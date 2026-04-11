@@ -10,8 +10,7 @@
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
-#include "../render.hpp"  // For RenderContext and ThorVG access
-#include <thorvg_capi.h>  // ThorVG C API
+#include "../render.hpp"  // For RenderContext
 #include <string.h>
 #include <math.h>         // For pow() in color space gamma correction
 

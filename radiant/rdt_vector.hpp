@@ -8,7 +8,7 @@
 // ============================================================================
 //
 // All Radiant rendering code calls rdt_* functions — never tvg_* directly.
-// ThorVG is isolated behind this API in a single backend file.
+// ThorVG is isolated behind this API in rdt_vector_tvg.cpp and render_svg_inline.cpp.
 //
 // Current backend: rdt_vector_tvg.cpp (ThorVG C API wrapper, all platforms)
 // Future backends: Core Graphics (macOS), Direct2D (Windows), extracted sw_engine (Linux)
@@ -150,6 +150,7 @@ typedef struct RdtPicture RdtPicture;
 
 RdtPicture* rdt_picture_load(const char* path);
 RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_type);
+RdtPicture* rdt_picture_dup(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 bool        rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out);
@@ -159,40 +160,49 @@ void        rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
 void        rdt_picture_free(RdtPicture* pic);
 
 // ---------------------------------------------------------------------------
-// Utility: convert between Tvg_Matrix ↔ RdtMatrix during migration
+// Engine lifecycle (must call init before any rdt_* operations)
+// ---------------------------------------------------------------------------
+
+void rdt_engine_init(int threads);
+void rdt_engine_term(void);
+void rdt_font_load(const char* font_path);
+
+// ---------------------------------------------------------------------------
+// Internal bridge for render_svg_inline.cpp (ThorVG text/image → RdtPicture)
 // ---------------------------------------------------------------------------
 
 #ifndef LAMBDA_HEADLESS
 #include <thorvg_capi.h>
 
-static inline RdtMatrix rdt_matrix_from_tvg(const Tvg_Matrix* t) {
-    RdtMatrix m = { t->e11, t->e12, t->e13,
-                    t->e21, t->e22, t->e23,
-                    t->e31, t->e32, t->e33 };
-    return m;
-}
-static inline Tvg_Matrix rdt_matrix_to_tvg(const RdtMatrix* r) {
-    Tvg_Matrix m = { r->e11, r->e12, r->e13,
-                     r->e21, r->e22, r->e23,
-                     r->e31, r->e32, r->e33 };
-    return m;
-}
-
-// MIGRATION ONLY: access the underlying ThorVG canvas for code not yet migrated.
-// Remove this once all tvg_* calls are eliminated from render files.
-Tvg_Canvas rdt_vector_get_tvg_canvas(RdtVector* vec);
-
-// MIGRATION ONLY: wrap an existing Tvg_Paint (e.g. ImageSurface::pic for SVG)
-// as an RdtPicture. The paint is duplicated; the original is NOT freed.
-RdtPicture* rdt_picture_from_tvg_paint(Tvg_Paint paint, float w, float h);
-
-// MIGRATION ONLY: wrap an existing Tvg_Paint, taking ownership (no duplicate).
+// Wrap an existing Tvg_Paint, taking ownership (no duplicate).
 // The caller must NOT use or free the paint after this call.
+// Used only by render_svg_inline.cpp for text/image paint bridging.
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h);
 
 #endif
 
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
+    return m;
+}
+
+// multiply two 3x3 affine matrices: result = a * b
+static inline RdtMatrix rdt_matrix_multiply(const RdtMatrix* a, const RdtMatrix* b) {
+    RdtMatrix r;
+    r.e11 = a->e11 * b->e11 + a->e12 * b->e21 + a->e13 * b->e31;
+    r.e12 = a->e11 * b->e12 + a->e12 * b->e22 + a->e13 * b->e32;
+    r.e13 = a->e11 * b->e13 + a->e12 * b->e23 + a->e13 * b->e33;
+    r.e21 = a->e21 * b->e11 + a->e22 * b->e21 + a->e23 * b->e31;
+    r.e22 = a->e21 * b->e12 + a->e22 * b->e22 + a->e23 * b->e32;
+    r.e23 = a->e21 * b->e13 + a->e22 * b->e23 + a->e23 * b->e33;
+    r.e31 = a->e31 * b->e11 + a->e32 * b->e21 + a->e33 * b->e31;
+    r.e32 = a->e31 * b->e12 + a->e32 * b->e22 + a->e33 * b->e32;
+    r.e33 = a->e31 * b->e13 + a->e32 * b->e23 + a->e33 * b->e33;
+    return r;
+}
+
+// create a translation matrix
+static inline RdtMatrix rdt_matrix_translate(float tx, float ty) {
+    RdtMatrix m = { 1, 0, tx,  0, 1, ty,  0, 0, 1 };
     return m;
 }

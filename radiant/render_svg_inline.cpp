@@ -1,8 +1,9 @@
 /**
- * render_svg_inline.cpp - Inline SVG Rendering via ThorVG
+ * render_svg_inline.cpp - Inline SVG Rendering via RdtVector
  *
- * Converts SVG element trees to ThorVG scene graphs for rendering
- * inline SVG content within HTML documents.
+ * Converts SVG element trees directly to rdt_ draw calls.
+ * No ThorVG scene tree is constructed — shapes are drawn immediately
+ * to the target RdtVector with accumulated transforms.
  */
 
 #include "render_svg_inline.hpp"
@@ -20,25 +21,26 @@
 #include <ctype.h>
 #include <math.h>
 
+#ifndef LAMBDA_HEADLESS
+#include <thorvg_capi.h>  // needed for SVG text rendering (tvg_text_* API)
+#endif
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
 
-static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_rect(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_circle(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_ellipse(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_line(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_polyline(SvgRenderContext* ctx, Element* elem, bool close_path);
-static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem);
-static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* elem);
+static void render_svg_element(SvgRenderContext* ctx, Element* elem);
+static void render_svg_rect(SvgRenderContext* ctx, Element* elem);
+static void render_svg_circle(SvgRenderContext* ctx, Element* elem);
+static void render_svg_ellipse(SvgRenderContext* ctx, Element* elem);
+static void render_svg_line(SvgRenderContext* ctx, Element* elem);
+static void render_svg_polyline(SvgRenderContext* ctx, Element* elem, bool close_path);
+static void render_svg_path(SvgRenderContext* ctx, Element* elem);
+static void render_svg_text(SvgRenderContext* ctx, Element* elem);
+static void render_svg_image(SvgRenderContext* ctx, Element* elem);
+static void render_svg_group(SvgRenderContext* ctx, Element* elem);
+static void render_svg_children(SvgRenderContext* ctx, Element* elem);
 static void process_svg_defs(SvgRenderContext* ctx, Element* defs);
-static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem,
-                                   float bx = 0, float by = 0, float bw = 0, float bh = 0);
-static void apply_svg_transform(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem);
 
 // ============================================================================
 // Helper: Get Attribute from Lambda Element
@@ -591,13 +593,44 @@ static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
     return nullptr;
 }
 
-static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
-                                    float bx, float by, float bw, float bh) {
-    if (!shape || !def || def->stop_count < 2) return;
+// ============================================================================
+// Compose element transform with accumulated context transform
+// ============================================================================
 
-    Tvg_Gradient grad;
+static RdtMatrix compose_element_transform(SvgRenderContext* ctx, Element* elem) {
+    const char* transform_str = get_svg_attr(elem, "transform");
+    if (!transform_str) return ctx->transform;
+
+    float m[6];
+    if (!parse_svg_transform(transform_str, m)) return ctx->transform;
+
+    RdtMatrix local = {
+        m[0], m[2], m[4],  // a, c, e
+        m[1], m[3], m[5],  // b, d, f
+        0, 0, 1
+    };
+    return rdt_matrix_multiply(&ctx->transform, &local);
+}
+
+// ============================================================================
+// Apply gradient fill via rdt_ API
+// ============================================================================
+
+static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
+                               float bx, float by, float bw, float bh,
+                               const RdtMatrix* transform) {
+    if (!path || !def || def->stop_count < 2) return;
+
+    RdtGradientStop stops[SVG_MAX_GRAD_STOPS];
+    for (int i = 0; i < def->stop_count; i++) {
+        stops[i].offset = def->stops[i].offset;
+        stops[i].r = def->stops[i].color.r;
+        stops[i].g = def->stops[i].color.g;
+        stops[i].b = def->stops[i].color.b;
+        stops[i].a = def->stops[i].color.a;
+    }
+
     if (def->is_radial) {
-        grad = tvg_radial_gradient_new();
         float cx, cy, r;
         if (def->user_space) {
             cx = def->cx; cy = def->cy; r = def->r;
@@ -606,9 +639,9 @@ static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
             cy = by + def->cy * bh;
             r  = def->r * (bw < bh ? bw : bh);
         }
-        tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
+        rdt_fill_radial_gradient(ctx->vec, path, cx, cy, r,
+                                 stops, def->stop_count, RDT_FILL_WINDING, transform);
     } else {
-        grad = tvg_linear_gradient_new();
         float x1, y1, x2, y2;
         if (def->user_space) {
             x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
@@ -616,43 +649,31 @@ static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
             x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
             x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
         }
-        tvg_linear_gradient_set(grad, x1, y1, x2, y2);
+        rdt_fill_linear_gradient(ctx->vec, path, x1, y1, x2, y2,
+                                 stops, def->stop_count, RDT_FILL_WINDING, transform);
     }
-
-    Tvg_Color_Stop stops[SVG_MAX_GRAD_STOPS];
-    for (int i = 0; i < def->stop_count; i++) {
-        stops[i].offset = def->stops[i].offset;
-        stops[i].r = def->stops[i].color.r;
-        stops[i].g = def->stops[i].color.g;
-        stops[i].b = def->stops[i].color.b;
-        stops[i].a = def->stops[i].color.a;
-    }
-    tvg_gradient_set_color_stops(grad, stops, def->stop_count);
-    tvg_shape_set_gradient(shape, grad);
 }
 
 // ============================================================================
-// Apply Fill and Stroke to ThorVG Shape
+// Draw fill and stroke for an SVG shape via rdt_ API
 // ============================================================================
 
-static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem,
-                                   float bx, float by, float bw, float bh) {
-    if (!shape || !elem) return;
+static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* elem,
+                                  const RdtMatrix* transform,
+                                  float bx, float by, float bw, float bh) {
+    if (!path || !elem) return;
 
-    // get fill attribute - inherit from context if not specified
+    // --- FILL ---
     const char* fill = get_svg_attr(elem, "fill");
-
-    // determine effective fill (element attribute → inherited from context → default black)
     Color fc;
     bool has_fill = true;
+    bool gradient_applied = false;
 
     if (fill) {
-        // element has explicit fill attribute
         if (strcmp(fill, "none") == 0) {
             has_fill = false;
         } else if (strncmp(fill, "url(#", 5) == 0) {
-            // gradient reference — look up in defs table
-            bool applied = false;
+            // gradient reference
             if (ctx->defs) {
                 const char* id_start = fill + 5;
                 const char* id_end   = strchr(id_start, ')');
@@ -662,13 +683,13 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
                     memcpy(id_buf, id_start, id_len);
                     SvgGradDef* def = lookup_grad_def((SvgDefTable*)ctx->defs, id_buf);
                     if (def && def->stop_count >= 2) {
-                        apply_svg_gradient_fill(shape, def, bx, by, bw, bh);
-                        has_fill = false;   // gradient applied, skip solid fill
-                        applied  = true;
+                        draw_gradient_fill(ctx, path, def, bx, by, bw, bh, transform);
+                        gradient_applied = true;
+                        has_fill = false;
                     }
                 }
             }
-            if (!applied) {
+            if (!gradient_applied) {
                 log_debug("[SVG] gradient fill not resolved: %s", fill);
                 fc = ctx->fill_color;   // fallback
             }
@@ -676,131 +697,89 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
             fc = parse_svg_color(fill);
         }
     } else if (!ctx->fill_none) {
-        // no fill attribute, inherit from context
         fc = ctx->fill_color;
     } else {
-        // context has fill_none set
         has_fill = false;
     }
 
     if (has_fill) {
-        // apply fill-opacity if present
         const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
         if (fill_opacity) {
             float opacity = strtof(fill_opacity, nullptr);
             fc.a = (uint8_t)(fc.a * opacity);
         }
-
-        // apply general opacity
         const char* opacity = get_svg_attr(elem, "opacity");
         if (opacity) {
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
         }
-
-        tvg_shape_set_fill_color(shape, fc.r, fc.g, fc.b, fc.a);
+        rdt_fill_path(ctx->vec, path, fc, RDT_FILL_WINDING, transform);
     }
 
-    // get stroke - inherit from context if not specified
+    // --- STROKE ---
     const char* stroke = get_svg_attr(elem, "stroke");
     bool has_stroke = false;
     Color sc;
 
     if (stroke) {
-        // element has explicit stroke attribute
         if (strcmp(stroke, "none") != 0) {
             has_stroke = true;
             sc = parse_svg_color(stroke);
         }
     } else if (!ctx->stroke_none) {
-        // no stroke attribute, inherit from context
         has_stroke = true;
         sc = ctx->stroke_color;
     }
 
     if (has_stroke) {
-        // stroke width - inherit from context if not specified
         const char* stroke_width_str = get_svg_attr(elem, "stroke-width");
         float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
-        tvg_shape_set_stroke_width(shape, stroke_width);
 
-        // apply stroke-opacity
         const char* stroke_opacity = get_svg_attr(elem, "stroke-opacity");
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
         }
 
-        tvg_shape_set_stroke_color(shape, sc.r, sc.g, sc.b, sc.a);
-
-        // stroke-linecap
+        // linecap
+        RdtStrokeCap cap = RDT_CAP_BUTT;
         const char* linecap = get_svg_attr(elem, "stroke-linecap");
         if (linecap) {
-            if (strcmp(linecap, "round") == 0) {
-                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
-            } else if (strcmp(linecap, "square") == 0) {
-                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_SQUARE);
-            } else {
-                tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
-            }
+            if (strcmp(linecap, "round") == 0)       cap = RDT_CAP_ROUND;
+            else if (strcmp(linecap, "square") == 0)  cap = RDT_CAP_SQUARE;
         }
 
-        // stroke-linejoin
+        // linejoin
+        RdtStrokeJoin join = RDT_JOIN_MITER;
         const char* linejoin = get_svg_attr(elem, "stroke-linejoin");
         if (linejoin) {
-            if (strcmp(linejoin, "round") == 0) {
-                tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_ROUND);
-            } else if (strcmp(linejoin, "bevel") == 0) {
-                tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_BEVEL);
-            } else {
-                tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
-            }
+            if (strcmp(linejoin, "round") == 0)       join = RDT_JOIN_ROUND;
+            else if (strcmp(linejoin, "bevel") == 0)   join = RDT_JOIN_BEVEL;
         }
 
-        // stroke-dasharray
+        // dash array
+        float dashes[16];
+        int dash_count = 0;
         const char* dasharray = get_svg_attr(elem, "stroke-dasharray");
         if (dasharray && strcmp(dasharray, "none") != 0) {
-            float dashes[16];
-            int count = 0;
             const char* p = dasharray;
-            while (*p && count < 16) {
+            while (*p && dash_count < 16) {
                 while (*p && (isspace(*p) || *p == ',')) p++;
                 if (!*p) break;
-                dashes[count++] = strtof(p, (char**)&p);
-            }
-            if (count > 0) {
-                const char* dashoffset = get_svg_attr(elem, "stroke-dashoffset");
-                float offset = dashoffset ? parse_svg_length(dashoffset, 0) : 0;
-                tvg_shape_set_stroke_dash(shape, dashes, count, offset);
+                dashes[dash_count++] = strtof(p, (char**)&p);
             }
         }
+
+        rdt_stroke_path(ctx->vec, path, sc, stroke_width, cap, join,
+                        dash_count > 0 ? dashes : nullptr, dash_count, transform);
     }
 }
 
 // ============================================================================
-// Apply Transform to ThorVG Paint
+// SVG Shape Renderers (draw directly via rdt_ API)
 // ============================================================================
 
-static void apply_svg_transform(SvgRenderContext* ctx, Tvg_Paint paint, Element* elem) {
-    const char* transform_str = get_svg_attr(elem, "transform");
-    if (!transform_str) return;
-
-    float m[6];
-    if (parse_svg_transform(transform_str, m)) {
-        Tvg_Matrix matrix = {
-            m[0], m[2], m[4],  // a, c, e
-            m[1], m[3], m[5],  // b, d, f
-            0, 0, 1
-        };
-        tvg_paint_set_transform(paint, &matrix);
-    }
-}
-
-// ============================================================================
-// SVG Shape Renderers
-// ============================================================================
-
-static Tvg_Paint render_svg_rect(SvgRenderContext* ctx, Element* elem) {
+static void render_svg_rect(SvgRenderContext* ctx, Element* elem) {
     float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
     float width = parse_svg_length(get_svg_attr(elem, "width"), 0);
@@ -808,136 +787,129 @@ static Tvg_Paint render_svg_rect(SvgRenderContext* ctx, Element* elem) {
     float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
     float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);  // default to rx
 
-    if (width <= 0 || height <= 0) return nullptr;
+    if (width <= 0 || height <= 0) return;
 
-    Tvg_Paint shape = tvg_shape_new();
-    tvg_shape_append_rect(shape, x, y, width, height, rx, ry, true);
-
-    apply_svg_fill_stroke(ctx, shape, elem, x, y, width, height);
-    apply_svg_transform(ctx, shape, elem);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    RdtPath* path = rdt_path_new();
+    rdt_path_add_rect(path, x, y, width, height, rx, ry);
+    draw_svg_fill_stroke(ctx, path, elem, &m, x, y, width, height);
+    rdt_path_free(path);
 
     log_debug("[SVG] rect: x=%.1f y=%.1f w=%.1f h=%.1f rx=%.1f", x, y, width, height, rx);
-    return shape;
 }
 
-static Tvg_Paint render_svg_circle(SvgRenderContext* ctx, Element* elem) {
+static void render_svg_circle(SvgRenderContext* ctx, Element* elem) {
     float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
     float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
     float r = parse_svg_length(get_svg_attr(elem, "r"), 0);
 
-    if (r <= 0) return nullptr;
+    if (r <= 0) return;
 
-    Tvg_Paint shape = tvg_shape_new();
-    tvg_shape_append_circle(shape, cx, cy, r, r, true);
-
-    apply_svg_fill_stroke(ctx, shape, elem, cx - r, cy - r, 2 * r, 2 * r);
-    apply_svg_transform(ctx, shape, elem);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    RdtPath* path = rdt_path_new();
+    rdt_path_add_circle(path, cx, cy, r, r);
+    draw_svg_fill_stroke(ctx, path, elem, &m, cx - r, cy - r, 2 * r, 2 * r);
+    rdt_path_free(path);
 
     log_debug("[SVG] circle: cx=%.1f cy=%.1f r=%.1f", cx, cy, r);
-    return shape;
 }
 
-static Tvg_Paint render_svg_ellipse(SvgRenderContext* ctx, Element* elem) {
+static void render_svg_ellipse(SvgRenderContext* ctx, Element* elem) {
     float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
     float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
     float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
     float ry = parse_svg_length(get_svg_attr(elem, "ry"), 0);
 
-    if (rx <= 0 || ry <= 0) return nullptr;
+    if (rx <= 0 || ry <= 0) return;
 
-    Tvg_Paint shape = tvg_shape_new();
-    tvg_shape_append_circle(shape, cx, cy, rx, ry, true);
-
-    apply_svg_fill_stroke(ctx, shape, elem, cx - rx, cy - ry, 2 * rx, 2 * ry);
-    apply_svg_transform(ctx, shape, elem);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    RdtPath* path = rdt_path_new();
+    rdt_path_add_circle(path, cx, cy, rx, ry);
+    draw_svg_fill_stroke(ctx, path, elem, &m, cx - rx, cy - ry, 2 * rx, 2 * ry);
+    rdt_path_free(path);
 
     log_debug("[SVG] ellipse: cx=%.1f cy=%.1f rx=%.1f ry=%.1f", cx, cy, rx, ry);
-    return shape;
 }
 
-static Tvg_Paint render_svg_line(SvgRenderContext* ctx, Element* elem) {
+static void render_svg_line(SvgRenderContext* ctx, Element* elem) {
     float x1 = parse_svg_length(get_svg_attr(elem, "x1"), 0);
     float y1 = parse_svg_length(get_svg_attr(elem, "y1"), 0);
     float x2 = parse_svg_length(get_svg_attr(elem, "x2"), 0);
     float y2 = parse_svg_length(get_svg_attr(elem, "y2"), 0);
 
-    Tvg_Paint shape = tvg_shape_new();
-    tvg_shape_move_to(shape, x1, y1);
-    tvg_shape_line_to(shape, x2, y2);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    RdtPath* path = rdt_path_new();
+    rdt_path_move_to(path, x1, y1);
+    rdt_path_line_to(path, x2, y2);
 
-    // lines have stroke only, no fill by default
+    // lines have stroke only by default — ensure stroke is set
     const char* stroke = get_svg_attr(elem, "stroke");
-    if (!stroke) {
-        // SVG default: lines inherit stroke or have none
-        // set default black stroke
-        tvg_shape_set_stroke_color(shape, 0, 0, 0, 255);
-        tvg_shape_set_stroke_width(shape, 1.0f);
+    if (!stroke && ctx->stroke_none) {
+        // no inherited stroke and no explicit stroke: draw with default black
+        Color black = {}; black.a = 255;
+        rdt_stroke_path(ctx->vec, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
+                        nullptr, 0, &m);
     }
-    apply_svg_fill_stroke(ctx, shape, elem);
-    apply_svg_transform(ctx, shape, elem);
+    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
+    rdt_path_free(path);
 
     log_debug("[SVG] line: (%.1f,%.1f) -> (%.1f,%.1f)", x1, y1, x2, y2);
-    return shape;
 }
 
-// helper: parse points attribute for polyline/polygon
-static bool parse_points(const char* points_str, Tvg_Paint shape, bool close_path) {
-    if (!points_str || !shape) return false;
+// helper: parse points attribute for polyline/polygon into RdtPath
+static bool parse_points_to_path(const char* points_str, RdtPath* path, bool close_path) {
+    if (!points_str || !path) return false;
 
     const char* p = points_str;
     float x, y;
     bool first = true;
 
     while (*p) {
-        // skip whitespace and commas
         while (*p && (isspace(*p) || *p == ',')) p++;
         if (!*p) break;
 
-        // parse x
         char* end;
         x = strtof(p, &end);
         if (end == p) break;
         p = end;
 
-        // skip separator
         while (*p && (isspace(*p) || *p == ',')) p++;
         if (!*p) break;
 
-        // parse y
         y = strtof(p, &end);
         if (end == p) break;
         p = end;
 
         if (first) {
-            tvg_shape_move_to(shape, x, y);
+            rdt_path_move_to(path, x, y);
             first = false;
         } else {
-            tvg_shape_line_to(shape, x, y);
+            rdt_path_line_to(path, x, y);
         }
     }
 
     if (close_path && !first) {
-        tvg_shape_close(shape);
+        rdt_path_close(path);
     }
 
-    return !first;  // return true if at least one point was parsed
+    return !first;
 }
 
-static Tvg_Paint render_svg_polyline(SvgRenderContext* ctx, Element* elem, bool close_path) {
+static void render_svg_polyline(SvgRenderContext* ctx, Element* elem, bool close_path) {
     const char* points = get_svg_attr(elem, "points");
-    if (!points) return nullptr;
+    if (!points) return;
 
-    Tvg_Paint shape = tvg_shape_new();
-    if (!parse_points(points, shape, close_path)) {
-        tvg_paint_unref(shape, true);
-        return nullptr;
+    RdtPath* path = rdt_path_new();
+    if (!parse_points_to_path(points, path, close_path)) {
+        rdt_path_free(path);
+        return;
     }
 
-    apply_svg_fill_stroke(ctx, shape, elem);
-    apply_svg_transform(ctx, shape, elem);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
+    rdt_path_free(path);
 
     log_debug("[SVG] %s: points=%s", close_path ? "polygon" : "polyline", points);
-    return shape;
 }
 
 // ============================================================================
@@ -974,12 +946,12 @@ static int parse_flag(const char** p) {
 
 // arc-to-bezier conversion: SVG endpoint parameterization → center parameterization → cubic beziers
 // follows the SVG spec F.6 "Conversion from endpoint to center parameterization"
-static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
+static void arc_to_beziers(RdtPath* path, float x1, float y1,
                            float rx, float ry, float x_rotation,
                            int large_arc, int sweep, float x2, float y2) {
     // F.6.2 - degenerate cases
     if ((x1 == x2 && y1 == y2) || (rx == 0 && ry == 0)) {
-        tvg_shape_line_to(shape, x2, y2);
+        rdt_path_line_to(path, x2, y2);
         return;
     }
 
@@ -1076,7 +1048,7 @@ static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
             return sin_phi * rx * px + cos_phi * ry * py + cy;
         };
 
-        tvg_shape_cubic_to(shape,
+        rdt_path_cubic_to(path,
                            tx(cp1x, cp1y), ty(cp1x, cp1y),
                            tx(cp2x, cp2y), ty(cp2x, cp2y),
                            tx(ep2x, ep2y), ty(ep2x, ep2y));
@@ -1086,11 +1058,11 @@ static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
     }
 }
 
-static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
+static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
     const char* d = get_svg_attr(elem, "d");
-    if (!d || !*d) return nullptr;
+    if (!d || !*d) return;
 
-    Tvg_Paint shape = tvg_shape_new();
+    RdtPath* path = rdt_path_new();
 
     float cur_x = 0, cur_y = 0;
     float start_x = 0, start_y = 0;
@@ -1125,7 +1097,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 float x = parse_number(&p);
                 float y = parse_number(&p);
                 if (relative) { x += cur_x; y += cur_y; }
-                tvg_shape_move_to(shape, x, y);
+                rdt_path_move_to(path, x, y);
                 cur_x = start_x = x;
                 cur_y = start_y = y;
                 last_ctrl_x = cur_x;
@@ -1135,7 +1107,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     x = parse_number(&p);
                     y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    tvg_shape_line_to(shape, x, y);
+                    rdt_path_line_to(path, x, y);
                     cur_x = x; cur_y = y;
                 }
                 break;
@@ -1145,7 +1117,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    tvg_shape_line_to(shape, x, y);
+                    rdt_path_line_to(path, x, y);
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1156,7 +1128,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 while (peek_number(p)) {
                     float x = parse_number(&p);
                     if (relative) { x += cur_x; }
-                    tvg_shape_line_to(shape, x, cur_y);
+                    rdt_path_line_to(path, x, cur_y);
                     cur_x = x;
                 }
                 last_ctrl_x = cur_x;
@@ -1167,7 +1139,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 while (peek_number(p)) {
                     float y = parse_number(&p);
                     if (relative) { y += cur_y; }
-                    tvg_shape_line_to(shape, cur_x, y);
+                    rdt_path_line_to(path, cur_x, y);
                     cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1187,7 +1159,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    tvg_shape_cubic_to(shape, x1, y1, x2, y2, x, y);
+                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1206,7 +1178,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    tvg_shape_cubic_to(shape, x1, y1, x2, y2, x, y);
+                    rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
                     last_ctrl_x = x2; last_ctrl_y = y2;
                     cur_x = x; cur_y = y;
                 }
@@ -1227,7 +1199,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    tvg_shape_cubic_to(shape, cx1, cy1, cx2, cy2, x, y);
+                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1246,7 +1218,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
                     float cx2 = x + 2.0f/3.0f * (qx - x);
                     float cy2 = y + 2.0f/3.0f * (qy - y);
-                    tvg_shape_cubic_to(shape, cx1, cy1, cx2, cy2, x, y);
+                    rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
                     last_ctrl_x = qx; last_ctrl_y = qy;
                     cur_x = x; cur_y = y;
                 }
@@ -1263,7 +1235,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
 
-                    arc_to_beziers(shape, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
+                    arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
                     cur_x = x; cur_y = y;
                 }
                 last_ctrl_x = cur_x;
@@ -1271,7 +1243,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 break;
             }
             case 'Z': {  // closepath
-                tvg_shape_close(shape);
+                rdt_path_close(path);
                 cur_x = start_x;
                 cur_y = start_y;
                 last_ctrl_x = cur_x;
@@ -1284,11 +1256,11 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
         }
     }
 
-    apply_svg_fill_stroke(ctx, shape, elem);
-    apply_svg_transform(ctx, shape, elem);
+    RdtMatrix m = compose_element_transform(ctx, elem);
+    draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
+    rdt_path_free(path);
 
     log_debug("[SVG] path: d=%s", d);
-    return shape;
 }
 
 // ============================================================================
@@ -1575,8 +1547,8 @@ static float estimate_text_width(const char* text, float font_size) {
  * Render SVG <text> element with proper tspan support
  * Each tspan gets its own color and position
  */
-static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
-    if (!elem) return nullptr;
+static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
+    if (!elem) return;
 
     // parse parent text attributes
     float base_x = parse_svg_length(get_svg_attr(elem, "x"), 0);
@@ -1603,10 +1575,13 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
     char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
-        return nullptr;
+        return;
     }
 
-    // count children to see if we need a scene
+    // compose element transform with accumulated context transform
+    RdtMatrix m = compose_element_transform(ctx, elem);
+
+    // count children to see if we have tspans
     int text_segments = 0;
     bool has_tspan = false;
 
@@ -1629,8 +1604,17 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
 
     if (text_segments == 0) {
         free(font_path);
-        return nullptr;
+        return;
     }
+
+    // helper lambda to wrap and draw a ThorVG text paint
+    auto draw_text_paint = [&](Tvg_Paint tvg_text) {
+        if (!tvg_text) return;
+        RdtPicture* pic = rdt_picture_take_tvg_paint(tvg_text, 0, 0);
+        if (pic) {
+            rdt_picture_draw(ctx->vec, pic, 255, &m);
+        }
+    };
 
     // if single text with no tspan, use simple rendering
     if (text_segments == 1 && !has_tspan) {
@@ -1640,40 +1624,13 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
                                                   font_path, font_name, font_size, default_fill,
                                                   anchor_x);
             free((void*)text_content);
-            free(font_path);
-            if (text) {
-                const char* transform_str = get_svg_attr(elem, "transform");
-                if (transform_str) {
-                    // compose text position with SVG transform into a single matrix
-                    // (tvg_paint_set_transform replaces tvg_paint_translate)
-                    float ascent = font_size * 0.8f;
-                    float adj_y = base_y - ascent;
-                    float m[6];
-                    if (parse_svg_transform(transform_str, m)) {
-                        // final = svg_transform * translate(base_x, adj_y)
-                        float te = m[0] * base_x + m[2] * adj_y + m[4];
-                        float tf = m[1] * base_x + m[3] * adj_y + m[5];
-                        Tvg_Matrix matrix = {
-                            m[0], m[2], te,
-                            m[1], m[3], tf,
-                            0, 0, 1
-                        };
-                        tvg_paint_set_transform(text, &matrix);
-                    }
-                }
-                // else: tvg_paint_translate from create_text_segment is sufficient
-            }
-            return text;
+            draw_text_paint(text);
         }
-    }
-
-    // multiple segments - create a scene
-    Tvg_Paint scene = tvg_scene_new();
-    if (!scene) {
         free(font_path);
-        return nullptr;
+        return;
     }
 
+    // multiple segments - draw each directly with accumulated transform
     float cur_x = base_x;
     float cur_y = base_y;
 
@@ -1691,7 +1648,7 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
                                                               font_path, font_name, font_size, default_fill);
                     if (text_obj) {
-                        tvg_scene_push(scene, text_obj);
+                        draw_text_paint(text_obj);
                         cur_x += estimate_text_width(text_copy, font_size);
                     }
                     free(text_copy);
@@ -1737,7 +1694,7 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
                                                               font_path, font_name, tspan_font_size, fill);
                     if (text_obj) {
-                        tvg_scene_push(scene, text_obj);
+                        draw_text_paint(text_obj);
                         cur_x += estimate_text_width(text_content, tspan_font_size);
                     }
                     free((void*)text_content);
@@ -1746,15 +1703,10 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         }
     }
 
-    // apply parent transform to the scene
-    apply_svg_transform(ctx, scene, elem);
-
     free(font_path);
 
     log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)",
               text_segments, base_x, base_y);
-
-    return scene;
 }
 
 // ============================================================================
@@ -1765,15 +1717,15 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
  * Render SVG <image> element using Radiant's image loading infrastructure
  * Images are loaded via Radiant's load_image() and converted to ThorVG pictures
  */
-static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
-    if (!elem) return nullptr;
+static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
+    if (!elem) return;
 
     // get href attribute (SVG 2 uses href, SVG 1.1 uses xlink:href)
     const char* href = get_svg_attr(elem, "href");
     if (!href) href = get_svg_attr(elem, "xlink:href");
     if (!href || !*href) {
         log_debug("[SVG] <image> missing href attribute");
-        return nullptr;
+        return;
     }
 
     // parse position and size
@@ -1785,13 +1737,13 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
     // TODO: integrate with Radiant's load_image() when UiContext is available
     // For now, use ThorVG's picture loading for SVG images
     Tvg_Paint pic = tvg_picture_new();
-    if (!pic) return nullptr;
+    if (!pic) return;
 
     Tvg_Result result = tvg_picture_load(pic, href);
     if (result != TVG_RESULT_SUCCESS) {
         log_debug("[SVG] <image> failed to load: %s", href);
         tvg_paint_unref(pic, true);
-        return nullptr;
+        return;
     }
 
     // set size if specified
@@ -1802,28 +1754,33 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
     // position the image
     tvg_paint_translate(pic, x, y);
 
-    // apply transform if present
-    apply_svg_transform(ctx, pic, elem);
-
     // apply opacity if present
+    uint8_t op = 255;
     const char* opacity = get_svg_attr(elem, "opacity");
     if (opacity) {
-        float op = strtof(opacity, nullptr);
-        tvg_paint_set_opacity(pic, (uint8_t)(op * 255));
+        float opf = strtof(opacity, nullptr);
+        op = (uint8_t)(opf * 255);
+    }
+
+    // compose element transform with accumulated context transform
+    RdtMatrix m = compose_element_transform(ctx, elem);
+
+    // wrap as RdtPicture and draw
+    RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
+    if (rdt_pic) {
+        rdt_picture_draw(ctx->vec, rdt_pic, op, &m);
     }
 
     log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
               href, x, y, width, height);
-
-    return pic;
 }
 
 // ============================================================================
 // SVG Group and Children
 // ============================================================================
 
-static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
-    if (!elem) return nullptr;
+static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
+    if (!elem) return;
 
     // save current inherited state
     Color saved_fill = ctx->fill_color;
@@ -1831,6 +1788,7 @@ static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
     float saved_stroke_width = ctx->stroke_width;
     bool saved_fill_none = ctx->fill_none;
     bool saved_stroke_none = ctx->stroke_none;
+    RdtMatrix saved_transform = ctx->transform;
 
     // update inherited state from group attributes
     const char* fill = get_svg_attr(elem, "fill");
@@ -1858,8 +1816,11 @@ static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
         ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
     }
 
-    // render children with updated inherited state
-    Tvg_Paint scene = render_svg_children_as_scene(ctx, elem);
+    // apply group transform to accumulated transform
+    ctx->transform = compose_element_transform(ctx, elem);
+
+    // render children directly
+    render_svg_children(ctx, elem);
 
     // restore inherited state
     ctx->fill_color = saved_fill;
@@ -1867,36 +1828,17 @@ static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
     ctx->stroke_width = saved_stroke_width;
     ctx->fill_none = saved_fill_none;
     ctx->stroke_none = saved_stroke_none;
-
-    return scene;
+    ctx->transform = saved_transform;
 }
 
-static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* elem) {
-    if (!elem || elem->length == 0) return nullptr;
-
-    Tvg_Paint scene = tvg_scene_new();
-    int child_count = 0;
+static void render_svg_children(SvgRenderContext* ctx, Element* elem) {
+    if (!elem || elem->length == 0) return;
 
     for (int64_t i = 0; i < elem->length; i++) {
         Element* child = get_child_element_at(elem, i);
         if (!child) continue;
-
-        Tvg_Paint child_paint = render_svg_element(ctx, child);
-        if (child_paint) {
-            tvg_scene_push(scene, child_paint);
-            child_count++;
-        }
+        render_svg_element(ctx, child);
     }
-
-    if (child_count == 0) {
-        tvg_paint_unref(scene, true);
-        return nullptr;
-    }
-
-    // apply group transform
-    apply_svg_transform(ctx, scene, elem);
-
-    return scene;
 }
 
 // ============================================================================
@@ -1974,33 +1916,32 @@ static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
 // Main SVG Element Dispatcher
 // ============================================================================
 
-static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
-    if (!elem) return nullptr;
+static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
+    if (!elem) return;
 
     const char* tag = get_element_tag_name(elem);
-    if (!tag) return nullptr;
+    if (!tag) return;
 
     log_debug("[SVG] rendering element: %s", tag);
 
     if (strcmp(tag, "rect") == 0) {
-        return render_svg_rect(ctx, elem);
+        render_svg_rect(ctx, elem);
     } else if (strcmp(tag, "circle") == 0) {
-        return render_svg_circle(ctx, elem);
+        render_svg_circle(ctx, elem);
     } else if (strcmp(tag, "ellipse") == 0) {
-        return render_svg_ellipse(ctx, elem);
+        render_svg_ellipse(ctx, elem);
     } else if (strcmp(tag, "line") == 0) {
-        return render_svg_line(ctx, elem);
+        render_svg_line(ctx, elem);
     } else if (strcmp(tag, "polyline") == 0) {
-        return render_svg_polyline(ctx, elem, false);
+        render_svg_polyline(ctx, elem, false);
     } else if (strcmp(tag, "polygon") == 0) {
-        return render_svg_polyline(ctx, elem, true);
+        render_svg_polyline(ctx, elem, true);
     } else if (strcmp(tag, "path") == 0) {
-        return render_svg_path(ctx, elem);
+        render_svg_path(ctx, elem);
     } else if (strcmp(tag, "g") == 0) {
-        return render_svg_group(ctx, elem);
+        render_svg_group(ctx, elem);
     } else if (strcmp(tag, "defs") == 0) {
         process_svg_defs(ctx, elem);
-        return nullptr;  // defs don't render
     } else if (strcmp(tag, "linearGradient") == 0 ||
                strcmp(tag, "radialGradient") == 0 ||
                strcmp(tag, "clipPath") == 0 ||
@@ -2008,7 +1949,6 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
                strcmp(tag, "symbol") == 0 ||
                strcmp(tag, "pattern") == 0) {
         // these are definitions, don't render directly
-        return nullptr;
     } else if (strcmp(tag, "use") == 0) {
         const char* href = get_svg_attr(elem, "href");
         if (!href) href = get_svg_attr(elem, "xlink:href");
@@ -2017,25 +1957,28 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
             if (ref) {
                 float ux = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
                 float uy = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
-                Tvg_Paint child = render_svg_element(ctx, ref);
-                if (child) {
-                    if (ux != 0.0f || uy != 0.0f) {
-                        Tvg_Matrix m = {1, 0, ux,  0, 1, uy,  0, 0, 1};
-                        tvg_paint_set_transform(child, &m);
-                    }
-                    return child;
+                // compose <use> offset + element transform with accumulated transform
+                RdtMatrix saved = ctx->transform;
+                RdtMatrix el_m = compose_element_transform(ctx, elem);
+                if (ux != 0.0f || uy != 0.0f) {
+                    RdtMatrix translate = rdt_matrix_translate(ux, uy);
+                    ctx->transform = rdt_matrix_multiply(&el_m, &translate);
+                } else {
+                    ctx->transform = el_m;
                 }
+                render_svg_element(ctx, ref);
+                ctx->transform = saved;
+                return;
             }
         }
         log_debug("[SVG] <use> href='%s' not resolved", href ? href : "(none)");
-        return nullptr;
     } else if (strcmp(tag, "text") == 0) {
-        return render_svg_text(ctx, elem);
+        render_svg_text(ctx, elem);
     } else if (strcmp(tag, "image") == 0) {
-        return render_svg_image(ctx, elem);
+        render_svg_image(ctx, elem);
     } else {
         // unknown element - try rendering children
-        return render_svg_children_as_scene(ctx, elem);
+        render_svg_children(ctx, elem);
     }
 }
 
@@ -2043,23 +1986,28 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
 // Build SVG Scene
 // ============================================================================
 
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio, FontContext* font_ctx) {
-    if (!svg_element) return nullptr;
+void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
+                       Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform) {
+    if (!svg_element || !vec) return;
 
-    log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
+    log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
 
     // initialize render context
     SvgRenderContext ctx = {};
     ctx.svg_root = svg_element;
     ctx.pool = pool;
     ctx.font_ctx = font_ctx;
-    ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;  // ensure valid pixel ratio
+    ctx.vec = vec;
+    ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
     ctx.stroke_width = 1.0f;
     ctx.opacity = 1.0f;
     ctx.fill_none = false;
     ctx.stroke_none = true;
+
+    // start with base transform (document position/scale)
+    ctx.transform = base_transform ? *base_transform : rdt_matrix_identity();
 
     // parse viewBox
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
@@ -2077,16 +2025,13 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
         bool par_none  = par && strcmp(par, "none") == 0;
         bool par_slice = par && strstr(par, "slice") != nullptr;
         if (par_none) {
-            // non-uniform stretch: each axis scales independently
             ctx.translate_x = -vb.min_x * ctx.scale_x;
             ctx.translate_y = -vb.min_y * ctx.scale_y;
         } else {
-            // uniform scale
             float scale = par_slice
                 ? (ctx.scale_x > ctx.scale_y ? ctx.scale_x : ctx.scale_y)
                 : (ctx.scale_x < ctx.scale_y ? ctx.scale_x : ctx.scale_y);
             ctx.scale_x = ctx.scale_y = scale;
-            // alignment keyword (default: xMidYMid)
             float align_x = 0.5f, align_y = 0.5f;
             if (par) {
                 if      (strstr(par, "xMin")) align_x = 0.0f;
@@ -2097,22 +2042,17 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
             ctx.translate_x = -vb.min_x * scale + (viewport_width  - vb.width  * scale) * align_x;
             ctx.translate_y = -vb.min_y * scale + (viewport_height - vb.height * scale) * align_y;
         }
-    } else {
-        ctx.scale_x = ctx.scale_y = 1.0f;
-        ctx.translate_x = ctx.translate_y = 0;
-    }
 
-    // create root scene
-    Tvg_Paint scene = tvg_scene_new();
-
-    // apply viewBox transform
-    if (vb.has_viewbox) {
-        Tvg_Matrix matrix = {
+        // compose viewBox transform with base transform
+        RdtMatrix vb_matrix = {
             ctx.scale_x, 0, ctx.translate_x,
             0, ctx.scale_y, ctx.translate_y,
             0, 0, 1
         };
-        tvg_paint_set_transform(scene, &matrix);
+        ctx.transform = rdt_matrix_multiply(&ctx.transform, &vb_matrix);
+    } else {
+        ctx.scale_x = ctx.scale_y = 1.0f;
+        ctx.translate_x = ctx.translate_y = 0;
     }
 
     // pre-pass: process all <defs> so gradients and id refs are ready before rendering shapes
@@ -2125,19 +2065,14 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
         }
     }
 
-    // render children
+    // render children directly to vec
     for (int64_t i = 0; i < svg_element->length; i++) {
         Element* child = get_child_element_at(svg_element, i);
         if (!child) continue;
-
-        Tvg_Paint child_paint = render_svg_element(&ctx, child);
-        if (child_paint) {
-            tvg_scene_push(scene, child_paint);
-        }
+        render_svg_element(&ctx, child);
     }
 
-    log_debug("[SVG] build_svg_scene complete");
-    return scene;
+    log_debug("[SVG] render_svg_to_vec complete");
 }
 
 // ============================================================================
@@ -2160,56 +2095,20 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",
               view->x, view->y, view->width, view->height, scale);
 
-    // build ThorVG scene from SVG element tree
-    // pass pixel_ratio so text sizes can be adjusted (divided by pixel_ratio)
-    // since the entire scene will be scaled by pixel_ratio after building
-    FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
-    Tvg_Paint svg_scene = build_svg_scene(svg_elem, view->width, view->height,
-                                            rdcon->ui_context->document->pool, scale, font_ctx);
-    if (!svg_scene) {
-        log_debug("[SVG] render_inline_svg: failed to build scene");
-        return;
-    }
-
-    // wrap scene as RdtPicture (takes ownership, no dup; 0,0 = don't resize)
-    RdtPicture* pic = rdt_picture_take_tvg_paint(svg_scene, 0, 0);
-    if (!pic) return;
-
-    // position in document coordinates
+    // compute document position
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
 
-    // build_svg_scene already called tvg_paint_set_transform for the viewBox,
-    // which sets overriding=true and blocks subsequent translate/scale calls.
-    // We must compose the position+scale into the existing transform matrix.
-    RdtMatrix scene_m;
-    rdt_picture_get_transform(pic, &scene_m);
-
-    // Compose: first apply scene transform (viewBox), then scale by pixel_ratio,
-    // then translate to document position.
-    // Combined = Translate(x,y) * Scale(scale) * scene_m
-    RdtMatrix combined = {
-        scale * scene_m.e11, scale * scene_m.e12, scale * scene_m.e13 + x,
-        scale * scene_m.e21, scale * scene_m.e22, scale * scene_m.e23 + y,
-        scene_m.e31,         scene_m.e32,         scene_m.e33
+    // build base transform: Translate(x,y) * Scale(scale)
+    RdtMatrix base_transform = {
+        scale, 0, x,
+        0, scale, y,
+        0, 0, 1
     };
 
     // apply document transform if any
     if (rdcon->has_transform) {
-        // Multiply: rdcon->transform * combined
-        RdtMatrix dm = rdcon->transform;
-        RdtMatrix final_m = {
-            dm.e11 * combined.e11 + dm.e12 * combined.e21 + dm.e13 * combined.e31,
-            dm.e11 * combined.e12 + dm.e12 * combined.e22 + dm.e13 * combined.e32,
-            dm.e11 * combined.e13 + dm.e12 * combined.e23 + dm.e13 * combined.e33,
-            dm.e21 * combined.e11 + dm.e22 * combined.e21 + dm.e23 * combined.e31,
-            dm.e21 * combined.e12 + dm.e22 * combined.e22 + dm.e23 * combined.e32,
-            dm.e21 * combined.e13 + dm.e22 * combined.e23 + dm.e23 * combined.e33,
-            dm.e31 * combined.e11 + dm.e32 * combined.e21 + dm.e33 * combined.e31,
-            dm.e31 * combined.e12 + dm.e32 * combined.e22 + dm.e33 * combined.e32,
-            dm.e31 * combined.e13 + dm.e32 * combined.e23 + dm.e33 * combined.e33
-        };
-        combined = final_m;
+        base_transform = rdt_matrix_multiply(&rdcon->transform, &base_transform);
     }
 
     // apply clip region (e.g. iframe content box, overflow:hidden)
@@ -2224,8 +2123,10 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         rdt_path_free(clip_path);
     }
 
-    // render the scene through rdt_ pipeline
-    rdt_picture_draw(&rdcon->vec, pic, 255, &combined);
+    // render SVG directly to the framebuffer
+    FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
+    render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
+                      rdcon->ui_context->document->pool, scale, font_ctx, &base_transform);
 
     if (has_clip) {
         rdt_pop_clip(&rdcon->vec);

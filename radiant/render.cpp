@@ -1781,10 +1781,11 @@ void render_svg(ImageSurface* surface) {
     RdtVector tmp_vec = {};
     rdt_vector_init(&tmp_vec, (uint32_t*)surface->pixels, width, height, width);
 
-    // Wrap the ThorVG SVG picture and draw at target size (takes ownership)
-    RdtPicture* pic = rdt_picture_take_tvg_paint(surface->pic, (float)width, (float)height);
+    // Draw SVG picture at target size (takes ownership from surface)
+    RdtPicture* pic = surface->pic;
     surface->pic = NULL;  // ownership transferred
     if (pic) {
+        rdt_picture_set_size(pic, (float)width, (float)height);
         rdt_picture_draw(&tmp_vec, pic, 255, nullptr);
         rdt_picture_free(pic);
     }

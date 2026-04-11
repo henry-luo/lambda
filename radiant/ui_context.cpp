@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "rdt_vector.hpp"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -111,11 +112,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     uicon->legacy_default_font.font_size_from_medium = true;
     uicon->fallback_fonts = fallback_fonts;
 
-    // init ThorVG engine (v1.0-pre34: no engine type param, just thread count)
-    tvg_engine_init(1);
-    // load default fonts for ThorVG to render text later
-    // ThorVG needs fonts pre-loaded before they can be used in SVG text elements
-    const char* tvg_fonts[] = {
+    // init vector rendering engine
+    rdt_engine_init(1);
+    // load default fonts for vector engine to render text later
+    const char* vec_fonts[] = {
         "Times New Roman", "Times",  // default serif
         "Arial",                      // common sans-serif used in graph SVG
         "Helvetica",                  // fallback sans-serif
@@ -123,10 +123,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
         "Geneva",                     // macOS fallback for Verdana
         nullptr
     };
-    for (int i = 0; tvg_fonts[i]; i++) {
-        char* font_path = load_font_path(uicon->font_ctx, tvg_fonts[i]);
+    for (int i = 0; vec_fonts[i]; i++) {
+        char* font_path = load_font_path(uicon->font_ctx, vec_fonts[i]);
         if (font_path) {
-            tvg_font_load(font_path);
+            rdt_font_load(font_path);
             mem_free(font_path);
         }
     }
@@ -177,7 +177,7 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
-    tvg_engine_term();
+    rdt_engine_term();
     image_surface_destroy(uicon->surface);
     if (uicon->mouse_state.sys_cursor) {
         glfwDestroyCursor(uicon->mouse_state.sys_cursor);
