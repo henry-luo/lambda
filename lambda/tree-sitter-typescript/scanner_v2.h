@@ -893,7 +893,12 @@ static bool scan_ts_type_arguments(TSLexer *lexer) {
 static bool scan_ts_type_parameters(TSLexer *lexer) {
     lexer->result_symbol = TS_TYPE_PARAMETERS;
 
-    ts_skip_ws_and_comments(lexer);
+    // Skip whitespace only — NOT comments. The '/' character could be a regex
+    // or division operator and ts_skip_ws_and_comments would irreversibly consume it.
+    // Comments (extras) are handled by tree-sitter before calling the external scanner.
+    while (iswspace(lexer->lookahead)) {
+        skip(lexer);
+    }
 
     if (lexer->lookahead != '<') return false;
 
@@ -956,7 +961,6 @@ static bool scan_ts_type_parameters(TSLexer *lexer) {
     lexer->mark_end(lexer);
     return true;
 }
-
 // ================================================================
 // v2: scan_ts_interface_body — opaque { ... } body scanner
 // ================================================================
@@ -1332,9 +1336,12 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
     }
 
     // Type arguments — needs disambiguation, only when grammar says it's valid
+    // Guard: skip when REGEX_PATTERN is valid — in expression context, /<tag>/
+    // must be parsed as a regex literal, not as division + type assertion <tag>.
     if (valid_symbols[TS_TYPE_ARGUMENTS] &&
         !valid_symbols[AUTOMATIC_SEMICOLON] &&
-        !valid_symbols[TEMPLATE_CHARS]) {
+        !valid_symbols[TEMPLATE_CHARS] &&
+        !valid_symbols[REGEX_PATTERN]) {
         if (lexer->lookahead == '<' || (iswspace(lexer->lookahead))) {
             if (scan_ts_type_arguments(lexer)) return true;
             // fall through — scan_ts_type_arguments returned false, try other tokens
