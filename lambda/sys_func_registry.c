@@ -794,6 +794,16 @@ extern int64_t js_ne_raw(Item left, Item right);
 extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_loose_ne_raw(Item left, Item right);
 
+// debug-only: native test262 harness functions for performance
+#ifndef NDEBUG
+extern void js_assert_same_value(Item actual, Item expected, Item message);
+extern void js_assert_not_same_value(Item actual, Item unexpected, Item message);
+extern void js_assert_compare_array(Item actual, Item expected, Item message);
+extern void js_assert_deep_equal(Item actual, Item expected, Item message);
+extern Item js_compare_array(Item a, Item b);
+extern void js_verify_property(Item obj, Item name, Item desc, Item options);
+#endif
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -1184,6 +1194,14 @@ JitImport jit_runtime_imports[] = {
     {"js_build_template_object", FPTR(js_build_template_object)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+#ifndef NDEBUG
+    {"js_assert_same_value", FPTR(js_assert_same_value)},
+    {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
+    {"js_assert_compare_array", FPTR(js_assert_compare_array)},
+    {"js_assert_deep_equal", FPTR(js_assert_deep_equal)},
+    {"js_compare_array", FPTR(js_compare_array)},
+    {"js_verify_property", FPTR(js_verify_property)},
+#endif
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},
     {"js_array_length", FPTR(js_array_length)},

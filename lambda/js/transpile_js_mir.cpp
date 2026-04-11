@@ -1937,6 +1937,16 @@ static void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
         MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3));
 }
 
+static void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4) {
+    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 4, args, 0);
+    jm_emit(mt, MIR_new_call_insn(mt->ctx, 6,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3, a4));
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -7943,6 +7953,79 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
         return jm_transpile_math_call(mt, call, prop->name);
     }
+
+#ifndef NDEBUG
+    // assert.sameValue(a, b [, msg]) / assert.notSameValue(a, b [, msg])
+    // assert.compareArray(a, b [, msg]) / assert.deepEqual(a, b [, msg])
+    // → native C++ implementation for test262 performance (debug builds only)
+    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* m = (JsMemberNode*)call->callee;
+        if (!m->computed && m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
+            JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
+            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "assert", 6) == 0) {
+                const char* native_fn = NULL;
+                if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "sameValue", 9) == 0)
+                    native_fn = "js_assert_same_value";
+                else if (prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "notSameValue", 12) == 0)
+                    native_fn = "js_assert_not_same_value";
+                else if (prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "compareArray", 12) == 0)
+                    native_fn = "js_assert_compare_array";
+                else if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "deepEqual", 9) == 0)
+                    native_fn = "js_assert_deep_equal";
+                if (native_fn) {
+                    JsAstNode* a1 = call->arguments;
+                    JsAstNode* a2 = a1 ? a1->next : NULL;
+                    JsAstNode* a3 = a2 ? a2->next : NULL;
+                    MIR_reg_t actual_reg   = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                    MIR_reg_t expected_reg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
+                    MIR_reg_t msg_reg      = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
+                    jm_call_void_3(mt, native_fn,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, actual_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, expected_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                    return jm_emit_undefined(mt);
+                }
+            }
+        }
+    }
+
+    // verifyProperty(obj, name, desc [, options]) / compareArray(a, b)
+    // → native C++ standalone function interception for test262 (debug builds only)
+    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+        if (id->name) {
+            // verifyProperty(obj, name, desc [, options])
+            if (id->name->len == 14 && strncmp(id->name->chars, "verifyProperty", 14) == 0 && arg_count >= 3) {
+                JsAstNode* a1 = call->arguments;
+                JsAstNode* a2 = a1 ? a1->next : NULL;
+                JsAstNode* a3 = a2 ? a2->next : NULL;
+                JsAstNode* a4 = a3 ? a3->next : NULL;
+                MIR_reg_t obj_reg  = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                MIR_reg_t name_reg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
+                MIR_reg_t desc_reg = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_undefined(mt);
+                MIR_reg_t opts_reg = a4 ? jm_transpile_box_item(mt, a4) : jm_emit_undefined(mt);
+                jm_call_void_4(mt, "js_verify_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, desc_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, opts_reg));
+                return jm_emit_undefined(mt);
+            }
+            // compareArray(a, b)
+            if (id->name->len == 12 && strncmp(id->name->chars, "compareArray", 12) == 0 && arg_count == 2) {
+                JsAstNode* a1 = call->arguments;
+                JsAstNode* a2 = a1 ? a1->next : NULL;
+                MIR_reg_t arr_a = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                MIR_reg_t arr_b = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
+                return jm_call_2(mt, "js_compare_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_a),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_b));
+            }
+        }
+    }
+#endif // !NDEBUG
 
     // ClassName.staticMethod(args) → compile-time static method dispatch
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {

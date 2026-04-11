@@ -763,6 +763,8 @@ struct BatchTiming {
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
+static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
+static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
 static bool g_batch_only = false;
@@ -824,6 +826,7 @@ static void load_known_crashers(const char* path) {
     char buf[2048];
     while (fgets(buf, sizeof(buf), f)) {
         // format: "MISSING\t<test_name>\t<test_path>" or "CRASH_N\t<test_name>\t<test_path>"
+        // or "SLOW_<ms>\t<test_name>\t<test_path>" or "TIMEOUT_\t<test_name>\t<test_path>"
         char* first_tab = strchr(buf, '\t');
         if (!first_tab) continue;
         char* name_start = first_tab + 1;
@@ -833,7 +836,11 @@ static void load_known_crashers(const char* path) {
         size_t len = strlen(name_start);
         while (len > 0 && (name_start[len-1] == '\n' || name_start[len-1] == '\r'))
             name_start[--len] = '\0';
-        if (len > 0) g_known_crashers.insert(std::string(name_start));
+        if (len > 0) {
+            g_known_crashers.insert(std::string(name_start));
+            if (strncmp(buf, "SLOW_", 5) == 0)
+                g_known_slow_tests.insert(std::string(name_start));
+        }
     }
     fclose(f);
 }
@@ -1271,6 +1278,8 @@ static Test262RunResult evaluate_batch_result(
 
     // timeout (exit code 124 from batch handler)
     if (br.exit_code == 124) {
+        if (br.output.find("slow") != std::string::npos)
+            return {T262_TIMEOUT, "slow test (took >3s in previous run, quarantined)"};
         return {T262_TIMEOUT, "test timed out (10s)"};
     }
 
@@ -1340,11 +1349,17 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     // Crashers are skipped entirely — mark them as CRASH in results so Phase 3 evaluation
     // records them properly without spending time executing them.
+    // Slow tests are marked as timeout (exit_code=124) instead of crash (137).
     for (size_t idx : crasher_indices) {
         const auto& p = prepared[idx];
         BatchResult cr;
-        cr.output = "SKIPPED: known crasher from previous run";
-        cr.exit_code = 137;  // signal-killed
+        if (g_known_slow_tests.count(p.test_name)) {
+            cr.output = "SKIPPED: slow test (>3s in previous run)";
+            cr.exit_code = 124;  // timeout
+        } else {
+            cr.output = "SKIPPED: known crasher from previous run";
+            cr.exit_code = 137;  // signal-killed
+        }
         cr.elapsed_us = 0;
         batch_results[p.test_name] = cr;
     }
@@ -1424,22 +1439,26 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // Cumulative: merge previous crashers with newly-discovered ones.
     // Tests are only removed from quarantine if they PASS when run individually in Phase 2a.
     {
-        // Preserve manually-added TIMEOUT_ entries and # comments from the existing file.
+        // Preserve manually-added TIMEOUT_ entries, SLOW_ entries, and # comments from the existing file.
         // TIMEOUT_ entries are tests that loop forever (Lambda bug: missing throw guard),
-        // distinct from CRASH_ entries which are actual process crashes/signals.
+        // SLOW_ entries are tests that took >3s — both are quarantined from batch execution.
+        // SLOW_ entries are regenerated from fresh timing data if the test ran in this session.
         std::vector<std::string> timeout_lines;
-        std::unordered_set<std::string> timeout_names;
+        std::unordered_set<std::string> timeout_names;  // names to skip re-emitting as CRASH_
         {
             FILE* old_f = fopen("temp/_t262_crashers.txt", "r");
             if (old_f) {
                 char tbuf[2048];
                 while (fgets(tbuf, sizeof(tbuf), old_f)) {
-                    if (strncmp(tbuf, "TIMEOUT_", 8) == 0 || tbuf[0] == '#') {
+                    bool is_timeout = strncmp(tbuf, "TIMEOUT_", 8) == 0;
+                    bool is_slow    = strncmp(tbuf, "SLOW_", 5) == 0;
+                    if (is_timeout || is_slow || tbuf[0] == '#') {
                         size_t tl = strlen(tbuf);
                         while (tl > 0 && (tbuf[tl-1] == '\n' || tbuf[tl-1] == '\r')) tbuf[--tl] = '\0';
                         if (tl > 0) {
-                            timeout_lines.push_back(std::string(tbuf));
-                            if (strncmp(tbuf, "TIMEOUT_", 8) == 0) {
+                            if (is_timeout) {
+                                // always preserve TIMEOUT_ entries
+                                timeout_lines.push_back(std::string(tbuf));
                                 char* ft = strchr(tbuf, '\t');
                                 if (ft) {
                                     char* ns = ft + 1;
@@ -1447,6 +1466,24 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                     if (st) *st = '\0';
                                     timeout_names.insert(std::string(ns));
                                 }
+                            } else if (is_slow) {
+                                // preserve SLOW_ entries only if test was not re-run this session
+                                // (re-run tests will be re-emitted from fresh timing data below)
+                                char* ft = strchr(tbuf, '\t');
+                                if (ft) {
+                                    char* ns = ft + 1;
+                                    char* st = strchr(ns, '\t');
+                                    char* name_copy = ns;
+                                    if (st) { *st = '\0'; }
+                                    std::string name(name_copy);
+                                    // only preserve if not in this run's results (quarantined tests
+                                    // have exit_code=124 set above, so they won't be re-emitted)
+                                    timeout_lines.push_back(std::string(tbuf));
+                                    timeout_names.insert(name);
+                                }
+                            } else {
+                                // # comment lines
+                                timeout_lines.push_back(std::string(tbuf));
                             }
                         }
                     }
@@ -1502,6 +1539,24 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     crash_exit++;
                 }
             }
+            // Add newly-discovered slow tests (>3s elapsed) from clean batches
+            size_t slow_count = 0;
+            for (auto& kv : batch_results) {
+                if (written.count(kv.first)) continue;
+                if (kv.second.elapsed_us >= SLOW_THRESHOLD_US) {
+                    const char* path = "";
+                    for (size_t idx : clean_indices) {
+                        if (prepared[idx].test_name == kv.first) {
+                            path = prepared[idx].test_path.c_str();
+                            break;
+                        }
+                    }
+                    fprintf(crasher_log, "SLOW_%ld\t%s\t%s\n",
+                            kv.second.elapsed_us / 1000, kv.first.c_str(), path);
+                    written.insert(kv.first);
+                    slow_count++;
+                }
+            }
             // Clean tests still missing after Phase 2b
             for (size_t idx : lost_indices) {
                 const auto& p = prepared[idx];
@@ -1514,9 +1569,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 }
             }
             fclose(crasher_log);
-            if (still_lost + crash_exit > 0) {
-                fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit → temp/_t262_crashers.txt\n",
-                        still_lost, crash_exit);
+            if (still_lost + crash_exit + slow_count > 0) {
+                fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit + %zu slow (>3s) → temp/_t262_crashers.txt\n",
+                        still_lost, crash_exit, slow_count);
             }
         }
     }
