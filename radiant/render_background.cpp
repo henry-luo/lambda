@@ -1151,7 +1151,7 @@ static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, 
 static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* tile_rect) {
     if (!img->pic) return;
 
-    RdtPicture* pic = rdt_picture_from_tvg_paint(img->pic, (float)img->width, (float)img->height);
+    RdtPicture* pic = rdt_picture_dup(img->pic);
     if (!pic) return;
 
     rdt_picture_set_size(pic, tile_rect->width, tile_rect->height);
