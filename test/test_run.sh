@@ -712,7 +712,7 @@ while IFS= read -r source; do
     fi
 done < <(get_valid_test_sources)
 
-echo "Valid test sources from config: ${valid_test_sources[*]}"
+echo "Valid test sources from config: ${valid_test_sources[*]}" || true
 
 # Find existing executables that correspond to valid test sources
 test_executables=()

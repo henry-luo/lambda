@@ -23,6 +23,9 @@ all: lib$(LANGUAGE_NAME).a
 lib$(LANGUAGE_NAME).a: $(OBJS)
 	$(AR) $(ARFLAGS) $@ $^
 
+# scanner.c includes ../scanner_v2.h — track header dependency
+$(SRC_DIR)/scanner.o: scanner_v2.h
+
 clean:
 	$(RM) $(OBJS) lib$(LANGUAGE_NAME).a
 

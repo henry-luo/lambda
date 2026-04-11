@@ -148,9 +148,14 @@ TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
-# TypeScript grammar dependencies
+# JavaScript scanner dependencies
+JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
+
+# TypeScript grammar and scanner dependencies
 TS_GRAMMAR_JS = lambda/tree-sitter-typescript/grammar.js
 TS_PARSER_C = lambda/tree-sitter-typescript/src/parser.c
+TS_SCANNER_C = lambda/tree-sitter-typescript/src/scanner.c
+TS_SCANNER_H = lambda/tree-sitter-typescript/scanner_v2.h
 
 # LaTeX grammar dependencies
 LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
@@ -189,8 +194,8 @@ $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
-# Build tree-sitter-javascript library
-$(TREE_SITTER_JAVASCRIPT_LIB):
+# Build tree-sitter-javascript library (depends on scanner source)
+$(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "Building tree-sitter-javascript library..."
 	@echo "🔧 Compiler: $(CC)"
 	@echo "🔧 CXX: $(CXX)"
@@ -231,8 +236,8 @@ $(TS_PARSER_C): $(TS_GRAMMAR_JS)
 	fi
 	@echo "✅ TypeScript parser generated successfully"
 
-# Build tree-sitter-typescript library (depends on parser generation)
-$(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C)
+# Build tree-sitter-typescript library (depends on parser generation + scanner)
+$(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 	@echo "Building tree-sitter-typescript library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-typescript libtree-sitter-typescript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
