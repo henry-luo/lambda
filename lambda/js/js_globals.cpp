@@ -208,11 +208,19 @@ extern "C" Item js_date_new_from(Item value) {
         String* s = it2s(value);
         if (s) {
             struct tm tm = {};
-            if (strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm) ||
-                strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
-                strptime(s->chars, "%c", &tm)) {
+            char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%c", &tm);
+            if (rest) {
                 time_t t = timegm(&tm);
                 double ms = (double)t * 1000.0;
+                // Parse fractional seconds (e.g. ".872" → 872ms)
+                if (rest && *rest == '.') {
+                    char* end_frac;
+                    double frac = strtod(rest, &end_frac);
+                    ms += frac * 1000.0;
+                    rest = end_frac;
+                }
                 store_time(ms);
             } else {
                 // fallback: try mktime (local time)
@@ -236,14 +244,59 @@ extern "C" Item js_date_new_from(Item value) {
         bool has_time = false;
         Item other_time = js_map_get_fast_ext(value.map, "_time", 5, &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
-            store_time(other_time.get_double());
+            double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
+            store_time(ms);
         } else {
-            // Non-Date object: try ToPrimitive then ToNumber
-            Item prim = js_to_number(value);
-            if (get_type_id(prim) == LMD_TYPE_FLOAT || get_type_id(prim) == LMD_TYPE_INT)
-                store_time(prim.get_double());
-            else
-                store_time(NAN);
+            // Non-Date object: ToPrimitive(value) per ES spec §21.4.2
+            // 1. Check Symbol.toPrimitive
+            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+            Item to_prim = js_property_get(value, sym_key);
+            Item prim;
+            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
+                Item args[1] = { hint };
+                prim = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
+                // If result is an object, throw TypeError
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
+                // Symbol results → throw TypeError
+                if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+                    js_throw_type_error("Cannot convert a Symbol value to a number");
+                    return ItemNull;
+                }
+            } else {
+                // No Symbol.toPrimitive: try valueOf/toString
+                prim = js_to_number(value);
+                if (js_check_exception()) return ItemNull;
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_FLOAT)
+                    store_time(it2d(prim));
+                else if (pt == LMD_TYPE_INT || pt == LMD_TYPE_INT64)
+                    store_time((double)it2i(prim));
+                else
+                    store_time(NAN);
+                goto date_done;
+            }
+            // Dispatch on ToPrimitive result type
+            TypeId pt = get_type_id(prim);
+            if (pt == LMD_TYPE_STRING) {
+                // Re-enter Date constructor with the string
+                return js_date_new_from(prim);
+            } else {
+                // ToNumber on the primitive
+                Item num = js_to_number(prim);
+                TypeId nt = get_type_id(num);
+                if (nt == LMD_TYPE_FLOAT)
+                    store_time(it2d(num));
+                else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64)
+                    store_time((double)it2i(num));
+                else
+                    store_time(NAN);
+            }
         }
     } else {
         // Per spec: ToNumber(value) then TimeClip
@@ -254,6 +307,7 @@ extern "C" Item js_date_new_from(Item value) {
         else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64) store_time((double)it2i(num));
         else store_time(NAN);
     }
+date_done:
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
     return obj;

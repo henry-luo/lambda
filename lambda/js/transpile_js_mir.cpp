@@ -14324,6 +14324,12 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
 
+    // Check for exception (e.g. TypeError: null is not iterable)
+    MIR_reg_t iter_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_label_t l_iter_err = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
+        MIR_new_reg_op(mt->ctx, iter_exc)));
+
     // In generators: register iterator and loop_var as env-stored variables
     if (mt->in_generator && mt->gen_env_reg) {
         int iter_slot = mt->gen_local_slot_count++;
@@ -14410,6 +14416,7 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // fall through to l_end
 
     jm_emit_label(mt, l_end);
+    jm_emit_label(mt, l_iter_err);  // exception from js_get_iterator jumps here
     if (mt->loop_depth > 0) mt->loop_depth--;
     jm_pop_scope(mt);
 }

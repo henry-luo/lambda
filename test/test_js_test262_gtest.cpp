@@ -1,6 +1,12 @@
 // =============================================================================
 // test262 Compliance Test Runner for LambdaJS
 // =============================================================================
+//
+// Workflow to move a test into the baseline list:
+//   1. Fix it so that it passes, is stable, and finishes in < 3 seconds.
+//   2. Run it in a batch of 50 tests.  If still stable, add it to baseline.
+//
+// =============================================================================
 // Dynamically discovers and runs ECMAScript test262 tests against lambda.exe js.
 //
 // Protocol:

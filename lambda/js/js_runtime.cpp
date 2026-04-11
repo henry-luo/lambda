@@ -11500,6 +11500,15 @@ extern "C" bool js_is_generator(Item obj) {
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
 
+    // null and undefined are never iterable — throw TypeError immediately
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s is not iterable",
+                 tid == LMD_TYPE_NULL ? "null" : "undefined");
+        js_throw_type_error(msg);
+        return ItemNull;
+    }
+
     // Arrays: wrap in array iterator
     if (tid == LMD_TYPE_ARRAY) {
         Item iter = js_object_create(ItemNull);
@@ -11568,8 +11577,20 @@ extern "C" Item js_get_iterator(Item iterable) {
         }
     }
 
-    // Fallback: return as-is
-    return iterable;
+    // Non-iterable value — throw TypeError
+    {
+        char msg[128];
+        const char* type_str = "object";
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT)
+            type_str = "number";
+        else if (tid == LMD_TYPE_BOOL)
+            type_str = "boolean";
+        else if (tid == LMD_TYPE_SYMBOL)
+            type_str = "symbol";
+        snprintf(msg, sizeof(msg), "%s is not iterable", type_str);
+        js_throw_type_error(msg);
+        return ItemNull;
+    }
 }
 
 // IteratorStep: call iterator.next(), return result {done, value}
@@ -11577,6 +11598,10 @@ extern "C" Item js_get_iterator(Item iterable) {
 // The sentinel is a unique bit pattern (type tag 0x7F) that cannot collide with
 // any valid JS value including null, undefined, false, 0, or empty string.
 extern "C" Item js_iterator_step(Item iterator) {
+    // Safety: if iterator is null (e.g. from a failed js_get_iterator), return done
+    if (get_type_id(iterator) == LMD_TYPE_NULL || iterator.item == ITEM_JS_UNDEFINED)
+        return (Item){.item = JS_ITER_DONE_SENTINEL};
+
     // Synthetic array iterator
     bool has_arr = false;
     Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);

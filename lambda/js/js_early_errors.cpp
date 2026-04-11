@@ -36,6 +36,7 @@ struct EarlyErrorCtx {
     // iteration_labels: labels attached to iteration statements (for/while/do-while/for-in/for-of)
     // non_iteration_labels: labels attached to non-iteration statements
     const char* iteration_labels[32];
+    int iteration_label_lens[32];
     int iteration_label_count;
     bool in_iteration;       // currently inside any iteration statement
     bool in_switch;          // currently inside switch
@@ -997,7 +998,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                                     ls->body->node_type == JS_AST_NODE_DO_WHILE_STATEMENT;
                 int saved_count = ctx->iteration_label_count;
                 if (is_iteration && ls->label && ctx->iteration_label_count < 32) {
-                    ctx->iteration_labels[ctx->iteration_label_count++] = ls->label;
+                    ctx->iteration_labels[ctx->iteration_label_count] = ls->label;
+                    ctx->iteration_label_lens[ctx->iteration_label_count] = ls->label_len;
+                    ctx->iteration_label_count++;
                 }
                 walk_statement(ctx, ls->body);
                 ctx->iteration_label_count = saved_count;
@@ -1016,7 +1019,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 // continue with label: label must refer to an iteration statement
                 bool found = false;
                 for (int i = 0; i < ctx->iteration_label_count; i++) {
-                    if (strcmp(ctx->iteration_labels[i], cn->label) == 0) {
+                    if (ctx->iteration_label_lens[i] == cn->label_len &&
+                        strncmp(ctx->iteration_labels[i], cn->label, cn->label_len) == 0) {
                         found = true;
                         break;
                     }
