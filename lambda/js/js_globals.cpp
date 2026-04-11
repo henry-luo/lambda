@@ -841,9 +841,81 @@ extern "C" Item js_parseFloat(Item str_item) {
     memcpy(buf, s->chars, len);
     buf[len] = '\0';
 
+    // ES spec: skip leading StrWhiteSpaceChar (includes Unicode whitespace)
+    char* p = buf;
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v') { p++; continue; }
+        // UTF-8 two-byte: U+00A0 (NBSP) = C2 A0
+        if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) { p += 2; continue; }
+        // UTF-8 three-byte Unicode whitespace:
+        // U+FEFF (BOM) = EF BB BF
+        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) { p += 3; continue; }
+        // U+2000-U+200A (various spaces), U+2028 (LS), U+2029 (PS), U+202F, U+205F, U+3000
+        // All encoded as E2 8x xx or E3 80 80
+        if ((unsigned char)p[0] == 0xE2) {
+            unsigned char b1 = (unsigned char)p[1], b2 = (unsigned char)p[2];
+            // U+2000-U+200A: E2 80 80 - E2 80 8A
+            if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) { p += 3; continue; }
+            // U+2028: E2 80 A8, U+2029: E2 80 A9
+            if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) { p += 3; continue; }
+            // U+202F: E2 80 AF
+            if (b1 == 0x80 && b2 == 0xAF) { p += 3; continue; }
+            // U+205F: E2 81 9F
+            if (b1 == 0x81 && b2 == 0x9F) { p += 3; continue; }
+        }
+        // U+3000 (ideographic space): E3 80 80
+        if ((unsigned char)p[0] == 0xE3 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x80) { p += 3; continue; }
+        break;
+    }
+
+    // ES spec: parseFloat only parses StrDecimalLiteral — no hex (0x), no 0o, no 0b.
+    // strtod parses hex on many platforms, so we must guard against it.
+    // StrDecimalLiteral: [+-]? (Infinity | DecimalDigits [. DecimalDigits] [eE [+-] DecimalDigits] | . DecimalDigits [eE ...])
+    char* start = p;
+    if (*p == '+' || *p == '-') p++;
+    if (*p == 'I') {
+        // check for "Infinity"
+        if (strncmp(p, "Infinity", 8) == 0) {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = (*start == '-') ? -HUGE_VAL : HUGE_VAL;
+            return (Item){.item = d2it(fp)};
+        }
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // must start with a decimal digit or '.'
+    if ((*p < '0' || *p > '9') && *p != '.') {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // '.' alone without a following digit is not valid
+    if (*p == '.' && (p[1] < '0' || p[1] > '9')) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+
+    // scan to find the end of the valid decimal literal (no hex)
+    char* q = p;
+    while (*q >= '0' && *q <= '9') q++;         // integer part
+    if (*q == '.') { q++; while (*q >= '0' && *q <= '9') q++; } // fractional part
+    if (*q == 'e' || *q == 'E') {                // exponent
+        q++;
+        if (*q == '+' || *q == '-') q++;
+        if (*q >= '0' && *q <= '9') { while (*q >= '0' && *q <= '9') q++; }
+        else { q = q - (q[-1] == '+' || q[-1] == '-' ? 2 : 1); } // no digits after e → backtrack
+    }
+
+    // null-terminate at the end of valid decimal literal and parse
+    char saved = *q;
+    *q = '\0';
     char* endptr;
-    double val = strtod(buf, &endptr);
-    if (endptr == buf) {
+    double val = strtod(start, &endptr);
+    *q = saved;
+
+    if (endptr == start) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
@@ -3737,6 +3809,10 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
 }
 
 extern "C" Item js_to_string_val(Item value) {
+    // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
+    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_symbol_to_string(value);
+    }
     return js_to_string(value);
 }
 
@@ -3967,7 +4043,17 @@ extern "C" Item js_object_is(Item left, Item right) {
 // =============================================================================
 
 extern "C" Item js_object_assign(Item target, Item* sources, int count) {
-    if (get_type_id(target) != LMD_TYPE_MAP) return target;
+    TypeId tid = get_type_id(target);
+    if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+        (target.item == 0 && tid != LMD_TYPE_INT)) {
+        extern Item js_new_error_with_name(Item type_name, Item message);
+        extern void js_throw_value(Item error);
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("Cannot convert undefined or null to object"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
+    if (tid != LMD_TYPE_MAP) return target;
     for (int i = 0; i < count; i++) {
         Item source = sources[i];
         if (get_type_id(source) != LMD_TYPE_MAP) continue;
@@ -5695,7 +5781,13 @@ static Item js_ctor_placeholder() { return ItemNull; }
 // v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
 static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
 static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
-static Item js_ctor_string_fn(Item arg) { return js_to_string(arg); }
+static Item js_ctor_string_fn(Item arg) {
+    // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
+    if (get_type_id(arg) == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_symbol_to_string(arg);
+    }
+    return js_to_string(arg);
+}
 
 // RegExp(pattern, flags) without 'new' should behave like new RegExp(pattern, flags)
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item);

@@ -869,9 +869,10 @@ extern "C" Item js_to_string(Item value) {
 
     case LMD_TYPE_INT: {
         int64_t v = it2i(value);
-        // Check if this is a symbol item (encoded as negative int <= -JS_SYMBOL_BASE)
+        // Symbols cannot be implicitly converted to string (ES spec 7.1.12)
         if (v <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_symbol_to_string(value);
+            js_throw_type_error("Cannot convert a Symbol value to a string");
+            return ItemNull;
         }
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
@@ -3134,6 +3135,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                     Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
                     return js_get_constructor(arr_name);
                 }
+                // v83: __proto__ for arrays → Array.prototype
+                if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
+                    return js_get_prototype_of(object);
+                }
                 // Symbol.iterator → values method (Symbol.iterator has well-known ID=1, key "__sym_1")
                 if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
                     return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
@@ -3181,6 +3186,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item str_name = (Item){.item = s2it(heap_create_name("String", 6))};
                 return js_get_constructor(str_name);
             }
+            // v83: __proto__ for strings → String.prototype
+            if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
+                return js_get_prototype_of(object);
+            }
             // Symbol.iterator → string iterator factory (Symbol.iterator has well-known ID=1, key "__sym_1")
             if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
                 return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
@@ -3218,6 +3227,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (js_is_deleted_sentinel(pm_val)) return make_js_undefined();
                     return pm_val;
                 }
+            }
+            // v83: __proto__ for function objects → return Function.prototype
+            if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
+                return js_get_prototype_of(object);
             }
             // .prototype — lazy initialization (skip for global builtin wrappers like parseInt)
             if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
@@ -3525,6 +3538,22 @@ extern "C" Item js_property_get(Item object, Item key) {
                     return static_method;
                 }
             }
+            // v83: Prototype chain fallback for function objects
+            // Look up unknown properties on Function.prototype (e.g. .constructor, .__proto__)
+            {
+                Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+                if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
+                    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                    Item func_proto = js_property_get(func_ctor, proto_key);
+                    if (get_type_id(func_proto) == LMD_TYPE_MAP) {
+                        Item result = map_get(func_proto.map, key);
+                        if (result.item != ItemNull.item) return result;
+                        // Also walk Object.prototype chain
+                        result = js_prototype_lookup(func_proto, key);
+                        if (result.item != ItemNull.item) return result;
+                    }
+                }
+            }
         }
     }
 
@@ -3555,6 +3584,13 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (type == LMD_TYPE_BOOL) {
                 Item bool_name = (Item){.item = s2it(heap_create_name("Boolean", 7))};
                 return js_get_constructor(bool_name);
+            }
+        }
+        // v83: __proto__ for number and boolean primitives
+        if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
+                type == LMD_TYPE_BOOL) {
+                return js_get_prototype_of(object);
             }
         }
         Item builtin = js_lookup_builtin_method(type, str_key->chars, str_key->len);
@@ -8816,8 +8852,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
 
     // match method name and delegate to Lambda fn_* functions
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
-        if (argc < 1) return (Item){.item = i2it(-1)};
-        Item search_val = js_to_string(args[0]);
+        Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
         if (argc < 2) return (Item){.item = i2it(fn_index_of(str, search_val))};
         // indexOf with start position
         int start_pos = (int)js_get_number(args[1]);
@@ -8848,8 +8883,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = i2it(-1)};
     }
     if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
-        if (argc < 1) return (Item){.item = i2it(-1)};
-        Item search_val = js_to_string(args[0]);
+        Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
         if (argc < 2) return (Item){.item = i2it(fn_last_index_of(str, search_val))};
         // lastIndexOf with start position - search backwards from position
         int end_pos = (int)js_get_number(args[1]);
@@ -9579,7 +9613,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // indexOf
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
         int start = (argc >= 2) ? (int)js_get_number(args[1]) : 0;
         // v24: ES spec - negative fromIndex means length + fromIndex
@@ -9587,7 +9622,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = start; i < a->length; i++) {
             // v25: skip holes (deleted elements) per ES spec
             if (a->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
-            if (it2b(js_strict_equal(js_array_element(arr, i), args[0]))) return (Item){.item = i2it(i)};
+            if (it2b(js_strict_equal(js_array_element(arr, i), search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
     }
@@ -9601,7 +9636,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // includes
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
         // v24: Support fromIndex argument (ES spec)
         int from = (argc >= 2) ? (int)js_get_number(args[1]) : 0;
@@ -9609,10 +9645,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = from; i < a->length; i++) {
             // includes uses SameValueZero (NaN === NaN, +0 === -0)
             Item elem = js_array_element(arr, i);
-            if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = b2it(true)};
+            if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = b2it(true)};
             // NaN === NaN for includes
-            if (get_type_id(elem) == LMD_TYPE_FLOAT && get_type_id(args[0]) == LMD_TYPE_FLOAT) {
-                double d1 = it2d(elem), d2 = it2d(args[0]);
+            if (get_type_id(elem) == LMD_TYPE_FLOAT && get_type_id(search_val) == LMD_TYPE_FLOAT) {
+                double d1 = it2d(elem), d2 = it2d(search_val);
                 if (d1 != d1 && d2 != d2) return (Item){.item = b2it(true)};
             }
         }
@@ -10291,13 +10327,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // lastIndexOf
     if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
         int from = argc > 1 ? (int)js_get_number(args[1]) : a->length - 1;
         if (from < 0) from = a->length + from;
         if (from >= a->length) from = a->length - 1;
         for (int i = from; i >= 0; i--) {
-            if (it2b(js_strict_equal(js_array_element(arr, i), args[0]))) return (Item){.item = i2it(i)};
+            if (it2b(js_strict_equal(js_array_element(arr, i), search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
     }
