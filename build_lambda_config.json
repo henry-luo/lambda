@@ -1181,6 +1181,8 @@
                 "lib/clock_compat.c",
                 "radiant/radiant.cpp"
             ],
+            "additional_source_files": [
+            ],
             "includes": [
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/libpng16",

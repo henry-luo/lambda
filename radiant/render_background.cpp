@@ -6,15 +6,37 @@
 #include "../lambda/input/css/css_value.hpp"
 #include <math.h>
 
-/**
- * Helper function to apply transform and push paint to canvas
- * If a transform is active in rdcon, applies it to the paint before pushing
- */
-static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
-    if (rdcon->has_transform) {
-        tvg_paint_set_transform(paint, &rdcon->transform);
+// Get transform pointer for rdt_* calls (NULL if identity)
+static const RdtMatrix* get_transform(RenderContext* rdcon) {
+    if (!rdcon->has_transform) return nullptr;
+    return &rdcon->transform;
+}
+
+// Create a clip path from the render context's clip region
+static RdtPath* create_bg_clip_path(RenderContext* rdcon) {
+    RdtPath* clip = rdt_path_new();
+    if (rdcon->block.has_clip_radius) {
+        float clip_x = rdcon->block.clip.left;
+        float clip_y = rdcon->block.clip.top;
+        float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
+        float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
+        float r = rdcon->block.clip_radius.top_left;
+        if (rdcon->block.clip_radius.top_right > 0) r = max(r, rdcon->block.clip_radius.top_right);
+        if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
+        if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
+        rdt_path_add_rect(clip, clip_x, clip_y, clip_w, clip_h, r, r);
+        log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f r=%.0f",
+                  clip_x, clip_y, clip_w, clip_h, r);
+    } else {
+        rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
+            rdcon->block.clip.right - rdcon->block.clip.left,
+            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
     }
-    tvg_canvas_push(rdcon->canvas, paint);
+    log_debug("[CLIP SHAPE] clip_rect created: clip=%.0f,%.0f to %.0f,%.0f has_radius=%d", 
+              rdcon->block.clip.left, rdcon->block.clip.top, 
+              rdcon->block.clip.right, rdcon->block.clip.bottom,
+              rdcon->block.has_clip_radius);
+    return clip;
 }
 
 /**
@@ -114,114 +136,37 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 }
 
 /**
- * Create a rounded clip shape for ThorVG based on the render context's clip region
- */
-static Tvg_Paint create_clip_shape(RenderContext* rdcon) {
-    Tvg_Paint clip_rect = tvg_shape_new();
-
-    if (rdcon->block.has_clip_radius) {
-        // Use rounded clipping
-        float clip_x = rdcon->block.clip.left;
-        float clip_y = rdcon->block.clip.top;
-        float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
-        float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
-
-        // Use the first radius value for all corners (simplified approach)
-        // ThorVG's append_rect only supports uniform x/y radius
-        float r = rdcon->block.clip_radius.top_left;
-        if (rdcon->block.clip_radius.top_right > 0) r = max(r, rdcon->block.clip_radius.top_right);
-        if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
-        if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
-
-        tvg_shape_append_rect(clip_rect, clip_x, clip_y, clip_w, clip_h, r, r, true);
-        log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f r=%.0f",
-                  clip_x, clip_y, clip_w, clip_h, r);
-    } else {
-        // Use rectangular clipping
-        tvg_shape_append_rect(clip_rect,
-            rdcon->block.clip.left, rdcon->block.clip.top,
-            rdcon->block.clip.right - rdcon->block.clip.left,
-            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0, true);
-    }
-
-    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-    log_debug("[CLIP SHAPE] clip_rect created: clip=%.0f,%.0f to %.0f,%.0f has_radius=%d", 
-              rdcon->block.clip.left, rdcon->block.clip.top, 
-              rdcon->block.clip.right, rdcon->block.clip.bottom,
-              rdcon->block.has_clip_radius);
-    return clip_rect;
-}
-
-/**
  * Bezier control point constant for approximating circular arcs
  */
 #define KAPPA 0.5522847498f
 
 /**
- * Build rounded rectangle path with Bezier curves for 4 different corner radii
+ * Build rounded rectangle path with 4 different corner radii
  */
-static void build_rounded_rect_path(Tvg_Paint shape, float x, float y, float w, float h,
+static void build_rounded_rect_path(RdtPath* p, float x, float y, float w, float h,
                                      float r_tl, float r_tr, float r_br, float r_bl) {
-    // Start from top-left corner (after the radius)
-    tvg_shape_move_to(shape, x + r_tl, y);
-
-    // Top edge
-    tvg_shape_line_to(shape, x + w - r_tr, y);
-
-    // Top-right corner (Bezier curve)
+    rdt_path_move_to(p, x + r_tl, y);
+    rdt_path_line_to(p, x + w - r_tr, y);
     if (r_tr > 0) {
-        float cp1_x = x + w - r_tr + r_tr * KAPPA;
-        float cp1_y = y;
-        float cp2_x = x + w;
-        float cp2_y = y + r_tr - r_tr * KAPPA;
-        float end_x = x + w;
-        float end_y = y + r_tr;
-        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+        rdt_path_cubic_to(p, x + w - r_tr + r_tr * KAPPA, y,
+            x + w, y + r_tr - r_tr * KAPPA, x + w, y + r_tr);
     }
-
-    // Right edge
-    tvg_shape_line_to(shape, x + w, y + h - r_br);
-
-    // Bottom-right corner (Bezier curve)
+    rdt_path_line_to(p, x + w, y + h - r_br);
     if (r_br > 0) {
-        float cp1_x = x + w;
-        float cp1_y = y + h - r_br + r_br * KAPPA;
-        float cp2_x = x + w - r_br + r_br * KAPPA;
-        float cp2_y = y + h;
-        float end_x = x + w - r_br;
-        float end_y = y + h;
-        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+        rdt_path_cubic_to(p, x + w, y + h - r_br + r_br * KAPPA,
+            x + w - r_br + r_br * KAPPA, y + h, x + w - r_br, y + h);
     }
-
-    // Bottom edge
-    tvg_shape_line_to(shape, x + r_bl, y + h);
-
-    // Bottom-left corner (Bezier curve)
+    rdt_path_line_to(p, x + r_bl, y + h);
     if (r_bl > 0) {
-        float cp1_x = x + r_bl - r_bl * KAPPA;
-        float cp1_y = y + h;
-        float cp2_x = x;
-        float cp2_y = y + h - r_bl + r_bl * KAPPA;
-        float end_x = x;
-        float end_y = y + h - r_bl;
-        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+        rdt_path_cubic_to(p, x + r_bl - r_bl * KAPPA, y + h,
+            x, y + h - r_bl + r_bl * KAPPA, x, y + h - r_bl);
     }
-
-    // Left edge
-    tvg_shape_line_to(shape, x, y + r_tl);
-
-    // Top-left corner (Bezier curve)
+    rdt_path_line_to(p, x, y + r_tl);
     if (r_tl > 0) {
-        float cp1_x = x;
-        float cp1_y = y + r_tl - r_tl * KAPPA;
-        float cp2_x = x + r_tl - r_tl * KAPPA;
-        float cp2_y = y;
-        float end_x = x + r_tl;
-        float end_y = y;
-        tvg_shape_cubic_to(shape, cp1_x, cp1_y, cp2_x, cp2_y, end_x, end_y);
+        rdt_path_cubic_to(p, x, y + r_tl - r_tl * KAPPA,
+            x + r_tl - r_tl * KAPPA, y, x + r_tl, y);
     }
-
-    tvg_shape_close(shape);
+    rdt_path_close(p);
 }
 
 /**
@@ -229,7 +174,6 @@ static void build_rounded_rect_path(Tvg_Paint shape, float x, float y, float w, 
  * Handles border-radius by using ThorVG if needed
  */
 void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
-    // Check if we have border radius on this element OR a parent rounded clip
     bool has_radius = false;
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
@@ -238,44 +182,30 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
                      border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
     }
 
-    // Also need ThorVG if parent has rounded clip
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
 
     if (has_radius || needs_rounded_clip || rdcon->has_transform) {
-        // Use ThorVG for rounded background, rounded clipping, or transformed elements
-        Tvg_Canvas canvas = rdcon->canvas;
-        Tvg_Paint shape = tvg_shape_new();
+        RdtVector* vec = &rdcon->vec;
+        const RdtMatrix* xform = get_transform(rdcon);
 
-        float x = rect.x;
-        float y = rect.y;
-        float w = rect.width;
-        float h = rect.height;
-
+        RdtPath* p = rdt_path_new();
         float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
         if (has_radius && border) {
-            // Constrain radii FIRST
-            constrain_border_radii(border, w, h);
-            // Then read the constrained values
+            constrain_border_radii(border, rect.width, rect.height);
             r_tl = border->radius.top_left;
             r_tr = border->radius.top_right;
             r_br = border->radius.bottom_right;
             r_bl = border->radius.bottom_left;
         }
+        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
 
-        // Build rounded rect path with all 4 corner radii
-        build_rounded_rect_path(shape, x, y, w, h, r_tl, r_tr, r_br, r_bl);
-        tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-
-        // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-        Tvg_Paint clip_rect = create_clip_shape(rdcon);
-        tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-        tvg_canvas_remove(canvas, NULL);  // clear previous shapes
-        push_with_transform(rdcon, shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
+        RdtPath* clip = create_bg_clip_path(rdcon);
+        rdt_push_clip(vec, clip, NULL);
+        rdt_fill_path(vec, p, color, RDT_FILL_WINDING, xform);
+        rdt_pop_clip(vec);
+        rdt_path_free(clip);
+        rdt_path_free(p);
     } else {
-        // Simple rectangular fill
         ImageSurface* surface = rdcon->ui_context->surface;
         fill_surface_rect(surface, &rect, color.c, &rdcon->block.clip);
     }
@@ -319,7 +249,7 @@ static void calc_linear_gradient_points(float angle, Rect rect,
 }
 
 /**
- * Render linear gradient using ThorVG
+ * Render linear gradient
  */
 void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
@@ -330,10 +260,11 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
               view->node_name(), rect.x, rect.y, rect.width, rect.height);
 
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
+    RdtVector* vec = &rdcon->vec;
+    const RdtMatrix* xform = get_transform(rdcon);
 
-    // Create rectangle shape for gradient fill
+    // Build shape path
+    RdtPath* p = rdt_path_new();
     bool has_radius = false;
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
@@ -343,31 +274,20 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     }
 
     if (has_radius) {
-        // Constrain radii FIRST
         constrain_border_radii(border, rect.width, rect.height);
-        // Then read the constrained values
-        float r_tl = border->radius.top_left;
-        float r_tr = border->radius.top_right;
-        float r_br = border->radius.bottom_right;
-        float r_bl = border->radius.bottom_left;
-        // Rounded rectangle with all 4 corner radii
-        build_rounded_rect_path(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
+        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height,
+            border->radius.top_left, border->radius.top_right,
+            border->radius.bottom_right, border->radius.bottom_left);
     } else {
-        // Simple rectangle
-        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
+        rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
-
-    // Create linear gradient
-    Tvg_Gradient grad = tvg_linear_gradient_new();
 
     // Calculate gradient line
     float x1, y1, x2, y2;
     calc_linear_gradient_points(gradient->angle, rect, &x1, &y1, &x2, &y2);
-    tvg_linear_gradient_set(grad, x1, y1, x2, y2);
 
-    // Add color stops
-    // ThorVG color stops are in RGBA format with position 0.0-1.0
-    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)mem_alloc(sizeof(Tvg_Color_Stop) * gradient->stop_count, MEM_CAT_RENDER);
+    // Build gradient stops
+    RdtGradientStop* stops = (RdtGradientStop*)alloca(gradient->stop_count * sizeof(RdtGradientStop));
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position >= 0 ? gs->position : (float)i / (gradient->stop_count - 1);
@@ -375,25 +295,17 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         stops[i].g = gs->color.g;
         stops[i].b = gs->color.b;
         stops[i].a = gs->color.a;
-
         log_debug("[GRADIENT] Stop %d: pos=%.2f color=#%02x%02x%02x%02x",
                   i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
-    tvg_gradient_set_color_stops(grad, stops, gradient->stop_count);
-    mem_free(stops);
-
-    // Apply gradient fill to shape
-    tvg_shape_set_gradient(shape, grad);
-
-    // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-    Tvg_Paint clip_rect = create_clip_shape(rdcon);
-    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-    tvg_canvas_remove(canvas, NULL);  // clear previous shapes
-    push_with_transform(rdcon, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
+    RdtPath* clip = create_bg_clip_path(rdcon);
+    rdt_push_clip(vec, clip, NULL);
+    rdt_fill_linear_gradient(vec, p, x1, y1, x2, y2, stops, gradient->stop_count,
+                             RDT_FILL_WINDING, xform);
+    rdt_pop_clip(vec);
+    rdt_path_free(clip);
+    rdt_path_free(p);
 }
 
 /**
@@ -437,7 +349,7 @@ static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, f
 }
 
 /**
- * Render radial gradient using ThorVG
+ * Render radial gradient
  */
 void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
@@ -445,10 +357,10 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
         return;
     }
 
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
+    RdtVector* vec = &rdcon->vec;
+    const RdtMatrix* xform = get_transform(rdcon);
 
-    // Create rectangle shape for gradient fill
+    RdtPath* p = rdt_path_new();
     bool has_radius = false;
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
@@ -459,43 +371,25 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
 
     if (has_radius) {
         constrain_border_radii(border, rect.width, rect.height);
-        float r_tl = border->radius.top_left;
-        float r_tr = border->radius.top_right;
-        float r_br = border->radius.bottom_right;
-        float r_bl = border->radius.bottom_left;
-        build_rounded_rect_path(shape, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
+        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height,
+            border->radius.top_left, border->radius.top_right,
+            border->radius.bottom_right, border->radius.bottom_left);
     } else {
-        tvg_shape_append_rect(shape, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
+        rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
 
-    // Calculate center position in absolute coordinates
     float cx = rect.x + rect.width * gradient->cx;
     float cy = rect.y + rect.height * gradient->cy;
-
-    // Calculate radius based on size keyword
     float radius = calc_radial_radius(gradient, rect, rect.width * gradient->cx, rect.height * gradient->cy);
 
-    // For circle shape, use uniform radius
-    // For ellipse, we'd need to scale, but ThorVG only supports circular radial gradients
-    // So we approximate ellipse as circle using the larger dimension
     if (gradient->shape == RADIAL_SHAPE_ELLIPSE) {
-        // Use average of width/height ratio
         radius = fmaxf(rect.width, rect.height) * 0.5f;
     }
 
     log_debug("[GRADIENT] Radial gradient center=(%.1f,%.1f) radius=%.1f shape=%d",
               cx, cy, radius, gradient->shape);
 
-    // Create radial gradient
-    Tvg_Gradient grad = tvg_radial_gradient_new();
-
-    // ThorVG radial gradient: (cx, cy, r, fx, fy, fr)
-    // cx, cy, r = end circle (outer), fx, fy, fr = start circle (inner focal point)
-    // For CSS radial gradients, focal point is at center with zero radius
-    tvg_radial_gradient_set(grad, cx, cy, radius, cx, cy, 0);
-
-    // Add color stops
-    Tvg_Color_Stop* stops = (Tvg_Color_Stop*)mem_alloc(sizeof(Tvg_Color_Stop) * gradient->stop_count, MEM_CAT_RENDER);
+    RdtGradientStop* stops = (RdtGradientStop*)alloca(gradient->stop_count * sizeof(RdtGradientStop));
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position;
@@ -503,25 +397,17 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
         stops[i].g = gs->color.g;
         stops[i].b = gs->color.b;
         stops[i].a = gs->color.a;
-
         log_debug("[GRADIENT] Radial stop %d: pos=%.2f color=#%02x%02x%02x%02x",
                   i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
-    tvg_gradient_set_color_stops(grad, stops, gradient->stop_count);
-    mem_free(stops);
-
-    // Apply gradient fill to shape
-    tvg_shape_set_gradient(shape, grad);
-
-    // Set clipping
-    Tvg_Paint clip_rect = create_clip_shape(rdcon);
-    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-    tvg_canvas_remove(canvas, NULL);
-    push_with_transform(rdcon, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
+    RdtPath* clip = create_bg_clip_path(rdcon);
+    rdt_push_clip(vec, clip, NULL);
+    rdt_fill_radial_gradient(vec, p, cx, cy, radius, stops, gradient->stop_count,
+                             RDT_FILL_WINDING, xform);
+    rdt_pop_clip(vec);
+    rdt_path_free(clip);
+    rdt_path_free(p);
 }
 
 /**
@@ -901,7 +787,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         r_bl = border->radius.bottom_left;
     }
 
-    Tvg_Canvas canvas = rdcon->canvas;
+    const RdtMatrix* xform = get_transform(rdcon);
 
     // Render outer shadows first (in reverse order - last shadow is bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
@@ -925,66 +811,57 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                   s->offset_x, s->offset_y, s->blur_radius, s->spread_radius,
                   s->color.r, s->color.g, s->color.b, s->color.a);
 
-        // Create shadow shape
-        Tvg_Paint shadow_shape = tvg_shape_new();
+        // Build shadow path
+        RdtPath* shadow_path = rdt_path_new();
 
         if (sr_tl > 0 || sr_tr > 0 || sr_br > 0 || sr_bl > 0) {
             // Rounded shadow - build path with bezier corners
-            // Use the same build_rounded_rect_path logic
             float x = shadow_x, y = shadow_y, w = shadow_w, h = shadow_h;
 
             #define KAPPA_SHADOW 0.5522847498f
-            tvg_shape_move_to(shadow_shape, x + sr_tl, y);
-            tvg_shape_line_to(shadow_shape, x + w - sr_tr, y);
+            rdt_path_move_to(shadow_path, x + sr_tl, y);
+            rdt_path_line_to(shadow_path, x + w - sr_tr, y);
             if (sr_tr > 0) {
-                tvg_shape_cubic_to(shadow_shape,
+                rdt_path_cubic_to(shadow_path,
                     x + w - sr_tr + sr_tr * KAPPA_SHADOW, y,
                     x + w, y + sr_tr - sr_tr * KAPPA_SHADOW,
                     x + w, y + sr_tr);
             }
-            tvg_shape_line_to(shadow_shape, x + w, y + h - sr_br);
+            rdt_path_line_to(shadow_path, x + w, y + h - sr_br);
             if (sr_br > 0) {
-                tvg_shape_cubic_to(shadow_shape,
+                rdt_path_cubic_to(shadow_path,
                     x + w, y + h - sr_br + sr_br * KAPPA_SHADOW,
                     x + w - sr_br + sr_br * KAPPA_SHADOW, y + h,
                     x + w - sr_br, y + h);
             }
-            tvg_shape_line_to(shadow_shape, x + sr_bl, y + h);
+            rdt_path_line_to(shadow_path, x + sr_bl, y + h);
             if (sr_bl > 0) {
-                tvg_shape_cubic_to(shadow_shape,
+                rdt_path_cubic_to(shadow_path,
                     x + sr_bl - sr_bl * KAPPA_SHADOW, y + h,
                     x, y + h - sr_bl + sr_bl * KAPPA_SHADOW,
                     x, y + h - sr_bl);
             }
-            tvg_shape_line_to(shadow_shape, x, y + sr_tl);
+            rdt_path_line_to(shadow_path, x, y + sr_tl);
             if (sr_tl > 0) {
-                tvg_shape_cubic_to(shadow_shape,
+                rdt_path_cubic_to(shadow_path,
                     x, y + sr_tl - sr_tl * KAPPA_SHADOW,
                     x + sr_tl - sr_tl * KAPPA_SHADOW, y,
                     x + sr_tl, y);
             }
-            tvg_shape_close(shadow_shape);
+            rdt_path_close(shadow_path);
             #undef KAPPA_SHADOW
         } else {
             // Simple rectangle shadow
-            tvg_shape_append_rect(shadow_shape, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0, true);
+            rdt_path_add_rect(shadow_path, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0);
         }
 
-        tvg_shape_set_fill_color(shadow_shape, s->color.r, s->color.g, s->color.b, s->color.a);
-
-        // Apply clipping
-        Tvg_Paint clip_rect = tvg_shape_new();
-        Bound* clip = &rdcon->block.clip;
-        tvg_shape_append_rect(clip_rect, clip->left, clip->top,
-                              clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-        tvg_paint_set_mask_method(shadow_shape, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-        // Render the shadow shape
-        tvg_canvas_remove(canvas, NULL);
-        push_with_transform(rdcon, shadow_shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);
+        // Clip to block clip region and fill
+        RdtPath* clip_path = create_bg_clip_path(rdcon);
+        rdt_push_clip(&rdcon->vec, clip_path, xform);
+        rdt_fill_path(&rdcon->vec, shadow_path, s->color, RDT_FILL_WINDING, xform);
+        rdt_pop_clip(&rdcon->vec);
+        rdt_path_free(shadow_path);
+        rdt_path_free(clip_path);
 
         // Apply software box blur if blur radius > 0
         if (s->blur_radius > 0 && rdcon->ui_context->surface) {
@@ -1043,7 +920,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         r_bl = view->bound->border->radius.bottom_left;
     }
 
-    Tvg_Canvas canvas = rdcon->canvas;
+    const RdtMatrix* xform = get_transform(rdcon);
 
     // Render inset shadows in reverse order (last specified = bottommost)
     for (int i = shadow_count - 1; i >= 0; i--) {
@@ -1059,20 +936,17 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         if (inner_w <= 0 || inner_h <= 0) {
             // Spread consumes entire element — fill with shadow color
-            Tvg_Paint fill_shape = tvg_shape_new();
-            tvg_shape_append_rect(fill_shape, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
-            tvg_shape_set_fill_color(fill_shape, s->color.r, s->color.g, s->color.b, s->color.a);
+            RdtPath* fill_path = rdt_path_new();
+            rdt_path_add_rect(fill_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
 
-            // Clip to element rect
-            Tvg_Paint clip_shape = tvg_shape_new();
-            tvg_shape_append_rect(clip_shape, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
-            tvg_shape_set_fill_color(clip_shape, 0, 0, 0, 255);
-            tvg_paint_set_mask_method(fill_shape, clip_shape, TVG_MASK_METHOD_ALPHA);
+            RdtPath* clip_path = rdt_path_new();
+            rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
 
-            tvg_canvas_remove(canvas, NULL);
-            push_with_transform(rdcon, fill_shape);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(canvas, NULL);
+            rdt_push_clip(&rdcon->vec, clip_path, xform);
+            rdt_fill_path(&rdcon->vec, fill_path, s->color, RDT_FILL_WINDING, xform);
+            rdt_pop_clip(&rdcon->vec);
+            rdt_path_free(fill_path);
+            rdt_path_free(clip_path);
             continue;
         }
 
@@ -1088,87 +962,83 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         // Use even-odd fill rule with outer rect (clockwise) + inner rect (counter-clockwise)
         // to render a ring-shaped shadow that only fills the border area.
-        Tvg_Paint shadow_shape = tvg_shape_new();
+        RdtPath* shadow_path = rdt_path_new();
 
         // Outer path (clockwise): element border-box
         if (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) {
             #define KAPPA_INSET 0.5522847498f
-            tvg_shape_move_to(shadow_shape, rect.x + r_tl, rect.y);
-            tvg_shape_line_to(shadow_shape, rect.x + rect.width - r_tr, rect.y);
-            if (r_tr > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_move_to(shadow_path, rect.x + r_tl, rect.y);
+            rdt_path_line_to(shadow_path, rect.x + rect.width - r_tr, rect.y);
+            if (r_tr > 0) rdt_path_cubic_to(shadow_path,
                 rect.x + rect.width - r_tr + r_tr * KAPPA_INSET, rect.y,
                 rect.x + rect.width, rect.y + r_tr - r_tr * KAPPA_INSET,
                 rect.x + rect.width, rect.y + r_tr);
-            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y + rect.height - r_br);
-            if (r_br > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y + rect.height - r_br);
+            if (r_br > 0) rdt_path_cubic_to(shadow_path,
                 rect.x + rect.width, rect.y + rect.height - r_br + r_br * KAPPA_INSET,
                 rect.x + rect.width - r_br + r_br * KAPPA_INSET, rect.y + rect.height,
                 rect.x + rect.width - r_br, rect.y + rect.height);
-            tvg_shape_line_to(shadow_shape, rect.x + r_bl, rect.y + rect.height);
-            if (r_bl > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, rect.x + r_bl, rect.y + rect.height);
+            if (r_bl > 0) rdt_path_cubic_to(shadow_path,
                 rect.x + r_bl - r_bl * KAPPA_INSET, rect.y + rect.height,
                 rect.x, rect.y + rect.height - r_bl + r_bl * KAPPA_INSET,
                 rect.x, rect.y + rect.height - r_bl);
-            tvg_shape_line_to(shadow_shape, rect.x, rect.y + r_tl);
-            if (r_tl > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, rect.x, rect.y + r_tl);
+            if (r_tl > 0) rdt_path_cubic_to(shadow_path,
                 rect.x, rect.y + r_tl - r_tl * KAPPA_INSET,
                 rect.x + r_tl - r_tl * KAPPA_INSET, rect.y,
                 rect.x + r_tl, rect.y);
-            tvg_shape_close(shadow_shape);
+            rdt_path_close(shadow_path);
             #undef KAPPA_INSET
         } else {
-            tvg_shape_move_to(shadow_shape, rect.x, rect.y);
-            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y);
-            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y + rect.height);
-            tvg_shape_line_to(shadow_shape, rect.x, rect.y + rect.height);
-            tvg_shape_close(shadow_shape);
+            rdt_path_move_to(shadow_path, rect.x, rect.y);
+            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y);
+            rdt_path_line_to(shadow_path, rect.x + rect.width, rect.y + rect.height);
+            rdt_path_line_to(shadow_path, rect.x, rect.y + rect.height);
+            rdt_path_close(shadow_path);
         }
 
         // Inner path (counter-clockwise): the cutout hole
         if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
             #define KAPPA_INNER 0.5522847498f
-            tvg_shape_move_to(shadow_shape, inner_x + ir_tl, inner_y);
-            tvg_shape_line_to(shadow_shape, inner_x, inner_y + ir_tl);
-            if (ir_tl > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_move_to(shadow_path, inner_x + ir_tl, inner_y);
+            rdt_path_line_to(shadow_path, inner_x, inner_y + ir_tl);
+            if (ir_tl > 0) rdt_path_cubic_to(shadow_path,
                 inner_x, inner_y + ir_tl - ir_tl * KAPPA_INNER,
                 inner_x + ir_tl - ir_tl * KAPPA_INNER, inner_y,
                 inner_x + ir_tl, inner_y);
-            tvg_shape_line_to(shadow_shape, inner_x, inner_y + inner_h - ir_bl);
-            if (ir_bl > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, inner_x, inner_y + inner_h - ir_bl);
+            if (ir_bl > 0) rdt_path_cubic_to(shadow_path,
                 inner_x, inner_y + inner_h - ir_bl + ir_bl * KAPPA_INNER,
                 inner_x + ir_bl - ir_bl * KAPPA_INNER, inner_y + inner_h,
                 inner_x + ir_bl, inner_y + inner_h);
-            tvg_shape_line_to(shadow_shape, inner_x + inner_w - ir_br, inner_y + inner_h);
-            if (ir_br > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, inner_x + inner_w - ir_br, inner_y + inner_h);
+            if (ir_br > 0) rdt_path_cubic_to(shadow_path,
                 inner_x + inner_w - ir_br + ir_br * KAPPA_INNER, inner_y + inner_h,
                 inner_x + inner_w, inner_y + inner_h - ir_br + ir_br * KAPPA_INNER,
                 inner_x + inner_w, inner_y + inner_h - ir_br);
-            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y + ir_tr);
-            if (ir_tr > 0) tvg_shape_cubic_to(shadow_shape,
+            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y + ir_tr);
+            if (ir_tr > 0) rdt_path_cubic_to(shadow_path,
                 inner_x + inner_w, inner_y + ir_tr - ir_tr * KAPPA_INNER,
                 inner_x + inner_w - ir_tr + ir_tr * KAPPA_INNER, inner_y,
                 inner_x + inner_w - ir_tr, inner_y);
-            tvg_shape_close(shadow_shape);
+            rdt_path_close(shadow_path);
             #undef KAPPA_INNER
         } else {
-            tvg_shape_move_to(shadow_shape, inner_x, inner_y);
-            tvg_shape_line_to(shadow_shape, inner_x, inner_y + inner_h);
-            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y + inner_h);
-            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y);
-            tvg_shape_close(shadow_shape);
+            rdt_path_move_to(shadow_path, inner_x, inner_y);
+            rdt_path_line_to(shadow_path, inner_x, inner_y + inner_h);
+            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y + inner_h);
+            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y);
+            rdt_path_close(shadow_path);
         }
 
-        tvg_shape_set_fill_rule(shadow_shape, TVG_FILL_RULE_EVEN_ODD);
-        tvg_shape_set_fill_color(shadow_shape, s->color.r, s->color.g, s->color.b, s->color.a);
-
-        // Clip to element border-box
-        Tvg_Paint clip_shape = create_clip_shape(rdcon);
-        tvg_paint_set_mask_method(shadow_shape, clip_shape, TVG_MASK_METHOD_ALPHA);
-
-        tvg_canvas_remove(canvas, NULL);
-        push_with_transform(rdcon, shadow_shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);
+        // Clip to element border-box and fill with even-odd rule
+        RdtPath* clip_path = create_bg_clip_path(rdcon);
+        rdt_push_clip(&rdcon->vec, clip_path, xform);
+        rdt_fill_path(&rdcon->vec, shadow_path, s->color, RDT_FILL_EVEN_ODD, xform);
+        rdt_pop_clip(&rdcon->vec);
+        rdt_path_free(shadow_path);
+        rdt_path_free(clip_path);
 
         // Apply software box blur if blur radius > 0
         if (s->blur_radius > 0 && rdcon->ui_context->surface) {
@@ -1276,27 +1146,28 @@ static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, 
 }
 
 /**
- * Render a single tile of a background image using ThorVG (for SVG images).
+ * Render a single tile of a background image using the vector API (for SVG images).
  */
 static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* tile_rect) {
-    Tvg_Paint pic = create_tvg_picture_from_surface(img);
+    if (!img->pic) return;
+
+    RdtPicture* pic = rdt_picture_from_tvg_paint(img->pic, (float)img->width, (float)img->height);
     if (!pic) return;
 
-    tvg_canvas_remove(rdcon->canvas, NULL);
-    tvg_picture_set_size(pic, tile_rect->width, tile_rect->height);
-    tvg_paint_translate(pic, tile_rect->x, tile_rect->y);
+    rdt_picture_set_size(pic, tile_rect->width, tile_rect->height);
 
-    // Apply clipping
-    Tvg_Paint clip_rect = tvg_shape_new();
-    Bound* clip = &rdcon->block.clip;
-    tvg_shape_append_rect(clip_rect, clip->left, clip->top,
-                          clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-    tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
+    // Build translation matrix for tile position
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = tile_rect->x;
+    m.e23 = tile_rect->y;
 
-    tvg_canvas_push(rdcon->canvas, pic);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(rdcon->canvas, NULL);
+    // Clip to block clip region
+    RdtPath* clip_path = create_bg_clip_path(rdcon);
+    rdt_push_clip(&rdcon->vec, clip_path, &m);
+    rdt_picture_draw(&rdcon->vec, pic, 255, &m);
+    rdt_pop_clip(&rdcon->vec);
+    rdt_path_free(clip_path);
+    rdt_picture_free(pic);
 }
 
 /**
