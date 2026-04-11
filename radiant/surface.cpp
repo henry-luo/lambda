@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/base64.h"
+#include "../lib/url.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
@@ -64,10 +65,30 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             log_error("[BG-IMAGE] Invalid data URI (no comma)");
             return NULL;
         }
+
+        // Check if data URI is base64-encoded: "data:...;base64,..."
+        bool is_base64 = false;
+        const char* meta = img_url + 5;  // after "data:"
+        size_t meta_len = comma - meta;
+        for (size_t i = 0; i + 5 < meta_len; i++) {
+            if (strncasecmp(meta + i, "base64", 6) == 0) {
+                is_base64 = true;
+                break;
+            }
+        }
+
         size_t decoded_len = 0;
-        uint8_t* decoded = base64_decode(comma + 1, 0, &decoded_len);
+        uint8_t* decoded = NULL;
+        if (is_base64) {
+            decoded = base64_decode(comma + 1, 0, &decoded_len);
+        } else {
+            // URL-encoded (percent-encoded) data URI
+            const char* data_str = comma + 1;
+            size_t data_str_len = strlen(data_str);
+            decoded = (uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len);
+        }
         if (!decoded || decoded_len == 0) {
-            log_error("[BG-IMAGE] Failed to decode data URI base64");
+            log_error("[BG-IMAGE] Failed to decode data URI");
             return NULL;
         }
         // Detect format from MIME type or content

@@ -349,6 +349,31 @@ void constrain_border_radii(BorderProp* border, float width, float height) {
     }
 }
 
+/**
+ * Resolve percentage border-radius values to pixels.
+ * CSS Backgrounds 3 §5.3: percentages resolve against element dimensions.
+ * Uses min(width, height) since we store a single radius per corner.
+ */
+void resolve_border_radius_percentages(Corner* radius, float width, float height) {
+    float dim = min(width, height);
+    if (radius->tl_percent) {
+        radius->top_left = radius->top_left * dim / 100.0f;
+        radius->tl_percent = false;
+    }
+    if (radius->tr_percent) {
+        radius->top_right = radius->top_right * dim / 100.0f;
+        radius->tr_percent = false;
+    }
+    if (radius->br_percent) {
+        radius->bottom_right = radius->bottom_right * dim / 100.0f;
+        radius->br_percent = false;
+    }
+    if (radius->bl_percent) {
+        radius->bottom_left = radius->bottom_left * dim / 100.0f;
+        radius->bl_percent = false;
+    }
+}
+
 static inline bool has_border_radius(BorderProp* border) {
     return border->radius.top_left > 0 || border->radius.top_right > 0 ||
            border->radius.bottom_right > 0 || border->radius.bottom_left > 0;
@@ -373,14 +398,17 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     Corner scaled_radius = border->radius;
     scaled_radius.top_left *= s;
     scaled_radius.top_right *= s;
-    scaled_radius.bottom_left *= s;
     scaled_radius.bottom_right *= s;
+    scaled_radius.bottom_left *= s;
     Corner orig_radius = border->radius;
     border->radius = scaled_radius;
     constrain_border_radii(border, rect.width, rect.height);
 
     bool has_radius = has_border_radius(border);
-    bool needs_vector = has_radius ||
+    bool non_uniform = (border->width.top != border->width.right ||
+                        border->width.right != border->width.bottom ||
+                        border->width.bottom != border->width.left);
+    bool needs_vector = has_radius || non_uniform ||
                         needs_vector_rendering(border->top_style) ||
                         needs_vector_rendering(border->right_style) ||
                         needs_vector_rendering(border->bottom_style) ||

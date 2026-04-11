@@ -220,6 +220,9 @@ void rdt_path_free(RdtPath* p) {
 // Fill
 // ============================================================================
 
+// forward declare clip-aware draw helper (defined in Clipping section below)
+static void tvg_push_draw_remove_clipped(RdtVectorImpl* impl, Tvg_Paint shape);
+
 void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
                    RdtFillRule rule, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
@@ -232,7 +235,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
         tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
     }
     apply_transform(shape, transform);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
@@ -243,7 +246,7 @@ void rdt_fill_rect(RdtVector* vec, float x, float y, float w, float h,
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_rect(shape, x, y, w, h, 0, 0, true);
     tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
@@ -254,7 +257,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_rect(shape, x, y, w, h, rx, ry, true);
     tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 // ============================================================================
@@ -298,7 +301,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     }
 
     apply_transform(shape, transform);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 // ============================================================================
@@ -335,7 +338,7 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     tvg_shape_set_gradient(shape, grad);
 
     apply_transform(shape, transform);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
@@ -368,7 +371,7 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     tvg_shape_set_gradient(shape, grad);
 
     apply_transform(shape, transform);
-    tvg_push_draw_remove(impl, shape);
+    tvg_push_draw_remove_clipped(impl, shape);
 }
 
 // ============================================================================

@@ -114,7 +114,11 @@ static const struct {
     const char* generic;
     const char* preferred[8];
 } generic_families[] = {
+#ifdef __APPLE__
+    {"serif",      {"Times", "Times New Roman", "Georgia", "DejaVu Serif", NULL}},
+#else
     {"serif",      {"Times New Roman", "Times", "Georgia", "DejaVu Serif", NULL}},
+#endif
     {"sans-serif", {"Arial", "Helvetica", "DejaVu Sans", "Liberation Sans", NULL}},
     {"monospace",  {"Courier New", "Courier", "Monaco", "DejaVu Sans Mono", NULL}},
     {"cursive",    {"Comic Sans MS", "Apple Chancery", "Bradley Hand", NULL}},
