@@ -871,3 +871,170 @@ With the parser at 2,566 states (711 KB lib), further reductions require targeti
 | `index_signature` | 9 | Possible | Only in class_body, type-heavy |
 
 The 711 KB lib represents a **51.2% reduction** from the original 1,456 KB, exceeding the original 500–600 KB target range when accounting for the ~80 KB C++ type parser overhead (total TS parsing: ~791 KB effective, comparable to target).
+
+---
+
+## Phase E Results: JS test262 Compatibility Hardening ✅
+
+Phase E addressed scanner dispatch conflicts that caused ASI (Automatic Semicolon Insertion) failures in JavaScript code when the v2 opaque token scanners corrupted the shared lexer state. Also added AST builder source-prefix fallbacks for modifier information lost to opaque tokens.
+
+### Problem: Scanner Lexer State Corruption
+
+Tree-sitter's external scanner contract has a critical property: **within a single `external_scanner_scan()` call, sub-scanners share the same lexer state**. Tree-sitter only resets the lexer when the entire scanner function returns `false`. Between sub-scanners within one call, `advance()` moves the lexer position forward irreversibly.
+
+This created two classes of failures:
+
+1. **Modifier scanner consuming non-modifier identifiers**: In class bodies, when both `TS_CLASS_MODIFIERS` and `AUTOMATIC_SEMICOLON` are valid in parallel GLR parse paths, the modifier scanner reads an identifier like `a` (in `m() {} a\n b = 42;`), discovers it's not a modifier keyword, returns `false` — but the lexer is now past `a`. The downstream ASI scanner runs on corrupted state, creating an ASI token that wrongly spans `a`.
+
+2. **Type parameters scanner advancing past whitespace**: `scan_ts_type_parameters()` calls `ts_skip_ws_and_comments()` which uses `advance()` to skip whitespace including newlines. When `TS_TYPE_PARAMETERS` is valid alongside `AUTOMATIC_SEMICOLON` and the lookahead is whitespace (e.g., `{1 \n2}3` — space before newline), the type parameters scanner advances past `space + \n`, fails (no `<` found), but the ASI scanner then sees `'2'` instead of the whitespace — returning `false` (not whitespace) instead of detecting the newline for ASI.
+
+### E1: Scanner Dispatch Fixes
+
+Three fixes in `scanner_v2.h`:
+
+#### Fix 1: `did_read_ident` Tracking in `scan_ts_class_modifiers`
+
+Added `bool *did_read_ident` output parameter to `scan_ts_class_modifiers()`. Set to `true` after the identifier-reading loop completes. In the dispatch, after the modifier scanner fails:
+
+```c
+if (valid_symbols[TS_CLASS_MODIFIERS] &&
+    !valid_symbols[TEMPLATE_CHARS] &&
+    !valid_symbols[ERROR_RECOVERY]) {
+    int32_t ch = lexer->lookahead;
+    if (ts_is_ident_start(ch) || ch == '*' || ch == ' ' || ...) {
+        bool did_read_ident = false;
+        if (scan_ts_class_modifiers(lexer, &did_read_ident)) return true;
+        // Only return false (force clean retry) when an identifier was consumed
+        // If only whitespace was skipped, ASI can still work on the advanced state
+        if (valid_symbols[AUTOMATIC_SEMICOLON] && did_read_ident) {
+            return false;
+        }
+    }
+}
+```
+
+This recovers 9 test262 tests: `literal_names_asi` and `multiple_definitions_literal_names_asi` patterns where class fields follow method bodies on the same line.
+
+#### Fix 2: `ERROR_RECOVERY` Guard on `TS_CLASS_MODIFIERS`
+
+Added `!valid_symbols[ERROR_RECOVERY]` to the modifier scanner dispatch guard. During error recovery, tree-sitter sets all external tokens valid — the modifier scanner would enter even outside class contexts (e.g., inside `statement_block`), consuming whitespace and corrupting the lexer for ASI. Skipping modifiers during error recovery prevents this.
+
+#### Fix 3: ASI Guard on `TS_TYPE_PARAMETERS` Whitespace Entry
+
+Split the type parameters dispatch into two conditions:
+
+```c
+if (valid_symbols[TS_TYPE_PARAMETERS] && !valid_symbols[TEMPLATE_CHARS]) {
+    int32_t tch = lexer->lookahead;
+    if (tch == '<') {
+        // '<' is unambiguously type parameters start — always enter
+        if (scan_ts_type_parameters(lexer)) return true;
+    } else if ((tch == ' ' || tch == '\t') && !valid_symbols[AUTOMATIC_SEMICOLON]) {
+        // Whitespace entry: only when ASI is not valid, because
+        // ts_skip_ws_and_comments uses advance() which corrupts lexer for ASI
+        if (scan_ts_type_parameters(lexer)) return true;
+    }
+}
+```
+
+When `lookahead == '<'`, the type parameters scanner won't corrupt state (it consumes `<` as the expected first char). When lookahead is whitespace and ASI is also valid, the scanner would advance past whitespace+newlines via `ts_skip_ws_and_comments()`, corrupting the lexer for ASI — so we skip it.
+
+#### Fix 4: First-Char Filter in `scan_ts_class_modifiers`
+
+Added fast-reject for identifier characters that can't start any modifier keyword. Modifier keywords only start with `{a, d, g, o, p, r, s}`. If the first identifier character doesn't match, the scanner breaks **without reading the identifier** (preserving lexer state):
+
+```c
+if (ch != 'a' && ch != 'd' && ch != 'g' && ch != 'o' &&
+    ch != 'p' && ch != 'r' && ch != 's') {
+    break;  // not a modifier keyword — don't consume identifier
+}
+```
+
+This prevents `did_read_ident` from triggering on identifiers like `method` or `name` that clearly aren't modifiers, reducing unnecessary `return false` cycles.
+
+### E2: AST Builder Source-Prefix Fallbacks
+
+The opaque `_ts_class_modifiers` token consumes modifier keywords as a single token. Tree-sitter doesn't expose the consumed keywords as named children in the CST. The AST builder needed fallback mechanisms to detect modifier information lost to opaque consumption.
+
+Five fallbacks added to `build_js_ast.cpp`, all using the same strategy: read the source text between the parent node start byte and the name field start byte, then scan for specific keywords with word boundary checks.
+
+| Fallback | Location | Keywords Detected | Strategy |
+|----------|----------|-------------------|----------|
+| Object literal `get`/`set` | `build_js_object_property_u` (~line 773) | `get`, `set` | Skip whitespace, check 3-char prefix + word boundary |
+| Generator `*` | `build_js_function` (~line 931) | `*` | Linear scan for `*` char in prefix |
+| `async` | `build_js_function` (~line 971) | `async` | `memcmp` with left/right `isalnum` boundary checks |
+| Field `static` | `build_ts_field_def_u` (~line 2713) | `static` | Skip whitespace, check 6-char prefix |
+| Method `get`/`set`/`static` | `build_ts_method_def_u` (~line 2825) | `get`, `set`, `static` | Multi-keyword word parser with `*` skip |
+
+### E3: Test Results
+
+**test262 regression progression** (baseline-only runs):
+
+| Stage | Passed | Regressions | Key Fix |
+|-------|--------|-------------|---------|
+| Initial v2 switch | 15,762 / 16,190 | 428 | — |
+| Generator `*` scanner fix | 16,176 / 16,190 | 14 | `*` in fast reject + `any_consumed` flag |
+| ASI vs type_parameters conflict | 16,177 / 16,190 | 13 | `!AUTOMATIC_SEMICOLON` guard on `TS_TYPE_PARAMETERS` (initial) |
+| Async detection fallback | 16,178 / 16,190 | 12 | `async` source prefix scan in `build_js_function` |
+| `did_read_ident` + `return false` | 16,187 / 16,190 | 3 | Modifier scanner targeted retry mechanism |
+| TS_TYPE_PARAMETERS ASI fix | 16,188 / 16,190 | 2 | Split whitespace vs `<` entry in TP dispatch |
+| Baseline updated + full run | 16,205 / 16,206 | 1 | WeakSet runtime issue (unrelated) |
+| **Full test suite** | **17,577 / 28,574** | **0** | 1,372 improvements beyond baseline |
+
+**Lambda baseline**: 566/566 ALL PASS (no regressions)
+
+### Cumulative Size Results (Phase E)
+
+Phase E did not change the grammar — only scanner dispatch guards and AST builder fallbacks. Parser size is unchanged from Phase D.
+
+| Metric | Phase D | **Phase E** | Notes |
+|--------|---------|-------------|-------|
+| States | 2,554 | **2,554** | Unchanged |
+| Large states | 695 | **695** | Unchanged |
+| Symbols | 318 | **318** | Unchanged |
+| `parser.c` source | — | **134,936 lines** | — |
+| **Lib size** | **711 KB** | **712 KB** | Scanner code grew slightly |
+| C++ type parser | ~80 KB | **~80 KB** | Unchanged |
+
+### Implementation Files (Updated)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `define-grammar-v2.js` | ~748 | v2 TS grammar with 5 external tokens |
+| `scanner_v2.h` | ~1,362 | External scanner with bracket-balancing + modifier scanning + ASI guards |
+| `ts_type_parser.cpp` | ~1,225 | C++ recursive descent type + interface parser |
+| `ts_type_parser.hpp` | ~20 | Header declarations |
+| `build_js_ast.cpp` | — | 5 source-prefix fallbacks for opaque modifier detection |
+
+### Scanner Dispatch Order (Final)
+
+```
+1. TEMPLATE_CHARS       — guarded: if ASI valid → return false
+2. JSX_TEXT             — try, fall through on failure
+3. TS_INTERFACE_BODY    — !TEMPLATE_CHARS; try, fall through
+4. TS_CLASS_MODIFIERS   — !TEMPLATE_CHARS, !ERROR_RECOVERY
+                          Lookahead: ident_start | * | whitespace
+                          On fail: return false if did_read_ident && ASI valid
+5. TS_TYPE_PARAMETERS   — !TEMPLATE_CHARS
+                          '<' → always enter
+                          ' '/'\t' → only if !ASI valid
+6. TS_TYPE              — !ASI, !TERNARY_QMARK, !TEMPLATE_CHARS
+7. TS_TYPE_ARGUMENTS    — !ASI, !TEMPLATE_CHARS
+                          Lookahead: '<' | whitespace; try, fall through
+8. AUTOMATIC_SEMICOLON  — main ASI scanner; ternary fallback
+9. TERNARY_QMARK        — standalone
+10. HTML_COMMENT        — !LOGICAL_OR, !ESCAPE_SEQUENCE, !REGEX_PATTERN
+```
+
+### Key Design Insight: Sub-Scanner Lexer Sharing
+
+The root cause of all ASI-related regressions was the same pattern:
+
+1. An opaque token scanner (modifiers, type parameters) enters with whitespace at lookahead
+2. It calls `ts_skip_ws_and_comments()` which uses `advance()` to skip whitespace + newlines
+3. The scanner fails to match (no modifier keyword, no `<` for type params) and returns `false`
+4. The lexer is now positioned past the whitespace/newline
+5. The ASI scanner runs next, calls `mark_end()` at the corrupted position
+6. ASI token gets wrong extent, or ASI fails to detect the newline
+
+The fix pattern: **guard each opaque scanner's whitespace entry against `AUTOMATIC_SEMICOLON`**, ensuring the ASI scanner always sees clean lexer state with the newline intact. For the modifier scanner specifically, the `did_read_ident` flag enables a targeted `return false` that forces tree-sitter to retry with a completely reset lexer.
