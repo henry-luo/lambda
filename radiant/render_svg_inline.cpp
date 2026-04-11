@@ -715,6 +715,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
         }
+        // apply inherited group opacity
+        if (ctx->opacity < 1.0f) {
+            fc.a = (uint8_t)(fc.a * ctx->opacity);
+        }
         rdt_fill_path(ctx->vec, path, fc, RDT_FILL_WINDING, transform);
     }
 
@@ -745,6 +749,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
+        }
+        // apply inherited group opacity
+        if (ctx->opacity < 1.0f) {
+            sc.a = (uint8_t)(sc.a * ctx->opacity);
         }
 
         // linecap
@@ -1909,9 +1917,19 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     Color saved_stroke = ctx->stroke_color;
     Color saved_current_color = ctx->current_color;
     float saved_stroke_width = ctx->stroke_width;
+    float saved_opacity = ctx->opacity;
     bool saved_fill_none = ctx->fill_none;
     bool saved_stroke_none = ctx->stroke_none;
     RdtMatrix saved_transform = ctx->transform;
+
+    // apply group opacity (inherited, multiplied down)
+    const char* opacity_attr = get_svg_attr(elem, "opacity");
+    if (opacity_attr) {
+        float op = strtof(opacity_attr, nullptr);
+        if (op < 0.0f) op = 0.0f;
+        if (op > 1.0f) op = 1.0f;
+        ctx->opacity *= op;
+    }
 
     // update CSS 'color' property (for currentColor keyword)
     const char* color_attr = get_svg_attr(elem, "color");
@@ -1956,6 +1974,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     ctx->stroke_color = saved_stroke;
     ctx->current_color = saved_current_color;
     ctx->stroke_width = saved_stroke_width;
+    ctx->opacity = saved_opacity;
     ctx->fill_none = saved_fill_none;
     ctx->stroke_none = saved_stroke_none;
     ctx->transform = saved_transform;

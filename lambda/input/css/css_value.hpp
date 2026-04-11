@@ -471,8 +471,21 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_COVER,  // background-size cover
     CSS_VALUE_LOCAL,  // background-attachment local
     CSS_VALUE_PADDING_BOX,  // background-origin/clip padding-box
-    CSS_VALUE_MULTIPLY,  // background-blend-mode multiply
-    CSS_VALUE_OVERLAY,  // background-blend-mode overlay
+    CSS_VALUE_MULTIPLY,  // blend-mode multiply
+    CSS_VALUE_OVERLAY,  // blend-mode overlay
+    CSS_VALUE_SCREEN,   // blend-mode screen
+    CSS_VALUE_DARKEN,   // blend-mode darken
+    CSS_VALUE_LIGHTEN,  // blend-mode lighten
+    CSS_VALUE_COLOR_DODGE,  // blend-mode color-dodge
+    CSS_VALUE_COLOR_BURN,   // blend-mode color-burn
+    CSS_VALUE_HARD_LIGHT,   // blend-mode hard-light
+    CSS_VALUE_SOFT_LIGHT,   // blend-mode soft-light
+    CSS_VALUE_DIFFERENCE,   // blend-mode difference
+    CSS_VALUE_EXCLUSION,    // blend-mode exclusion
+    CSS_VALUE_HUE_BLEND,    // blend-mode hue
+    CSS_VALUE_SATURATION_BLEND, // blend-mode saturation
+    CSS_VALUE_COLOR_BLEND,  // blend-mode color
+    CSS_VALUE_LUMINOSITY_BLEND, // blend-mode luminosity
     CSS_VALUE_ROUND,  // background-repeat round
     CSS_VALUE_SPACE,  // background-repeat space
     // Table properties

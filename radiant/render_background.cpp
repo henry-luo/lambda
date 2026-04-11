@@ -6,6 +6,102 @@
 #include "../lambda/input/css/css_value.hpp"
 #include <math.h>
 
+// --- CSS Blend Mode Functions (CSS Compositing and Blending Level 1) ---
+// All operate on normalized [0,1] channel values.
+static inline float blend_multiply(float Cb, float Cs) { return Cb * Cs; }
+static inline float blend_screen(float Cb, float Cs) { return Cb + Cs - Cb * Cs; }
+static inline float blend_overlay(float Cb, float Cs) {
+    return Cb <= 0.5f ? 2.0f * Cb * Cs : 1.0f - 2.0f * (1.0f - Cb) * (1.0f - Cs);
+}
+static inline float blend_darken(float Cb, float Cs) { return Cb < Cs ? Cb : Cs; }
+static inline float blend_lighten(float Cb, float Cs) { return Cb > Cs ? Cb : Cs; }
+static inline float blend_color_dodge(float Cb, float Cs) {
+    if (Cb <= 0.0f) return 0.0f;
+    if (Cs >= 1.0f) return 1.0f;
+    float v = Cb / (1.0f - Cs);
+    return v < 1.0f ? v : 1.0f;
+}
+static inline float blend_color_burn(float Cb, float Cs) {
+    if (Cb >= 1.0f) return 1.0f;
+    if (Cs <= 0.0f) return 0.0f;
+    float v = 1.0f - (1.0f - Cb) / Cs;
+    return v > 0.0f ? v : 0.0f;
+}
+static inline float blend_hard_light(float Cb, float Cs) {
+    return Cs <= 0.5f ? 2.0f * Cb * Cs : 1.0f - 2.0f * (1.0f - Cb) * (1.0f - Cs);
+}
+static inline float blend_soft_light(float Cb, float Cs) {
+    if (Cs <= 0.5f) return Cb - (1.0f - 2.0f * Cs) * Cb * (1.0f - Cb);
+    float D = Cb <= 0.25f ? ((16.0f * Cb - 12.0f) * Cb + 4.0f) * Cb : sqrtf(Cb);
+    return Cb + (2.0f * Cs - 1.0f) * (D - Cb);
+}
+static inline float blend_difference(float Cb, float Cs) { return fabsf(Cb - Cs); }
+static inline float blend_exclusion(float Cb, float Cs) { return Cb + Cs - 2.0f * Cb * Cs; }
+
+// Apply a blend mode to a single channel (normalized [0,255] byte values)
+static inline uint8_t apply_blend_channel(uint8_t Cb_byte, uint8_t Cs_byte, CssEnum mode) {
+    float Cb = Cb_byte / 255.0f;
+    float Cs = Cs_byte / 255.0f;
+    float result;
+    switch (mode) {
+        case CSS_VALUE_MULTIPLY:    result = blend_multiply(Cb, Cs); break;
+        case CSS_VALUE_SCREEN:      result = blend_screen(Cb, Cs); break;
+        case CSS_VALUE_OVERLAY:     result = blend_overlay(Cb, Cs); break;
+        case CSS_VALUE_DARKEN:      result = blend_darken(Cb, Cs); break;
+        case CSS_VALUE_LIGHTEN:     result = blend_lighten(Cb, Cs); break;
+        case CSS_VALUE_COLOR_DODGE: result = blend_color_dodge(Cb, Cs); break;
+        case CSS_VALUE_COLOR_BURN:  result = blend_color_burn(Cb, Cs); break;
+        case CSS_VALUE_HARD_LIGHT:  result = blend_hard_light(Cb, Cs); break;
+        case CSS_VALUE_SOFT_LIGHT:  result = blend_soft_light(Cb, Cs); break;
+        case CSS_VALUE_DIFFERENCE:  result = blend_difference(Cb, Cs); break;
+        case CSS_VALUE_EXCLUSION:   result = blend_exclusion(Cb, Cs); break;
+        default:                    result = Cs; break; // normal
+    }
+    int v = (int)(result * 255.0f + 0.5f);
+    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
+
+// Composite a source pixel onto a backdrop pixel using a CSS blend mode.
+// pixel format: ABGR (A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7)
+uint32_t composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode) {
+    uint8_t sa = (source >> 24) & 0xFF;
+    if (sa == 0) return backdrop;
+    uint8_t ba = (backdrop >> 24) & 0xFF;
+    if (ba == 0) return source;
+
+    uint8_t sr = source & 0xFF, sg = (source >> 8) & 0xFF, sb = (source >> 16) & 0xFF;
+    uint8_t br = backdrop & 0xFF, bg = (backdrop >> 8) & 0xFF, bb = (backdrop >> 16) & 0xFF;
+
+    // CSS Compositing spec: Co = (1-αb)·Cs + (1-αs)·Cb + αb·αs·B(Cb,Cs)
+    // For fully opaque pixels (common case): Co = B(Cb, Cs)
+    if (sa == 255 && ba == 255) {
+        uint8_t rr = apply_blend_channel(br, sr, blend_mode);
+        uint8_t rg = apply_blend_channel(bg, sg, blend_mode);
+        uint8_t rb = apply_blend_channel(bb, sb, blend_mode);
+        return (255u << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg << 8) | rr;
+    }
+
+    // General case with alpha
+    float fa = ba / 255.0f, fsa = sa / 255.0f;
+    float ra = fa + fsa - fa * fsa; // result alpha
+    if (ra < 0.001f) return 0;
+
+    float p = (1.0f - fa) * fsa;
+    float q = (1.0f - fsa) * fa;
+    float t = fa * fsa;
+    auto blendch = [&](uint8_t Cb_b, uint8_t Cs_b) -> uint8_t {
+        float Bb = apply_blend_channel(Cb_b, Cs_b, blend_mode) / 255.0f;
+        float Co = (p * (Cs_b / 255.0f) + q * (Cb_b / 255.0f) + t * Bb) / ra;
+        int v = (int)(Co * 255.0f + 0.5f);
+        return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    };
+    uint8_t rr = blendch(br, sr);
+    uint8_t rg_ch = blendch(bg, sg);
+    uint8_t rb = blendch(bb, sb);
+    uint8_t new_a = (uint8_t)(ra * 255.0f + 0.5f);
+    return ((uint32_t)new_a << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg_ch << 8) | rr;
+}
+
 // Get transform pointer for rdt_* calls (NULL if identity)
 static const RdtMatrix* get_transform(RenderContext* rdcon) {
     if (!rdcon->has_transform) return nullptr;
@@ -109,6 +205,42 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         render_background_color(rdcon, view, bg->color, rect);
     }
 
+    // Check if background-blend-mode requires special compositing
+    bool has_blend = (bg->blend_mode != 0 && bg->blend_mode != CSS_VALUE_NORMAL);
+    bool has_upper_layers = bg->image ||
+        (bg->radial_layers && bg->radial_layer_count > 0) ||
+        (bg->gradient_type != GRADIENT_NONE &&
+         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient));
+
+    // Save backdrop pixels before rendering upper layers if blend mode is active
+    ImageSurface* surface = rdcon->ui_context->surface;
+    uint32_t* saved_pixels = nullptr;
+    int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
+    if (has_blend && has_upper_layers && surface && surface->pixels) {
+        blend_x0 = max(0, (int)rdcon->block.clip.left);
+        blend_y0 = max(0, (int)rdcon->block.clip.top);
+        int x1 = min(surface->width, (int)rdcon->block.clip.right);
+        int y1 = min(surface->height, (int)rdcon->block.clip.bottom);
+        blend_w = x1 - blend_x0;
+        blend_h = y1 - blend_y0;
+        if (blend_w > 0 && blend_h > 0) {
+            saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
+            if (saved_pixels) {
+                uint32_t* px = (uint32_t*)surface->pixels;
+                int pitch = surface->pitch / 4;
+                for (int row = 0; row < blend_h; row++) {
+                    memcpy(saved_pixels + row * blend_w,
+                           px + (blend_y0 + row) * pitch + blend_x0,
+                           blend_w * sizeof(uint32_t));
+                }
+                // Clear the region to transparent so upper layers render cleanly
+                for (int row = 0; row < blend_h; row++) {
+                    memset(px + (blend_y0 + row) * pitch + blend_x0, 0, blend_w * sizeof(uint32_t));
+                }
+            }
+        }
+    }
+
     // Render background image positioned within pos_rect, painted within paint_rect (via clip)
     if (bg->image) {
         render_background_image(rdcon, view, bg, pos_rect);
@@ -129,6 +261,22 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
         render_background_gradient(rdcon, view, bg, paint_rect);
+    }
+
+    // Apply background-blend-mode: composite upper layers onto saved backdrop
+    if (saved_pixels && blend_w > 0 && blend_h > 0) {
+        uint32_t* px = (uint32_t*)surface->pixels;
+        int pitch = surface->pitch / 4;
+        for (int row = 0; row < blend_h; row++) {
+            for (int col = 0; col < blend_w; col++) {
+                uint32_t backdrop = saved_pixels[row * blend_w + col];
+                uint32_t source = px[(blend_y0 + row) * pitch + (blend_x0 + col)];
+                px[(blend_y0 + row) * pitch + (blend_x0 + col)] =
+                    composite_blend_pixel(backdrop, source, bg->blend_mode);
+            }
+        }
+        mem_free(saved_pixels);
+        log_debug("[BLEND] Applied background-blend-mode to %dx%d region", blend_w, blend_h);
     }
 
     // Restore original clip

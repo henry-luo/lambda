@@ -405,7 +405,10 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     constrain_border_radii(border, rect.width, rect.height);
 
     bool has_radius = has_border_radius(border);
-    bool needs_vector = has_radius ||
+    bool non_uniform = (border->width.top != border->width.right ||
+                        border->width.right != border->width.bottom ||
+                        border->width.bottom != border->width.left);
+    bool needs_vector = has_radius || non_uniform ||
                         needs_vector_rendering(border->top_style) ||
                         needs_vector_rendering(border->right_style) ||
                         needs_vector_rendering(border->bottom_style) ||

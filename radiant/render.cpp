@@ -15,6 +15,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
 #include <math.h>
@@ -1181,20 +1182,30 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
             Rect rect = {0, 0, 0, 0};
             bool draw_deco = true;
+            // Use the same ascender as glyph rendering for consistent baseline
+            float deco_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * s;
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // Use font underline_position metric for correct placement below baseline
                 float underline_pos = _deco_m ? _deco_m->underline_position : 0;
-                float ascend = _deco_m ? (_deco_m->hhea_ascender * s) : 12.0f;
                 // Apply text-underline-offset if set
                 float offset = rdcon->font.style->text_underline_offset;
                 rect.x = rdcon->block.x + text_rect->x * s;
-                rect.y = rdcon->block.y + text_rect->y * s + ascend - underline_pos * s + offset;
+                // baseline = text_rect_y + ascender; underline_pos is negative (below baseline)
+                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - underline_pos * s + offset;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
-                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
+                rect.x = rdcon->block.x + text_rect->x * s;
+                // overline sits at the ascender line (baseline - ascender = top of text)
+                rect.y = rdcon->block.y + text_rect->y * s;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
-                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s + (text_rect->height * s) / 2;
+                rect.x = rdcon->block.x + text_rect->x * s;
+                // Use OS/2 strikeout position (above baseline) for accurate placement
+                float strikeout_pos = (_deco_m && _deco_m->strikeout_position > 0)
+                    ? _deco_m->strikeout_position : (deco_ascend * 0.3f);
+                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - strikeout_pos * s;
+                if (_deco_m && _deco_m->strikeout_size > 0)
+                    thickness = _deco_m->strikeout_size;
             }
             else {
                 draw_deco = false;  // unknown decoration type, skip rendering
@@ -1990,6 +2001,46 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
     }
 
+    // Save backdrop for mix-blend-mode before rendering this element
+    CssEnum mix_blend = (block->in_line && block->in_line->mix_blend_mode &&
+                         block->in_line->mix_blend_mode != CSS_VALUE_NORMAL)
+                        ? block->in_line->mix_blend_mode : (CssEnum)0;
+    uint32_t* mix_blend_backdrop = nullptr;
+    int mbx0 = 0, mby0 = 0, mbw = 0, mbh = 0;
+    if (mix_blend) {
+        float ms = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            mbx0 = (int)(pa_block.x + block->x * ms);
+            mby0 = (int)(pa_block.y + block->y * ms);
+            int mx1 = mbx0 + (int)(block->width * ms);
+            int my1 = mby0 + (int)(block->height * ms);
+            if (mbx0 < 0) mbx0 = 0;
+            if (mby0 < 0) mby0 = 0;
+            if (mx1 > surface->width) mx1 = surface->width;
+            if (my1 > surface->height) my1 = surface->height;
+            mbw = mx1 - mbx0;
+            mbh = my1 - mby0;
+            if (mbw > 0 && mbh > 0) {
+                mix_blend_backdrop = (uint32_t*)mem_alloc((size_t)mbw * mbh * sizeof(uint32_t), MEM_CAT_RENDER);
+                if (mix_blend_backdrop) {
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < mbh; row++) {
+                        memcpy(mix_blend_backdrop + row * mbw,
+                               px + (mby0 + row) * pitch + mbx0,
+                               mbw * sizeof(uint32_t));
+                    }
+                    // Clear region to transparent so element renders on clean background
+                    for (int row = 0; row < mbh; row++) {
+                        memset(px + (mby0 + row) * pitch + mbx0, 0, mbw * sizeof(uint32_t));
+                    }
+                    log_debug("[MIX-BLEND] Saved backdrop %dx%d for <%s>", mbw, mbh, block->node_name());
+                }
+            }
+        }
+    }
+
     if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
@@ -2000,6 +2051,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 log_debug("Skipping bound for empty cell (empty-cells: hide)");
             }
         }
+
         if (!skip_bound) {
             render_bound(rdcon, block);
         }
@@ -2163,6 +2215,23 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
                       opacity, block->node_name(), x0, y0, x1, y1);
         }
+    }
+
+    // Apply mix-blend-mode: composite rendered element onto saved backdrop
+    if (mix_blend_backdrop && mbw > 0 && mbh > 0) {
+        ImageSurface* surface = rdcon->ui_context->surface;
+        uint32_t* px = (uint32_t*)surface->pixels;
+        int pitch = surface->pitch / 4;
+        for (int row = 0; row < mbh; row++) {
+            for (int col = 0; col < mbw; col++) {
+                uint32_t backdrop = mix_blend_backdrop[row * mbw + col];
+                uint32_t source = px[(mby0 + row) * pitch + (mbx0 + col)];
+                px[(mby0 + row) * pitch + (mbx0 + col)] =
+                    composite_blend_pixel(backdrop, source, mix_blend);
+            }
+        }
+        mem_free(mix_blend_backdrop);
+        log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
     }
 
     // Apply CSS clip-path mask (pixel-level masking)

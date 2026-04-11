@@ -4645,6 +4645,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         }
                     }
+                } else if (func && func->name &&
+                           (strcmp(func->name, "linear-gradient") == 0 ||
+                            strcmp(func->name, "repeating-linear-gradient") == 0 ||
+                            strcmp(func->name, "radial-gradient") == 0 ||
+                            strcmp(func->name, "repeating-radial-gradient") == 0 ||
+                            strcmp(func->name, "conic-gradient") == 0)) {
+                    // Delegate gradient functions to the background shorthand handler
+                    log_debug("[CSS] background-image: delegating %s to background handler", func->name);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, decl, lycon);
                 }
             } else if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
                 // Direct URL/string value (non-function form)
@@ -5709,9 +5718,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     filter->params.drop_shadow.color.a = 255;
 
                     // Parse drop-shadow arguments: <offset-x> <offset-y> [<blur-radius>] [<color>]
+                    // drop-shadow() uses space-separated args, so the parser may pack
+                    // them into a single CSS_VALUE_TYPE_LIST — unwrap if needed
+                    int ds_count = func->arg_count;
+                    CssValue** ds_values = func->args;
+                    if (ds_count == 1 && ds_values[0] && ds_values[0]->type == CSS_VALUE_TYPE_LIST) {
+                        ds_count = ds_values[0]->data.list.count;
+                        ds_values = ds_values[0]->data.list.values;
+                    }
                     int len_idx = 0;
-                    for (int i = 0; i < func->arg_count; i++) {
-                        CssValue* a = func->args[i];
+                    for (int i = 0; i < ds_count; i++) {
+                        CssValue* a = ds_values[i];
                         if (!a) continue;
                         if (a->type == CSS_VALUE_TYPE_LENGTH) {
                             float val = resolve_length_value(lycon, prop_id, a);
@@ -5724,6 +5741,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             filter->params.drop_shadow.color.g = a->data.color.data.rgba.g;
                             filter->params.drop_shadow.color.b = a->data.color.data.rgba.b;
                             filter->params.drop_shadow.color.a = a->data.color.data.rgba.a;
+                        } else if (a->type == CSS_VALUE_TYPE_FUNCTION && a->data.function) {
+                            // Nested color function like rgba(0,0,0,0.5) — resolve it
+                            Color c = resolve_color_value(lycon, a);
+                            filter->params.drop_shadow.color = c;
                         }
                     }
                     log_debug("[CSS] filter: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
