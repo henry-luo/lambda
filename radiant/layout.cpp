@@ -962,7 +962,8 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
     }
 }
 
-// Count spaces in a text view for justify alignment
+// Count justification opportunities in a text view for justify alignment.
+// CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
 static int count_spaces_in_view(View* view) {
     int count = 0;
     while (view) {
@@ -972,10 +973,8 @@ static int count_spaces_in_view(View* view) {
             if (text_data) {
                 TextRect* rect = text->rect;
                 while (rect) {
-                    const char* str = text_data + rect->start_index;
-                    for (int i = 0; i < rect->length; i++) {
-                        if (str[i] == ' ') count++;
-                    }
+                    count += count_justify_opportunities(
+                        text_data + rect->start_index, rect->length);
                     rect = rect->next;
                 }
             }
@@ -991,7 +990,8 @@ static int count_spaces_in_view(View* view) {
     return count;
 }
 
-// Apply justify alignment by distributing space between words
+// Apply justify alignment by distributing space between words and CJK inter-char gaps.
+// CSS Text 3 §7.3: For auto justification, expand word spaces and CJK inter-character gaps.
 static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
     float cumulative_offset = 0;
     View* last_view = nullptr;
@@ -1011,18 +1011,13 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
                 rect->x += cumulative_offset;
                 last_rect = rect;
 
-                // Add space after each space character
+                // Count justification opportunities (spaces + CJK inter-char gaps)
                 if (text_data) {
-                    const char* str = text_data + rect->start_index;
-                    int space_count = 0;
-                    for (int i = 0; i < rect->length; i++) {
-                        if (str[i] == ' ') {
-                            space_count++;
-                        }
-                    }
+                    int gap_count = count_justify_opportunities(
+                        text_data + rect->start_index, rect->length);
                     // Expand this rect's width by the space added within it
-                    if (space_count > 0) {
-                        float added_space = space_count * space_per_gap;
+                    if (gap_count > 0) {
+                        float added_space = gap_count * space_per_gap;
                         rect->width += added_space;
                         cumulative_offset += added_space;
                     }
@@ -1300,20 +1295,24 @@ void line_align(LayoutContext* lycon) {
 
                     if (last_rect) {
                         const char* text_data = (const char*)text->text_data();
-                        int num_spaces = 0;
+                        int num_gaps = 0;
                         if (text_data) {
-                            const char* str = text_data + last_rect->start_index;
-                            for (int i = 0; i < last_rect->length; i++) {
-                                if (str[i] == ' ') num_spaces++;
-                            }
+                            num_gaps = count_justify_opportunities(
+                                text_data + last_rect->start_index,
+                                last_rect->length);
                         }
 
                         float extra_width = available_width - line_width;
 
-                        if (num_spaces > 0 && extra_width > 0) {
-                            last_rect->width += extra_width;
-                            adjust_text_bounds(text);
-                            return;
+                        if (num_gaps > 0 && extra_width > 0) {
+                            // Fast path only when no sibling views need repositioning.
+                            // If sibling views exist (e.g., <br>), fall through to
+                            // multi-view path so they get shifted by cumulative offset.
+                            if (!view->next()) {
+                                last_rect->width += extra_width;
+                                adjust_text_bounds(text);
+                                return;
+                            }
                         }
                     }
                     // Fall through only if sibling views exist — the line

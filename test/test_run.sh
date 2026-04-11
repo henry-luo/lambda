@@ -694,7 +694,7 @@ echo "🔍 Finding test executables and sources..."
 get_valid_test_sources() {
     # Extract test sources from the JSON configuration using new tests array structure
     # Only include sources from enabled test suites (exclude disabled ones)
-    jq -r '.test.test_suites[] | select(.disabled != true) | .tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
+    jq -r '.test.test_suites[] | select(.disabled != true) | .tests[]? | select(.disabled != true) | .source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
         # Handle different source path formats
         if [[ "$source" == test/* ]]; then
             echo "$source"
