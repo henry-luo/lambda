@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Strip JS comments from test262 test files to reduce I/O and speed up parsing.
+"""Strip JS comments from test262 test and harness files to reduce I/O and speed up parsing.
 
-Creates a parallel directory structure under ref/test262-stripped/ containing
-comment-stripped versions of all .js test files. The YAML frontmatter
+Creates a parallel directory structure under ../lambda-test/js262/ containing
+comment-stripped versions of all .js test and harness files. The YAML frontmatter
 (/*--- ... ---*/) is preserved since the metadata parser depends on it.
-
-Harness files are copied as-is (they're loaded separately and already cached).
 
 Usage: python3 utils/strip_test262_comments.py
 """
@@ -17,13 +15,10 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 SRC_ROOT = "ref/test262"
-DST_ROOT = "ref/test262-stripped"
+DST_ROOT = "../lambda-test/js262"
 
-# Directories containing test files to strip
-TEST_DIRS = ["test"]
-
-# Directories to copy as-is (harness files, etc.)
-COPY_DIRS = ["harness"]
+# Directories containing .js files to strip
+STRIP_DIRS = ["test", "harness"]
 
 
 def strip_js_comments(source):
@@ -269,25 +264,15 @@ def main():
 
     start_time = time.time()
 
-    # Copy harness files as-is
-    for copy_dir in COPY_DIRS:
-        src = os.path.join(SRC_ROOT, copy_dir)
-        dst = os.path.join(DST_ROOT, copy_dir)
-        if os.path.isdir(src):
-            if os.path.exists(dst):
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
-            print(f"Copied {copy_dir}/ as-is")
-
-    # Collect test files to strip
+    # Collect all .js files to strip (test + harness)
     all_pairs = []
-    for test_dir in TEST_DIRS:
-        src = os.path.join(SRC_ROOT, test_dir)
-        dst = os.path.join(DST_ROOT, test_dir)
+    for strip_dir in STRIP_DIRS:
+        src = os.path.join(SRC_ROOT, strip_dir)
+        dst = os.path.join(DST_ROOT, strip_dir)
         if os.path.isdir(src):
             pairs = collect_files(src, dst)
             all_pairs.extend(pairs)
-            print(f"Found {len(pairs)} .js files in {test_dir}/")
+            print(f"Found {len(pairs)} .js files in {strip_dir}/")
 
     if not all_pairs:
         print("No files to process.", file=sys.stderr)

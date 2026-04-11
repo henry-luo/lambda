@@ -135,6 +135,7 @@ test/venv/
 test/layout
 test/render
 test/wpt
+test/js262
 test/pdf/output
 test/fuzzy/crashes/
 
