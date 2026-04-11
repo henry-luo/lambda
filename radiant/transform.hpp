@@ -11,14 +11,14 @@
 #define RADIANT_TRANSFORM_HPP
 
 #include "view.hpp"
-#include <thorvg_capi.h>
+#include "rdt_vector.hpp"
 #include <cmath>
 
 namespace radiant {
 
 /**
  * Compute the combined 3x3 affine transformation matrix from a chain of transform functions.
- * The matrix is in ThorVG format:
+ * The matrix layout:
  *   [e11 e12 e13]   [a  c  tx]
  *   [e21 e22 e23] = [b  d  ty]
  *   [e31 e32 e33]   [0  0  1 ]
@@ -30,11 +30,11 @@ namespace radiant {
  * @param origin_y Transform origin Y
  * @return Combined transform matrix
  */
-inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
+inline RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                            float width, float height,
                                            float origin_x, float origin_y) {
     // Start with identity matrix
-    Tvg_Matrix result = {
+    RdtMatrix result = {
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 1.0f
@@ -43,7 +43,7 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
     if (!functions) return result;
 
     // Matrix multiplication helper: result = a * b
-    auto matrix_multiply = [](const Tvg_Matrix& a, const Tvg_Matrix& b) -> Tvg_Matrix {
+    auto matrix_multiply = [](const RdtMatrix& a, const RdtMatrix& b) -> RdtMatrix {
         return {
             a.e11 * b.e11 + a.e12 * b.e21 + a.e13 * b.e31,
             a.e11 * b.e12 + a.e12 * b.e22 + a.e13 * b.e32,
@@ -60,14 +60,14 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
     };
 
     // Translate to origin
-    Tvg_Matrix to_origin = {
+    RdtMatrix to_origin = {
         1.0f, 0.0f, -origin_x,
         0.0f, 1.0f, -origin_y,
         0.0f, 0.0f, 1.0f
     };
 
     // Translate back from origin
-    Tvg_Matrix from_origin = {
+    RdtMatrix from_origin = {
         1.0f, 0.0f, origin_x,
         0.0f, 1.0f, origin_y,
         0.0f, 0.0f, 1.0f
@@ -77,7 +77,7 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
     result = from_origin;
 
     for (TransformFunction* tf = functions; tf; tf = tf->next) {
-        Tvg_Matrix m = {
+        RdtMatrix m = {
             1.0f, 0.0f, 0.0f,
             0.0f, 1.0f, 0.0f,
             0.0f, 0.0f, 1.0f
@@ -227,37 +227,6 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
 }
 
 /**
- * Apply transform to a ThorVG paint object
- *
- * @param paint ThorVG paint object
- * @param transform TransformProp containing transform functions and origin
- * @param x Element X position (border-box left)
- * @param y Element Y position (border-box top)
- * @param width Element width (border-box)
- * @param height Element height (border-box)
- */
-inline void apply_transform(Tvg_Paint paint, TransformProp* transform,
-                           float x, float y, float width, float height) {
-    if (!paint || !transform || !transform->functions) return;
-
-    // Calculate origin in element coordinates
-    float origin_x = transform->origin_x_percent
-        ? (transform->origin_x / 100.0f) * width
-        : transform->origin_x;
-    float origin_y = transform->origin_y_percent
-        ? (transform->origin_y / 100.0f) * height
-        : transform->origin_y;
-
-    // Origin is relative to element's border-box
-    origin_x += x;
-    origin_y += y;
-
-    Tvg_Matrix m = compute_transform_matrix(transform->functions, width, height, origin_x, origin_y);
-
-    tvg_paint_set_transform(paint, &m);
-}
-
-/**
  * Check if an element has any transforms applied
  */
 inline bool has_transform(DomElement* elem) {
@@ -267,7 +236,7 @@ inline bool has_transform(DomElement* elem) {
 /**
  * Transform a point through the element's transform matrix
  */
-inline void transform_point(float& x, float& y, const Tvg_Matrix& m) {
+inline void transform_point(float& x, float& y, const RdtMatrix& m) {
     float new_x = m.e11 * x + m.e12 * y + m.e13;
     float new_y = m.e21 * x + m.e22 * y + m.e23;
     x = new_x;

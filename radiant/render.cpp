@@ -61,14 +61,6 @@ void log_render_stats() {
  * frame, this causes previously drawn content to be cleared to black.
  * Resetting the target sets fulldraw=true, which bypasses dirty region clearing.
  */
-void tvg_canvas_reset_and_draw(RenderContext* rdcon, bool clear) {
-    ImageSurface* surface = rdcon->ui_context->surface;
-    tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)surface->pixels, surface->width,
-        surface->width, surface->height, TVG_COLORSPACE_ABGR8888);
-    tvg_canvas_draw(rdcon->canvas, clear);
-    tvg_canvas_sync(rdcon->canvas);
-}
-
 // CollapsedBorder struct is now defined in view.hpp
 
 // ============================================================================
@@ -95,7 +87,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
-void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     bool show_hz_scroll = true, bool show_vt_scroll = true);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
@@ -104,14 +96,8 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-colu
 
 /**
  * Helper function to apply transform and push paint to canvas
- * If a transform is active in rdcon, applies it to the paint before pushing
+ * (Legacy — retained for infrastructure until full canvas removal)
  */
-static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
-    if (rdcon->has_transform) {
-        tvg_paint_set_transform(paint, &rdcon->transform);
-    }
-    tvg_canvas_push(rdcon->canvas, paint);
-}
 
 // draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
 // supports bitmap_scale for fixed-size bitmap fonts (e.g. emoji at 109ppem → 16px)
@@ -917,31 +903,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     Rect bot_line = {rect.x, rect.y + thickness - line_t, rect.width, line_t};
                     fill_surface_rect(rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip);
                 } else if (deco_style == CSS_VALUE_WAVY) {
-                    // Wavy line using ThorVG shape
+                    // Wavy line using RdtVector path
                     float wave_amp = thickness * 1.5f;
                     float wave_len = thickness * 4.0f;
-                    Tvg_Canvas canvas = rdcon->canvas;
-                    Tvg_Paint shape = tvg_shape_new();
+                    RdtPath* p = rdt_path_new();
                     float wx = rect.x;
-                    tvg_shape_move_to(shape, wx, rect.y);
+                    rdt_path_move_to(p, wx, rect.y);
                     while (wx < rect.x + rect.width) {
                         float half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-                        tvg_shape_cubic_to(shape, wx + half * 0.33f, rect.y - wave_amp,
+                        rdt_path_cubic_to(p, wx + half * 0.33f, rect.y - wave_amp,
                                            wx + half * 0.67f, rect.y - wave_amp,
                                            wx + half, rect.y);
                         wx += half;
                         if (wx >= rect.x + rect.width) break;
                         half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-                        tvg_shape_cubic_to(shape, wx + half * 0.33f, rect.y + wave_amp,
+                        rdt_path_cubic_to(p, wx + half * 0.33f, rect.y + wave_amp,
                                            wx + half * 0.67f, rect.y + wave_amp,
                                            wx + half, rect.y);
                         wx += half;
                     }
-                    tvg_shape_set_stroke_color(shape, deco_color.r, deco_color.g, deco_color.b, deco_color.a);
-                    tvg_shape_set_stroke_width(shape, fmaxf(1.0f, thickness * 0.5f));
-                    tvg_canvas_push(canvas, shape);
-                    tvg_canvas_reset_and_draw(rdcon, false);
-                    tvg_canvas_remove(canvas, NULL);
+                    rdt_stroke_path(&rdcon->vec, p, deco_color, fmaxf(1.0f, thickness * 0.5f),
+                                    RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+                    rdt_path_free(p);
                 } else {
                     // Solid (default)
                     fill_surface_rect(rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip);
@@ -1046,14 +1029,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float cy = y + baseline_offset - font_size * 0.35f;  // center on x-height
             float radius = bullet_size / 2.0f;
 
-            // Draw filled circle using ThorVG
-            Tvg_Canvas canvas = rdcon->canvas;
-            Tvg_Paint shape = tvg_shape_new();
-            tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
-            tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-            tvg_canvas_push(canvas, shape);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
+            // Draw filled circle using RdtVector
+            RdtPath* p = rdt_path_new();
+            rdt_path_add_circle(p, cx, cy, radius, radius);
+            rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
             log_debug("[MARKER RENDER] Drew disc at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
         }
@@ -1068,14 +1048,10 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float radius = bullet_size / 2.0f;
             float stroke_width = 1.0f;
 
-            Tvg_Canvas canvas = rdcon->canvas;
-            Tvg_Paint shape = tvg_shape_new();
-            tvg_shape_append_circle(shape, cx, cy, radius - stroke_width/2, radius - stroke_width/2, true);
-            tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
-            tvg_shape_set_stroke_width(shape, stroke_width);
-            tvg_canvas_push(canvas, shape);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
+            RdtPath* p = rdt_path_new();
+            rdt_path_add_circle(p, cx, cy, radius - stroke_width/2, radius - stroke_width/2);
+            rdt_stroke_path(&rdcon->vec, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+            rdt_path_free(p);
             log_debug("[MARKER RENDER] Drew circle outline at (%.1f, %.1f) r=%.1f", cx, cy, radius);
             break;
         }
@@ -1088,13 +1064,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             float sx = x + width - bullet_size - 4.0f;
             float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
 
-            Tvg_Canvas canvas = rdcon->canvas;
-            Tvg_Paint shape = tvg_shape_new();
-            tvg_shape_append_rect(shape, sx, sy, bullet_size, bullet_size, 0, 0, true);
-            tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-            tvg_canvas_push(canvas, shape);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
+            rdt_fill_rect(&rdcon->vec, sx, sy, bullet_size, bullet_size, color);
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
             break;
         }
@@ -1169,7 +1139,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
 /**
  * Render vector path (for PDF curves and complex paths)
- * Uses ThorVG to render Bezier curves and path segments
+ * Uses RdtVector to render Bezier curves and path segments
  */
 void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
     VectorPathProp* vpath = block->vpath;
@@ -1177,10 +1147,9 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
 
     log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);
 
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
-    if (!shape) {
-        log_error("[VPATH] Failed to create ThorVG shape");
+    RdtPath* p = rdt_path_new();
+    if (!p) {
+        log_error("[VPATH] Failed to create RdtPath");
         return;
     }
 
@@ -1194,11 +1163,11 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
 
         switch (seg->type) {
             case VectorPathSegment::VPATH_MOVETO:
-                tvg_shape_move_to(shape, sx, sy);
+                rdt_path_move_to(p, sx, sy);
                 log_debug("[VPATH] moveto (%.1f, %.1f)", sx, sy);
                 break;
             case VectorPathSegment::VPATH_LINETO:
-                tvg_shape_line_to(shape, sx, sy);
+                rdt_path_line_to(p, sx, sy);
                 log_debug("[VPATH] lineto (%.1f, %.1f)", sx, sy);
                 break;
             case VectorPathSegment::VPATH_CURVETO: {
@@ -1206,12 +1175,12 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
                 float cy1 = offset_y + seg->y1;
                 float cx2 = offset_x + seg->x2;
                 float cy2 = offset_y + seg->y2;
-                tvg_shape_cubic_to(shape, cx1, cy1, cx2, cy2, sx, sy);
+                rdt_path_cubic_to(p, cx1, cy1, cx2, cy2, sx, sy);
                 log_debug("[VPATH] curveto (%.1f,%.1f)-(%.1f,%.1f)->(%.1f,%.1f)", cx1, cy1, cx2, cy2, sx, sy);
                 break;
             }
             case VectorPathSegment::VPATH_CLOSE:
-                tvg_shape_close(shape);
+                rdt_path_close(p);
                 log_debug("[VPATH] close");
                 break;
         }
@@ -1219,20 +1188,16 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
 
     // Apply stroke if present
     if (vpath->has_stroke) {
-        tvg_shape_set_stroke_color(shape,
-            vpath->stroke_color.r, vpath->stroke_color.g, vpath->stroke_color.b, vpath->stroke_color.a);
-        tvg_shape_set_stroke_width(shape, vpath->stroke_width);
+        rdt_stroke_path(&rdcon->vec, p, vpath->stroke_color, vpath->stroke_width,
+                        RDT_CAP_BUTT, RDT_JOIN_MITER,
+                        vpath->dash_pattern, vpath->dash_pattern_length > 0 ? vpath->dash_pattern_length : 0,
+                        NULL);
 
-        // Apply dash pattern if present
         if (vpath->dash_pattern && vpath->dash_pattern_length > 0) {
             log_debug("[VPATH] Setting dash pattern: count=%d, values=[%.1f, %.1f]",
                      vpath->dash_pattern_length,
                      vpath->dash_pattern[0],
                      vpath->dash_pattern_length > 1 ? vpath->dash_pattern[1] : 0.0f);
-            Tvg_Result result = tvg_shape_set_stroke_dash(shape, vpath->dash_pattern, vpath->dash_pattern_length, 0);
-            log_debug("[VPATH] tvg_shape_set_stroke_dash returned: %d", result);
-            // Set butt cap for crisp dash ends
-            tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
         }
 
         log_debug("[VPATH] Stroke: RGB(%d,%d,%d) width=%.1f",
@@ -1241,16 +1206,10 @@ void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
 
     // Apply fill if present
     if (vpath->has_fill) {
-        tvg_shape_set_fill_color(shape,
-            vpath->fill_color.r, vpath->fill_color.g, vpath->fill_color.b, vpath->fill_color.a);
+        rdt_fill_path(&rdcon->vec, p, vpath->fill_color, RDT_FILL_WINDING, NULL);
     }
 
-    // Push to canvas and render
-    tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
-    tvg_canvas_push(canvas, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
-
+    rdt_path_free(p);
     log_info("[VPATH] Rendered vector path successfully");
 }
 
@@ -1380,39 +1339,36 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     for (int i = 0; i < mc->computed_column_count - 1; i++) {
         float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f - mc->rule_width / 2.0f;
 
-        // Create rule shape
-        Tvg_Paint rule = tvg_shape_new();
-
-        // Different stroke patterns for different styles
-        if (mc->rule_style == CSS_VALUE_DOTTED) {
-            // Dotted line: small dashes
-            float dash_pattern[] = {mc->rule_width, mc->rule_width * 2};
-            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
-        } else if (mc->rule_style == CSS_VALUE_DASHED) {
-            // Dashed line: longer dashes
-            float dash_pattern[] = {mc->rule_width * 3, mc->rule_width * 2};
-            tvg_shape_set_stroke_dash(rule, dash_pattern, 2, 0);
-        } else if (mc->rule_style == CSS_VALUE_DOUBLE) {
-            // Double: two lines (render first here, second below)
-            // For double, we draw two thinner lines
+        if (mc->rule_style == CSS_VALUE_DOUBLE) {
+            // Double: two thin filled rectangles
             float thin_width = mc->rule_width / 3.0f;
-            tvg_shape_append_rect(rule, rule_x - thin_width, block_y, thin_width, rule_height, 0, 0, true);
-            tvg_shape_append_rect(rule, rule_x + thin_width, block_y, thin_width, rule_height, 0, 0, true);
-            tvg_shape_set_fill_color(rule, mc->rule_color.r, mc->rule_color.g,
-                                     mc->rule_color.b, mc->rule_color.a);
-            push_with_transform(rdcon, rule);
-            continue;
+            rdt_fill_rect(&rdcon->vec, rule_x - thin_width, block_y, thin_width, rule_height, mc->rule_color);
+            rdt_fill_rect(&rdcon->vec, rule_x + thin_width, block_y, thin_width, rule_height, mc->rule_color);
+        } else {
+            // Solid, dotted, dashed: draw as vertical line
+            RdtPath* p = rdt_path_new();
+            rdt_path_move_to(p, rule_x, block_y);
+            rdt_path_line_to(p, rule_x, block_y + rule_height);
+
+            float* dash = NULL;
+            int dash_count = 0;
+            float dash_pattern[2];
+            if (mc->rule_style == CSS_VALUE_DOTTED) {
+                dash_pattern[0] = mc->rule_width;
+                dash_pattern[1] = mc->rule_width * 2;
+                dash = dash_pattern;
+                dash_count = 2;
+            } else if (mc->rule_style == CSS_VALUE_DASHED) {
+                dash_pattern[0] = mc->rule_width * 3;
+                dash_pattern[1] = mc->rule_width * 2;
+                dash = dash_pattern;
+                dash_count = 2;
+            }
+
+            rdt_stroke_path(&rdcon->vec, p, mc->rule_color, mc->rule_width,
+                            RDT_CAP_BUTT, RDT_JOIN_MITER, dash, dash_count, NULL);
+            rdt_path_free(p);
         }
-
-        // Solid, dotted, dashed: draw as vertical line
-        tvg_shape_move_to(rule, rule_x, block_y);
-        tvg_shape_line_to(rule, rule_x, block_y + rule_height);
-        tvg_shape_set_stroke_width(rule, mc->rule_width);
-        tvg_shape_set_stroke_color(rule, mc->rule_color.r, mc->rule_color.g,
-                                   mc->rule_color.b, mc->rule_color.a);
-        tvg_shape_set_stroke_cap(rule, TVG_STROKE_CAP_BUTT);
-
-        push_with_transform(rdcon, rule);
 
         log_debug("[MULTICOL] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
     }
@@ -1499,30 +1455,30 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
-    tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
-    Tvg_Paint shape = tvg_shape_new();
-    tvg_shape_move_to(shape, rect.x, rect.y);
-    tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
-    tvg_shape_line_to(shape, rect.x + rect.width, rect.y + rect.height);
-    tvg_shape_line_to(shape, rect.x, rect.y + rect.height);
-    tvg_shape_close(shape);
-    tvg_shape_set_stroke_width(shape, 2); // stroke width of 2 pixels
-    tvg_shape_set_stroke_color(shape, 255, 0, 0, 100); // Red stroke color (RGBA)
-    // define the dash pattern for a dotted line
-    float dash_pattern[2] = {8.0f, 8.0f}; // 8 units on, 8 units off
-    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
+void draw_debug_rect(RdtVector* vec, Rect rect, Bound* clip) {
+    RdtPath* p = rdt_path_new();
+    rdt_path_move_to(p, rect.x, rect.y);
+    rdt_path_line_to(p, rect.x + rect.width, rect.y);
+    rdt_path_line_to(p, rect.x + rect.width, rect.y + rect.height);
+    rdt_path_line_to(p, rect.x, rect.y + rect.height);
+    rdt_path_close(p);
 
-    // set clipping
-    Tvg_Paint clip_rect = tvg_shape_new();
-    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
-    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+    // dash pattern for dotted line
+    float dash_pattern[2] = {8.0f, 8.0f};
+    Color debug_color;
+    debug_color.r = 255; debug_color.g = 0; debug_color.b = 0; debug_color.a = 100;
 
-    tvg_canvas_push(canvas, shape);
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
-    tvg_canvas_remove(canvas, NULL);  // IMPORTANT: clear shapes after rendering
+    // clip region
+    RdtPath* clip_p = rdt_path_new();
+    rdt_path_add_rect(clip_p, clip->left, clip->top,
+                      clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+    rdt_push_clip(vec, clip_p, NULL);
+
+    rdt_stroke_path(vec, p, debug_color, 2.0f, RDT_CAP_BUTT, RDT_JOIN_MITER, dash_pattern, 2, NULL);
+
+    rdt_pop_clip(vec);
+    rdt_path_free(clip_p);
+    rdt_path_free(p);
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
@@ -1571,7 +1527,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             rect.height -= (block->bound->border->width.top + block->bound->border->width.bottom) * s;
         }
         if (block->scroller->pane) {
-            scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
+            scrollpane_render(&rdcon->vec, block->scroller->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
                 block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
         } else {
@@ -1614,7 +1570,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     bool self_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
 
     // Save transform state and apply element's transform
-    Tvg_Matrix pa_transform = rdcon->transform;
+    RdtMatrix pa_transform = rdcon->transform;
     bool pa_has_transform = rdcon->has_transform;
 
     if (block->transform && block->transform->functions) {
@@ -1633,13 +1589,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         origin_y += elem_y;
 
         // Compute new transform matrix
-        Tvg_Matrix new_transform = radiant::compute_transform_matrix(
+        RdtMatrix new_transform = radiant::compute_transform_matrix(
             block->transform->functions, block->width, block->height, origin_x, origin_y);
 
         // If parent has transform, concatenate
         if (rdcon->has_transform) {
             // Matrix multiply: new = parent * element
-            Tvg_Matrix combined = {
+            RdtMatrix combined = {
                 pa_transform.e11 * new_transform.e11 + pa_transform.e12 * new_transform.e21 + pa_transform.e13 * new_transform.e31,
                 pa_transform.e11 * new_transform.e12 + pa_transform.e12 * new_transform.e22 + pa_transform.e13 * new_transform.e32,
                 pa_transform.e11 * new_transform.e13 + pa_transform.e12 * new_transform.e23 + pa_transform.e13 * new_transform.e33,
@@ -1705,7 +1661,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top * s : 0);
         rc.width = block->width * s + (block->bound ? (block->bound->margin.left + block->bound->margin.right) * s : 0);
         rc.height = block->height * s + (block->bound ? (block->bound->margin.top + block->bound->margin.bottom) * s : 0);
-        draw_debug_rect(rdcon->canvas, rc, &rdcon->block.clip);
+        draw_debug_rect(&rdcon->vec, rc, &rdcon->block.clip);
     }
 
     View* view = block->first_child;
@@ -1755,9 +1711,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // Apply CSS filters after all content is rendered
     // Filters are applied to the rendered pixel data in the element's region
     if (block->filter && block->filter->functions) {
-        // Sync canvas to ensure all content is rendered to the surface
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
 
         // Calculate the element's bounding rect
         Rect filter_rect;
@@ -1775,9 +1728,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     // Apply CSS opacity: multiply alpha of all pixels in the element's region
     if (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f) {
-        // Flush any pending ThorVG shapes to the surface before modifying pixels
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(rdcon->canvas, NULL);
 
         float opacity = block->in_line->opacity;
         float s = rdcon->scale;
@@ -1818,58 +1768,29 @@ void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
         log_debug("no picture to render");  return;
     }
-    // Step 1: Create an offscreen canvas to render the original Picture
-    Tvg_Canvas canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
-    if (!canvas) return;
-
+    // Rasterize the SVG picture into a pixel buffer using a temporary vector context
     uint32_t width = surface->max_render_width;
     uint32_t height = surface->max_render_width * surface->height / surface->width;
     surface->pixels = (uint32_t*)mem_alloc(width * height * sizeof(uint32_t), MEM_CAT_RENDER);
-    if (!surface->pixels) {
-        tvg_canvas_destroy(canvas);
-        return;
-    }
+    if (!surface->pixels) return;
 
     // CRITICAL: Clear the buffer to transparent before rendering SVG
-    // Without this, the SVG renders on top of garbage memory data
     memset(surface->pixels, 0, width * height * sizeof(uint32_t));
 
-    // Set the canvas target to the buffer
-    if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height,
-        TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
-        log_debug("Failed to set canvas target");
-        mem_free(surface->pixels);  surface->pixels = NULL;
-        tvg_canvas_destroy(canvas);
-        return;
+    // Create a temporary vector context targeting the pixel buffer
+    RdtVector tmp_vec = {};
+    rdt_vector_init(&tmp_vec, (uint32_t*)surface->pixels, width, height, width);
+
+    // Wrap the ThorVG SVG picture and draw at target size (takes ownership)
+    RdtPicture* pic = rdt_picture_take_tvg_paint(surface->pic, (float)width, (float)height);
+    surface->pic = NULL;  // ownership transferred
+    if (pic) {
+        rdt_picture_draw(&tmp_vec, pic, 255, nullptr);
+        rdt_picture_free(pic);
     }
 
-    tvg_picture_set_size(surface->pic, width, height);
-    tvg_canvas_push(canvas, surface->pic);
-    tvg_canvas_update(canvas);
-    // CRITICAL: Pass false to preserve transparent background we set with memset
-    // Passing true would clear the buffer to black (ThorVG's default clear color)
-    tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas);
-
-    // Step 4: Clean up canvas
-    tvg_canvas_destroy(canvas); // this also frees pic
-    surface->pic = NULL;
+    rdt_vector_destroy(&tmp_vec);
     surface->width = width;  surface->height = height;  surface->pitch = width * sizeof(uint32_t);
-}
-
-// load surface pixels to a picture
-Tvg_Paint load_picture(ImageSurface* surface) {
-    Tvg_Paint pic = tvg_picture_new();
-    if (!pic) { return NULL; }
-
-    // Load the raw pixel data into the new Picture
-    if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height,
-        TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
-        log_debug("Failed to load raw pixel data");
-        tvg_paint_unref(pic, true);
-        return NULL;
-    }
-    return pic;
 }
 
 // Helper function to render just the image content (without block layout)
@@ -1930,21 +1851,20 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (!img->pixels) {
             render_svg(img);
         }
-        Tvg_Paint pic = load_picture(img);
-        if (pic) {
-            tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-            tvg_picture_set_size(pic, img_rect.width, img_rect.height);
-            tvg_paint_translate(pic, img_rect.x, img_rect.y);
-            // clip the svg picture
-            Tvg_Paint clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
-            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-            tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
-            tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
-            tvg_canvas_push(rdcon->canvas, pic);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
+        if (img->pixels) {
+            // clip to block bounds
+            Bound* clip = &rdcon->block.clip;
+            RdtPath* clip_path = rdt_path_new();
+            rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+            rdt_push_clip(&rdcon->vec, clip_path, nullptr);
+            rdt_path_free(clip_path);
+
+            rdt_draw_image(&rdcon->vec, (uint32_t*)img->pixels, img->width, img->height,
+                           img->width, img_rect.x, img_rect.y, img_rect.width, img_rect.height, 255, nullptr);
+
+            rdt_pop_clip(&rdcon->vec);
         } else {
-            log_debug("failed to load svg picture");
+            log_debug("failed to render svg image");
         }
     } else {
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
@@ -2206,30 +2126,19 @@ void render_focus_outline(RenderContext* rdcon, RadiantState* state) {
     float outline_offset = 2.0f * s;
     float outline_width = 2.0f * s;
 
-    // Create outline shape
-    Tvg_Paint shape = tvg_shape_new();
-    if (!shape) return;
-
     // Draw dotted rectangle outline
     float ox = x - outline_offset;
     float oy = y - outline_offset;
     float ow = width + outline_offset * 2;
     float oh = height + outline_offset * 2;
 
-    tvg_shape_append_rect(shape, ox, oy, ow, oh, 0, 0, true);
-
-    // Focus ring color: typically blue or system accent color
-    // Using a standard web focus color: #005FCC (blue)
-    tvg_shape_set_stroke_color(shape, 0x00, 0x5F, 0xCC, 0xFF);
-    tvg_shape_set_stroke_width(shape, outline_width);
-
-    // Dotted pattern: dash length 4, gap 2 (scaled)
+    // Focus ring color: #005FCC (blue), dotted pattern
+    RdtPath* path = rdt_path_new();
+    rdt_path_add_rect(path, ox, oy, ow, oh, 0, 0);
     float dash_pattern[] = {4.0f * s, 2.0f * s};
-    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
-
-    tvg_canvas_push(rdcon->canvas, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
+    Color focus_color = {0}; focus_color.r = 0x00; focus_color.g = 0x5F; focus_color.b = 0xCC; focus_color.a = 0xFF;
+    rdt_stroke_path(&rdcon->vec, path, focus_color, outline_width, RDT_CAP_BUTT, RDT_JOIN_MITER, dash_pattern, 2, nullptr);
+    rdt_path_free(path);
     log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
 
@@ -2306,17 +2215,10 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     log_debug("[CARET] Before render: CSS pos (%.1f,%.1f), physical pos (%.1f,%.1f) height=%.1f",
         css_x, css_y, x, y, height);
 
-    // Draw using ThorVG for proper integration with scene graph
-    Tvg_Paint shape = tvg_shape_new();
-    if (shape) {
-        tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0, true);
-        // Gray caret
-        tvg_shape_set_fill_color(shape, 0x66, 0x66, 0x66, 0xCC);
-        tvg_canvas_push(rdcon->canvas, shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
-        log_debug("[CARET] ThorVG: Drew caret at (%.0f,%.0f) size %.0fx%.0f", x, y, caret_width, height);
-    }
+    // Draw caret rectangle
+    Color caret_color = {0}; caret_color.r = 0x66; caret_color.g = 0x66; caret_color.b = 0x66; caret_color.a = 0xCC;
+    rdt_fill_rect(&rdcon->vec, x, y, caret_width, height, caret_color);
+    log_debug("[CARET] Drew caret at (%.0f,%.0f) size %.0fx%.0f", x, y, caret_width, height);
 
     log_debug("[CARET] Rendered caret at (%.0f,%.0f) height=%.0f", x, y, height);
 }
@@ -2393,16 +2295,9 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     float sel_height = end_y - start_y;  // Use line height approximation
     if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
 
-    // Draw selection highlight using ThorVG
-    Tvg_Paint shape = tvg_shape_new();
-    if (shape) {
-        tvg_shape_append_rect(shape, min_x, min_y, sel_width, sel_height, 0, 0, true);
-        // Semi-transparent blue selection highlight (typical system selection color)
-        tvg_shape_set_fill_color(shape, 0x00, 0x78, 0xD7, 0x80);  // Blue with 50% alpha
-        tvg_canvas_push(rdcon->canvas, shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
-    }
+    // Draw selection highlight
+    Color sel_color = {0}; sel_color.r = 0x00; sel_color.g = 0x78; sel_color.b = 0xD7; sel_color.a = 0x80;
+    rdt_fill_rect(&rdcon->vec, min_x, min_y, sel_width, sel_height, sel_color);
 
     log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
 }
@@ -2451,40 +2346,28 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
             float dh = dt->height * s;
 
             // draw highlight border around drop target
-            Tvg_Paint drop_shape = tvg_shape_new();
-            if (drop_shape) {
-                tvg_shape_append_rect(drop_shape, dx - 2*s, dy - 2*s, dw + 4*s, dh + 4*s, 4*s, 4*s, true);
-                tvg_shape_set_stroke_color(drop_shape, 0x33, 0x99, 0xFF, 0xC0);
-                tvg_shape_set_stroke_width(drop_shape, 2.0f * s);
-                tvg_canvas_push(rdcon->canvas, drop_shape);
-            }
+            Color drop_stroke_color = {0}; drop_stroke_color.r = 0x33; drop_stroke_color.g = 0x99; drop_stroke_color.b = 0xFF; drop_stroke_color.a = 0xC0;
+            RdtPath* drop_path = rdt_path_new();
+            rdt_path_add_rect(drop_path, dx - 2*s, dy - 2*s, dw + 4*s, dh + 4*s, 0, 0);
+            rdt_stroke_path(&rdcon->vec, drop_path, drop_stroke_color, 2.0f * s, RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, nullptr);
+            rdt_path_free(drop_path);
 
             // draw semi-transparent blue fill
-            Tvg_Paint drop_fill = tvg_shape_new();
-            if (drop_fill) {
-                tvg_shape_append_rect(drop_fill, dx, dy, dw, dh, 0, 0, true);
-                tvg_shape_set_fill_color(drop_fill, 0x33, 0x99, 0xFF, 0x20);
-                tvg_canvas_push(rdcon->canvas, drop_fill);
-            }
-
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(rdcon->canvas, NULL);
+            Color drop_fill_color = {0}; drop_fill_color.r = 0x33; drop_fill_color.g = 0x99; drop_fill_color.b = 0xFF; drop_fill_color.a = 0x20;
+            rdt_fill_rect(&rdcon->vec, dx, dy, dw, dh, drop_fill_color);
             log_debug("[DRAG] Drop target highlight at (%.0f,%.0f) size %.0fx%.0f", dx, dy, dw, dh);
         }
 
         // Draw a small drag indicator at cursor position
         float cx = dd->current_x;
         float cy = dd->current_y;
-        Tvg_Paint drag_ind = tvg_shape_new();
-        if (drag_ind) {
-            tvg_shape_append_rect(drag_ind, cx - 4*s, cy - 4*s, 8*s, 8*s, 2*s, 2*s, true);
-            tvg_shape_set_fill_color(drag_ind, 0x33, 0x99, 0xFF, 0x80);
-            tvg_shape_set_stroke_color(drag_ind, 0x33, 0x99, 0xFF, 0xFF);
-            tvg_shape_set_stroke_width(drag_ind, 1.0f * s);
-            tvg_canvas_push(rdcon->canvas, drag_ind);
-            tvg_canvas_reset_and_draw(rdcon, false);
-            tvg_canvas_remove(rdcon->canvas, NULL);
-        }
+        Color ind_fill = {0}; ind_fill.r = 0x33; ind_fill.g = 0x99; ind_fill.b = 0xFF; ind_fill.a = 0x80;
+        rdt_fill_rounded_rect(&rdcon->vec, cx - 4*s, cy - 4*s, 8*s, 8*s, 2*s, 2*s, ind_fill);
+        Color ind_stroke = {0}; ind_stroke.r = 0x33; ind_stroke.g = 0x99; ind_stroke.b = 0xFF; ind_stroke.a = 0xFF;
+        RdtPath* ind_path = rdt_path_new();
+        rdt_path_add_rect(ind_path, cx - 4*s, cy - 4*s, 8*s, 8*s, 2*s, 2*s);
+        rdt_stroke_path(&rdcon->vec, ind_path, ind_stroke, 1.0f * s, RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, nullptr);
+        rdt_path_free(ind_path);
     }
 
     // Caret rendered on top of content
@@ -2497,15 +2380,13 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
 void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
-    rdcon->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
-    Tvg_Result result = tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
-        uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
-    if (result != TVG_RESULT_SUCCESS) {
-        log_error("render_init: tvg_swcanvas_set_target failed with result=%d", result);
-    }
+
+    // initialize vector renderer (owns the ThorVG canvas internally)
+    rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
+        uicon->surface->width, uicon->surface->height, uicon->surface->width);
 
     // Initialize transform state (identity matrix, not active)
-    rdcon->transform = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    rdcon->transform = rdt_matrix_identity();
     rdcon->has_transform = false;
 
     // Initialize HiDPI scale factor for converting CSS logical pixels to physical surface pixels
@@ -2530,7 +2411,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
 }
 
 void render_clean_up(RenderContext* rdcon) {
-    tvg_canvas_destroy(rdcon->canvas);
+    rdt_vector_destroy(&rdcon->vec);
 }
 
 /**
@@ -2650,12 +2531,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 
-    // all shapes should already have been drawn to the canvas
-    // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
-    tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
+    // all shapes have been drawn to the surface by rdt_* calls
+    // (each rdt_fill_*/rdt_stroke_* call completes synchronously)
 
     auto t_sync = high_resolution_clock::now();
-    log_info("[TIMING] tvg_canvas_sync: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
+    log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
 
     // save the rendered surface to image file (PNG or JPEG based on extension)
     if (output_file) {
