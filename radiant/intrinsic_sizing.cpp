@@ -278,9 +278,23 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             continue;
         }
 
-        // Apply text-transform if specified
+        // Apply text-transform if specified (full case mapping: 1→many)
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
+            // Add advance widths for extra codepoints from full case mapping
+            for (int tti = 1; tti < tt_count; tti++) {
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
+                if (extra_glyph) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
+                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
+                    current_word += extra_advance;
+                    total_width += extra_advance;
+                }
+            }
         }
 
         // Emoji combining marks: skin tone modifiers, variation selectors, and
@@ -513,7 +527,20 @@ float compute_text_height_at_width(LayoutContext* lycon,
         }
 
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
+            // Add advance widths for extra codepoints from full case mapping
+            for (int tti = 1; tti < tt_count; tti++) {
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
+                if (extra_glyph) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
+                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
+                    current_word_width += extra_advance;
+                }
+            }
         }
 
         // CSS font-variant: small-caps scaling (matching measure_text_intrinsic_widths)

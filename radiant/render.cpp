@@ -647,10 +647,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // skip soft hyphen (U+00AD) — invisible unless line breaks there
                     if (s_cp == 0x00AD) continue;
 
-                    s_cp = apply_text_transform(s_cp, text_transform, s_word_start);
+                    uint32_t s_tt_out[3];
+                    int s_tt_count = apply_text_transform_full(s_cp, text_transform, s_word_start, s_tt_out);
                     s_word_start = false;
 
-                    LoadedGlyph* s_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_s, s_cp, true);
+                    for (int sti = 0; sti < s_tt_count; sti++) {
+                        uint32_t s_tt_cp = s_tt_out[sti];
+                        if (s_tt_cp == 0) continue;
+
+                    LoadedGlyph* s_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_s, s_tt_cp, true);
                     if (!s_glyph) {
                         sx_pos += scaled_space_width;
                         continue;
@@ -668,6 +673,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     }
                     rdcon->color = saved_color;
                     sx_pos += s_glyph->advance_x;
+                    } // end for s_tt_count
                 }
             }
 
@@ -732,8 +738,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 if (codepoint == 0x00AD) continue;
 
                 // Apply text-transform before loading glyph
-                codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+                uint32_t tt_out[3];
+                int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+                codepoint = tt_out[0];
                 is_word_start = false;
+
+                for (int tti = 0; tti < tt_count; tti++) {
+                uint32_t render_cp = tt_out[tti];
+                if (render_cp == 0) continue;
 
                 // Debug: Log the font face being used for this glyph
                 static int glyph_debug_count = 0;
@@ -749,7 +761,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 FontStyleDesc _sd2 = font_style_desc_from_prop(rdcon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd2, codepoint, true);
+                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd2, render_cp, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -823,6 +835,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // advance to the next position
                     x += glyph->advance_x;
                 }
+                } // end for tti (full case mapping expansion)
             }
         }
         // render trailing hyphen for soft-hyphen line break
