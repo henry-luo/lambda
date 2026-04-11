@@ -1108,8 +1108,9 @@ static int ts_match_modifier_keyword(TSLexer *lexer) {
 }
 
 // Main class modifiers scanner
-static bool scan_ts_class_modifiers(TSLexer *lexer) {
+static bool scan_ts_class_modifiers(TSLexer *lexer, bool *did_read_ident) {
     lexer->result_symbol = TS_CLASS_MODIFIERS;
+    *did_read_ident = false;
 
     // positions[i] = lexer position after consuming i-th keyword
     // We track positions by marking after each keyword
@@ -1134,7 +1135,11 @@ static bool scan_ts_class_modifiers(TSLexer *lexer) {
     bool has_safe_mark = false;
 
     for (;;) {
-        // skip whitespace and comments
+        // On the first iteration (no keywords confirmed yet), skip whitespace
+        // the same as subsequent iterations — modifiers can follow newlines
+        // (e.g., after `{` in class body). The `did_read_ident` + `return false`
+        // mechanism in the dispatch handles the case where a non-modifier identifier
+        // was read and the lexer state is corrupted for ASI.
         ts_skip_ws_and_comments(lexer);
 
         int32_t ch = lexer->lookahead;
@@ -1158,6 +1163,15 @@ static bool scan_ts_class_modifiers(TSLexer *lexer) {
         // must start with identifier char for keyword matching
         if (!ts_is_ident_start(ch)) break;
 
+        // fast reject: modifier keywords start with a,d,g,o,p,r,s only.
+        // If first char doesn't match, this can't be a modifier keyword.
+        // Break WITHOUT reading the identifier to avoid advancing the lexer
+        // past non-modifier content (which would corrupt state for downstream scanners).
+        if (ch != 'a' && ch != 'd' && ch != 'g' && ch != 'o' &&
+            ch != 'p' && ch != 'r' && ch != 's') {
+            break;
+        }
+
         // read identifier into buffer (max 16 chars for our keywords, max is "protected" = 9)
         char buf[16];
         int len = 0;
@@ -1167,6 +1181,7 @@ static bool scan_ts_class_modifiers(TSLexer *lexer) {
             advance(lexer);
         }
         buf[len] = '\0';
+        *did_read_ident = true;
 
         // check that identifier boundary is clean (next char is not ident char)
         if (ts_is_ident_char(lexer->lookahead)) {
@@ -1264,13 +1279,26 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
 
     // v2: class member modifiers — opaque modifier prefix (declare/public/static/readonly/...)
     // After class members, both TS_CLASS_MODIFIERS and AUTOMATIC_SEMICOLON may be valid
-    // in parallel parse paths. The modifier scanner handles newlines correctly — it skips
-    // whitespace to find modifier keywords, and `*` handling is needed for generators.
+    // in parallel parse paths. The modifier scanner advances the lexer even when returning
+    // false (consuming whitespace and non-modifier identifiers), which corrupts state for
+    // downstream scanners like ASI. When the modifier scanner fails and ASI is also valid,
+    // return false immediately to let tree-sitter retry from a clean lexer state in
+    // separate parse paths, rather than running ASI on corrupted lexer position.
     if (valid_symbols[TS_CLASS_MODIFIERS] &&
-        !valid_symbols[TEMPLATE_CHARS]) {
+        !valid_symbols[TEMPLATE_CHARS] &&
+        !valid_symbols[ERROR_RECOVERY]) {
         int32_t ch = lexer->lookahead;
         if (ts_is_ident_start(ch) || ch == '*' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-            if (scan_ts_class_modifiers(lexer)) return true;
+            bool did_read_ident = false;
+            if (scan_ts_class_modifiers(lexer, &did_read_ident)) return true;
+            // Modifier scanner failed and may have advanced the lexer past content.
+            // If it read a non-modifier identifier, the lexer is past that identifier
+            // and the downstream ASI scanner would see corrupted state. Return false to
+            // let tree-sitter retry from a clean lexer position.
+            // If it only advanced past whitespace (no identifier read), ASI can still work.
+            if (valid_symbols[AUTOMATIC_SEMICOLON] && did_read_ident) {
+                return false;
+            }
         }
         // fall through to try other external tokens
     }
@@ -1278,10 +1306,16 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
     // v2: type parameters — unambiguous in declaration context (starts with '<')
     // Only enter when lookahead is '<' or horizontal whitespace — NOT newlines,
     // as scan_ts_type_parameters would advance past newlines needed for ASI detection.
+    // Guard: when ASI is valid and lookahead is whitespace, skip type parameters to
+    // avoid ts_skip_ws_and_comments (which uses advance()) corrupting lexer state for ASI.
+    // When lookahead is '<', always enter — it won't corrupt state since '<' is the
+    // expected first char of type parameters.
     if (valid_symbols[TS_TYPE_PARAMETERS] &&
         !valid_symbols[TEMPLATE_CHARS]) {
         int32_t tch = lexer->lookahead;
-        if (tch == '<' || tch == ' ' || tch == '\t') {
+        if (tch == '<') {
+            if (scan_ts_type_parameters(lexer)) return true;
+        } else if ((tch == ' ' || tch == '\t') && !valid_symbols[AUTOMATIC_SEMICOLON]) {
             if (scan_ts_type_parameters(lexer)) return true;
         }
     }

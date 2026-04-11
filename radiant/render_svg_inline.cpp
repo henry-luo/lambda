@@ -2171,6 +2171,10 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         return;
     }
 
+    // wrap scene as RdtPicture (takes ownership, no dup; 0,0 = don't resize)
+    RdtPicture* pic = rdt_picture_take_tvg_paint(svg_scene, 0, 0);
+    if (!pic) return;
+
     // position in document coordinates
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
@@ -2178,13 +2182,13 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     // build_svg_scene already called tvg_paint_set_transform for the viewBox,
     // which sets overriding=true and blocks subsequent translate/scale calls.
     // We must compose the position+scale into the existing transform matrix.
-    Tvg_Matrix scene_m;
-    tvg_paint_get_transform(svg_scene, &scene_m);
+    RdtMatrix scene_m;
+    rdt_picture_get_transform(pic, &scene_m);
 
     // Compose: first apply scene transform (viewBox), then scale by pixel_ratio,
     // then translate to document position.
     // Combined = Translate(x,y) * Scale(scale) * scene_m
-    Tvg_Matrix combined = {
+    RdtMatrix combined = {
         scale * scene_m.e11, scale * scene_m.e12, scale * scene_m.e13 + x,
         scale * scene_m.e21, scale * scene_m.e22, scale * scene_m.e23 + y,
         scene_m.e31,         scene_m.e32,         scene_m.e33
@@ -2193,8 +2197,8 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     // apply document transform if any
     if (rdcon->has_transform) {
         // Multiply: rdcon->transform * combined
-        Tvg_Matrix dm = rdcon->transform;
-        Tvg_Matrix final_m = {
+        RdtMatrix dm = rdcon->transform;
+        RdtMatrix final_m = {
             dm.e11 * combined.e11 + dm.e12 * combined.e21 + dm.e13 * combined.e31,
             dm.e11 * combined.e12 + dm.e12 * combined.e22 + dm.e13 * combined.e32,
             dm.e11 * combined.e13 + dm.e12 * combined.e23 + dm.e13 * combined.e33,
@@ -2208,24 +2212,24 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         combined = final_m;
     }
 
-    tvg_paint_set_transform(svg_scene, &combined);
-
     // apply clip region (e.g. iframe content box, overflow:hidden)
     Bound* clip = &rdcon->block.clip;
     float clip_w = clip->right - clip->left;
     float clip_h = clip->bottom - clip->top;
-    if (clip_w > 0 && clip_h > 0) {
-        Tvg_Paint clip_rect = tvg_shape_new();
-        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip_w, clip_h, 0, 0, true);
-        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-        tvg_paint_set_mask_method(svg_scene, clip_rect, TVG_MASK_METHOD_ALPHA);
+    bool has_clip = (clip_w > 0 && clip_h > 0);
+    if (has_clip) {
+        RdtPath* clip_path = rdt_path_new();
+        rdt_path_add_rect(clip_path, clip->left, clip->top, clip_w, clip_h, 0, 0);
+        rdt_push_clip(&rdcon->vec, clip_path, nullptr);
+        rdt_path_free(clip_path);
     }
 
-    // render immediately to buffer (same pattern as SVG images)
-    tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-    tvg_canvas_push(rdcon->canvas, svg_scene);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(rdcon->canvas, NULL);  // clear shapes after rendering
+    // render the scene through rdt_ pipeline
+    rdt_picture_draw(&rdcon->vec, pic, 255, &combined);
+
+    if (has_clip) {
+        rdt_pop_clip(&rdcon->vec);
+    }
 
     log_debug("[SVG] render_inline_svg: rendered to buffer");
 }
