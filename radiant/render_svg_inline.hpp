@@ -63,6 +63,7 @@ struct SvgRenderContext {
     // inherited style state
     Color fill_color;
     Color stroke_color;
+    Color current_color;         // CSS 'color' property for currentColor keyword
     float stroke_width;
     float opacity;
     bool fill_none;
