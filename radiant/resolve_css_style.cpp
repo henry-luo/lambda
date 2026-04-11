@@ -3642,12 +3642,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 else if (align_value == CSS_VALUE_MATCH_PARENT) {
-                    // match-parent: inherit parent's text-align, but resolve start/end
-                    // against parent's direction value
+                    // match-parent: inherit parent's text-align value as-is.
+                    // CSS Text 3 §7.1: Logical keywords (start/end) are inherited
+                    // without resolution — the layout code resolves them against
+                    // the element's own direction at layout time (line_align()).
                     DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
                     DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
                     CssEnum inherited_align = CSS_VALUE_START;
-                    CssEnum parent_dir = CSS_VALUE_LTR;
 
                     // Find parent's computed text-align
                     for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
@@ -3659,23 +3660,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
 
-                    // Find parent's direction
-                    for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
-                        if (p->blk && (p->blk->direction == CSS_VALUE_LTR || p->blk->direction == CSS_VALUE_RTL)) {
-                            parent_dir = p->blk->direction;
-                            break;
-                        }
-                    }
-
-                    // Resolve start/end against parent's direction
-                    if (inherited_align == CSS_VALUE_START) {
-                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-                    } else if (inherited_align == CSS_VALUE_END) {
-                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-                    } else {
-                        block->blk->text_align = inherited_align;
-                    }
-                    log_debug("[CSS] Text-align: match-parent resolved to %d (parent dir=%d)", block->blk->text_align, parent_dir);
+                    block->blk->text_align = inherited_align;
+                    log_debug("[CSS] Text-align: match-parent inherited %d from parent", inherited_align);
                 }
                 else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;

@@ -501,9 +501,9 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
         utf16_len = 1;
     } else if (codepoint <= 0x10FFFF) {
         // surrogate pair
-        codepoint -= 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (codepoint >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (codepoint & 0x3FF));
+        uint32_t cp = codepoint - 0x10000;
+        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
         utf16_len = 2;
     } else {
         return NULL;
@@ -528,21 +528,61 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
 
     if (!fallback) return NULL;
 
-    // get the font URL from the fallback font
+    // get the font URL and PostScript name from the fallback font
     CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
+    CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
     CFRelease(fallback);
-    if (!desc) return NULL;
+    if (!desc) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
 
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
     CFRelease(desc);
-    if (!url) return NULL;
+    if (!url) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
 
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
+
+    // for TTC/OTC collections, determine the correct face index by matching
+    // the PostScript name against all faces in the collection file
+    if (ok && path[0] && out_face_index && ps_name) {
+        size_t path_len = strlen(path);
+        bool is_collection = (path_len > 4 &&
+            (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
+             strcasecmp(path + path_len - 4, ".otc") == 0));
+        if (is_collection) {
+            CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromURL(url);
+            if (descs) {
+                CFIndex count = CFArrayGetCount(descs);
+                for (CFIndex i = 0; i < count; i++) {
+                    CTFontDescriptorRef face_desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
+                    CFStringRef face_ps = (CFStringRef)CTFontDescriptorCopyAttribute(face_desc, kCTFontNameAttribute);
+                    if (face_ps) {
+                        if (CFStringCompare(face_ps, ps_name, 0) == kCFCompareEqualTo) {
+                            *out_face_index = (int)i;
+                            log_debug("font_platform: TTC face index %d for '%s'",
+                                      (int)i, CFStringGetCStringPtr(ps_name, kCFStringEncodingUTF8));
+                            CFRelease(face_ps);
+                            break;
+                        }
+                        CFRelease(face_ps);
+                    }
+                }
+                CFRelease(descs);
+            }
+        }
+    }
+
     CFRelease(url);
+    if (ps_name) CFRelease(ps_name);
 
     if (ok && path[0]) {
-        log_debug("font_platform: codepoint U+%04X → '%s'", codepoint, path);
+        log_debug("font_platform: codepoint U+%04X → '%s' (face %d)",
+                  codepoint, path, out_face_index ? *out_face_index : 0);
         return mem_strdup(path, MEM_CAT_FONT);
     }
     return NULL;
