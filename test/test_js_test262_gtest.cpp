@@ -384,6 +384,7 @@ struct CachedMeta {
     std::string neg_type;
     std::vector<std::string> includes;
     std::vector<std::string> features;
+    bool native_harness; // true = no includes, not negative, no Test262Error in source
 };
 
 static std::unordered_map<std::string, CachedMeta> g_metadata_cache;
@@ -405,7 +406,8 @@ static bool load_metadata_cache(const char* path) {
 
     std::string header;
     if (!std::getline(f, header)) return false;
-    if (header.substr(0, 2) != "V1") return false;
+    bool is_v2 = header.substr(0, 2) == "V2";
+    if (!is_v2 && header.substr(0, 2) != "V1") return false;
 
     // parse expected count from "V1\t<count>"
     size_t expected = 0;
@@ -428,7 +430,7 @@ static bool load_metadata_cache(const char* path) {
         while (std::getline(ss, field, '\t')) {
             fields.push_back(field);
         }
-        while (fields.size() < 6) fields.push_back("");
+        while (fields.size() < 7) fields.push_back("");
 
         CachedMeta meta;
         meta.flags = std::stoi(fields[1]);
@@ -436,6 +438,7 @@ static bool load_metadata_cache(const char* path) {
         meta.neg_type = fields[3];
         meta.includes = split_semicolons(fields[4]);
         meta.features = split_semicolons(fields[5]);
+        meta.native_harness = is_v2 && !fields[6].empty() && fields[6][0] == '1';
 
         g_metadata_cache[fields[0]] = std::move(meta);
     }
@@ -663,6 +666,7 @@ struct Test262Prepared {
     std::string skip_message;
     bool is_negative;
     std::string negative_type;
+    bool native_harness;         // true = run without JS harness preamble (native interception only)
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -712,6 +716,21 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     return combined;
 }
 
+// Assemble raw test source for native harness mode (no includes, just strict prefix + test body)
+static std::string assemble_native_test_source(const Test262Prepared& p) {
+    std::string source = read_file_contents(get_source_path(p.test_path));
+    if (source.empty()) return "";
+
+    if (p.is_strict) {
+        std::string combined;
+        combined.reserve(source.size() + 20);
+        combined += "\"use strict\";\n";
+        combined += source;
+        return combined;
+    }
+    return source;
+}
+
 // Legacy: assemble combined source with harness included (for backward compatibility)
 static std::string assemble_combined_source(const Test262Prepared& p) {
     std::string source = read_file_contents(get_source_path(p.test_path));
@@ -752,7 +771,7 @@ static const size_t T262_BATCH_CHUNK_SIZE = 50;
 static const size_t T262_MAX_PARALLEL_BATCHES = 12;
 static const size_t RETRY_BATCH_SIZE = 5;
 
-struct SubBatch { size_t start; size_t end; };
+struct SubBatch { size_t start; size_t end; bool native; };
 
 struct BatchTiming {
     size_t batch_idx;
@@ -876,6 +895,7 @@ static void prepare_all_tests(
             p.skip_result = T262_PASS; // not skipped by default
             p.is_negative = false;
             p.is_strict = false;
+            p.native_harness = false;
 
             // check test-specific skip list (by relative path)
             {
@@ -894,6 +914,7 @@ static void prepare_all_tests(
 
             // load metadata from cache or fall back to file read
             Test262Metadata meta;
+            bool cached_native_harness = false;
             if (!g_metadata_cache.empty()) {
                 auto it = g_metadata_cache.find(param.test_path);
                 if (it != g_metadata_cache.end()) {
@@ -908,6 +929,7 @@ static void prepare_all_tests(
                     meta.negative_type  = cm.neg_type;
                     meta.includes = cm.includes;
                     meta.features = cm.features;
+                    cached_native_harness = cm.native_harness;
                 } else {
                     p.skip_result = T262_SKIP;
                     p.skip_message = "not in metadata cache";
@@ -922,6 +944,11 @@ static void prepare_all_tests(
                     continue;
                 }
                 meta = parse_metadata(source);
+                // compute native eligibility inline (no cache available)
+                if (meta.includes.empty() && !meta.is_negative
+                    && source.find("Test262Error") == std::string::npos) {
+                    cached_native_harness = true;
+                }
             }
 
             // skip unsupported
@@ -948,6 +975,14 @@ static void prepare_all_tests(
             p.negative_type = meta.negative_type;
             p.is_strict = meta.is_strict;
             p.includes = std::move(meta.includes);
+
+#ifndef NDEBUG
+            // Native harness eligibility: pre-computed in metadata cache (V2+),
+            // or computed inline when no cache is available.
+            p.native_harness = cached_native_harness;
+#else
+            p.native_harness = false;
+#endif
 
             prep_count.fetch_add(1, std::memory_order_relaxed);
         }
@@ -1094,11 +1129,29 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     std::unordered_map<std::string, BatchResult> results;
     if (indices.empty()) return results;
 
-    // split into chunks
+    // Split indices into native-harness and JS-harness groups.
+    // Native tests run without harness preamble (transpiler intercepts all harness calls).
+    // JS tests run with sta.js+assert.js preamble as before.
+    std::vector<size_t> native_indices, js_indices;
+    for (size_t idx : indices) {
+        if (prepared[idx].native_harness)
+            native_indices.push_back(idx);
+        else
+            js_indices.push_back(idx);
+    }
+    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness = %zu total\n",
+            native_indices.size(), js_indices.size(), indices.size());
+
+    // Create sub-batches from both groups
     std::vector<SubBatch> batches;
-    for (size_t s = 0; s < indices.size(); s += T262_BATCH_CHUNK_SIZE) {
-        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, indices.size());
-        batches.push_back({s, e});
+    for (size_t s = 0; s < native_indices.size(); s += T262_BATCH_CHUNK_SIZE) {
+        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, native_indices.size());
+        batches.push_back({s, e, true});
+    }
+    size_t native_batch_count = batches.size();
+    for (size_t s = 0; s < js_indices.size(); s += T262_BATCH_CHUNK_SIZE) {
+        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, js_indices.size());
+        batches.push_back({s, e, false});
     }
 
     // Sort dispatch order: run estimated-slowest batches first to avoid stragglers.
@@ -1129,8 +1182,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             // Compute estimated cost per batch (sum of per-test times)
             std::vector<long> batch_cost(batches.size(), 0);
             for (size_t bi = 0; bi < batches.size(); bi++) {
+                const auto& idx_vec = batches[bi].native ? native_indices : js_indices;
                 for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
-                    size_t pi = indices[idx];
+                    size_t pi = idx_vec[idx];
                     auto it = prev_timing.find(prepared[pi].test_name);
                     if (it != prev_timing.end()) {
                         batch_cost[bi] += it->second;
@@ -1171,21 +1225,28 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 if (di >= batches.size()) break;
                 size_t i = dispatch_order[di];  // pick batch in cost-sorted order
 
-                // Write manifest for this sub-batch (two-module split: harness first, then tests)
+                // Write manifest for this sub-batch
                 FILE* mf = fopen(manifest_path, "wb");
                 if (!mf) continue;
 
-                // Send harness once per sub-batch via harness: protocol
-                std::string harness = assemble_harness_source();
-                fprintf(mf, "harness:%zu\n", harness.size());
-                fwrite(harness.data(), 1, harness.size(), mf);
-                fputc('\n', mf);
+                const auto& idx_vec = batches[i].native ? native_indices : js_indices;
 
-                // Send each test WITHOUT harness (inherits from preamble)
+                if (!batches[i].native) {
+                    // JS-harness batch: send harness preamble via harness: protocol
+                    std::string harness = assemble_harness_source();
+                    fprintf(mf, "harness:%zu\n", harness.size());
+                    fwrite(harness.data(), 1, harness.size(), mf);
+                    fputc('\n', mf);
+                }
+                // else: native-harness batch — no harness preamble (transpiler intercepts calls)
+
+                // Send each test source
                 for (size_t idx = batches[i].start; idx < batches[i].end; idx++) {
-                    size_t pi = indices[idx];
+                    size_t pi = idx_vec[idx];
                     const auto& p = prepared[pi];
-                    std::string test_src = assemble_test_source(p);
+                    std::string test_src = batches[i].native
+                        ? assemble_native_test_source(p)
+                        : assemble_test_source(p);
                     fprintf(mf, "source:%s:%zu\n",
                             p.test_name.c_str(), test_src.size());
                     fwrite(test_src.data(), 1, test_src.size(), mf);
@@ -1212,12 +1273,14 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
             return batch_timings[a].elapsed_secs > batch_timings[b].elapsed_secs;
         });
-        fprintf(stderr, "\n[test262] Per-batch timing (top 20 slowest of %zu batches):\n", batches.size());
+        fprintf(stderr, "\n[test262] Per-batch timing (top 20 slowest of %zu batches, %zu native + %zu js):\n",
+                batches.size(), native_batch_count, batches.size() - native_batch_count);
         size_t show = std::min((size_t)20, batches.size());
         for (size_t k = 0; k < show; k++) {
             size_t bi = order[k];
-            fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests)  tests[%zu..%zu]\n",
+            fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests) %s  tests[%zu..%zu]\n",
                     bi, batch_timings[bi].elapsed_secs, batch_timings[bi].num_tests,
+                    batches[bi].native ? "[native]" : "[js]    ",
                     batches[bi].start, batches[bi].end - 1);
         }
         // For the top 5 slowest batches, list all test names
@@ -1225,9 +1288,11 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         size_t detail = std::min((size_t)5, batches.size());
         for (size_t k = 0; k < detail; k++) {
             size_t bi = order[k];
-            fprintf(stderr, "  --- batch[%zu] (%.1fs) ---\n", bi, batch_timings[bi].elapsed_secs);
+            const auto& idx_vec = batches[bi].native ? native_indices : js_indices;
+            fprintf(stderr, "  --- batch[%zu] (%.1fs, %s) ---\n", bi, batch_timings[bi].elapsed_secs,
+                    batches[bi].native ? "native" : "js");
             for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
-                size_t pi = indices[idx];
+                size_t pi = idx_vec[idx];
                 const auto& p = prepared[pi];
                 // show per-test time if available
                 auto it = thread_results[bi].find(p.test_name);

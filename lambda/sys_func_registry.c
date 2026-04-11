@@ -802,6 +802,9 @@ extern void js_assert_compare_array(Item actual, Item expected, Item message);
 extern void js_assert_deep_equal(Item actual, Item expected, Item message);
 extern Item js_compare_array(Item a, Item b);
 extern void js_verify_property(Item obj, Item name, Item desc, Item options);
+extern void js_assert_throws(Item expected_ctor, Item func, Item message);
+extern void js_assert_base(Item must_be_true, Item message);
+extern void js_donotevaluate(void);
 #endif
 
 JitImport jit_runtime_imports[] = {
@@ -1201,6 +1204,9 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_deep_equal", FPTR(js_assert_deep_equal)},
     {"js_compare_array", FPTR(js_compare_array)},
     {"js_verify_property", FPTR(js_verify_property)},
+    {"js_assert_throws", FPTR(js_assert_throws)},
+    {"js_assert_base", FPTR(js_assert_base)},
+    {"js_donotevaluate", FPTR(js_donotevaluate)},
 #endif
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},

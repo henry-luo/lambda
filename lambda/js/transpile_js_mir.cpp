@@ -1909,6 +1909,13 @@ static MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+static void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name) {
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 0, NULL, 0);
+    jm_emit(mt, MIR_new_call_insn(mt->ctx, 2,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import)));
+}
+
 static void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
     MIR_var_t args[1] = {{a1t, "a", 0}};
@@ -7974,6 +7981,8 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     native_fn = "js_assert_compare_array";
                 else if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "deepEqual", 9) == 0)
                     native_fn = "js_assert_deep_equal";
+                else if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "throws", 6) == 0)
+                    native_fn = "js_assert_throws";
                 if (native_fn) {
                     JsAstNode* a1 = call->arguments;
                     JsAstNode* a2 = a1 ? a1->next : NULL;
@@ -8022,6 +8031,22 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_2(mt, "js_compare_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_a),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_b));
+            }
+            // assert(mustBeTrue [, message])
+            if (id->name->len == 6 && strncmp(id->name->chars, "assert", 6) == 0 && arg_count >= 1 && arg_count <= 2) {
+                JsAstNode* a1 = call->arguments;
+                JsAstNode* a2 = a1 ? a1->next : NULL;
+                MIR_reg_t cond_reg = jm_transpile_box_item(mt, a1);
+                MIR_reg_t msg_reg  = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
+                jm_call_void_2(mt, "js_assert_base",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cond_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                return jm_emit_undefined(mt);
+            }
+            // $DONOTEVALUATE()
+            if (id->name->len == 14 && strncmp(id->name->chars, "$DONOTEVALUATE", 14) == 0) {
+                jm_call_void_0(mt, "js_donotevaluate");
+                return jm_emit_undefined(mt);
             }
         }
     }

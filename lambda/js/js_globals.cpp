@@ -4515,6 +4515,188 @@ extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
     js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
+// =============================================================================
+// Native assert.throws for test262 (debug builds only)
+// assert.throws(expectedErrorConstructor, func [, message])
+// =============================================================================
+
+extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_to_string_val(Item value);
+    extern Item js_instanceof(Item left, Item right);
+    extern Item js_property_get(Item obj, Item key);
+
+    // validate func argument
+    if (get_type_id(func) != LMD_TYPE_FUNC) {
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name("assert.throws requires two arguments: the error constructor and a function to run"))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    // get message prefix
+    const char* msg_chars = "";
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) { msg_chars = ms->chars; msg_len = (int)ms->len; }
+    }
+
+    // call the function — expect it to throw
+    js_call_function(func, make_js_undefined(), NULL, 0);
+
+    if (js_check_exception()) {
+        // good — an exception was thrown. check its type.
+        Item thrown = js_clear_exception();
+
+        // thrown must be an object
+        TypeId tid = get_type_id(thrown);
+        if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) {
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 1000 ? msg_len : 1000); pos = msg_len < 1000 ? msg_len : 1000; buf[pos++] = ' '; }
+            const char* t = "Thrown value was not an object!";
+            int tl = (int)strlen(t);
+            memcpy(buf + pos, t, tl); pos += tl;
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return;
+        }
+
+        // check: thrown instanceof expectedErrorConstructor
+        Item instanceof_result = js_instanceof(thrown, expected_ctor);
+        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
+
+        if (!is_instance) {
+            // type mismatch — build error message
+            Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+            Item exp_name = js_property_get(expected_ctor, name_key);
+            // get actual constructor name via prototype chain
+            extern Item js_prototype_lookup(Item obj, Item key);
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+            Item thrown_ctor = js_prototype_lookup(thrown, ctor_key);
+            Item act_name = (get_type_id(thrown_ctor) != LMD_TYPE_UNDEFINED && get_type_id(thrown_ctor) != LMD_TYPE_NULL)
+                ? js_property_get(thrown_ctor, name_key) : make_js_undefined();
+            String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+            String* ans = (get_type_id(act_name) == LMD_TYPE_STRING) ? it2s(act_name) : NULL;
+            const char* en = ens ? ens->chars : "?";
+            int enl = ens ? (int)ens->len : 1;
+            const char* an = ans ? ans->chars : "?";
+            int anl = ans ? (int)ans->len : 1;
+
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+
+            if (enl == anl && strncmp(en, an, enl) == 0) {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a different error constructor with the same name";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+            } else {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a ";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+                memcpy(buf + pos, an, anl < 100 ? anl : 100); pos += anl < 100 ? anl : 100;
+            }
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+        }
+        return;
+    }
+
+    // no exception was thrown — that's a failure
+    {
+        Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+        Item exp_name = js_property_get(expected_ctor, name_key);
+        String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+        const char* en = ens ? ens->chars : "?";
+        int enl = ens ? (int)ens->len : 1;
+
+        char buf[1200];
+        int pos = 0;
+        if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+        const char* t = "Expected a ";
+        int tl = (int)strlen(t);
+        memcpy(buf + pos, t, tl); pos += tl;
+        memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+        const char* t2 = " to be thrown but no exception was thrown at all";
+        int t2l = (int)strlen(t2);
+        memcpy(buf + pos, t2, t2l); pos += t2l;
+        buf[pos] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+    }
+}
+
+// =============================================================================
+// Native assert() base function for test262 (debug builds only)
+// assert(mustBeTrue [, message])
+// =============================================================================
+
+extern "C" void js_assert_base(Item must_be_true, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_to_string_val(Item value);
+
+    // check mustBeTrue === true
+    if (get_type_id(must_be_true) == LMD_TYPE_BOOL && it2b(must_be_true)) return;
+
+    // build error message
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) {
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            js_throw_value(js_new_error_with_name(err_name, message));
+            return;
+        }
+    }
+
+    // default message: "Expected true but got <value>"
+    Item val_str = js_to_string_val(must_be_true);
+    String* vs = it2s(val_str);
+    const char* prefix = "Expected true but got ";
+    int plen = (int)strlen(prefix);
+    int vlen = vs ? (int)vs->len : 9;
+    const char* vchars = vs ? vs->chars : "undefined";
+    char* buf = (char*)malloc(plen + vlen + 1);
+    memcpy(buf, prefix, plen);
+    memcpy(buf + plen, vchars, vlen);
+    buf[plen + vlen] = '\0';
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name(buf, plen + vlen))};
+    free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native $DONOTEVALUATE for test262 (debug builds only)
+// =============================================================================
+
+extern "C" void js_donotevaluate(void) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name("Test262: This statement should not be evaluated."))};
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
 #endif // !NDEBUG
 
 // =============================================================================
