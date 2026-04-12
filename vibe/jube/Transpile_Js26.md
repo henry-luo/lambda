@@ -275,7 +275,7 @@ Four benchmarks now **faster than V8**: sieve (0.26×), permute (0.59×), queens
 
 ---
 
-### P4: Direct Array Access in Typed Loops (Priority: HIGH)
+### P4: Direct Array Access in Typed Loops (Priority: HIGH) — ✅ PARTIALLY DONE
 
 **Problem:** Array access in tight loops (`arr[i]` where both arr and i are known types) still goes through bounds checking + deleted-sentinel checking per access. For `matmul` (136×), the inner loop does 3 array reads and 1 array write per iteration, each with full runtime overhead.
 
@@ -284,7 +284,15 @@ Four benchmarks now **faster than V8**: sieve (0.26×), permute (0.59×), queens
 - Checking `arr->items[idx] != JS_DELETED_SENTINEL` every access
 - Function call fallback for out-of-bounds
 
-**Proposed fix — Loop-hoisted bounds check:**
+**Implemented (in Phase 2):**
+- ✅ P4b: Array element class type propagation (`bodies[i]` → Body via field-access inference)
+- ✅ P4b-of: For-of loop variable class inference (same field-access inference as P4b)
+- ✅ P4h: Loop-invariant array pointer hoisting (typed + regular arrays in for/while loops)
+- ~~ Bounds check elimination — deferred (diminishing returns; hot loops use function params)
+
+**Remaining (deferred):**
+
+Loop-hoisted bounds check (full elimination):
 ```mir
 // Before loop: verify array won't be resized
 arr_len = load_i64(arr, 16)    // arr->length
@@ -300,12 +308,12 @@ For 2D arrays (`matrix[i][j]`):
 2. Hoist inner array pointer (`row_items = row->items`) to inner loop entry
 3. Inner load becomes single `load_i64(row_items, j * 8)`
 
-**Expected impact:** 5–10× speedup on array-intensive loops → matmul from 136× to ~15×, navier_stokes from 47× to ~8×.
+**Expected impact (remaining):** Bounds check elimination could yield additional 1.5–2× on array-intensive loops, but was deferred as diminishing returns.
 
 **Effort:** Medium. Requires:
 1. Loop analysis to identify array access patterns
 2. Bounds-check hoisting (prove loop bounds ≤ array length)
-3. Array items pointer hoisting (prove no resize in loop body)
+3. Array items pointer hoisting (prove no resize in loop body) — ✅ done (P4h)
 
 ---
 
