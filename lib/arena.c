@@ -73,6 +73,53 @@ static inline int _arena_get_bin(size_t size) {
     return 7;  // 2048+ goes to last bin
 }
 
+// Helper: remove a specific free block from its bin
+// Returns true if the block was found and removed
+static bool _arena_remove_free_block(Arena* arena, ArenaFreeBlock* target) {
+    int bin = _arena_get_bin(target->size);
+    ArenaFreeBlock** prev_ptr = &arena->free_lists[bin];
+    ArenaFreeBlock* block = arena->free_lists[bin];
+
+    while (block) {
+        if (block == target) {
+            *prev_ptr = block->next;
+            arena->free_bytes -= block->size;
+            return true;
+        }
+        prev_ptr = &block->next;
+        block = block->next;
+    }
+    return false;
+}
+
+// Helper: find and remove a free block adjacent to [addr, addr+size)
+// Scans all bins for a block whose end touches addr (left neighbor)
+// or whose start is at addr+size (right neighbor).
+// Returns the removed block, or NULL if no adjacent block found.
+static ArenaFreeBlock* _arena_find_adjacent_block(Arena* arena, uintptr_t addr, size_t size) {
+    uintptr_t block_end = addr + size;
+
+    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
+        ArenaFreeBlock** prev_ptr = &arena->free_lists[i];
+        ArenaFreeBlock* block = arena->free_lists[i];
+
+        while (block) {
+            uintptr_t fb_start = (uintptr_t)block;
+            uintptr_t fb_end = fb_start + block->size;
+
+            if (fb_end == addr || fb_start == block_end) {
+                // adjacent — remove from bin
+                *prev_ptr = block->next;
+                arena->free_bytes -= block->size;
+                return block;
+            }
+            prev_ptr = &block->next;
+            block = block->next;
+        }
+    }
+    return NULL;
+}
+
 // Forward declarations
 static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment);
 
@@ -471,12 +518,40 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     // Determine bin index based on size
     int bin = _arena_get_bin(size);
 
-    // Add to free-list
-    ArenaFreeBlock* block = (ArenaFreeBlock*)ptr;
-    block->size = size;
+    // Coalesce with adjacent free blocks
+    uintptr_t merged_addr = (uintptr_t)ptr;
+    size_t merged_size = size;
+
+    // Repeatedly scan for adjacent free blocks and merge them
+    ArenaFreeBlock* adj;
+    while ((adj = _arena_find_adjacent_block(arena, merged_addr, merged_size)) != NULL) {
+        uintptr_t adj_addr = (uintptr_t)adj;
+        if (adj_addr + adj->size == merged_addr) {
+            // left neighbor: adj is before our block
+            merged_addr = adj_addr;
+            merged_size += adj->size;
+        } else {
+            // right neighbor: adj is after our block
+            merged_size += adj->size;
+        }
+    }
+
+    // After coalescing, check if merged block reaches the bump cursor (bump-back)
+    uintptr_t merged_end = merged_addr + merged_size;
+    chunk_cursor = data_start + chunk->used;
+    if (merged_end == chunk_cursor) {
+        chunk->used -= merged_size;
+        arena->total_used -= merged_size;
+        return;
+    }
+
+    // Add merged block to free-list in appropriate bin
+    bin = _arena_get_bin(merged_size);
+    ArenaFreeBlock* block = (ArenaFreeBlock*)merged_addr;
+    block->size = merged_size;
     block->next = arena->free_lists[bin];
     arena->free_lists[bin] = block;
-    arena->free_bytes += size;
+    arena->free_bytes += merged_size;
 }
 
 // Try to allocate from free-list (alignment-aware, A3 fix)

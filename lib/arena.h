@@ -17,6 +17,11 @@ extern "C" {
  * - Adaptive chunk sizing (4KB -> 64KB)
  * - Zero per-allocation metadata overhead
  * - Bulk reset/clear operations
+ *
+ * @warning ARENA_NOT_THREAD_SAFE - Arena is NOT thread-safe.
+ * Each Arena instance must be owned and accessed by a single thread only.
+ * Concurrent access from multiple threads requires external synchronization
+ * (e.g., a mutex). ScratchArena is designed for single-threaded scoped use.
  */
 
 // Default chunk size configurations

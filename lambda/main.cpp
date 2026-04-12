@@ -3198,8 +3198,8 @@ int main(int argc, char *argv[]) {
 
     // Note: memtrack_shutdown is called via atexit handler
 
-    // Note: rpmalloc cleanup is handled automatically when process exits
-    // since it's only used within mempool (not as global malloc replacement)
+    // Clean up rpmalloc (release thread and global state)
+    mempool_cleanup();
 
     log_finish();
     return ret_code;
