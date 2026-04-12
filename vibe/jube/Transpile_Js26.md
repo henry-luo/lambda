@@ -4,7 +4,11 @@
 
 This document analyzes the current LambdaJS benchmark performance against V8 (Node.js 22.13.0) and proposes targeted optimizations to close the gap. Benchmarks were run on Apple Silicon M4 (release build, 3 runs averaged).
 
-**Key finding:** LambdaJS shows a **massive OOP benchmark regression** since the Js11 era (6.3× geo mean → 25.82× for AWFY). The test262 compliance work (Js16–Js25) introduced correctness overhead that negated earlier performance gains. Numeric and function-call benchmarks remain competitive (R7RS 3.12×, BENG 3.65×), confirming the regression is **localized to object/property access paths**.
+**Current status (2026-04-12, after P1+P2+P4b):** Overall geo mean improved from ~8× to **~5×** across all suites. AWFY improved from 25.82× to **17.64×** (still the weakest suite, dominated by method dispatch overhead in richards/deltablue). nbody improved from 235× to **66×** (3.6× faster). R7RS and BENG are now near-competitive at 2.26× and 2.48×.
+
+**Update (2026-06-19, after P2b+P4b-of+P4h):** AWFY geo mean improved from 17.64× to **16.27×** (−7.8%). Key wins: storage −12.2% (INT compound assignment), richards −8.4%, json −8.2%, nbody −7.0%, towers −5.8%. Phase 2 is now effectively complete; remaining gains require Phase 3 (method dispatch).
+
+**Key finding (original):** LambdaJS shows a **massive OOP benchmark regression** since the Js11 era (6.3× geo mean → 25.82× for AWFY). The test262 compliance work (Js16–Js25) introduced correctness overhead that negated earlier performance gains. The regression is **localized to object/property access paths**.
 
 ---
 
@@ -12,90 +16,87 @@ This document analyzes the current LambdaJS benchmark performance against V8 (No
 
 ### Summary by Suite (Geometric Mean LJS/V8)
 
-| Suite | Geo Mean | Tests | LJS Wins | Verdict |
-|-------|----------|-------|----------|---------|
-| R7RS | **3.12×** | 9/10 | ack (0.60×) | Acceptable |
-| AWFY | **25.82×** | 12/14 | sieve (0.32×) | Critical regression |
-| BENG | **3.65×** | 7/10 | fannkuch (0.21×), pidigits (0.26×) | Acceptable |
-| KOSTYA | **6.91×** | 7/7 | — | Needs work |
-| LARCENY | **5.28×** | 12/12 | array1 (0.41×) | Needs work |
+| Suite | Original | After P1+P2+P4b | After P2b+P4h | Tests | LJS Wins | Verdict |
+|-------|----------|-----------------|---------------|-------|----------|---------|
+| R7RS | 3.12× | **2.26×** | **2.26×** | 9/10 | tak, ack, nqueens, paraffins, primes | Good |
+| AWFY | 25.82× | **17.64×** | **16.27×** | 12/14 | sieve (0.26×) | Needs P3 method dispatch |
+| BENG | 3.65× | **2.48×** | **2.48×** | 7/10 | fannkuch (0.15×), pidigits (0.17×) | Good |
+| KOSTYA | 6.91× | **4.96×** | **~4.9×** | 7/7 | primes (0.85×) | Needs work |
+| LARCENY | 5.28× | **3.80×** | **~3.7×** | 12/12 | array1, paraffins, primes | Improved |
 
-### Tier Classification
+### Tier Classification (Updated 2026-04-12)
 
 **A-Tier: LambdaJS FASTER than V8 (< 1×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| fannkuch | 1.47 | 6.88 | 0.21× | Pure integer recursion |
-| pidigits | 0.73 | 2.83 | 0.26× | BigInt/integer math |
-| sieve | 0.16 | 0.51 | 0.32× | Simple array + loop |
-| array1 | 1.09 | 2.65 | 0.41× | Array fill + access |
-| ack | 11.19 | 18.55 | 0.60× | Deep recursion |
+| fannkuch | 1.04 | 6.88 | 0.15× | Pure integer recursion |
+| pidigits | 0.49 | 2.83 | 0.17× | BigInt/integer math |
+| array1 | 0.82 | 2.65 | 0.31× | Array fill + access |
+| sieve | 0.13 | 0.51 | 0.26× | Simple array + loop |
+| ack | 8.14 | 18.55 | 0.44× | Deep recursion |
+| paraffins | 1.02 | 1.33 | 0.77× | Tree recursion |
+| tak | 0.84 | 1.06 | 0.79× | Integer recursion |
+| primes-L | 5.07 | 6.14 | 0.83× | Integer sieve |
+| nqueens | 2.13 | 2.50 | 0.85× | Backtracking |
+| primes-K | 5.13 | 6.06 | 0.85× | Integer sieve |
 
 **B-Tier: Near Parity (1–2×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| tak | 1.10 | 1.06 | 1.03× | Integer recursion |
-| paraffins | 1.38 | 1.33 | 1.04× | Tree recursion |
-| primes-K | 7.03 | 6.06 | 1.16× | Integer sieve |
-| primes-L | 7.40 | 6.14 | 1.21× | Integer sieve |
-| nqueens | 3.03 | 2.50 | 1.21× | Backtracking |
-| cpstak | 2.30 | 1.37 | 1.68× | CPS recursion |
+| cpstak | 1.64 | 1.37 | 1.20× | CPS recursion |
+| fasta | 12.85 | 9.15 | 1.40× | String building |
+| base64 | 47.40 | 26.77 | 1.77× | String/byte ops |
+| divrec | 18.53 | 10.17 | 1.82× | Integer division |
 
 **C-Tier: Moderate Slowdown (2–5×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| fasta | 19.05 | 9.15 | 2.08× | String building |
-| divrec | 24.80 | 10.17 | 2.44× | Integer division |
-| base64 | 66.85 | 26.77 | 2.50× | String/byte ops |
-| ray | 15.96 | 5.22 | 3.06× | Float math + objects |
-| sumfp | 4.44 | 1.26 | 3.53× | Float accumulation |
-| json_gen | 33.25 | 9.08 | 3.66× | Object creation |
-| puzzle | 20.23 | 5.22 | 3.87× | Array + integer math |
-| collatz | 7643.68 | 1849.04 | 4.13× | Integer loop |
-| mandelbrot-A | 195.07 | 41.65 | 4.68× | Float math in loop |
-| fib | 13.32 | 2.81 | 4.74× | Integer recursion |
-| mandelbrot-B | 103.99 | 21.23 | 4.90× | Float math in loop |
+| ray | 10.76 | 5.22 | 2.06× | Float math + objects |
+| sumfp | 3.04 | 1.26 | 2.41× | Float accumulation |
+| json_gen | 23.45 | 9.08 | 2.58× | Object creation |
+| puzzle | 14.69 | 5.22 | 2.81× | Array + integer math |
+| collatz | 5596.07 | 1849.04 | 3.03× | Integer loop |
+| mandelbrot-B | 73.03 | 21.23 | 3.44× | Float math in loop |
+| mandelbrot-A | 143.85 | 41.65 | 3.45× | Float math in loop |
+| fib | 10.71 | 2.81 | 3.81× | Integer recursion |
+| quicksort | 11.13 | 2.42 | 4.60× | Array swap + recursion |
 
 **D-Tier: Slow (5–20×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| quicksort | 15.84 | 2.42 | 6.54× | Array swap + recursion |
-| spectralnorm | 41.13 | 4.76 | 8.64× | Float nested loops |
-| fibfp | 21.82 | 2.46 | 8.86× | Float recursion |
-| brainfuck | 646.15 | 66.20 | 9.76× | Interpreter pattern |
-| triangl | 1027.60 | 96.75 | 10.62× | Array + integer ops |
-| binarytrees | 85.78 | 7.63 | 11.24× | Alloc-heavy trees |
-| sum | 24.51 | 1.95 | 12.55× | Integer accumulation |
-| mbrot | 32.06 | 2.68 | 11.96× | Float complex math |
-| levenshtein | 69.55 | 5.37 | 12.96× | 2D array + loops |
-| list-A | 10.44 | 0.76 | 13.68× | Linked list OOP |
-| pnpoly | 120.37 | 7.72 | 15.59× | Array + float math |
-| bounce | 14.70 | 0.85 | 17.27× | OOP class methods |
-| crypto_sha1 | 235.72 | 12.41 | 19.00× | Bitwise + array ops |
-| diviter | 12259.43 | 615.44 | 19.92× | Long integer loop |
+| spectralnorm | 27.73 | 4.76 | 5.83× | Float nested loops |
+| fibfp | 15.43 | 2.46 | 6.27× | Float recursion |
+| brainfuck | 450.80 | 66.20 | 6.81× | Interpreter pattern |
+| binarytrees | 59.29 | 7.63 | 7.77× | Alloc-heavy trees |
+| triangl | 759.85 | 96.75 | 7.85× | Array + integer ops |
+| mbrot | 22.68 | 2.68 | 8.46× | Float complex math |
+| bounce | 7.33 | 0.85 | 8.62× | OOP class methods |
+| sum | 17.29 | 1.95 | 8.87× | Integer accumulation |
+| levenshtein | 50.80 | 5.37 | 9.46× | 2D array + loops |
+| list | 7.81 | 0.76 | 10.28× | Linked list OOP |
+| pnpoly | 84.28 | 7.72 | 10.92× | Array + float math |
+| storage | 12.41 | 0.90 | 13.79× | Array alloc OOP |
+| diviter | 9088.09 | 615.44 | 14.77× | Long integer loop |
 
 **E-Tier: Critical (>20×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| storage | 20.40 | 0.90 | 22.72× | Array alloc OOP |
-| queens-A | 22.69 | 0.97 | 23.36× | OOP class methods |
-| deriv | 168.80 | 6.14 | 27.48× | Recursive structure |
-| permute | 37.09 | 1.06 | 34.91× | OOP + array |
-| towers | 69.13 | 1.65 | 41.92× | OOP linked list |
-| navier_stokes | 1019.00 | 21.63 | 47.12× | Float array ops |
-| gcbench | 1957.34 | 36.72 | 53.31× | GC allocation |
-| richards-J | 735.89 | 12.25 | 60.08× | OOP method dispatch |
-| json-A | 299.05 | 3.70 | 80.90× | OOP + hash map |
-| richards-A | 8332.02 | 66.43 | 125.43× | OOP method dispatch |
-| deltablue | 2514.22 | 18.93 | 132.82× | OOP constraints |
-| matmul | 2989.24 | 21.95 | 136.19× | Float 2D array |
-| nbody-B | 1886.97 | 11.83 | 159.53× | Float + object |
-| nbody-A | 1749.21 | 7.43 | 235.48× | Float + class field |
+| queens | 16.29 | 0.97 | 16.79× | OOP class methods |
+| deriv | 122.37 | 6.14 | 19.93× | Recursive structure |
+| permute | 25.71 | 1.06 | 24.25× | OOP + array |
+| towers | 48.32 | 1.65 | 29.28× | OOP linked list |
+| gcbench | 1368.78 | 36.72 | 37.28× | GC allocation |
+| json | 191.83 | 3.70 | 51.85× | OOP + hash map |
+| nbody-A | 453.14 | 7.43 | 60.99× | Float + class field |
+| richards-A | 5726.52 | 66.43 | 86.20× | OOP method dispatch |
+| matmul | 2144.68 | 21.95 | 97.71× | Float 2D array |
+| nbody-B | 1194.46 | 11.83 | 100.97× | Float + object |
+| deltablue | 1843.05 | 18.93 | 97.37× | OOP constraints |
 
 ### Failing Tests (8 of 62)
 
@@ -226,45 +227,51 @@ store_f64(this_ptr, offset_x, x)   // no boxing, straight memory write
 
 ---
 
-### P3: Inline Method Dispatch for Monomorphic Call Sites (Priority: HIGH)
+### P3: Inline Method Dispatch for Known Class Instances ✅ IMPLEMENTED
 
-**Problem:** `obj.method(args)` compiles to two runtime calls: `js_property_access(obj, "method")` to fetch the function, then `js_call_function(fn, this, args, argc)` to invoke it. For benchmarks like richards (125×) and deltablue (133×), the inner loop is dominated by virtual method dispatch.
+**Problem:** `obj.method(args)` compiles to two runtime calls: `js_property_access(obj, "method")` to fetch the function, then `js_call_function(fn, this, args, argc)` to invoke it. The full dispatch chain is: `js_map_method` (670 lines of type checks) → `js_property_access` (hash lookup + prototype chain walk) → `js_call_function` (type check, this binding, builtin check) → `js_invoke_fn` (arity switch, fn ptr cast) — **6+ function calls per method invocation**.
 
-**Current state:** The P7 optimization exists for direct native calls where the transpiler can resolve the method at compile time. But this requires the transpiler to know both the class of the receiver AND that no subclass overrides the method.
+**Implementation (2025-06-22):** Direct MIR CALL bypassing all runtime dispatch.
 
-**Proposed fix — Inline Cache (IC) at call site:**
-```c
-// Monomorphic IC: cache the last shape → function pointer mapping
-static Shape* cached_shape = NULL;
-static FuncPtr cached_fn = NULL;
+When the receiver's class is known at compile time:
+- `this.method(args)` inside a class method: uses `mt->current_class`
+- `obj.method(args)` where `obj` was assigned from `new ClassName()`: uses `obj->class_entry`
 
-if (obj->shape == cached_shape) {
-    result = cached_fn(obj, args...);  // fast path: direct call
-} else {
-    fn = js_property_access(obj, "method");
-    cached_shape = obj->shape;
-    cached_fn = extract_func(fn);
-    result = js_call_function(fn, obj, args, argc);
-}
-```
+The transpiler resolves the method by walking the class + superclass chain at compile time, then emits a direct `MIR_CALL` to the method's `func_item` with individually transpiled boxed arguments.
 
-In MIR, this translates to a shape-check guard + direct function call.
+**Key implementation details:**
+1. **Override safety:** For `this` receiver, scans ALL known classes to detect subclass overrides. If any subclass overrides the target method, P3 falls back to runtime dispatch. Named vars from `new ClassName()` have exact types — no override check needed.
+2. **Argument evaluation order:** Arguments are transpiled BEFORE setting `this` to the receiver. This prevents a bug where `object.add(name, this.readValue())` would see the wrong `this` during argument evaluation.
+3. **Guards:** Method must have `func_item` (compiled), `capture_count == 0` (no closures), and no spread arguments.
+4. **This save/restore:** Saves `js_get_this()`, sets `js_set_this(recv)`, clears `new.target`, calls method, restores both.
+5. **Closure readback:** Calls `jm_readback_closure_env()` after the direct call in case the method modified closure state.
 
-For class hierarchies with known subclasses (common in AWFY), emit a **switch on shape**:
-```mir
-// Virtual dispatch for node.process() where Node has 3 subclasses
-shape = load_i64(node, 0)  // shape pointer at offset 0
-if shape == WorkerNode_shape: call WorkerNode_process(node)
-elif shape == HandlerNode_shape: call HandlerNode_process(node)
-else: call generic_dispatch(node, "process", ...)
-```
+**Insertion point:** Between spread-arg check and `jm_build_args_array()` in the CALL_EXPRESSION handler for method calls.
 
-**Expected impact:** 5–20× speedup on method-heavy benchmarks → richards from 125× to ~10×, deltablue from 133× to ~15×.
+**Results — AWFY benchmarks (5-run medians, release build, Apple Silicon M4):**
 
-**Effort:** Medium-High. Requires:
-1. Shape comparison in generated MIR code
-2. Per-call-site IC slot allocation (MIR global variables)
-3. Polymorphic fallback for megamorphic sites
+| Benchmark | Pre-P3 (ms) | Post-P3 (ms) | Speedup | vs V8 |
+|-----------|-------------|--------------|---------|-------|
+| sieve | 0.131 | 0.134 | — | **0.26×** |
+| permute | 25.71 | 0.625 | **41.1×** | **0.59×** |
+| queens | 16.29 | 0.482 | **33.8×** | **0.50×** |
+| towers | 48.32 | 4.511 | **10.7×** | 2.73× |
+| bounce | 7.33 | 7.746 | — | 9.11× |
+| list | 7.81 | 0.673 | **11.6×** | **0.89×** |
+| storage | 12.41 | 5.478 | **2.3×** | 6.09× |
+| mandelbrot | 143.85 | 147.03 | — | 3.53× |
+| nbody | 453.14 | 440.22 | — | 59.25× |
+| richards | 5726.52 | 4778.47 | **1.2×** | 71.93× |
+| json | 191.83 | 17.01 | **11.3×** | 4.60× |
+| deltablue | 1843.05 | 1906.63 | — | 100.72× |
+
+**AWFY Geometric Mean: 16.27× → 4.52× (−72.2%, 3.6× overall improvement)**
+
+Four benchmarks now **faster than V8**: sieve (0.26×), permute (0.59×), queens (0.50×), list (0.89×).
+
+**Why some benchmarks don't improve:**
+- **bounce/sieve/mandelbrot/nbody:** Dominated by numeric computation, not method dispatch — P3 doesn't fire on hot paths
+- **richards/deltablue:** Use deep polymorphic hierarchies where `this` receiver has subclass overrides → P3 correctly falls back to runtime dispatch. These need P3b (shape-based polymorphic dispatch) for further improvement
 
 ---
 
@@ -371,16 +378,19 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 
 **Result:** 7–26% improvement on OOP benchmarks. Modest vs target because method dispatch and array element type propagation are larger bottlenecks. See §7 for detailed analysis.
 
-### Phase 2: Float Unboxing (P2) + Array Hoisting (P4) — NEXT
+### Phase 2: Float Unboxing (P2) + Array Hoisting (P4) — ✅ COMPLETE (2025-06-19)
 
 1. ✅ Field type tracking implemented in P1 (`ctor_prop_types[]`)
 2. ✅ Native float load/store for shaped float fields (P1 `js_get/set_slot_f`)
-3. ⬜ Compound assignment native path (`this.x += val` in methods)
-4. ⬜ Array element class type propagation (`bodies[i]` → Body)
-5. ⬜ Loop-invariant array pointer hoisting
-6. ⬜ Eliminate per-iteration bounds checks where provably safe
+3. ✅ Compound assignment native path (`this.x += val` and `obj.x -= expr` in methods)
+4. ✅ Array element class type propagation (`bodies[i]` → Body via P4b field-access inference)
+5. ✅ P2b: INT compound/simple assignment (`js_get/set_slot_i` for INT-typed shaped fields)
+6. ✅ P4b-of: For-of loop variable class inference (same field-access inference as P4b)
+7. ✅ Inheritance guard fix (only disable child `ctor_prop_count` when parent has constructor fields)
+8. ✅ P4h: Loop-invariant array pointer hoisting (typed + regular arrays in for/while loops)
+9. ~~ Bounds check elimination — deferred (diminishing returns; hot loops use function params)
 
-**Validation:** nbody < 10×, matmul < 10×, mandelbrot < 3×.
+**Validation (2025-06-19):** AWFY geo mean 17.64× → 16.27× (−7.8%). Key: storage 14.14→12.41ms (−12.2%), richards 6252→5727ms (−8.4%), json 209→192ms (−8.2%), nbody 487→453ms (−7.0%).
 
 ### Phase 3: Method Dispatch (P3) + Loop Counter (P6)
 
@@ -402,14 +412,14 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 
 ## 5. Target Performance After Optimization
 
-| Suite | Current Geo Mean | Target Geo Mean | Improvement |
-|-------|-----------------|----------------|-------------|
-| R7RS | 3.12× | **2.0×** | 1.5× |
-| AWFY | 25.82× | **5.0×** | 5× |
-| BENG | 3.65× | **2.0×** | 1.8× |
-| KOSTYA | 6.91× | **3.0×** | 2.3× |
-| LARCENY | 5.28× | **3.0×** | 1.8× |
-| **Overall** | **~8× geo mean** | **~3× geo mean** | **2.7×** |
+| Suite | Original | After P1+P2 | After P2b | Target | Remaining |
+|-------|----------|-------------|-----------|--------|-----------|
+| R7RS | 3.12× | **2.26×** | **2.26×** | **2.0×** | Close — fibfp, sum, mbrot need work |
+| AWFY | 25.82× | **17.64×** | **16.27×** | **5.0×** | P3 method dispatch critical |
+| BENG | 3.65× | **2.48×** | **2.48×** | **2.0×** | Nearly there — spectralnorm, nbody |
+| KOSTYA | 6.91× | **4.96×** | **~4.9×** | **3.0×** | matmul needs param type propagation |
+| LARCENY | 5.28× | **3.80×** | **~3.7×** | **3.0×** | Close — diviter, gcbench, triangl |
+| **Overall** | **~8×** | **~5×** | **~4.8×** | **~3×** | P3 + P6 loop counter needed |
 
 ### Test Fixes (8 failing → 3 failing)
 
@@ -500,77 +510,227 @@ The P1 implementation delivers **measurable but modest improvements** (7–26%).
 - Method call return type inference (class factory methods)
 - Compound assignment native path (`this.x += val` in methods, not just constructors)
 
+### Phase 2 (P2+P4b): Compound Assignment + Array Element Type Inference — ✅ IMPLEMENTED (2025-06-18)
+
+**What was built:**
+
+1. **P2: Native compound assignment for shaped class instances** — For `obj.field op= expr` (where op is `+=`, `-=`, `*=`, `/=`) and the object has known class_entry with FLOAT field type:
+   - Emits `js_get_slot_f(obj, byte_offset)` → native double read
+   - Transpiles RHS as native float (or unbox if ANY type)
+   - Emits native MIR arithmetic (MIR_DADD, MIR_DSUB, MIR_DMUL, MIR_DDIV)
+   - Emits `js_set_slot_f(obj, byte_offset, result)` → native double write
+   - Replaces 3 boxed runtime calls (property_access + js_subtract + property_set) with 2 native slot calls + 1 MIR instruction
+   - Also handles simple assignment (`obj.field = expr`) in method bodies for float fields
+   - Boxed fallback (`js_set_shaped_slot`) for known-slot non-float simple assignments
+
+2. **P4b: Array element class type inference** — When a variable is assigned from a subscript access (`const x = arr[i]`):
+   - `jm_collect_var_fields_walk()` recursively walks the function body AST to collect all unique field names accessed as `x.field`
+   - `jm_match_class_from_fields()` scans all known `JsClassEntry` objects and finds the unique class whose constructor has ALL collected field names
+   - Requires ≥2 unique field accesses for reliable inference (avoids false positives)
+   - Tags `var_entry->class_entry` enabling P1 native reads and P2 native writes on the variable
+   - Works for both `this.bodies[i]` (via `mt->current_class`) and named array variables
+
+**Key design decisions:**
+- P4b uses **usage-based inference** rather than array element type tracking: it doesn't need to know the array's element type, just that the variable is used with field names matching exactly one class
+- The AST walker handles 20+ node types to cover common code patterns (blocks, for loops, if statements, assignments, binary expressions, function calls, switch, try/catch, etc.)
+- Functions/class bodies are NOT recursed into (different scope — the variable isn't accessible there)
+- The "exactly one class matches" constraint ensures soundness: if two classes share all accessed field names, inference conservatively returns NULL
+
+**Files changed:**
+
+| File | Changes |
+|------|---------|
+| `lambda/js/transpile_js_mir.cpp` | P2 compound assignment block (~70 lines), P4b walker + matcher + integration (~150 lines) |
+
+**Tests:** 78/78 JS tests pass, 566/566 Lambda baseline tests pass, 11/11 passing AWFY benchmarks still pass.
+
+**Benchmark results (debug build, Apple Silicon M4):**
+
+| Benchmark | Before (ms) | After (ms) | Speedup |
+|-----------|------------|-----------|---------|
+| nbody | 3772 | 1234 | **3.06×** |
+| bounce | 51 | 31 | **1.63×** |
+| deltablue | 7095 | 7160 | ~1.00× |
+| richards | 23357 | 23977 | ~1.00× |
+
+**Release build (Apple Silicon M4):**
+
+| Benchmark | Release (ms) |
+|-----------|-------------|
+| nbody | 474 |
+| bounce | 8.5 |
+| mandelbrot | 149 |
+| permute | 30 |
+| queens | 17.5 |
+
+**What fires on nbody hot loop:**
+- P4b: `_js_iBody` and `_js_jBody` inferred as `Body` from 7 field accesses each
+- P1: 8 native float loads (`iBody.mass`, `iBody.vx`×2, `iBody.vy`×2, `iBody.vz`×2, `jBody.mass`)
+- P2: 6 native compound assignments (`iBody.vx -= ...`, `iBody.vy -= ...`, `iBody.vz -= ...`, `jBody.vx += ...`, `jBody.vy += ...`, `jBody.vz += ...`)
+
+**Remaining gaps:**
+- deltablue/richards dominated by method dispatch (→ P3 needed)
+- forEach callback parameters (e.g., `body` in `bodies.forEach((body) => { body.x += ... })`) not yet inferred — P4b only works with subscript-initialized variables
+- matmul/navier_stokes need array pointer hoisting and bounds check elimination
+
+### Phase 2b (P2b+P4b-of+P4h): INT Assignment + For-of Inference + Array Hoisting — ✅ IMPLEMENTED (2025-06-19)
+
+**What was built:**
+
+1. **P2b: INT compound/simple assignment for shaped class instances** — Mirrors P2 float assignment but for INT-typed fields:
+   - Emits `js_get_slot_i(obj, byte_offset)` → native int64_t read
+   - Emits native MIR integer arithmetic (MIR_ADD, MIR_SUB, MIR_MUL)
+   - Emits `js_set_slot_i(obj, byte_offset, result)` → native int64_t write
+   - Also handles simple assignment (`obj.field = expr`) for INT fields
+   - Biggest winner: `storage` benchmark (−12.2%) which uses integer fields in OOP patterns
+
+2. **P4b-of: For-of loop variable class inference** — Extends P4b to `for (const x of arr)` loops:
+   - Reuses `jm_collect_var_fields_walk()` and `jm_match_class_from_fields()` from P4b
+   - The for-of iteration variable gets class_entry tagged, enabling P1 native reads and P2 native writes
+   - Works alongside the existing for-of semi-native optimization
+
+3. **Inheritance guard fix** — Fixed false negative in constructor field type detection for class hierarchies:
+   - Previously: if a class extends another, child's `ctor_prop_count` was unconditionally zeroed
+   - Fix: only disable child `ctor_prop_count` when parent class actually has constructor field assignments (`parent_has_ctor_fields` flag)
+   - Enables P1/P2 native paths for more class hierarchies (e.g., AWFY benchmarks with empty base classes)
+
+4. **P4h: Loop-invariant array pointer hoisting** — Hoists array metadata loads (items pointer, length, typed-array data pointer) out of for/while loop bodies:
+   - `jm_scan_subscript_arrays()` AST walker scans loop body for computed MEMBER_EXPRESSION patterns (`arr[i]`)
+   - Tracks reassigned variables as "unsafe" (prevents hoisting for mutated arrays)
+   - For typed arrays: hoists 3 loads (ta_ptr, ta_len, ta_data) before loop entry
+   - For regular arrays: hoists 2 loads (items pointer, length) before loop entry
+   - Hoisted registers stored in `JsMirVarEntry.hoisted_data_reg` / `hoisted_len_reg`
+   - All 4 array access functions (`array_get_inline`, `typed_array_get`, `typed_array_get_native`, `typed_array_set`) accept optional hoisted registers and skip redundant loads when provided
+   - Cleanup: hoisted fields cleared after loop end to prevent stale pointers in nested/sequential loops
+   - Fires on: matmul (3 typed arrays in main), triangl (1 typed + 3 regular in while), brainfuck (2 typed arrays)
+   - **Limited impact** (~1-2%): hoisted loads are a small fraction of per-iteration work, and the hottest loops (matmul inner) take arrays as function parameters (no typed_array_type set for params)
+
+**Files changed:**
+
+| File | Changes |
+|------|---------|
+| `lambda/js/transpile_js_mir.cpp` | P2b INT assignment (~40 lines), P4b-of for-of inference (~15 lines), inheritance guard fix (~10 lines), P4h scanner + hoisting logic (~250 lines), 4 function signatures updated with hoisted params |
+
+**Tests:** 78/78 JS tests pass, 566/566 Lambda baseline tests pass, 12/12 passing AWFY benchmarks still pass.
+
+**Benchmark results (AWFY, release build, Apple Silicon M4, median of 3 runs):**
+
+| Benchmark | Before (ms) | After (ms) | Δ | V8 Ratio |
+|-----------|------------|-----------|---|----------|
+| sieve | 0.18 | 0.131 | −27% | 0.26× |
+| permute | 27.14 | 25.71 | −5.3% | 24.25× |
+| queens | 16.89 | 16.29 | −3.6% | 16.79× |
+| towers | 51.29 | 48.32 | −5.8% | 29.28× |
+| bounce | 7.41 | 7.33 | −1.1% | 8.62× |
+| list | 8.27 | 7.81 | −5.6% | 10.28× |
+| storage | 14.14 | 12.41 | **−12.2%** | 13.79× |
+| mandelbrot | 145.25 | 143.85 | −1.0% | 3.45× |
+| nbody | 487.13 | 453.14 | **−7.0%** | 60.99× |
+| richards | 6251.84 | 5726.52 | **−8.4%** | 86.20× |
+| json | 208.88 | 191.83 | **−8.2%** | 51.85× |
+| deltablue | 1935.33 | 1843.05 | −4.8% | 97.37× |
+
+**AWFY Geometric Mean: 17.64× → 16.27× → 4.52× (P3: −72.2%)**
+
+**Phase 3 Analysis:**
+- P3 direct method dispatch eliminates 6+ runtime function calls per method invocation for monomorphic/known-class call sites
+- Massive wins on recursive OOP benchmarks: permute (41×), queens (34×), towers (11×), list (12×), json (11×)
+- richards/deltablue still limited: polymorphic hierarchies cause P3's override check to fall back to runtime dispatch
+- Next step: P3b (shape-based polymorphic dispatch) for richards/deltablue
+
+**Previous Phase 2 Analysis:**
+- P2b INT assignment is the primary driver: storage (−12.2%), richards (−8.4%), json (−8.2%) all use integer fields in OOP patterns
+- Inheritance guard fix enables P1/P2 on more class hierarchies, contributing to richards/deltablue/json improvements
+- P4h array hoisting fires correctly but provides minimal additional speedup (~1-2%) because hoisted loads are a small fraction of total work and matmul's hot inner loop takes arrays as function parameters
+- Bounds check elimination (Phase 2 item 9) deferred: the hottest array-intensive loops use function parameters (matmul) or have complex control flow (brainfuck), limiting the benefit of provably-safe bounds removal
+
+**Remaining gaps (→ Phase 3):**
+- richards/deltablue/json still dominated by method dispatch overhead
+- matmul needs parameter type propagation for typed arrays (new optimization, beyond Phase 2 scope)
+- sum/diviter need integer loop counter optimization (P6)
+
 ---
 
 ## Appendix: Raw Benchmark Data
 
+### Current Results (2026-06-19, release build, Apple Silicon M4, after P1+P2+P2b+P4b+P4b-of+P4h)
+
 ```
-Benchmark               LambdaJS (ms)   Node.js (ms)   Ratio
+Benchmark               LambdaJS (ms)   Node.js (ms)   Ratio      Δ from original
 ─── R7RS ───
-fib                         13.32           2.81        4.74×
-fibfp                       21.82           2.46        8.86×
-tak                          1.10           1.06        1.03×
-cpstak                       2.30           1.37        1.68×
-sum                         24.51           1.95       12.55×
-sumfp                        4.44           1.26        3.53×
-nqueens                      3.03           2.50        1.21×
+fib                         10.71           2.81        3.81×      (was 4.74×)
+fibfp                       15.43           2.46        6.27×      (was 8.86×)
+tak                          0.84           1.06        0.79×      (was 1.03×)
+cpstak                       1.64           1.37        1.20×      (was 1.68×)
+sum                         17.29           1.95        8.87×      (was 12.55×)
+sumfp                        3.04           1.26        2.41×      (was 3.53×)
+nqueens                      2.13           2.50        0.85×      (was 1.21×)
 fft                           ---           2.31        FAIL
-mbrot                       32.06           2.68       11.96×
-ack                         11.19          18.55        0.60×
+mbrot                       22.68           2.68        8.46×      (was 11.96×)
+ack                          8.14          18.55        0.44×      (was 0.60×)
 
 ─── AWFY ───
-sieve                        0.16           0.51        0.32×
-permute                     37.09           1.06       34.91×
-queens                      22.69           0.97       23.36×
-towers                      69.13           1.65       41.92×
-bounce                      14.70           0.85       17.27×
-list                        10.44           0.76       13.68×
-storage                     20.40           0.90       22.72×
-mandelbrot                 195.07          41.65        4.68×
-nbody                     1749.21           7.43      235.48×
-richards                  8332.02          66.43      125.43×
-json                       299.05           3.70       80.90×
-deltablue                 2514.22          18.93      132.82×
+sieve                        0.13           0.51        0.26×      (was 0.32×) ★
+permute                      0.63           1.06        0.59×      (was 34.91×) ★★★ P3
+queens                       0.48           0.97        0.50×      (was 23.36×) ★★★ P3
+towers                       4.51           1.65        2.73×      (was 41.92×) ★★★ P3
+bounce                       7.75           0.85        9.11×      (was 17.27×)
+list                         0.67           0.76        0.89×      (was 13.68×) ★★★ P3
+storage                      5.48           0.90        6.09×      (was 22.72×) ★★ P3
+mandelbrot                 147.03          41.65        3.53×      (was 4.68×)
+nbody                      440.22           7.43       59.25×      (was 235.48×) ★
+richards                  4778.47          66.43       71.93×      (was 125.43×) ★ P3
+json                        17.01           3.70        4.60×      (was 80.90×) ★★★ P3
+deltablue                 1906.63          18.93      100.72×      (was 132.82×)
 havlak                        ---         182.63        FAIL
 cd                            ---          61.96        FAIL
 
 ─── BENG ───
-binarytrees                 85.78           7.63       11.24×
-fannkuch                     1.47           6.88        0.21×
-fasta                       19.05           9.15        2.08×
+binarytrees                 59.29           7.63        7.77×      (was 11.24×)
+fannkuch                     1.04           6.88        0.15×      (was 0.21×)
+fasta                       12.85           9.15        1.40×      (was 2.08×)
 knucleotide                   ---           6.92        FAIL
-mandelbrot                 103.99          21.23        4.90×
-nbody                     1886.97          11.83      159.53×
-pidigits                     0.73           2.83        0.26×
+mandelbrot                  73.03          21.23        3.44×      (was 4.90×)
+nbody                     1194.46          11.83      100.97×      (was 159.53×) ★
+pidigits                     0.49           2.83        0.17×      (was 0.26×)
 regexredux                    ---           3.69        FAIL
 revcomp                       ---           4.80        FAIL
-spectralnorm                41.13           4.76        8.64×
+spectralnorm                27.73           4.76        5.83×      (was 8.64×)
 
 ─── KOSTYA ───
-brainfuck                  646.15          66.20        9.76×
-matmul                    2989.24          21.95      136.19×
-primes                       7.03           6.06        1.16×
-base64                      66.85          26.77        2.50×
-levenshtein                 69.55           5.37       12.96×
-json_gen                    33.25           9.08        3.66×
-collatz                   7643.68        1849.04        4.13×
+brainfuck                  450.80          66.20        6.81×      (was 9.76×)
+matmul                    2144.68          21.95       97.71×      (was 136.19×)
+primes                       5.13           6.06        0.85×      (was 1.16×)
+base64                      47.40          26.77        1.77×      (was 2.50×)
+levenshtein                 50.80           5.37        9.46×      (was 12.96×)
+json_gen                    23.45           9.08        2.58×      (was 3.66×)
+collatz                   5596.07        1849.04        3.03×      (was 4.13×)
 
 ─── LARCENY ───
-triangl                   1027.60          96.75       10.62×
-array1                       1.09           2.65        0.41×
-deriv                      168.80           6.14       27.48×
-diviter                  12259.43         615.44       19.92×
-divrec                      24.80          10.17        2.44×
-gcbench                   1957.34          36.72       53.31×
-paraffins                    1.38           1.33        1.04×
-pnpoly                     120.37           7.72       15.59×
-primes                       7.40           6.14        1.21×
-puzzle                      20.23           5.22        3.87×
-quicksort                   15.84           2.42        6.54×
-ray                         15.96           5.22        3.06×
-
-─── JETSTREAM ───
-navier_stokes             1019.00          21.63       47.12×
-richards                   735.89          12.25       60.08×
-crypto_sha1                235.72          12.41       19.00×
+triangl                    759.85          96.75        7.85×      (was 10.62×)
+array1                       0.82           2.65        0.31×      (was 0.41×)
+deriv                      122.37           6.14       19.93×      (was 27.48×)
+diviter                   9088.09         615.44       14.77×      (was 19.92×)
+divrec                      18.53          10.17        1.82×      (was 2.44×)
+gcbench                   1368.78          36.72       37.28×      (was 53.31×)
+paraffins                    1.02           1.33        0.77×      (was 1.04×)
+pnpoly                      84.28           7.72       10.92×      (was 15.59×)
+primes                       5.07           6.14        0.83×      (was 1.21×)
+puzzle                      14.69           5.22        2.81×      (was 3.87×)
+quicksort                   11.13           2.42        4.60×      (was 6.54×)
+ray                         10.76           5.22        2.06×      (was 3.06×)
 ```
+
+★ = Major improvement from P1+P2+P4b optimizations
+
+### Improvement Summary (Original → After P1+P2+P2b+P3+P4b+P4b-of+P4h)
+
+| Category | Benchmarks Improved >1.5× | Key Wins |
+|----------|---------------------------|----------|
+| **P3 method dispatch** | permute: 35→0.59×, queens: 23→0.50×, towers: 42→2.7×, json: 81→4.6× | Direct MIR CALL bypasses 6+ runtime calls |
+| Float + OOP | nbody-A: 235→59×, nbody-B: 160→101×, spectralnorm: 8.6→5.8× | P2 compound assignment + P4b class inference |
+| OOP methods | bounce: 17→9.1×, list: 14→0.89×, storage: 23→6.1× | P1 shaped slot reads + P2b + P3 |
+| INT + OOP | richards: 125→72×, json: 81→4.6× | P2b INT assignment + P3 dispatch |
+| Pure numeric | ack: 0.60→0.44×, nqueens: 1.21→0.85×, fib: 4.74→3.81× | General transpiler improvements |
+| GC/alloc | gcbench: 53→37×, binarytrees: 11→7.8× | Memory subsystem improvements |
+| Still critical | richards: 72×, deltablue: 101×, matmul: 98× | Need P3b (polymorphic dispatch) and param type propagation |
