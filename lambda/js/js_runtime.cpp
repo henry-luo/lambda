@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cctype>
 #include <string>
+#include <map>
 #include <re2/re2.h>
 
 // v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
@@ -129,12 +130,20 @@ static inline Item js_symbol_to_key(Item sym) {
 extern "C" Item js_make_getter_key(Item key) {
     // convert symbol to string key first
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert numeric keys to string (JS coerces property keys to strings)
-    if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char nbuf[64];
-        if (get_type_id(key) == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
+        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
         else snprintf(nbuf, sizeof(nbuf), "%g", it2d(key));
         key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
+    } else if (kt == LMD_TYPE_BOOL) {
+        const char* s = it2b(key) ? "true" : "false";
+        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+    } else if (kt == LMD_TYPE_NULL) {
+        key = (Item){.item = s2it(heap_create_name("null", 4))};
+    } else if (kt == LMD_TYPE_UNDEFINED) {
+        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* s = it2s(key);
@@ -148,12 +157,20 @@ extern "C" Item js_make_getter_key(Item key) {
 // Convert any key (string or symbol) to a setter key (__set_<key_string>)
 extern "C" Item js_make_setter_key(Item key) {
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert numeric keys to string (JS coerces property keys to strings)
-    if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char nbuf[64];
-        if (get_type_id(key) == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
+        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
         else snprintf(nbuf, sizeof(nbuf), "%g", it2d(key));
         key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
+    } else if (kt == LMD_TYPE_BOOL) {
+        const char* s = it2b(key) ? "true" : "false";
+        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+    } else if (kt == LMD_TYPE_NULL) {
+        key = (Item){.item = s2it(heap_create_name("null", 4))};
+    } else if (kt == LMD_TYPE_UNDEFINED) {
+        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* s = it2s(key);
@@ -2855,10 +2872,11 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
-        // JS semantics: numeric keys are coerced to strings (obj[17] === obj["17"])
-        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+        // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
+        TypeId kt = get_type_id(key);
+        if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
             char buf[64];
-            if (get_type_id(key) == LMD_TYPE_INT) {
+            if (kt == LMD_TYPE_INT) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
@@ -2867,6 +2885,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else if (kt == LMD_TYPE_BOOL) {
+            const char* s = it2b(key) ? "true" : "false";
+            key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+        } else if (kt == LMD_TYPE_NULL) {
+            key = (Item){.item = s2it(heap_create_name("null", 4))};
+        } else if (kt == LMD_TYPE_UNDEFINED) {
+            key = (Item){.item = s2it(heap_create_name("undefined", 9))};
         }
         Item result = ItemNull;
         bool own_found = false;
@@ -3684,10 +3709,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
-        // JS semantics: numeric keys are coerced to strings (obj[17] === obj["17"])
-        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+        // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
+        TypeId kt = get_type_id(key);
+        if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
             char buf[64];
-            if (get_type_id(key) == LMD_TYPE_INT) {
+            if (kt == LMD_TYPE_INT) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
@@ -3696,6 +3722,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else if (kt == LMD_TYPE_BOOL) {
+            const char* s = it2b(key) ? "true" : "false";
+            key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
+        } else if (kt == LMD_TYPE_NULL) {
+            key = (Item){.item = s2it(heap_create_name("null", 4))};
+        } else if (kt == LMD_TYPE_UNDEFINED) {
+            key = (Item){.item = s2it(heap_create_name("undefined", 9))};
         }
         // v16: Enforce Object.freeze — frozen objects reject all property writes
         {
@@ -7147,6 +7180,25 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             pos += 7;
         }
     }
+    // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
+    //    Must NOT convert lookbehind (?<=...) or (?<!...)
+    {
+        size_t pos = 0;
+        while ((pos = processed_pattern.find("(?<", pos)) != std::string::npos) {
+            // skip escaped parens
+            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+            // check next char after (?< — if '=' or '!' it's lookbehind, skip
+            size_t after = pos + 3;
+            if (after < processed_pattern.size() &&
+                (processed_pattern[after] == '=' || processed_pattern[after] == '!')) {
+                pos++;
+                continue;
+            }
+            // it's a named group (?<name>...) — insert 'P' to make (?P<name>...)
+            processed_pattern.insert(pos + 2, "P");
+            pos += 4; // skip past (?P<
+        }
+    }
 
     // build RE2 options from flags
     re2::RE2::Options opts;
@@ -7354,9 +7406,25 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // v46: add input property (the original string passed to exec)
     Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
     js_property_set(result, input_key, str);
-    // groups property (undefined for non-named-group regexes)
+    // groups property — populated with named captures if regex has named groups
     Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
-    js_property_set(result, groups_key, make_js_undefined());
+    const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
+    if (!named.empty()) {
+        Item groups_obj = js_new_object();
+        for (auto& pair : named) {
+            int idx = pair.second;
+            Item val = make_js_undefined();
+            if (idx < num_groups && matches[idx].data()) {
+                int mlen = (int)matches[idx].size();
+                val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+            }
+            Item key = (Item){.item = s2it(heap_create_name(pair.first.c_str(), pair.first.size()))};
+            js_property_set(groups_obj, key, val);
+        }
+        js_property_set(result, groups_key, groups_obj);
+    } else {
+        js_property_set(result, groups_key, make_js_undefined());
+    }
     return result;
 }
 
@@ -9824,7 +9892,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 continue;
             }
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item mapped = js_invoke_fn(fn, cb_args, 3);
             // directly assign to preserve arrays (avoid list_push flattening)
             dst->items[i] = mapped;
         }
@@ -9849,7 +9917,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) {
                 js_array_push_item_direct(dst, elem);
             }
@@ -9885,7 +9953,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // v25: skip holes (deleted elements) per ES spec
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 4 ? 4 : (fn->param_count >= 3 ? 3 : 2));
+            accumulator = js_invoke_fn(fn, cb_args, 4);
         }
         return accumulator;
     }
@@ -9905,7 +9973,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            js_invoke_fn(fn, cb_args, 3);
         }
         js_current_this = prev_this;
         return ItemNull;
@@ -9924,7 +9992,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = 0; i < len; i++) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
         js_current_this = prev_this;
@@ -9943,7 +10011,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < len; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
         js_current_this = prev_this;
@@ -9960,7 +10028,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = src->length - 1; i >= 0; i--) {
             Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) { js_current_this = prev_this; return src->items[i]; }
         }
         js_current_this = prev_this;
@@ -9977,7 +10045,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = src->length - 1; i >= 0; i--) {
             Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
         js_current_this = prev_this;
@@ -9998,7 +10066,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // v25: skip holes (deleted elements) per ES spec
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
         }
         js_current_this = prev_this;
@@ -10019,7 +10087,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // v25: skip holes (deleted elements) per ES spec
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item pred = js_invoke_fn(fn, cb_args, 3);
             if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
         }
         js_current_this = prev_this;
@@ -10362,7 +10430,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
+            Item mapped = js_invoke_fn(fn, cb_args, 3);
             // flatten one level
             if (get_type_id(mapped) == LMD_TYPE_ARRAY) {
                 Array* inner = mapped.array;
@@ -10400,7 +10468,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         }
         for (int i = start_idx; i >= 0; i--) {
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 4 ? 4 : (fn->param_count >= 3 ? 3 : 2));
+            accumulator = js_invoke_fn(fn, cb_args, 4);
         }
         return accumulator;
     }

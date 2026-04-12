@@ -796,6 +796,11 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                 } else {
                     // Static getter/setter: store as __get_<name> or __set_<name> key
                     StrView accessor_name = js_node_source(tp, name_node);
+                    // Strip quotes from string literal keys (e.g., "test" → test)
+                    if (strcmp(name_type, "string") == 0 && accessor_name.length >= 2) {
+                        accessor_name.str++;
+                        accessor_name.length -= 2;
+                    }
                     char acc_key[256];
                     // Decode Unicode escapes in accessor names
                     char dec_acc[256];
@@ -1209,7 +1214,7 @@ JsAstNode* build_js_return_statement(JsTranspiler* tp, TSNode return_node) {
     if (child_count > 0) {
         TSNode arg_node = ts_node_named_child(return_node, 0);
         return_stmt->argument = build_js_expression(tp, arg_node);
-        return_stmt->base.type = return_stmt->argument->type;
+        return_stmt->base.type = return_stmt->argument ? return_stmt->argument->type : &TYPE_NULL;
     } else {
         return_stmt->base.type = &TYPE_NULL; // return undefined
     }

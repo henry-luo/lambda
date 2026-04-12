@@ -6393,6 +6393,8 @@ extern "C" Item js_get_global_this() {
         }
         // globalThis self-reference
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
+        // ES spec: all standard global properties are non-enumerable
+        js_mark_all_non_enumerable(js_global_this_obj);
     }
     return js_global_this_obj;
 }
@@ -6407,6 +6409,30 @@ extern "C" Item js_get_global_object() {
 extern "C" Item js_get_global_property(Item key) {
     Item global = js_get_global_this();
     return js_property_get(global, key);
+}
+
+// js_get_global_property_strict: like js_get_global_property but throws ReferenceError
+// for properties that don't exist on the global object. Used for bare identifier reads
+// (e.g. `x` as opposed to `obj.x`), which per ES spec must throw ReferenceError.
+extern "C" Item js_get_global_property_strict(Item key) {
+    Item global = js_get_global_this();
+    Item result = js_property_get(global, key);
+    // property_get returns JS undefined for missing keys.
+    // We need to distinguish "property exists with value undefined" from "not found".
+    if (get_type_id(result) == LMD_TYPE_UNDEFINED) {
+        // Check if the property actually exists on the global (own or prototype chain)
+        extern Item js_has_own_property(Item obj, Item key);
+        if (!it2b(js_has_own_property(global, key))) {
+            String* sk = it2s(key);
+            if (sk) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "%.*s is not defined", (int)sk->len, sk->chars);
+                extern void js_throw_reference_error(Item message);
+                js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+            }
+        }
+    }
+    return result;
 }
 
 // v48: Return a function wrapper for global builtins (parseInt, parseFloat, etc.)

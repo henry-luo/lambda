@@ -1437,6 +1437,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_this", FPTR(js_get_global_this)},
     {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
+    {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},

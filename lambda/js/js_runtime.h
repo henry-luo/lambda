@@ -479,6 +479,7 @@ Item js_btoa(Item str_item);
 Item js_get_global_this(void);
 Item js_get_global_object(void);
 Item js_get_global_property(Item key);
+Item js_get_global_property_strict(Item key);
 Item js_get_global_builtin_fn(Item name, Item param_count);
 
 // URL constructor
