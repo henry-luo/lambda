@@ -1,6 +1,6 @@
 #include "graph_theme.hpp"
 #include "../lib/str.h"
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -49,7 +49,7 @@ char* format_hex_color(int r, int g, int b) {
     if (g < 0) g = 0; if (g > 255) g = 255;
     if (b < 0) b = 0; if (b > 255) b = 255;
 
-    char* result = (char*)malloc(8);  // "#RRGGBB\0"
+    char* result = (char*)mem_alloc(8, MEM_CAT_STYLE);  // "#RRGGBB\0"
     snprintf(result, 8, "#%02x%02x%02x", r, g, b);
     return result;
 }
@@ -59,10 +59,10 @@ char* mix_colors(const char* fg, const char* bg, int fg_percent) {
     int bg_r, bg_g, bg_b;
 
     if (!parse_hex_color(fg, &fg_r, &fg_g, &fg_b)) {
-        return strdup("#000000");
+        return mem_strdup("#000000", MEM_CAT_STYLE);
     }
     if (!parse_hex_color(bg, &bg_r, &bg_g, &bg_b)) {
-        return strdup("#ffffff");
+        return mem_strdup("#ffffff", MEM_CAT_STYLE);
     }
 
     // clamp percentage
@@ -84,7 +84,7 @@ char* mix_colors(const char* fg, const char* bg, int fg_percent) {
 // ============================================================================
 
 static char* strdup_safe(const char* s) {
-    return s ? strdup(s) : NULL;
+    return s ? mem_strdup(s, MEM_CAT_STYLE) : NULL;
 }
 
 DiagramTheme* create_theme(const char* name, const char* bg, const char* fg) {
@@ -93,7 +93,7 @@ DiagramTheme* create_theme(const char* name, const char* bg, const char* fg) {
 
 DiagramTheme* create_theme_with_ratios(const char* name, const char* bg,
                                         const char* fg, const ThemeMixRatios* ratios) {
-    DiagramTheme* theme = (DiagramTheme*)calloc(1, sizeof(DiagramTheme));
+    DiagramTheme* theme = (DiagramTheme*)mem_calloc(1, sizeof(DiagramTheme), MEM_CAT_STYLE);
 
     theme->name = strdup_safe(name);
     theme->bg = strdup_safe(bg);
@@ -123,23 +123,23 @@ void free_theme(DiagramTheme* theme) {
     if (!theme) return;
 
     // Free all allocated strings
-    free((void*)theme->name);
-    free((void*)theme->bg);
-    free((void*)theme->fg);
-    free((void*)theme->text);
-    free((void*)theme->text_secondary);
-    free((void*)theme->text_muted);
-    free((void*)theme->line);
-    free((void*)theme->arrow);
-    free((void*)theme->node_fill);
-    free((void*)theme->node_stroke);
-    free((void*)theme->group_header);
-    free((void*)theme->surface);
-    free((void*)theme->accent);
-    free((void*)theme->error);
-    free((void*)theme->warning);
-    free((void*)theme->success);
-    free(theme);
+    mem_free((void*)theme->name);
+    mem_free((void*)theme->bg);
+    mem_free((void*)theme->fg);
+    mem_free((void*)theme->text);
+    mem_free((void*)theme->text_secondary);
+    mem_free((void*)theme->text_muted);
+    mem_free((void*)theme->line);
+    mem_free((void*)theme->arrow);
+    mem_free((void*)theme->node_fill);
+    mem_free((void*)theme->node_stroke);
+    mem_free((void*)theme->group_header);
+    mem_free((void*)theme->surface);
+    mem_free((void*)theme->accent);
+    mem_free((void*)theme->error);
+    mem_free((void*)theme->warning);
+    mem_free((void*)theme->success);
+    mem_free(theme);
 }
 
 // ============================================================================

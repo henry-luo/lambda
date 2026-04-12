@@ -1,6 +1,6 @@
 #include "graph_dagre.hpp"
 #include "../lib/log.h"
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <string.h>
 #include <math.h>
 #include <float.h>
@@ -61,8 +61,8 @@ static void detect_back_edges_dfs(LayoutNode* node, LayoutGraph* graph,
 
 static void detect_and_mark_back_edges(LayoutGraph* graph) {
     int n = graph->nodes->length;
-    int* dfs_state = (int*)calloc(n, sizeof(int));
-    int* node_indices = (int*)calloc(n, sizeof(int));
+    int* dfs_state = (int*)mem_calloc(n, sizeof(int), MEM_CAT_LAYOUT);
+    int* node_indices = (int*)mem_calloc(n, sizeof(int), MEM_CAT_LAYOUT);
     
     // initialize all edges as non-back edges
     for (int i = 0; i < graph->edges->length; i++) {
@@ -78,8 +78,8 @@ static void detect_and_mark_back_edges(LayoutGraph* graph) {
         }
     }
     
-    free(dfs_state);
-    free(node_indices);
+    mem_free(dfs_state);
+    mem_free(node_indices);
 }
 
 // ============================================================================
@@ -131,7 +131,7 @@ void dagre_assign_ranks(LayoutGraph* graph) {
     // first, detect and mark back edges
     detect_and_mark_back_edges(graph);
     
-    int* visited_flags = (int*)calloc(graph->nodes->length, sizeof(int));
+    int* visited_flags = (int*)mem_calloc(graph->nodes->length, sizeof(int), MEM_CAT_LAYOUT);
     
     // initialize all ranks to 0
     for (int i = 0; i < graph->nodes->length; i++) {
@@ -165,7 +165,7 @@ void dagre_assign_ranks(LayoutGraph* graph) {
         }
     }
     
-    free(visited_flags);
+    mem_free(visited_flags);
     
     log_debug("dagre: rank assignment complete");
 }
@@ -188,7 +188,7 @@ void dagre_create_layers(LayoutGraph* graph) {
     
     // create layers
     for (int r = 0; r <= max_rank; r++) {
-        LayoutLayer* layer = (LayoutLayer*)calloc(1, sizeof(LayoutLayer));
+        LayoutLayer* layer = (LayoutLayer*)mem_calloc(1, sizeof(LayoutLayer), MEM_CAT_LAYOUT);
         layer->rank = r;
         layer->nodes = arraylist_new(8);
         arraylist_append(graph->layers, layer);
@@ -303,8 +303,8 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
             if (node_count == 0) continue;
             
             // compute barycenters
-            NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)malloc(
-                node_count * sizeof(NodeWithBarycenter));
+            NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)mem_alloc(
+                node_count * sizeof(NodeWithBarycenter), MEM_CAT_LAYOUT);
             
             for (int j = 0; j < node_count; j++) {
                 LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
@@ -324,7 +324,7 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
                 arraylist_append(layer->nodes, node);
             }
             
-            free(nodes_with_bc);
+            mem_free(nodes_with_bc);
         }
         
         // count crossings after down sweep
@@ -347,8 +347,8 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
             int node_count = layer->nodes->length;
             if (node_count == 0) continue;
             
-            NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)malloc(
-                node_count * sizeof(NodeWithBarycenter));
+            NodeWithBarycenter* nodes_with_bc = (NodeWithBarycenter*)mem_alloc(
+                node_count * sizeof(NodeWithBarycenter), MEM_CAT_LAYOUT);
             
             for (int j = 0; j < node_count; j++) {
                 LayoutNode* node = (LayoutNode*)layer->nodes->data[j];
@@ -366,7 +366,7 @@ void dagre_reduce_crossings(LayoutGraph* graph, int max_iterations) {
                 arraylist_append(layer->nodes, node);
             }
             
-            free(nodes_with_bc);
+            mem_free(nodes_with_bc);
         }
         
         // count crossings after up sweep
@@ -518,11 +518,11 @@ void dagre_route_edges(LayoutGraph* graph, bool use_splines) {
                               to->width / 2.0f, to->height / 2.0f,
                               &end_x, &end_y);
         
-        Point2D* start = (Point2D*)calloc(1, sizeof(Point2D));
+        Point2D* start = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
         start->x = start_x;
         start->y = start_y;
         
-        Point2D* end = (Point2D*)calloc(1, sizeof(Point2D));
+        Point2D* end = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
         end->x = end_x;
         end->y = end_y;
         

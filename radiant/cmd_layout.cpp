@@ -19,7 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
@@ -39,7 +39,6 @@ extern "C" {
 #include "../lib/url.h"
 #include "../lib/log.h"
 #include "../lib/image.h"
-#include "../lib/memtrack.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/font/font.h"
@@ -2907,7 +2906,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                     }
 
                     if (math_src && math_src_len > 0) {
-                        MathInfo* mi = (MathInfo*)malloc(sizeof(MathInfo));
+                        MathInfo* mi = (MathInfo*)mem_alloc(sizeof(MathInfo), MEM_CAT_LAYOUT);
                         mi->parent = elem;
                         mi->index = i;
                         mi->source = math_src;
@@ -3806,7 +3805,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = std::chrono::high_resolution_clock::now();
 
-    Runtime* runtime = (Runtime*)calloc(1, sizeof(Runtime));
+    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     runtime_init(runtime);
 
     // Phase 5: Create result Input with arena for unified DOM allocation.
@@ -3843,7 +3842,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3860,7 +3859,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3879,7 +3878,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             "</style></head><body>%s</body></html>",
             svg_content);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
@@ -3898,7 +3897,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             }
             log_error("[Lambda Script] Failed to format SVG element");
             runtime_cleanup(runtime);
-            free(runtime);
+            mem_free(runtime);
             pool_destroy(result_pool);
             return nullptr;
         }
@@ -3915,7 +3914,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
             runtime_cleanup(runtime);
-            free(runtime);
+            mem_free(runtime);
             pool_destroy(result_pool);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
@@ -4009,7 +4008,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_error("[Lambda Script] Failed to create DomDocument");
         pool_destroy(result_pool);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
 
@@ -4023,7 +4022,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         dom_document_destroy(dom_doc);
         pool_destroy(result_pool);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
 
@@ -4037,7 +4036,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!css_engine) {
         log_error("[Lambda Script] Failed to create CSS engine");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
