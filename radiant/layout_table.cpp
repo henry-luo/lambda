@@ -3944,8 +3944,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     log_debug("%s Building table structure", tableNode->source_loc());
 
-    // Create table view and resolve styles
-    ViewTable* table = (ViewTable*)lycon->view;
+    // Use tableNode directly — lycon->view may not point to the table
+    // (e.g., when table is an abs-positioned child of a grid container)
+    ViewTable* table = (ViewTable*)tableNode;
     dom_node_resolve_style(tableNode, lycon);
     resolve_table_properties(lycon, tableNode, table);
 
@@ -8959,13 +8960,13 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
 
 // Main table layout entry point
 void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
+    if (!tableNode) {
+        log_debug("layout_table_content: null tableNode, returning");
+        return;
+    }
     log_debug("=== TABLE LAYOUT START ===");
     log_debug("%s Starting table layout", tableNode->source_loc());
     log_debug("%s Initial layout context - line.left=%d, advance_y=%d", tableNode->source_loc(), lycon->line.left, lycon->block.advance_y);
-    if (!tableNode) {
-        log_debug("%s ERROR: Null table node", tableNode->source_loc());
-        return;
-    }
 
     // CRITICAL: Save the table's font-size BEFORE building table tree.
     // Cell layout in build_table_tree will modify lycon->font to the cell's font-size,
@@ -8981,20 +8982,44 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // CRITICAL: Update font context before building table tree
     // This ensures children inherit the correct computed font-size from the table element.
     // Without this, lycon->font.style would still point to the grandparent's font.
-    ViewTable* table = (ViewTable*)lycon->view;
-    log_debug("%s Table font context check: table=%p, table->font=%p, lycon->font.style=%p, lycon->font.style->font_size=%.1f", tableNode->source_loc(),
-        (void*)table, table ? (void*)table->font : nullptr,
-        (void*)lycon->font.style, lycon->font.style ? lycon->font.style->font_size : -1.0f);
-    if (table && table->font) {
-        setup_font(lycon->ui_context, &lycon->font, table->font);
-        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table->font->font_size);
+    // Use tableNode->font directly (safe) instead of casting lycon->view to ViewTable*
+    // (which may not be a ViewTable yet — it's the parent's view at this point).
+    ViewBlock* table_block = tableNode->is_element() ? (ViewBlock*)tableNode->as_element() : nullptr;
+    if (table_block && table_block->font) {
+        log_debug("%s Table font context check: table_block=%p, font=%p, font_size=%.1f", tableNode->source_loc(),
+            (void*)table_block, (void*)table_block->font, table_block->font->font_size);
+        setup_font(lycon->ui_context, &lycon->font, table_block->font);
+        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table_block->font->font_size);
     } else {
-        log_debug("%s WARNING: table->font is NULL, cannot update font context", tableNode->source_loc());
+        log_debug("%s WARNING: table font is NULL, cannot update font context", tableNode->source_loc());
+    }
+
+    // Ensure the table has proper ViewTable setup.
+    // When a table is an absolutely positioned child of a grid/flex container,
+    // init_grid_item_view/init_flex_item_view sets view_type=RDT_VIEW_BLOCK and
+    // item_prop_type=ITEM_PROP_GRID/FLEX without allocating TableProp.
+    // We must allocate tb before build_table_tree accesses it.
+    if (tableNode->is_element()) {
+        ViewTable* vtable = (ViewTable*)tableNode;
+        if (vtable->item_prop_type != DomElement::ITEM_PROP_TABLE) {
+            vtable->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
+            vtable->item_prop_type = DomElement::ITEM_PROP_TABLE;
+            vtable->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
+            vtable->tb->border_spacing_h = 0.0f;
+            vtable->tb->border_spacing_v = 0.0f;
+            vtable->tb->border_collapse = false;
+            vtable->tb->is_annoy_tbody = 0;
+            vtable->tb->is_annoy_tr = 0;
+            vtable->tb->is_annoy_td = 0;
+            vtable->tb->is_annoy_colgroup = 0;
+            vtable->view_type = RDT_VIEW_TABLE;
+        }
+        lycon->view = (View*)vtable;
     }
 
     // Step 1: Build table structure from DOM
     log_debug("%s Step 1 - Building table tree", tableNode->source_loc());
-    table = build_table_tree(lycon, tableNode);
+    ViewTable* table = build_table_tree(lycon, tableNode);
     if (!table) {
         log_debug("%s ERROR: Failed to build table structure", tableNode->source_loc());
         return;

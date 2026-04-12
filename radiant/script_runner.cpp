@@ -31,6 +31,38 @@
 
 #include <cstring>
 #include <cctype>
+#include <signal.h>
+#include <setjmp.h>
+#include <unistd.h>
+
+// Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+static sigjmp_buf js_exec_jmpbuf;
+static volatile sig_atomic_t js_exec_guarded = 0;
+static struct sigaction js_exec_old_segv, js_exec_old_bus;
+
+static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
+    if (js_exec_guarded) {
+        // async-signal-safe: use write() instead of log_error()
+        const char* msg = (sig == SIGBUS)
+            ? "execute_document_scripts: caught SIGBUS during JS execution\n"
+            : "execute_document_scripts: caught SIGSEGV during JS execution\n";
+        write(STDERR_FILENO, msg, strlen(msg));
+        js_exec_guarded = 0;
+        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        siglongjmp(js_exec_jmpbuf, 1);
+    }
+    // not guarded — forward to previous handler
+    struct sigaction* old = (sig == SIGSEGV) ? &js_exec_old_segv : &js_exec_old_bus;
+    if (old->sa_flags & SA_SIGINFO) {
+        old->sa_sigaction(sig, info, ctx);
+    } else if (old->sa_handler != SIG_DFL && old->sa_handler != SIG_IGN) {
+        old->sa_handler(sig);
+    } else {
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
+}
 
 // Pool from the most recent JS execution.
 // Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
@@ -354,7 +386,25 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     runtime.reuse_pool = pool_create_mmap();
 
     // execute the combined JS source via JIT transpiler
-    Item result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
+    // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = js_exec_crash_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, &js_exec_old_segv);
+    sigaction(SIGBUS, &sa, &js_exec_old_bus);
+    js_exec_guarded = 1;
+
+    Item result;
+    if (sigsetjmp(js_exec_jmpbuf, 1) == 0) {
+        result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
+        js_exec_guarded = 0;
+        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+    } else {
+        log_error("execute_document_scripts: recovered from crash in JS JIT code");
+        result = ItemError;
+    }
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {

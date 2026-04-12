@@ -23,6 +23,7 @@
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
+#include <setjmp.h>
 #include <execinfo.h>
 #include <unistd.h>
 #include <sys/resource.h>  // getrusage for memory diagnostics
@@ -86,14 +87,15 @@ extern __thread Context* input_context;
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth = 0);
 void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
-void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
+static const int MAX_CSS_TREE_DEPTH = 512;
+void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 
@@ -337,8 +339,9 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 /**
  * Recursively apply inline style attributes to entire DOM tree
  */
-void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool) {
+void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth) {
     if (!dom_elem || !html_elem || !pool) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     // Apply inline style to current element
     apply_inline_style_attributes(dom_elem, html_elem, pool);
@@ -396,7 +399,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             DomElement* dom_child_elem = (DomElement*)dom_child;
 
             // Recursively apply to this child
-            apply_inline_styles_to_tree(dom_child_elem, html_child, pool);
+            apply_inline_styles_to_tree(dom_child_elem, html_child, pool, depth + 1);
 
             // Move to next DOM sibling
             dom_child = dom_child_elem->next_sibling;
@@ -864,8 +867,9 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count) {
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count, int depth = 0) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
@@ -1001,7 +1005,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count);
+            collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count, depth + 1);
         }
     }
 }
@@ -1010,8 +1014,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
  * Recursively collect <style> inline CSS from HTML
  * Parses and returns list of stylesheets
  */
-void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count) {
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count, int depth = 0) {
     if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
@@ -1061,7 +1066,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count);
+            collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count, depth + 1);
         }
     }
 }
@@ -1070,8 +1075,9 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
  * Recursively collect <style> inline CSS from HTML
  * Parses and adds to engine's stylesheet list
  */
-void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
+void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int depth = 0) {
     if (!elem || !engine || !pool) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
@@ -1108,7 +1114,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles(child_item.element, engine, pool);
+            collect_inline_styles(child_item.element, engine, pool, depth + 1);
         }
     }
 }
@@ -1128,11 +1134,11 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
 
     // Step 1: Collect and parse <link rel="stylesheet"> references
     log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count);
+    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
 
     // Step 2: Collect and parse <style> inline CSS
     log_debug("[CSS] Step 2: Collecting inline <style> elements...");
-    collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count);
+    collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
     log_debug("[CSS] Collected %d stylesheet(s) from HTML", *stylesheet_count);
     return stylesheets;
@@ -1695,8 +1701,9 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
  * Apply CSS stylesheet rules to DOM tree (original O(n×m) version)
  * Walks the tree recursively and matches selectors to elements
  */
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth) {
     if (!root || !stylesheet || !matcher || !pool) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     g_element_count++;
 
@@ -1712,7 +1719,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     while (child) {
         if (child->is_element()) {
             DomElement* child_elem = (DomElement*)child;
-            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool, engine);
+            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool, engine, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -1723,8 +1730,9 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
  * This is an optimized O(n) version that uses pre-built index
  */
 static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex* index,
-                                                  SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
+                                                  SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth) {
     if (!root || !index || !matcher || !pool) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
 
     g_element_count++;
 
@@ -1751,7 +1759,7 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
     while (child) {
         if (child->is_element()) {
             DomElement* child_elem = (DomElement*)child;
-            apply_stylesheet_to_dom_tree_indexed(child_elem, index, matcher, pool, engine);
+            apply_stylesheet_to_dom_tree_indexed(child_elem, index, matcher, pool, engine, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -1769,7 +1777,7 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
     SelectorIndex* index = build_selector_index(stylesheet, pool);
 
     // Apply using index
-    apply_stylesheet_to_dom_tree_indexed(root, index, matcher, pool, engine);
+    apply_stylesheet_to_dom_tree_indexed(root, index, matcher, pool, engine, 0);
 
     // Free index
     free_selector_index(index);
@@ -5036,7 +5044,36 @@ static char* generate_output_path(const char* input_file, const char* output_dir
  * Main layout command implementation using Lambda CSS and Radiant layout.
  * Supports both single-file and batch modes.
  */
-// Signal handler to capture crash backtrace (SIGTRAP/SIGABRT/SIGSEGV)
+// Crash recovery for layout_single_file — catches SIGSEGV/SIGBUS from
+// Apple framework code (CoreText/CoreGraphics font rasterisation, vImage lazy load, etc.)
+// that cannot be fixed in our code.
+static sigjmp_buf layout_crash_jmpbuf;
+static volatile sig_atomic_t layout_crash_guarded = 0;
+
+static void layout_crash_handler(int sig, siginfo_t* info, void* ctx) {
+    if (layout_crash_guarded) {
+        const char* msg = (sig == SIGBUS)
+            ? "\n=== RECOVERED: SIGBUS during layout (Apple framework bug) ===\n"
+            : "\n=== RECOVERED: SIGSEGV during layout ===\n";
+        write(STDERR_FILENO, msg, strlen(msg));
+        // Print backtrace for diagnostics
+        void* callstack[128];
+        int frames = backtrace(callstack, 128);
+        backtrace_symbols_fd(callstack, frames, STDERR_FILENO);
+        write(STDERR_FILENO, "=== END BACKTRACE ===\n", 22);
+        layout_crash_guarded = 0;
+        siglongjmp(layout_crash_jmpbuf, sig);
+    }
+    // not guarded — print backtrace and exit
+    fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
+    void* callstack[128];
+    int frames = backtrace(callstack, 128);
+    backtrace_symbols_fd(callstack, frames, STDERR_FILENO);
+    fprintf(stderr, "=== END BACKTRACE ===\n");
+    _exit(128 + sig);
+}
+
+// Legacy crash handler for SIGTRAP/SIGABRT (non-recoverable)
 static void crash_signal_handler(int sig) {
     fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
     void* callstack[128];
@@ -5050,7 +5087,15 @@ int cmd_layout(int argc, char** argv) {
     // Install crash signal handlers for diagnostics
     signal(SIGTRAP, crash_signal_handler);
     signal(SIGABRT, crash_signal_handler);
-    signal(SIGSEGV, crash_signal_handler);
+    // SIGSEGV/SIGBUS use sigaction for crash recovery (siglongjmp) support
+    {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_sigaction = layout_crash_handler;
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(SIGSEGV, &sa, NULL);
+        sigaction(SIGBUS, &sa, NULL);
+    }
 
     // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
     if (file_exists("log.conf")) {
@@ -5134,20 +5179,34 @@ int cmd_layout(int argc, char** argv) {
         }
 
         bool success = false;
-        try {
-            success = layout_single_file(
-                input_file,
-                output_path,
-                opts.css_file,
-                opts.viewport_width,
-                opts.viewport_height,
-                &ui_context,
-                cwd,
-                opts.debug
-            );
-        } catch (...) {
-            log_error("batch layout: uncaught exception processing %s", input_file);
-            success = false;
+        // Guard layout with crash recovery (catches SIGSEGV/SIGBUS from Apple frameworks)
+        layout_crash_guarded = 1;
+        int crash_sig = sigsetjmp(layout_crash_jmpbuf, 1);
+        if (crash_sig == 0) {
+            try {
+                success = layout_single_file(
+                    input_file,
+                    output_path,
+                    opts.css_file,
+                    opts.viewport_width,
+                    opts.viewport_height,
+                    &ui_context,
+                    cwd,
+                    opts.debug
+                );
+            } catch (...) {
+                log_error("batch layout: uncaught exception processing %s", input_file);
+                success = false;
+            }
+            layout_crash_guarded = 0;
+        } else {
+            // After SIGSEGV/SIGBUS recovery via siglongjmp, the process state
+            // (heap, allocator, caches) is likely corrupted. It is NOT safe to
+            // continue processing more files — exit immediately with code 1
+            // (graceful failure) instead of 128+sig (crash).
+            fprintf(stderr, "layout: recovered from signal %d processing %s — exiting\n",
+                    crash_sig, input_file);
+            _exit(1);
         }
 
         if (success) {
