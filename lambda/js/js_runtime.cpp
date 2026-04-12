@@ -2572,6 +2572,17 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
         se = se->next;
     }
 
+    // P1: Build slot_entries array for O(1) slot-indexed access
+    if (count <= 16) {
+        ShapeEntry** entries = (ShapeEntry**)pool_calloc(js_input->pool, count * sizeof(ShapeEntry*));
+        se = first;
+        for (int i = 0; i < count && se; i++, se = se->next) {
+            entries[i] = se;
+        }
+        tm->slot_entries = entries;
+        tm->slot_count = count;
+    }
+
     // Allocate data buffer (pre-sized, zero-initialized = null pointers)
     int data_size = count * (int)sizeof(void*);
     int data_cap = data_size < 64 ? 64 : data_size;
@@ -2611,6 +2622,11 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     Map* m = (Map*)object.map;
     TypeMap* tm = (TypeMap*)m->type;
     if (!tm || !tm->shape) return ItemNull;
+    // P1: O(1) array lookup when slot_entries is populated
+    if (tm->slot_entries && slot < tm->slot_count) {
+        return _map_read_field(tm->slot_entries[slot], m->data);
+    }
+    // Fallback: O(n) linked-list walk
     ShapeEntry* entry = tm->shape;
     for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
     if (!entry) return ItemNull;
@@ -2622,9 +2638,15 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     Map* m = (Map*)object.map;
     TypeMap* tm = (TypeMap*)m->type;
     if (!tm || !tm->shape) return;
-    ShapeEntry* entry = tm->shape;
-    for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
-    if (!entry) return;
+    // P1: O(1) array lookup when slot_entries is populated
+    ShapeEntry* entry;
+    if (tm->slot_entries && slot < tm->slot_count) {
+        entry = tm->slot_entries[slot];
+    } else {
+        entry = tm->shape;
+        for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
+        if (!entry) return;
+    }
     void* field_ptr = (char*)m->data + entry->byte_offset;
     TypeId value_type = get_type_id(value);
     TypeId field_type = entry->type->type_id;
@@ -2665,6 +2687,65 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     // All shaped slots are 8 bytes so no reshape is needed.
     if (field_type != value_type && value_type != LMD_TYPE_NULL) {
         entry->type = type_info[value_type].type;
+    }
+}
+
+// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
+// These functions read/write raw native values directly from the data buffer.
+// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
+// Type guards handle runtime type changes (e.g., FLOAT field later written as INT).
+
+extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
+    Map* m = (Map*)object.map;
+    void* field_ptr = (char*)m->data + byte_offset;
+    // Guard: if the runtime ShapeEntry type is INT, convert int→double
+    TypeMap* tm = (TypeMap*)m->type;
+    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
+    if (tm && tm->slot_entries && slot < tm->slot_count) {
+        TypeId tid = tm->slot_entries[slot]->type->type_id;
+        if (tid == LMD_TYPE_INT) return (double)(*(int64_t*)field_ptr);
+    }
+    return *(double*)field_ptr;
+}
+
+extern "C" int64_t js_get_slot_i(Item object, int64_t byte_offset) {
+    Map* m = (Map*)object.map;
+    void* field_ptr = (char*)m->data + byte_offset;
+    // Guard: if the runtime ShapeEntry type is FLOAT, convert double→int
+    TypeMap* tm = (TypeMap*)m->type;
+    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
+    if (tm && tm->slot_entries && slot < tm->slot_count) {
+        TypeId tid = tm->slot_entries[slot]->type->type_id;
+        if (tid == LMD_TYPE_FLOAT) return (int64_t)(*(double*)field_ptr);
+    }
+    return *(int64_t*)field_ptr;
+}
+
+extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
+    Map* m = (Map*)object.map;
+    *(double*)((char*)m->data + byte_offset) = value;
+    // Update ShapeEntry type to FLOAT if currently NULL (first write).
+    TypeMap* tm = (TypeMap*)m->type;
+    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
+    if (tm && tm->slot_entries && slot < tm->slot_count) {
+        ShapeEntry* entry = tm->slot_entries[slot];
+        if (entry && entry->type->type_id != LMD_TYPE_FLOAT) {
+            entry->type = type_info[LMD_TYPE_FLOAT].type;
+        }
+    }
+}
+
+extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
+    Map* m = (Map*)object.map;
+    *(int64_t*)((char*)m->data + byte_offset) = value;
+    // Update ShapeEntry type to INT if currently NULL (first write).
+    TypeMap* tm = (TypeMap*)m->type;
+    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
+    if (tm && tm->slot_entries && slot < tm->slot_count) {
+        ShapeEntry* entry = tm->slot_entries[slot];
+        if (entry && entry->type->type_id != LMD_TYPE_INT) {
+            entry->type = type_info[LMD_TYPE_INT].type;
+        }
     }
 }
 

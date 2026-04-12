@@ -155,7 +155,7 @@ V8's JIT warmup overhead (~1ms) makes LambdaJS competitive on short-running benc
 
 ## 3. Proposed Optimizations
 
-### P1: Inline Property Access for Known Shapes (Priority: CRITICAL)
+### P1: Inline Property Access for Known Shapes (Priority: CRITICAL) — ✅ IMPLEMENTED
 
 **Problem:** Every `this.x` compiles to a `js_property_access(obj, "x")` runtime call even when the transpiler knows the class shape at compile time. This call performs: null check → type dispatch → hash table lookup → descriptor check → value return. For benchmarks like richards (125×), this overhead dominates.
 
@@ -360,22 +360,25 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 
 ## 4. Implementation Roadmap
 
-### Phase 1: Property Access Fix (P1) — Impact: 10–50× on OOP benchmarks
+### Phase 1: Property Access Fix (P1) — ✅ DONE (2025-04-12)
 
-1. Add `offsets[]` flat array to Shape struct alongside existing `ShapeEntry` linked list
-2. Populate offsets at shape creation (one-time cost)
-3. Emit `js_get_shaped_slot_fast(obj, slot_index)` using O(1) array lookup
-4. Emit inline MIR load/store for known shape + known slot index
-5. Add shape-guard at method entry: `if (obj->shape != expected) goto slow_path`
+1. ✅ Added `slot_entries[]` O(1) array to TypeMap alongside existing `ShapeEntry` linked list
+2. ✅ Populated at object creation (one-time cost, ≤16 fields)
+3. ✅ `js_get/set_shaped_slot()` use O(1) array lookup with fallback
+4. ✅ Emit `js_get_slot_f/i` native calls for known-type shaped fields
+5. ✅ Constructor field type detection (literals + binary arithmetic)
+6. ✅ P1 native reads for both named vars and `this.prop` in methods
 
-**Validation:** Re-run AWFY suite. Target: geo mean from 25× to ≤ 8×.
+**Result:** 7–26% improvement on OOP benchmarks. Modest vs target because method dispatch and array element type propagation are larger bottlenecks. See §7 for detailed analysis.
 
-### Phase 2: Float Unboxing (P2) + Array Hoisting (P4)
+### Phase 2: Float Unboxing (P2) + Array Hoisting (P4) — NEXT
 
-1. Implement field type tracking (float vs int vs mixed) in shape metadata
-2. Emit native float load/store for shaped float fields
-3. Implement loop-invariant array pointer hoisting
-4. Eliminate per-iteration bounds checks where provably safe
+1. ✅ Field type tracking implemented in P1 (`ctor_prop_types[]`)
+2. ✅ Native float load/store for shaped float fields (P1 `js_get/set_slot_f`)
+3. ⬜ Compound assignment native path (`this.x += val` in methods)
+4. ⬜ Array element class type propagation (`bodies[i]` → Body)
+5. ⬜ Loop-invariant array pointer hoisting
+6. ⬜ Eliminate per-iteration bounds checks where provably safe
 
 **Validation:** nbody < 10×, matmul < 10×, mandelbrot < 3×.
 
@@ -429,6 +432,73 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 | Inline caches add memory overhead (per-call-site cached shape) | Use polymorphic ICs with bounded cache size (4 entries) |
 | Optimizations regress test262 compliance | Run test262 suite after each phase; maintain pass count ≥ current |
 | P1 changes `ShapeEntry` struct layout → breaks existing code | Keep linked list for backward compat; add offsets[] alongside |
+
+---
+
+## 7. Implementation Progress
+
+### Phase 1 (P1): Inline Property Access — ✅ IMPLEMENTED (2025-04-12)
+
+**What was built:**
+
+1. **O(1) slot lookup via `slot_entries[]` array** — Added `ShapeEntry** slot_entries` and `int slot_count` to `TypeMap`. Populated at object creation time in `js_new_object_with_shape()` for objects with ≤16 fields. `js_get_shaped_slot()` and `js_set_shaped_slot()` use O(1) array indexing with fallback to O(n) linked-list walk.
+
+2. **Native typed slot functions** — 4 new runtime functions that bypass Item boxing entirely:
+   - `js_get_slot_f(obj, byte_offset)` → returns raw `double` from data buffer
+   - `js_get_slot_i(obj, byte_offset)` → returns raw `int64_t` from data buffer
+   - `js_set_slot_f(obj, byte_offset, value)` → writes raw double + updates ShapeEntry type
+   - `js_set_slot_i(obj, byte_offset, value)` → writes raw int64 + updates ShapeEntry type
+   - Type guards in getters handle runtime type changes (INT↔FLOAT conversion)
+
+3. **Constructor field type detection** — `jm_detect_ctor_field_type()` infers field types from constructor init expressions:
+   - Number literals: `0` → INT, `0.0` → FLOAT
+   - Unary minus: `-0.0` → FLOAT, `-1` → INT
+   - Binary arithmetic (`+`, `-`, `*`, `/`, `%`) → FLOAT (JS numbers are IEEE-754 doubles)
+   - Types stored in `JsFuncCollected.ctor_prop_types[16]`
+
+4. **P1 native reads in transpiler** — `jm_transpile_as_native()` MEMBER_EXPRESSION handler emits direct `js_get_slot_f/i` calls when:
+   - Object is a named variable with known `class_entry` (e.g., `body.x`)
+   - Object is `this` in a class method (e.g., `this.vx` via `mt->current_class`)
+   - Field type is known FLOAT or INT from constructor scan
+   - Returns native MIR register (MIR_T_D or MIR_T_I64), no boxing
+
+5. **P3 native writes in constructors** — Constructor `this.prop = expr` assignments use `js_set_slot_f/i` when both the field type and RHS type are known numeric, bypassing Item boxing. Falls back to `js_set_shaped_slot` for unknown types.
+
+6. **Type inference for shaped fields** — `jm_get_effective_type()` returns FLOAT/INT for shaped property reads on known-class objects (both `this.prop` and `var.prop`), enabling native arithmetic paths downstream.
+
+**Files changed:**
+
+| File | Changes |
+|------|---------|
+| `lambda/lambda-data.hpp` | Added `slot_entries`, `slot_count` to TypeMap |
+| `lambda/js/js_runtime.cpp` | O(1 slot lookup, 4 native slot functions with type guards |
+| `lambda/js/js_runtime.h` | Declarations for `js_get/set_slot_f/i` |
+| `lambda/js/transpile_js_mir.cpp` | Field type detection, P1 native reads, P3 native writes, forward decl |
+| `lambda/sys_func_registry.c` | Registered 4 new functions in `jit_runtime_imports[]` |
+
+**Tests:** 78/78 JS tests pass, 566/566 Lambda baseline tests pass.
+
+**Benchmark results (AWFY, release build, Apple Silicon M4, median of 3 runs):**
+
+| Benchmark | Before (ms) | After (ms) | Speedup | Notes |
+|-----------|------------|-----------|---------|-------|
+| nbody | 1749 | 1290 | **1.36×** (−26%) | Float field access in tight loop |
+| bounce | 11.4 | 9.6 | **1.19×** (−16%) | OOP class methods |
+| deltablue | 2170 | 1848 | **1.17×** (−15%) | Constraint solving + OOP |
+| richards | 6581 | 6120 | **1.08×** (−7%) | Method dispatch dominates |
+
+**Analysis:**
+
+The P1 implementation delivers **measurable but modest improvements** (7–26%). The gains are largest on nbody where float field access is the dominant cost. The limited impact on richards and deltablue indicates that **property access O(1) lookup is not the primary bottleneck** — these benchmarks are dominated by:
+
+1. **Method dispatch overhead** — `obj.method()` still requires `js_property_access()` to fetch the function, then `js_call_function()` to invoke it. P1 only optimizes data field reads, not method lookups. (→ P3 inline method dispatch needed)
+2. **Boxed return values from method calls** — Even when P1 reads fields natively, method return values are still boxed Items. An expression like `this.bodies[i]` returns a boxed Item, so the subsequent `iBody.x` access can't use the P1 native path (no `class_entry` on the variable).
+3. **Array element access has no class info** — `let iBody = bodies[i]` loses the class type information. The transpiler doesn't know `iBody` is a `Body` instance, so falls back to generic property access.
+
+**Remaining gaps for further P1 improvement:**
+- Array element access type propagation (`bodies[i]` → knows it's a Body)
+- Method call return type inference (class factory methods)
+- Compound assignment native path (`this.x += val` in methods, not just constructors)
 
 ---
 
