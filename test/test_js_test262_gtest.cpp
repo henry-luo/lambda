@@ -106,8 +106,8 @@ static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test 
 static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
 // Slow tests (>= 3s) should be moved to temp/_t262_crashers.txt with SLOW status.
-static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
-static const char* NONBATCH_FILE = "test/js/test262_nonbatch.txt";
+static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
+static const char* NONBATCH_FILE = "test/js262/test262_nonbatch.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -667,7 +667,8 @@ static std::vector<Test262Param> discover_all_tests() {
 // =============================================================================
 
 enum Test262Result {
-    T262_PASS,
+    T262_PASS,          // fully passed: batch run + time < 3s (or non-batch individual pass)
+    T262_PARTIAL_PASS,  // passed individually but not reliably in batch (recovered, slow, or quarantined)
     T262_FAIL,
     T262_SKIP,
     T262_TIMEOUT,
@@ -1932,9 +1933,36 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
     }
 
-    // Phase 3: evaluate results and cache
+    // Build classification sets for partial-pass logic.
+    // Batchable tests must pass in their original Phase 2 batch with time < 3s to be "fully passed".
+    // Non-batch tests (propertyHelper.js etc.) are fully passed if they pass individually.
+    std::set<std::string> clean_set, nonbatch_set, crasher_name_set, phase2b_set;
+    for (size_t idx : clean_indices)    clean_set.insert(prepared[idx].test_name);
+    for (size_t idx : nonbatch_indices) nonbatch_set.insert(prepared[idx].test_name);
+    for (size_t idx : crasher_indices)  crasher_name_set.insert(prepared[idx].test_name);
+    for (size_t idx : lost_indices)     phase2b_set.insert(prepared[idx].test_name);
+
+    // Phase 3: evaluate results and cache, applying partial-pass classification
     for (size_t i = 0; i < prepared.size(); i++) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
+
+        // Classify partial passes for batchable tests.
+        // Non-batch tests: a pass is always a full pass.
+        // Batchable tests: only fully passed if passed in original batch run with time < 3s.
+        if (result.result == T262_PASS) {
+            const auto& name = prepared[i].test_name;
+            if (crasher_name_set.count(name)) {
+                result = {T262_PARTIAL_PASS, "partial: quarantined crasher, passed individually only"};
+            } else if (clean_set.count(name) && phase2b_set.count(name)) {
+                result = {T262_PARTIAL_PASS, "partial: batch-lost, passed only in individual retry"};
+            } else if (clean_set.count(name)) {
+                auto br_it = batch_results.find(name);
+                if (br_it != batch_results.end() && br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
+                    result = {T262_PARTIAL_PASS, "partial: slow (>= 3s in batch)"};
+                }
+            }
+            // non-batch tests and fast clean-batch passes remain T262_PASS
+        }
 
         std::lock_guard<std::mutex> lock(g_results_mutex);
         g_cached_results[prepared[i].test_name] = result;
@@ -1975,6 +2003,9 @@ TEST_P(Test262Suite, Run) {
     switch (result.result) {
         case T262_PASS:
             break;
+        case T262_PARTIAL_PASS:
+            GTEST_NONFATAL_FAILURE_(result.message.c_str());
+            break;
         case T262_SKIP:
             GTEST_SKIP() << "Skipped: " << result.message;
             break;
@@ -2008,9 +2039,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 class Test262ReportListener : public testing::EmptyTestEventListener {
 public:
-    int passed = 0, failed = 0, skipped = 0, crashed = 0, timed_out = 0, batch_lost = 0;
+    int passed = 0, failed = 0, skipped = 0, crashed = 0, timed_out = 0, batch_lost = 0, partial = 0;
     std::map<std::string, std::pair<int,int>> category_results; // category -> (pass, total)
-    std::vector<std::string> current_passing;    // tests that passed this run
+    std::vector<std::string> current_passing;    // tests that fully passed this run
     std::vector<std::string> regressions;        // baseline pass → now fail
     std::vector<std::string> improvements;       // baseline fail → now pass
 
@@ -2048,23 +2079,42 @@ public:
                 }
             }
         } else {
-            failed++;
-            // Check if failure is "not found in batch results" — batch infrastructure
-            // issue, not a real test failure. Don't count as regression.
-            bool is_batch_lost = false;
-            for (int i = 0; i < info.result()->total_part_count(); i++) {
-                const auto& part = info.result()->GetTestPartResult(i);
-                if (part.failed() && part.message() &&
-                    strstr(part.message(), "not found in batch")) {
-                    is_batch_lost = true;
-                    break;
+            // Check if this is a partial pass (passed individually but not reliably in batch)
+            bool is_partial = false;
+            if (!param_name.empty()) {
+                std::lock_guard<std::mutex> lock(g_results_mutex);
+                auto it = g_cached_results.find(param_name);
+                if (it != g_cached_results.end() && it->second.result == T262_PARTIAL_PASS) {
+                    is_partial = true;
                 }
             }
-            if (!is_batch_lost && !param_name.empty() && !g_baseline_passing.empty() &&
-                g_baseline_passing.find(param_name) != g_baseline_passing.end()) {
-                regressions.push_back(param_name);
+            if (is_partial) {
+                partial++;
+                // Partial passes are not added to current_passing (baseline).
+                // If this test was in the baseline, it IS a regression (no longer fully passing).
+                if (!param_name.empty() && !g_baseline_passing.empty() &&
+                    g_baseline_passing.find(param_name) != g_baseline_passing.end()) {
+                    regressions.push_back(param_name);
+                }
+            } else {
+                failed++;
+                // Check if failure is "not found in batch results" — batch infrastructure
+                // issue, not a real test failure. Don't count as regression.
+                bool is_batch_lost = false;
+                for (int i = 0; i < info.result()->total_part_count(); i++) {
+                    const auto& part = info.result()->GetTestPartResult(i);
+                    if (part.failed() && part.message() &&
+                        strstr(part.message(), "not found in batch")) {
+                        is_batch_lost = true;
+                        break;
+                    }
+                }
+                if (!is_batch_lost && !param_name.empty() && !g_baseline_passing.empty() &&
+                    g_baseline_passing.find(param_name) != g_baseline_passing.end()) {
+                    regressions.push_back(param_name);
+                }
+                if (is_batch_lost) batch_lost++;
             }
-            if (is_batch_lost) batch_lost++;
         }
     }
 
@@ -2073,16 +2123,17 @@ public:
     }
 
     void OnTestProgramEnd(const testing::UnitTest& unit_test) override {
-        int total = passed + failed;
+        int total = passed + failed + partial;
         int real_failed = failed - batch_lost;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
         printf("\n");
         printf("╔══════════════════════════════════════════════════╗\n");
         printf("║         test262 Compliance Summary               ║\n");
         printf("╠══════════════════════════════════════════════════╣\n");
-        printf("║  Passed:     %5d / %5d  (%.1f%%)              ║\n", passed, total, pct);
-        printf("║  Failed:     %5d  (real: %d, batch-lost: %d)   ║\n", failed, real_failed, batch_lost);
-        printf("║  Skipped:    %5d                               ║\n", skipped);
+        printf("║  Fully passed: %5d / %5d  (%.1f%%)             ║\n", passed, total, pct);
+        printf("║  Partial pass: %5d  (batch-unstable or slow)   ║\n", partial);
+        printf("║  Failed:       %5d  (real: %d, batch-lost: %d) ║\n", failed, real_failed, batch_lost);
+        printf("║  Skipped:      %5d                             ║\n", skipped);
         printf("╚══════════════════════════════════════════════════╝\n");
 
         // Regression / improvement report
@@ -2092,7 +2143,8 @@ public:
             printf("║         Regression Check vs Baseline             ║\n");
             printf("╠══════════════════════════════════════════════════╣\n");
             printf("║  Baseline passing: %5zu                         ║\n", g_baseline_passing.size());
-            printf("║  Current passing:  %5zu                         ║\n", current_passing.size());
+            printf("║  Fully passing:    %5zu                         ║\n", current_passing.size());
+            printf("║  Partial passing:  %5d                          ║\n", partial);
             printf("║  Improvements:     %5zu  (fail → pass)          ║\n", improvements.size());
             printf("║  Regressions:      %5zu  (pass → fail)          ║\n", regressions.size());
             printf("╚══════════════════════════════════════════════════╝\n");
@@ -2115,11 +2167,11 @@ public:
             }
         }
 
-        // Update baseline if requested
+        // Update baseline if requested — only fully passed tests
         if (g_update_baseline) {
             write_baseline_file(BASELINE_FILE, current_passing,
                                 g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
+            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
                    BASELINE_FILE, current_passing.size());
         }
     }
@@ -2319,6 +2371,7 @@ int main(int argc, char** argv) {
             const char* status = "?";
             switch (result.result) {
                 case T262_PASS: status = "PASS"; passed++; break;
+                case T262_PARTIAL_PASS: status = "PARTIAL"; failed++; failed_names.push_back(prepared[i].test_name); break;
                 case T262_FAIL: status = "FAIL"; failed++; failed_names.push_back(prepared[i].test_name); break;
                 case T262_TIMEOUT: status = "TIMEOUT"; failed++; failed_names.push_back(prepared[i].test_name); break;
                 case T262_CRASH: status = "CRASH"; failed++; failed_names.push_back(prepared[i].test_name); break;
@@ -2350,8 +2403,8 @@ int main(int argc, char** argv) {
 
     if (g_batch_only) {
         // Print summary directly from cached results, skip individual gtest runs
-        int passed = 0, failed = 0, skipped = 0;
-        std::vector<std::string> current_passing;
+        int passed = 0, failed = 0, skipped = 0, partial = 0;
+        std::vector<std::string> current_passing;  // only fully passed tests
         std::vector<std::string> regressions;
         std::vector<std::string> improvements;
         {
@@ -2359,6 +2412,7 @@ int main(int argc, char** argv) {
             for (auto& kv : g_cached_results) {
                 switch (kv.second.result) {
                     case T262_PASS: passed++; current_passing.push_back(kv.first); break;
+                    case T262_PARTIAL_PASS: partial++; break;
                     case T262_SKIP: skipped++; break;
                     default: failed++; break;
                 }
@@ -2427,9 +2481,13 @@ int main(int argc, char** argv) {
                     if (result.result == T262_PASS) {
                         recovered++;
                         recovered_names.push_back(reg_name);
-                        current_passing.push_back(reg_name);
-                        passed++;
+                        // Phase 4 recovered = partial pass (passed individually, not in batch)
+                        partial++;
                         failed--;
+                        {
+                            std::lock_guard<std::mutex> lock(g_results_mutex);
+                            g_cached_results[reg_name] = {T262_PARTIAL_PASS, "partial: passed in Phase 4 retry only"};
+                        }
                     } else {
                         real_regressions.push_back(reg_name);
                     }
@@ -2497,22 +2555,24 @@ int main(int argc, char** argv) {
             }
         }
 
-        int total = passed + failed;
+        int total = passed + failed + partial;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
         printf("\n");
         printf("╔══════════════════════════════════════════════════╗\n");
         printf("║         test262 Compliance Summary               ║\n");
         printf("╠══════════════════════════════════════════════════╣\n");
-        printf("║  Passed:     %5d / %5d  (%.1f%%)              ║\n", passed, total, pct);
-        printf("║  Failed:     %5d                               ║\n", failed);
-        printf("║  Skipped:    %5d                               ║\n", skipped);
+        printf("║  Fully passed: %5d / %5d  (%.1f%%)             ║\n", passed, total, pct);
+        printf("║  Partial pass: %5d  (batch-unstable or slow)   ║\n", partial);
+        printf("║  Failed:       %5d                             ║\n", failed);
+        printf("║  Skipped:      %5d                             ║\n", skipped);
         printf("╚══════════════════════════════════════════════════╝\n");
         if (!g_baseline_passing.empty()) {
             printf("\n╔══════════════════════════════════════════════════╗\n");
             printf("║         Regression Check vs Baseline             ║\n");
             printf("╠══════════════════════════════════════════════════╣\n");
             printf("║  Baseline passing: %5zu                         ║\n", g_baseline_passing.size());
-            printf("║  Current passing:  %5zu                         ║\n", current_passing.size());
+            printf("║  Fully passing:    %5zu                         ║\n", current_passing.size());
+            printf("║  Partial passing:  %5d                          ║\n", partial);
             printf("║  Improvements:     %5zu  (fail → pass)          ║\n", improvements.size());
             printf("║  Regressions:      %5zu  (pass → fail)          ║\n", regressions.size());
             printf("╚══════════════════════════════════════════════════╝\n");
@@ -2529,11 +2589,11 @@ int main(int argc, char** argv) {
                 printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
             }
         }
-        // Update baseline if requested (batch-only path)
+        // Update baseline if requested (batch-only path) — only fully passed tests
         if (g_update_baseline) {
             write_baseline_file(BASELINE_FILE, current_passing,
                                 g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
+            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
                    BASELINE_FILE, current_passing.size());
         }
         return regressions.empty() ? 0 : 1;
