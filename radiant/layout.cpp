@@ -635,20 +635,35 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // CSS 2.1: Elements without specified styles still have computed values
             // from inheritance. Propagate font from the current layout context so
             // computed style queries return the correct inherited font properties.
-            if (!dom_elem->font && lycon->font.style) {
-                Pool* pool = lycon->doc ? lycon->doc->view_tree->pool : nullptr;
-                if (pool) {
-                    dom_elem->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
-                    if (dom_elem->font) {
-                        dom_elem->font->family = lycon->font.style->family;
-                        dom_elem->font->font_size = lycon->font.style->font_size;
-                        dom_elem->font->font_style = lycon->font.style->font_style;
-                        dom_elem->font->font_weight = lycon->font.style->font_weight;
-                        dom_elem->font->font_variant = lycon->font.style->font_variant;
-                        dom_elem->font->text_deco = lycon->font.style->text_deco;
-                        dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
-                        dom_elem->font->word_spacing = lycon->font.style->word_spacing;
+            // Note: apply_element_default_style may have allocated font with partial
+            // properties (e.g., <b> gets font-weight:bold but no family/size).
+            // We must fill in missing properties from parent in all cases.
+            if (lycon->font.style) {
+                if (!dom_elem->font) {
+                    Pool* pool = lycon->doc ? lycon->doc->view_tree->pool : nullptr;
+                    if (pool) {
+                        dom_elem->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     }
+                }
+                if (dom_elem->font) {
+                    if (!dom_elem->font->family)
+                        dom_elem->font->family = lycon->font.style->family;
+                    if (dom_elem->font->font_size <= 0)
+                        dom_elem->font->font_size = lycon->font.style->font_size;
+                    if (dom_elem->font->font_style == 0 && lycon->font.style->font_style != 0)
+                        dom_elem->font->font_style = lycon->font.style->font_style;
+                    if (dom_elem->font->font_weight == 0)
+                        dom_elem->font->font_weight = lycon->font.style->font_weight;
+                    if (dom_elem->font->font_weight_numeric == 0 && lycon->font.style->font_weight_numeric != 0)
+                        dom_elem->font->font_weight_numeric = lycon->font.style->font_weight_numeric;
+                    if (dom_elem->font->font_variant == 0)
+                        dom_elem->font->font_variant = lycon->font.style->font_variant;
+                    if (dom_elem->font->text_deco == 0)
+                        dom_elem->font->text_deco = lycon->font.style->text_deco;
+                    if (dom_elem->font->letter_spacing == 0)
+                        dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
+                    if (dom_elem->font->word_spacing == 0)
+                        dom_elem->font->word_spacing = lycon->font.style->word_spacing;
                 }
             }
         }
