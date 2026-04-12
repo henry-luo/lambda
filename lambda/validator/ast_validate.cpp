@@ -11,6 +11,7 @@
 #include "../lambda-data.hpp"
 #include "../input/input.hpp"
 #include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
@@ -159,7 +160,7 @@ static ValidationResult* validate_lambda_file(const char* file_path, Pool* pool)
     // Validate the source
     ValidationResult* result = validate_lambda_source(content, pool);
 
-    free(content);
+    mem_free(content);
     return result;
 }
 
@@ -238,7 +239,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         SchemaValidator* validator = schema_validator_create(pool);
         if (!validator) {
             printf("Error: Failed to create schema validator\n");
-            free(schema_contents);
+            mem_free(schema_contents);
             pool_destroy(pool);
             return nullptr;
         }
@@ -323,7 +324,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         if (schema_result != 0) {
             printf("Error: Failed to load schema\n");
             schema_validator_destroy(validator);
-            free(schema_contents);
+            mem_free(schema_contents);
             pool_destroy(pool);
             return nullptr;
         }
@@ -333,7 +334,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         if (!getcwd(cwd_path, sizeof(cwd_path))) {
             printf("Error: Cannot get current working directory\n");
             schema_validator_destroy(validator);
-            free(schema_contents);
+            mem_free(schema_contents);
             pool_destroy(pool);
             return nullptr;
         }
@@ -345,10 +346,10 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, data_file);
         }
 
-        String* url_string = (String*)malloc(sizeof(String) + strlen(file_url) + 1);
+        String* url_string = (String*)mem_alloc(sizeof(String) + strlen(file_url) + 1, MEM_CAT_SYSTEM);
         String* type_string = nullptr;
         if (input_format && strcmp(input_format, "auto-detect") != 0) {
-            type_string = (String*)malloc(sizeof(String) + strlen(input_format) + 1);
+            type_string = (String*)mem_alloc(sizeof(String) + strlen(input_format) + 1, MEM_CAT_SYSTEM);
             if (type_string) {
                 type_string->len = strlen(input_format);
                 str_copy(type_string->chars, type_string->len + 1, input_format, type_string->len);
@@ -368,14 +369,14 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
                 printf("Error: Failed to parse input file\n");
             }
 
-            free(url_string);
-            if (type_string) free(type_string);
+            mem_free(url_string);
+            if (type_string) mem_free(type_string);
         }
 
         if (data_item.item == ITEM_ERROR) {
             printf("Error: Failed to parse data file\n");
             schema_validator_destroy(validator);
-            free(schema_contents);
+            mem_free(schema_contents);
             pool_destroy(pool);
             return nullptr;
         }
@@ -386,7 +387,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 
         // Cleanup
         schema_validator_destroy(validator);
-        free(schema_contents);
+        mem_free(schema_contents);
     }
 
     if (!validation_result) {
@@ -605,7 +606,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
 
     ValidationResult* result = run_ast_validation(data_file, schema_file, input_format, &opts);
 
-    if (schema_file_allocated) { free(schema_file); schema_file = nullptr; }
+    if (schema_file_allocated) { mem_free(schema_file); schema_file = nullptr; }
 
     // Return the ValidationResult directly to the caller
     return result;

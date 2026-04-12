@@ -7,21 +7,21 @@
 #include "server.hpp"
 #include "../../lib/log.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Endpoint Registry
 // ============================================================================
 
 EndpointRegistry* rest_registry_create(void) {
-    EndpointRegistry* reg = (EndpointRegistry*)calloc(1, sizeof(EndpointRegistry));
+    EndpointRegistry* reg = (EndpointRegistry*)mem_calloc(1, sizeof(EndpointRegistry), MEM_CAT_SERVE);
     return reg;
 }
 
 void rest_registry_destroy(EndpointRegistry *reg) {
     if (!reg) return;
     // patterns and schema strings are caller-owned, not freed here
-    free(reg);
+    mem_free(reg);
 }
 
 static int registry_add(EndpointRegistry *reg, HttpMethod method,

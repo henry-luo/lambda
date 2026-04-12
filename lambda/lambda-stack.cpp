@@ -14,6 +14,7 @@
 #include "lambda-stack.h"
 #include "lambda-error.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -174,7 +175,7 @@ static void install_signal_handler(void) {
 
     // 1. Allocate and register alternate signal stack
     //    The handler runs on this stack (since the main stack is exhausted)
-    void* alt_stack_mem = malloc(LAMBDA_ALT_STACK_SIZE);
+    void* alt_stack_mem = mem_alloc(LAMBDA_ALT_STACK_SIZE, MEM_CAT_SYSTEM);
     if (!alt_stack_mem) {
         log_error("stack init: failed to allocate alternate signal stack");
         return;
@@ -186,7 +187,7 @@ static void install_signal_handler(void) {
     ss.ss_flags = 0;
     if (sigaltstack(&ss, NULL) != 0) {
         log_error("stack init: sigaltstack failed");
-        free(alt_stack_mem);
+        mem_free(alt_stack_mem);
         return;
     }
 

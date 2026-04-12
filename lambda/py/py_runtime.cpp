@@ -14,7 +14,7 @@
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include <cmath>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 
 // Global Input context for Python runtime (for map_put, pool allocations)
@@ -407,7 +407,7 @@ extern "C" Item py_multiply(Item left, Item right) {
         size_t total_len = str->len * count;
         if (total_len > 1024 * 1024) total_len = 1024 * 1024; // limit
 
-        char* buf = (char*)malloc(total_len + 1);
+        char* buf = (char*)mem_alloc(total_len + 1, MEM_CAT_PY_RUNTIME);
         if (!buf) return left;
         size_t pos = 0;
         for (int64_t i = 0; i < count && pos + str->len <= total_len; i++) {
@@ -416,7 +416,7 @@ extern "C" Item py_multiply(Item left, Item right) {
         }
         buf[pos] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -1346,7 +1346,7 @@ extern "C" Item py_list_new(int length) {
     Array* arr = array();
     if (length > 0) {
         arr->capacity = length + 4;
-        arr->items = (Item*)malloc(arr->capacity * sizeof(Item));
+        arr->items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_PY_RUNTIME);
         arr->length = length;
         for (int i = 0; i < length; i++) {
             arr->items[i] = ItemNull;
@@ -1852,13 +1852,13 @@ extern "C" Item py_builtin_open(Item path_item, Item mode_item) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
-    char* buf = (char*)malloc(size + 1);
+    char* buf = (char*)mem_alloc(size + 1, MEM_CAT_PY_RUNTIME);
     size_t read_bytes = fread(buf, 1, size, f);
     buf[read_bytes] = '\0';
     fclose(f);
 
     Item result = (Item){.item = s2it(heap_create_name(buf))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 

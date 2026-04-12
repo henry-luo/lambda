@@ -22,12 +22,12 @@ static char* download_font_url(const char* url) {
     char* cache_path = nullptr;
     char* content = download_to_cache(url, FONT_CACHE_DIR, &cache_path);
     if (content) {
-        free(content);  // we only need the cache file path, not the in-memory content
+        mem_free(content);  // we only need the cache file path, not the in-memory content
     }
     if (cache_path) {
         // convert stdlib path to mem-tracked string
         char* result = mem_strdup(cache_path, MEM_CAT_LAYOUT);
-        free(cache_path);
+        mem_free(cache_path);
         return result;
     }
     return nullptr;
@@ -287,12 +287,12 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
         process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
 
         if (stylesheet_path) {
-            free(stylesheet_path);  // from url_to_local_path() or strdup() which use stdlib
+            mem_free(stylesheet_path);  // from url_to_local_path() or strdup() which use stdlib
         }
     }
 
     if (doc_base_path) {
-        free(doc_base_path);  // from url_to_local_path() which uses stdlib
+        mem_free(doc_base_path);  // from url_to_local_path() which uses stdlib
     }
 }
 

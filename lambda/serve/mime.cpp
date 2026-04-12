@@ -10,7 +10,7 @@
 #include "mime.hpp"
 #include "serve_utils.hpp"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <ctype.h>
 
 // ============================================================================

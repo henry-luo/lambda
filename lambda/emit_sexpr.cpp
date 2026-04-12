@@ -6,6 +6,8 @@
 // bridge (ast-bridge.rkt) can directly read and feed to eval-lambda
 // or eval-proc.
 //
+#include "../lib/memtrack.h"
+
 // Top-level format:
 //   (script "fn" form ...)      ; functional script
 //   (script "pn" form ...)      ; procedural script (has pn main)
@@ -1939,7 +1941,7 @@ int emit_sexpr_file(const char* script_path) {
     TSTree* tree = lambda_parse_source(parser, source);
     if (!tree) {
         fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -1948,7 +1950,7 @@ int emit_sexpr_file(const char* script_path) {
     if (ts_node_has_error(root)) {
         fprintf(stderr, "Error: Syntax errors in '%s'\n", script_path);
         ts_tree_delete(tree);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -1957,7 +1959,7 @@ int emit_sexpr_file(const char* script_path) {
     if (strstr(source, "\nimport ") || strncmp(source, "import ", 7) == 0) {
         fprintf(stderr, "Error: '%s' contains imports (not supported by --emit-sexpr)\n", script_path);
         ts_tree_delete(tree);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -1967,7 +1969,7 @@ int emit_sexpr_file(const char* script_path) {
     if (!input_base) {
         fprintf(stderr, "Error: Failed to allocate memory\n");
         ts_tree_delete(tree);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -1990,7 +1992,7 @@ int emit_sexpr_file(const char* script_path) {
         fprintf(stderr, "Error: Failed to build AST for '%s'\n", script_path);
         pool_destroy(tp.pool);
         ts_tree_delete(tree);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -1999,7 +2001,7 @@ int emit_sexpr_file(const char* script_path) {
         fprintf(stderr, "Error: %d errors building AST for '%s'\n", tp.error_count, script_path);
         pool_destroy(tp.pool);
         ts_tree_delete(tree);
-        free(source);
+        mem_free(source);
         ts_parser_delete(parser);
         return 1;
     }
@@ -2015,7 +2017,7 @@ int emit_sexpr_file(const char* script_path) {
     // cleanup
     pool_destroy(tp.pool);
     ts_tree_delete(tree);
-    free(source);
+    mem_free(source);
     ts_parser_delete(parser);
 
     return 0;

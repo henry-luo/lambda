@@ -34,11 +34,11 @@ TIMEOUT_DIR="$SCRIPT_DIR/results/timeouts"
 BADJSON_DIR="$SCRIPT_DIR/results/badjson"
 
 # Defaults
-DURATION_SEC=300
+DURATION_SEC=600
 TIMEOUT_SEC=10
-GEN_COUNT=50
-MUT_COUNT=3
-MUT_SEEDS=50
+GEN_COUNT=100
+MUT_COUNT=5
+MUT_SEEDS=100
 MODE="all"
 MUTATE_ONLY=0
 GENERATE_ONLY=0
@@ -129,9 +129,9 @@ run_one() {
 
     TESTS_RUN=$((TESTS_RUN + 1))
 
-    # Run with timeout
+    # Run with timeout (--no-log to avoid debug I/O overhead skewing results)
     local exit_code=0
-    timeout "$TIMEOUT_SEC" "$LAMBDA_EXE" layout "$html_file" -o "$json_out" \
+    timeout "$TIMEOUT_SEC" "$LAMBDA_EXE" layout "$html_file" --no-log -o "$json_out" \
         >/dev/null 2>"$TEMP_DIR/out/stderr_$$.txt" || exit_code=$?
 
     local basename

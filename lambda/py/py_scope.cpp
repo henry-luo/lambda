@@ -8,7 +8,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // scope management functions
 
@@ -173,7 +173,7 @@ void py_warning(PyTranspiler* tp, TSNode node, const char* format, ...) {
 // transpiler lifecycle functions
 
 PyTranspiler* py_transpiler_create(Runtime* runtime) {
-    PyTranspiler* tp = (PyTranspiler*)malloc(sizeof(PyTranspiler));
+    PyTranspiler* tp = (PyTranspiler*)mem_alloc(sizeof(PyTranspiler), MEM_CAT_PY_RUNTIME);
     memset(tp, 0, sizeof(PyTranspiler));
 
     // initialize memory pools
@@ -226,7 +226,7 @@ void py_transpiler_destroy(PyTranspiler* tp) {
         strbuf_free(tp->error_buf);
     }
 
-    free(tp);
+    mem_free(tp);
 }
 
 bool py_transpiler_parse(PyTranspiler* tp, const char* source, size_t length) {

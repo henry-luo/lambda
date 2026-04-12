@@ -2,6 +2,7 @@
 // Part of Lambda Script URL parser
 
 #include <stdlib.h>
+#include "memtrack.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -185,7 +186,7 @@ static char* url_idna_encode_hostname(const char* hostname) {
         }
     }
     result[rpos] = '\0';
-    char* out = malloc(rpos + 1);
+    char* out = mem_alloc(rpos + 1, MEM_CAT_TEMP);
     if (out) memcpy(out, result, rpos + 1);
     return out;
 }
@@ -195,7 +196,7 @@ static char* url_idna_encode_hostname(const char* hostname) {
 // Returns a malloc'd string; caller must free.
 static char* url_percent_encode(const char* input, size_t len) {
     // worst case: every byte becomes %XX (3x expansion)
-    char* out = malloc(len * 3 + 1);
+    char* out = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
     if (!out) return NULL;
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
@@ -222,7 +223,7 @@ static char* url_percent_encode(const char* input, size_t len) {
 UrlParser* url_parser_create(const char* input) {
     if (!input) return NULL;
 
-    UrlParser* parser = malloc(sizeof(UrlParser));
+    UrlParser* parser = mem_alloc(sizeof(UrlParser), MEM_CAT_TEMP);
     if (!parser) return NULL;
 
     parser->input = input;
@@ -236,7 +237,7 @@ UrlParser* url_parser_create(const char* input) {
 
 // Destroy URL parser
 void url_parser_destroy(UrlParser* parser) {
-    free(parser);
+    mem_free(parser);
 }
 
 // Enhanced URL parsing (Phase 2 - Enhanced component parsing)
@@ -331,13 +332,13 @@ UrlError url_parse_into(const char* input, Url* url) {
             // Extract username
             size_t username_len = colon_cred ? (colon_cred - current) : (at_sign - current);
             if (username_len > 0) {
-                char* username_buf = malloc(username_len + 1);
+                char* username_buf = mem_alloc(username_len + 1, MEM_CAT_TEMP);
                 if (username_buf) {
                     strncpy(username_buf, current, username_len);
                     username_buf[username_len] = '\0';
                     url_free_string(url->username);
                     url->username = url_create_string(username_buf);
-                    free(username_buf);
+                    mem_free(username_buf);
                 }
             }
 
@@ -345,13 +346,13 @@ UrlError url_parse_into(const char* input, Url* url) {
             if (colon_cred) {
                 size_t password_len = at_sign - (colon_cred + 1);
                 if (password_len > 0) {
-                    char* password_buf = malloc(password_len + 1);
+                    char* password_buf = mem_alloc(password_len + 1, MEM_CAT_TEMP);
                     if (password_buf) {
                         strncpy(password_buf, colon_cred + 1, password_len);
                         password_buf[password_len] = '\0';
                         url_free_string(url->password);
                         url->password = url_create_string(password_buf);
-                        free(password_buf);
+                        mem_free(password_buf);
                     }
                 }
             }
@@ -371,7 +372,7 @@ UrlError url_parse_into(const char* input, Url* url) {
                 url_free_string(url->hostname);
                 url->host = url_create_string(final_host);
                 url->hostname = url_create_string(final_host);
-                if (idna_host) free(idna_host);
+                if (idna_host) mem_free(idna_host);
             }
         }
 
@@ -413,7 +414,7 @@ UrlError url_parse_into(const char* input, Url* url) {
     size_t path_len = path_end - path_start;
     if (path_len > 0) {
         // Use dynamic allocation for paths to handle long URLs
-        char* path_buf = malloc(path_len + 1);
+        char* path_buf = mem_alloc(path_len + 1, MEM_CAT_TEMP);
         if (path_buf) {
             strncpy(path_buf, path_start, path_len);
             path_buf[path_len] = '\0';
@@ -425,8 +426,8 @@ UrlError url_parse_into(const char* input, Url* url) {
             char* encoded = url_percent_encode(path_buf, strlen(path_buf));
             url_free_string(url->pathname);
             url->pathname = url_create_string(encoded ? encoded : path_buf);
-            if (encoded) free(encoded);
-            free(path_buf);
+            if (encoded) mem_free(encoded);
+            mem_free(path_buf);
         }
     } else if (url->scheme == URL_SCHEME_HTTP || url->scheme == URL_SCHEME_HTTPS) {
         // Default path for HTTP/HTTPS
@@ -450,7 +451,7 @@ UrlError url_parse_into(const char* input, Url* url) {
         // Extract query (including the '?')
         size_t query_len = query_end - query_start;
         if (query_len > 0) {
-            char* query_buf = malloc(query_len + 2); // +1 for '?', +1 for '\0'
+            char* query_buf = mem_alloc(query_len + 2, MEM_CAT_TEMP); // +1 for '?', +1 for '\0'
             if (query_buf) {
                 query_buf[0] = '?';
                 strncpy(query_buf + 1, query_start, query_len);
@@ -459,8 +460,8 @@ UrlError url_parse_into(const char* input, Url* url) {
                 char* encoded = url_percent_encode(query_buf, strlen(query_buf));
                 url_free_string(url->search);
                 url->search = url_create_string(encoded ? encoded : query_buf);
-                if (encoded) free(encoded);
-                free(query_buf);
+                if (encoded) mem_free(encoded);
+                mem_free(query_buf);
             }
         }
 
@@ -475,14 +476,14 @@ UrlError url_parse_into(const char* input, Url* url) {
         // Fragment goes to end of string
         size_t fragment_len = strlen(fragment_start);
         if (fragment_len > 0 && fragment_len < 4096) {  // Reasonable limit for URL fragments
-            char* fragment_buf = malloc(fragment_len + 2); // +1 for '#', +1 for '\0'
+            char* fragment_buf = mem_alloc(fragment_len + 2, MEM_CAT_TEMP); // +1 for '#', +1 for '\0'
             if (fragment_buf) {
                 fragment_buf[0] = '#';
                 memcpy(fragment_buf + 1, fragment_start, fragment_len);  // Safe copy
                 fragment_buf[fragment_len + 1] = '\0';  // Explicit null termination
                 url_free_string(url->hash);
                 url->hash = url_create_string(fragment_buf);
-                free(fragment_buf);
+                mem_free(fragment_buf);
             }
         }
     }
@@ -644,7 +645,7 @@ void url_normalize_path(char* path) {
 char* url_resolve_path(const char* base_path, const char* relative_path) {
     if (!base_path || !relative_path) return NULL;
 
-    char* result = malloc(2048);
+    char* result = mem_alloc(2048, MEM_CAT_TEMP);
     if (!result) return NULL;
 
     if (relative_path[0] == '/') {
@@ -679,7 +680,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         int temp_count = 0;
         char* token = strtok(base_copy, "/");
         while (token && temp_count < 127) {
-            temp_segments[temp_count] = malloc(strlen(token) + 1);
+            temp_segments[temp_count] = mem_alloc(strlen(token) + 1, MEM_CAT_TEMP);
             if (temp_segments[temp_count]) {
                 size_t token_len = strlen(token);
                 str_copy(temp_segments[temp_count], token_len + 1, token, token_len);
@@ -697,7 +698,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
 
         // Free unused segments
         for (int i = segments_to_copy; i < temp_count; i++) {
-            free(temp_segments[i]);
+            mem_free(temp_segments[i]);
         }
     }
 
@@ -713,13 +714,13 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         } else if (strcmp(token, "..") == 0) {
             // Parent directory - remove last segment if possible (RFC 3986)
             if (segment_count > 0) {
-                free(segments[segment_count - 1]);
+                mem_free(segments[segment_count - 1]);
                 segment_count--;
             }
             // If segment_count == 0, ".." has no effect (can't go above root)
         } else if (strlen(token) > 0) {
             // Regular segment - add it
-            segments[segment_count] = malloc(strlen(token) + 1);
+            segments[segment_count] = mem_alloc(strlen(token) + 1, MEM_CAT_TEMP);
             if (segments[segment_count]) {
                 size_t token_len = strlen(token);
                 str_copy(segments[segment_count], token_len + 1, token, token_len);
@@ -738,7 +739,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
                 result_len = str_cat(result, result_len, 2048, "/", 1);
             }
             result_len = str_cat(result, result_len, 2048, segments[i], strlen(segments[i]));
-            free(segments[i]);
+            mem_free(segments[i]);
         }
     }
 
@@ -799,7 +800,7 @@ char* url_extract_path_from_authority_relative(const char* input) {
     const char* path_start = strchr(start, '/');
     if (!path_start) {
         // No path component, return "/"
-        char* result = malloc(2);
+        char* result = mem_alloc(2, MEM_CAT_TEMP);
         if (result) {
             str_copy(result, 2, "/", 1);
         }
@@ -814,14 +815,14 @@ char* url_extract_path_from_authority_relative(const char* input) {
 
     size_t path_len = path_end - path_start;
     if (path_len == 0) {
-        char* result = malloc(2);
+        char* result = mem_alloc(2, MEM_CAT_TEMP);
         if (result) {
             str_copy(result, 2, "/", 1);
         }
         return result;
     }
 
-    char* result = malloc(path_len + 1);
+    char* result = mem_alloc(path_len + 1, MEM_CAT_TEMP);
     if (result) {
         strncpy(result, path_start, path_len);
         result[path_len] = '\0';
@@ -1031,13 +1032,13 @@ void url_normalize_path_segments(char** segments, int* segment_count) {
 // Join normalized path segments back into a path string
 char* url_join_path_segments(char** segments, int segment_count) {
     if (!segments || segment_count < 0) {
-        char* result = malloc(2);
+        char* result = mem_alloc(2, MEM_CAT_TEMP);
         if (result) str_copy(result, 2, "/", 1);
         return result;
     }
 
     if (segment_count == 0) {
-        char* result = malloc(2);
+        char* result = mem_alloc(2, MEM_CAT_TEMP);
         if (result) str_copy(result, 2, "/", 1);
         return result;
     }
@@ -1050,7 +1051,7 @@ char* url_join_path_segments(char** segments, int segment_count) {
         }
     }
 
-    char* result = malloc(total_len + 1);
+    char* result = mem_alloc(total_len + 1, MEM_CAT_TEMP);
     if (!result) return NULL;
 
     str_copy(result, total_len + 1, "/", 1);
@@ -1125,7 +1126,7 @@ UrlError url_handle_path_relative(const char* input, const Url* base_url, Url* r
     if (resolved_path) {
         url_free_string(result->pathname);
         result->pathname = url_create_string(resolved_path);
-        free(resolved_path);
+        mem_free(resolved_path);
     } else {
         url_free_string(result->pathname);
         result->pathname = url_create_string("/");

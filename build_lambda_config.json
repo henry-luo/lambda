@@ -273,6 +273,8 @@
             ],
             "sources": [
                 "lib/mempool.c",
+                "lib/memtrack.c",
+                "lib/hashmap.c",
                 "lib/arena.c",
                 "lib/scratch_arena.c",
                 "lib/arraylist.c",
@@ -1364,7 +1366,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_strview_gtest.exe",
                         "icon": "👀"
@@ -1377,7 +1380,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_num_stack_gtest.exe",
                         "icon": "🔢"
@@ -1438,6 +1442,7 @@
                             "lib/font/woff2/table_tags.cpp",
                             "lib/font/woff2/variable_length.cpp",
                             "lib/arena.c",
+                            "lib/memtrack.c",
                             "lib/mempool.c",
                             "lib/log.c",
                             "lib/hashmap.c",
@@ -1456,7 +1461,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_url_gtest.exe",
                         "icon": "🔗"
@@ -1469,7 +1475,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_url_extra_gtest.exe",
                         "icon": "🌐"
@@ -1483,7 +1490,8 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "utf8proc"
+                            "utf8proc",
+                            "rpmalloc"
                         ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
@@ -1611,7 +1619,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_shell_gtest.exe",
                         "icon": "🐚"
@@ -1624,7 +1633,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lib/file.c"
@@ -1662,7 +1672,8 @@
                             "uv",
                             "mbedtls",
                             "mbedx509",
-                            "mbedcrypto"
+                            "mbedcrypto",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lambda/serve/serve_types.cpp",
@@ -1684,6 +1695,8 @@
                             "lambda/serve/tls_handler.cpp",
                             "lambda/serve/worker_pool.cpp",
                             "lambda/serve/language_backend.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
                             "lib/log.c"
                         ],
                         "binary": "test_serve_gtest.exe",
@@ -1698,7 +1711,8 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "uv"
+                            "uv",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lambda/serve/serve_types.cpp",
@@ -1708,6 +1722,8 @@
                             "lambda/serve/http_request.cpp",
                             "lambda/serve/http_response.cpp",
                             "lambda/serve/schema_validator.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
                             "lib/log.c"
                         ],
                         "binary": "test_serve_phase2_gtest.exe",

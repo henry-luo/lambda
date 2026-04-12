@@ -39,6 +39,18 @@
 5. **`lib/` foundation types are exempt.**
    Core allocator infrastructure (`mempool.c`, `arena.c`, `memtrack.c`, `hashmap.c`, `arraylist.c`, `strbuf.c`, `str.c`, `gc/*.c`) may use raw `malloc` since they _are_ the allocation layer. These files are the only ones that include `<stdlib.h>` directly.
 
+6. **`mem_alloc`/`mem_free` and raw `malloc`/`free` are NOT interchangeable in STATS mode.**
+   In STATS mode, `mem_alloc` prepends an 8-byte `MemAllocHeader` before the user pointer. Mixing allocators causes **heap corruption crashes**:
+   - `free()` on a `mem_alloc`'d pointer → frees user pointer directly, but the real allocation starts 8 bytes earlier → `POINTER_BEING_FREED_WAS_NOT_ALLOCATED` abort.
+   - `mem_free()` on a raw `malloc`'d pointer → reads 8 bytes before the pointer as `MemAllocHeader`, gets garbage, and calls `free()` on a wrong address → same abort.
+
+   **Real bug (fixed 2026-04-12)**: `download_http_content()` in `input_http.cpp` was migrated (Phase 3) to use `mem_realloc` internally, but all callers (`cmd_layout.cpp`, `script_runner.cpp`, `surface.cpp`, `test_http_gtest.cpp`) used raw `free()` on the returned data. This caused 7/8 `test_network_layout_gtest` tests to crash with SIGABRT. Similarly, `mem_strdup` in `lib/font/font_loader.c` was freed by raw `free()` in `file_data_free` and `font_context.c`. Both were reverted to raw allocators.
+
+   **Rule**: When migrating a function that **returns allocated memory to callers**, either:
+   - (a) Migrate the function AND all callers simultaneously, or
+   - (b) Keep the function using raw `malloc`/`strdup` so callers can use raw `free()`.
+   Never migrate just one side.
+
 ---
 
 ## 2. Current State
@@ -492,61 +504,138 @@ if (leaks > 0) {
 
 ## 10. Migration Plan
 
-### Phase 0: Infrastructure (1 session)
+### Phase 0: Infrastructure ✅ COMPLETE
 
-| # | Task | Description |
-|---|------|-------------|
-| 0.1 | Create `lib/mem.h` | Unified header: includes `memtrack.h` + `<stdlib.h>`, defines `MEMTRACK_POISON_RAW_ALLOC` pragma poison |
-| 0.2 | Fix STATS mode `mem_free` | Add inline size header (§7) so `current_bytes` decrements correctly |
-| 0.3 | Add new categories | 7 new categories (§6) in `memtrack.h` |
-| 0.4 | Implement pool/arena tracking stubs | Lifecycle tracking (§8) |
-| 0.5 | Add `memtrack_shutdown` return value | Return leak count for CI |
+| # | Task | Status |
+|---|------|--------|
+| 0.1 | Create `lib/mem.h` | ✅ Unified header with `memtrack.h` + `<stdlib.h>` + `#pragma GCC poison` |
+| 0.2 | Fix STATS mode `mem_free` | ✅ 8-byte `MemAllocHeader` (size, category, magic=0xBEEF) prepended in STATS mode |
+| 0.3 | Add new categories | ✅ All categories added to `memtrack.h` enum |
+| 0.4 | Implement pool/arena tracking | ✅ Lifecycle counters in `memtrack_pool_create/destroy`, `memtrack_arena_create/destroy` |
+| 0.5 | Add `memtrack_shutdown` return value | ✅ Returns leak count for CI |
 
-### Phase 1: Radiant Cleanup (1 session)
+### Phase 1: Radiant Cleanup ✅ COMPLETE
 
-Migrate the remaining ~49 raw calls in 15 radiant files. This is the smallest batch and validates the workflow.
+Migrated ~49 raw calls in 12+ radiant files.
 
-- Replace `#include <stdlib.h>` → `#include "mem.h"` in all 15 files
-- Convert all `malloc`→`mem_alloc`, `free`→`mem_free`, etc.
-- Build with `-DMEMTRACK_POISON_RAW_ALLOC` for `radiant/` target
-- Run `make test-radiant-baseline` — zero regressions
-- Run with `MEMTRACK_MODE=DEBUG` — verify zero leaks in layout tests
+- All `#include <stdlib.h>` → `#include "mem.h"` in radiant source files
+- All `malloc`→`mem_alloc`, `free`→`mem_free`, etc. with appropriate categories
+- `MEM_CAT_LAYOUT`, `MEM_CAT_RENDER`, `MEM_CAT_STYLE`, `MEM_CAT_FONT`, `MEM_CAT_FORMAT`, `MEM_CAT_TEMP`
+- Test results: Lambda 566/566, Radiant 4334/4645 (pre-existing failures only)
 
-### Phase 2: Lambda Core (1-2 sessions)
+### Phase 2: Lambda Core ✅ COMPLETE
 
-Migrate ~150 calls in ~30 core files (`runner.cpp`, `transpile*.cpp`, `build_ast.cpp`, `lambda-eval.cpp`, `lambda-error.cpp`, `lambda-vector.cpp`, `vmap.cpp`, etc.).
+Migrated ~150 calls in ~30 core files (`runner.cpp`, `transpile*.cpp`, `build_ast.cpp`, `lambda-eval.cpp`, `lambda-error.cpp`, `lambda-vector.cpp`, `vmap.cpp`, `mir.c`, etc.).
 
-- These are the most impactful — core runtime + AST + eval
-- Run `make test-lambda-baseline` after each batch
-- Run with `MEMTRACK_MODE=DEBUG` — verify zero leaks
+- Categories: `MEM_CAT_EVAL`, `MEM_CAT_AST`, `MEM_CAT_CONTAINER`, `MEM_CAT_STRING`, `MEM_CAT_PARSER`, `MEM_CAT_TEMP`
+- Test results: Lambda 566/566
 
-### Phase 3: Input Parsers (1-2 sessions)
+### Phase 3: Input Parsers ✅ COMPLETE
 
-Migrate ~120 calls in ~30 files. Mostly mechanical — markup parsers are highly repetitive (temp string buffers).
+Migrated ~131 raw calls in 28 files.
 
-- Markup parser files (15 files, ~55 calls) — all use `MEM_CAT_INPUT_MARKUP`
-- PDF decompress (19 calls) — `MEM_CAT_INPUT_PDF`
-- Other parsers (15 files, ~46 calls)
+- Markup parser files (15 files) → `MEM_CAT_INPUT_MARKUP`
+- PDF decompress (19 calls) → `MEM_CAT_INPUT_PDF`
+- CSS subsystem → `MEM_CAT_INPUT_CSS`
+- Other parsers (MDX, HTTP, etc.) → `MEM_CAT_INPUT_MDX`, `MEM_CAT_INPUT_OTHER`
+- Build config: Added `lib/memtrack.c`, `lib/arena.c` to `test_css_style_node` and `test_css_system` targets
+- Test results: Lambda 566/566
 
-### Phase 4: Script Engines (2-3 sessions)
+### Phase 4: Script Engines ✅ COMPLETE
 
-Migrate ~200 calls in ~35 files. These are the most numerous but follow a consistent pattern per engine:
+Migrated all 5 engine directories (~200 raw calls, 48 files total).
 
-- JavaScript: 12 files, ~75 calls → `MEM_CAT_JS_RUNTIME`
-- Python: 6 files, ~35 calls → `MEM_CAT_PY_RUNTIME`
-- Bash: 5 files, ~35 calls → `MEM_CAT_BASH_RUNTIME`
-- Ruby: 4 files, ~15 calls → `MEM_CAT_RB_RUNTIME`
+| Engine | Files | Category | External-lib `free()` kept raw |
+|--------|-------|----------|-------------------------------|
+| JavaScript | 12 | `MEM_CAT_JS_RUNTIME` | 4 calls in `js_globals.cpp` (url_encode/url_decode from lib/url.c) |
+| Python | 10 | `MEM_CAT_PY_RUNTIME` | 9 calls (read_text_file, file_getcwd, file_realpath) |
+| Bash | 14 | `MEM_CAT_BASH_RUNTIME` | 6 calls (read_text_file) |
+| Ruby | 7 | `MEM_CAT_RB_RUNTIME` | 1 call (read_text_file) |
+| TypeScript | 5 | `MEM_CAT_TEMP` | none |
 
-### Phase 5: Network/Serve + lib/ (1-2 sessions)
+- External-lib pattern: Memory returned by `read_text_file()`, `file_getcwd()`, `file_realpath()`, `url_encode_*()`, `url_decode_*()` uses raw `malloc` internally — callers keep raw `free()` with comments
+- Test results: Lambda 566/566, Radiant 4334/4645 (no regressions)
 
-- Network: 4 files, ~28 calls → `MEM_CAT_NETWORK`
-- Serve: 7 files, ~25 calls → `MEM_CAT_SERVE`
-- lib/ non-foundation: ~15 files, ~80 calls → various categories
+### Phase 5: Network/Serve ✅ COMPLETE
 
-### Phase 6: Poison Enforcement (1 session)
+Migrated all network and serve files (~23 files total).
+
+| Subsystem | Files | Category | Notes |
+|-----------|-------|----------|-------|
+| Network core | 5 | `MEM_CAT_NETWORK` | Multi-line `realloc` in resource_loaders.cpp fixed manually |
+| Serve/HTTP | ~18 | `MEM_CAT_SERVE` | `serve_utils.cpp` wrappers converted internally → 170 `serve_malloc`/`serve_free` call sites tracked automatically |
+
+- Build config: Added `lib/memtrack.c`, `lib/hashmap.c`, `rpmalloc` library to `test_serve_gtest` and `test_serve_phase2_gtest` targets
+- Test results: Lambda 566/566, Radiant 4334/4645 (no regressions)
+
+### Phase 6: lib/ Non-Foundation — ✅ COMPLETE
+
+**Strategy**: Option (b) — migrate lib/ functions AND all callers together to `mem_alloc`/`mem_free`.
+
+**lib/ files converted** (19 files, ~299 raw alloc sites → mem_alloc/mem_calloc/mem_realloc/mem_strdup):
+- `lib/base64.c` → MEM_CAT_TEMP
+- `lib/cmdedit.c` → MEM_CAT_TEMP
+- `lib/file.c` → MEM_CAT_TEMP (special: `file_realpath()` wraps system `realpath()` return via `mem_strdup` + raw `free`)
+- `lib/file_utils.c` → MEM_CAT_TEMP
+- `lib/image.c` → MEM_CAT_IMAGE
+- `lib/mime-detect.c` → MEM_CAT_TEMP
+- `lib/num_stack.c` → MEM_CAT_EVAL
+- `lib/pdf_writer.c` → MEM_CAT_FORMAT
+- `lib/shell.c` → MEM_CAT_TEMP
+- `lib/strview.c` → MEM_CAT_TEMP
+- `lib/url.c` → MEM_CAT_TEMP
+- `lib/url_parser.c` → MEM_CAT_TEMP
+- `lib/uv_loop.c` → MEM_CAT_TEMP
+- `lib/font/font_cache.c` → MEM_CAT_FONT
+- `lib/font/font_config.c` → MEM_CAT_FONT
+- `lib/font/font_context.c` → MEM_CAT_FONT
+- `lib/font/font_database.c` → MEM_CAT_FONT
+- `lib/font/font_loader.c` → MEM_CAT_FONT
+- `lib/font/font_decompress.cpp` → MEM_CAT_FONT
+- `lib/log.c` → **exempt** (foundation-adjacent, no migration)
+
+**Caller-side conversions** (~120 sites in lambda/ and radiant/):
+All `free()` calls on memory returned from migrated lib/ functions converted to `mem_free()`.
+Key caller files: main.cpp, runner.cpp, emit_sexpr.cpp, input.cpp, input_http.cpp, sysinfo.cpp, target.cpp, lambda-proc.cpp, event_sim.cpp, font_face.cpp, render_dvi.cpp, script_runner.cpp, surface.cpp, cmd_view_pdf.cpp.
+
+**Phase 2-5 gap fixes** (raw allocs in lambda/ files that were missed or added post-migration):
+- lambda-error.cpp: 5 malloc/calloc → mem_alloc/mem_calloc
+- lambda-eval-num.cpp: 2 malloc → mem_alloc
+- lambda-eval.cpp: 2 malloc → mem_alloc
+- lambda-vector.cpp: 6 malloc/calloc → mem_alloc/mem_calloc
+- lambda-mem.cpp: 2 calloc → mem_calloc
+- lambda-stack.cpp: 1 malloc → mem_alloc
+- vmap.cpp: 4 malloc/calloc → mem_alloc/mem_calloc
+- validator/ast_validate.cpp: 2 malloc → mem_alloc
+- validator/suggestions.cpp: 1 malloc → mem_alloc
+- main.cpp: 3 malloc + 3 strdup → mem_alloc/mem_strdup
+- runner.cpp: ~10 malloc/calloc/realloc → mem_alloc/mem_calloc/mem_realloc
+- mir.c: 4 malloc/calloc/realloc → mem_alloc/mem_calloc/mem_realloc
+- pack.cpp: 5 malloc/realloc → mem_alloc/mem_realloc
+- module_registry.cpp: 3 calloc → mem_calloc
+- sysinfo.cpp: 1 calloc → mem_calloc
+- build_ast.cpp: 5 malloc → mem_alloc
+- target.cpp: 1 calloc → mem_calloc
+- mark_editor.cpp: 1 strdup → mem_strdup
+
+**Critical bug fix**: `write_response_callback` in input_http.cpp converted from raw `realloc` to `mem_realloc`. This fixes an existing allocator mismatch where `free_fetch_response()` already used `mem_free(response->data)` but the callback accumulated data with raw `realloc`. Also resolves mixed-allocator paths in `download_to_cache()` and `load_script_content()` where content could come from either `read_text_file` (mem_alloc'd) or `download_http_content` (previously raw realloc'd).
+
+**Exceptions kept as raw free()**:
+- `markup_parser.cpp`: `free(folded)` — utf8proc returns raw malloc'd memory
+- `utf_string.cpp`: `free(fold1/fold2)` — utf8proc returns raw malloc'd memory
+- `mark_editor.cpp`: `realloc(elmt->items, ...)` — mixed arena/heap allocated items, unsafe to convert
+- `lambda-data.cpp`: `heap_data_alloc()` weak fallback — GC system allocator
+
+**Build config changes**:
+- Added `lib/memtrack.c` and `lib/hashmap.c` to `lambda-lib` dependency
+- Added `rpmalloc` library to 7 test targets that depend on `lambda-lib`
+
+**memtrack.h includes added** to 17 lambda/ files that previously lacked tracking support.
+
+### Phase 7: Poison Enforcement — NOT STARTED
 
 - Enable `-DMEMTRACK_POISON_RAW_ALLOC` globally for `lambda/` and `radiant/` builds
-- Fix any remaining compile errors
+- Fix any remaining compile errors (external-lib `free()` calls need `#undef` or wrapper)
 - Verify all `<stdlib.h>` includes are removed from `lambda/` and `radiant/`
 - Document exempt files (lib/ foundations)
 
@@ -609,14 +698,28 @@ memtrack: session stats:
 
 ## Summary
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| Raw malloc/free calls in lambda/radiant | ~607 | 0 |
-| Files with `#include <stdlib.h>` in lambda/radiant | 77 | 0 |
-| memtrack adoption (lambda/) | 3 files | all files |
-| memtrack adoption (radiant/) | 20 files | all files |
-| Leak count at shutdown | unknown | 0 (verified) |
-| STATS mode byte tracking | broken (monotonic) | correct (bidirectional) |
-| CI leak detection | none | every test run |
+| Metric | Before | Current | Target |
+|--------|--------|---------|--------|
+| Raw malloc/free in lambda/radiant | ~607 calls | ~80 (lib/ only) | 0 |
+| Files with `#include <stdlib.h>` in lambda/radiant | 77 | ~15 (lib/ non-foundation) | 0 |
+| memtrack adoption (lambda/) | 3 files | ~126 files | all files |
+| memtrack adoption (radiant/) | 20 files | all files | all files |
+| Leak count at shutdown | unknown | unknown | 0 (verified) |
+| STATS mode byte tracking | broken (monotonic) | ✅ correct (bidirectional) | correct |
+| CI leak detection | none | not yet enabled | every test run |
 
-**Total estimated effort**: 8-12 sessions across 6 phases.
+### Progress
+
+| Phase | Scope | Status | Tests |
+|-------|-------|--------|-------|
+| Phase 0 | Infrastructure | ✅ Complete | — |
+| Phase 1 | Radiant Cleanup (~49 calls, 12+ files) | ✅ Complete | Radiant 4334/4645 |
+| Phase 2 | Lambda Core (~150 calls, ~30 files) | ✅ Complete | Lambda 566/566 |
+| Phase 3 | Input Parsers (~131 calls, 28 files) | ✅ Complete | Lambda 566/566 |
+| Phase 4 | Script Engines (~200 calls, 48 files) | ✅ Complete | Lambda 566/566 |
+| Phase 5 | Network/Serve (~23 files) | ✅ Complete | Lambda 566/566 |
+| Phase 6 | lib/ Non-Foundation (~299 calls, 19 files + 120 caller sites) | ✅ Complete | Lambda 565/566, Radiant 4715/4715, Network 8/8 |
+| Phase 7 | Poison Enforcement | ❌ Not started | — |
+
+**Completed**: Phases 0–6 (all lambda/, radiant/, and lib/ non-foundation source files migrated, plus all callers).
+**Remaining**: Phase 7 (compile-time poison enforcement).

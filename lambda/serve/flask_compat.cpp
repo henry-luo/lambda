@@ -10,7 +10,7 @@
 #include "ipc_proto.hpp"
 #include "../../lib/log.h"
 
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstring>
 #include <cstdio>
 
@@ -18,7 +18,7 @@
 
 static void alloc_buffer(uv_handle_t* handle, size_t suggested, uv_buf_t* buf) {
     (void)handle;
-    buf->base = (char*)malloc(suggested);
+    buf->base = (char*)mem_alloc(suggested, MEM_CAT_SERVE);
     buf->len = buf->base ? (int)suggested : 0;
 }
 
@@ -34,12 +34,12 @@ static void on_worker_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* b
     WsgiWorker* w = (WsgiWorker*)stream->data;
 
     if (nread < 0) {
-        free(buf->base);
+        mem_free(buf->base);
         w->alive = 0;
         return;
     }
     if (nread == 0) {
-        free(buf->base);
+        mem_free(buf->base);
         return;
     }
 
@@ -47,15 +47,15 @@ static void on_worker_read(uv_stream_t* stream, ssize_t nread, const uv_buf_t* b
     if (w->read_len + (int)nread >= w->read_cap) {
         int new_cap = w->read_cap * 2;
         if (new_cap < w->read_len + (int)nread + 1) new_cap = w->read_len + (int)nread + 1;
-        char* nb = (char*)realloc(w->read_buf, new_cap);
-        if (!nb) { free(buf->base); return; }
+        char* nb = (char*)mem_realloc(w->read_buf, new_cap, MEM_CAT_SERVE);
+        if (!nb) { mem_free(buf->base); return; }
         w->read_buf = nb;
         w->read_cap = new_cap;
     }
 
     memcpy(w->read_buf + w->read_len, buf->base, nread);
     w->read_len += (int)nread;
-    free(buf->base);
+    mem_free(buf->base);
 
     // look for complete newline-delimited message
     char* nl = (char*)memchr(w->read_buf, '\n', w->read_len);
@@ -83,7 +83,7 @@ static int start_worker(WsgiBridge* bridge, int index) {
     WsgiWorker* w = &bridge->workers[index];
     memset(w, 0, sizeof(WsgiWorker));
 
-    w->read_buf = (char*)malloc(4096);
+    w->read_buf = (char*)mem_alloc(4096, MEM_CAT_SERVE);
     w->read_cap = 4096;
     w->read_len = 0;
 
@@ -132,7 +132,7 @@ static int start_worker(WsgiBridge* bridge, int index) {
 // ── public API ──
 
 WsgiBridge* wsgi_bridge_create(Server* server, const char* python_app, const char* python_path) {
-    WsgiBridge* bridge = (WsgiBridge*)calloc(1, sizeof(WsgiBridge));
+    WsgiBridge* bridge = (WsgiBridge*)mem_calloc(1, sizeof(WsgiBridge), MEM_CAT_SERVE);
     if (!bridge) return nullptr;
 
     bridge->server = server;
@@ -185,14 +185,14 @@ void wsgi_bridge_dispatch(WsgiBridge* bridge, HttpRequest* req, HttpResponse* re
 
     int msg_len = (int)strlen(msg);
     uv_buf_t buf = uv_buf_init(msg, msg_len);
-    uv_write_t* wr = (uv_write_t*)malloc(sizeof(uv_write_t));
+    uv_write_t* wr = (uv_write_t*)mem_alloc(sizeof(uv_write_t), MEM_CAT_SERVE);
     wr->data = msg;
 
     uv_write(wr, (uv_stream_t*)&w->stdin_pipe, &buf, 1,
              [](uv_write_t* req, int status) {
-                 free(req->data);  // free msg
+                 mem_free(req->data);  // free msg
                  if (status < 0) log_error("WSGI: write failed: %s", uv_strerror(status));
-                 free(req);
+                 mem_free(req);
              });
 }
 
@@ -215,8 +215,8 @@ void wsgi_bridge_destroy(WsgiBridge* bridge) {
         if (w->alive) {
             uv_process_kill(&w->process, SIGTERM);
         }
-        free(w->read_buf);
+        mem_free(w->read_buf);
     }
 
-    free(bridge);
+    mem_free(bridge);
 }

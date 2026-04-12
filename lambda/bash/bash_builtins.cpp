@@ -16,7 +16,7 @@
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cctype>
 #include <ctime>
 #include <unistd.h>
@@ -1599,7 +1599,7 @@ extern "C" Item bash_builtin_grep(Item* args, int argc) {
                 // skip trailing empty line (input ends with \n)
                 if (i == (int)s->len && i == line_start) break;
                 int line_len = i - line_start;
-                char* line_buf = (char*)malloc(line_len + 1);
+                char* line_buf = (char*)mem_alloc(line_len + 1, MEM_CAT_BASH_RUNTIME);
                 memcpy(line_buf, s->chars + line_start, line_len);
                 line_buf[line_len] = '\0';
 
@@ -1614,7 +1614,7 @@ extern "C" Item bash_builtin_grep(Item* args, int argc) {
                         bash_raw_putc('\n');
                     }
                 }
-                free(line_buf);
+                mem_free(line_buf);
                 line_start = i + 1;
             }
         }
@@ -1654,8 +1654,8 @@ extern "C" Item bash_builtin_sort(Item* args, int argc) {
     }
 
     int max_lines = 1024;
-    const char** lines = (const char**)malloc(max_lines * sizeof(const char*));
-    int* lens = (int*)malloc(max_lines * sizeof(int));
+    const char** lines = (const char**)mem_alloc(max_lines * sizeof(const char*), MEM_CAT_BASH_RUNTIME);
+    int* lens = (int*)mem_alloc(max_lines * sizeof(int), MEM_CAT_BASH_RUNTIME);
     int line_count = 0;
     int line_start = 0;
 
@@ -1663,8 +1663,8 @@ extern "C" Item bash_builtin_sort(Item* args, int argc) {
         if (i == (int)s->len || s->chars[i] == '\n') {
             if (line_count >= max_lines) {
                 max_lines *= 2;
-                lines = (const char**)realloc(lines, max_lines * sizeof(const char*));
-                lens = (int*)realloc(lens, max_lines * sizeof(int));
+                lines = (const char**)mem_realloc(lines, max_lines * sizeof(const char*), MEM_CAT_BASH_RUNTIME);
+                lens = (int*)mem_realloc(lens, max_lines * sizeof(int), MEM_CAT_BASH_RUNTIME);
             }
             lines[line_count] = s->chars + line_start;
             lens[line_count] = i - line_start;
@@ -1708,8 +1708,8 @@ extern "C" Item bash_builtin_sort(Item* args, int argc) {
         bash_raw_putc('\n');
     }
 
-    free(lines);
-    free(lens);
+    mem_free(lines);
+    mem_free(lens);
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
 }
@@ -2653,14 +2653,14 @@ static void dirstack_push_front(const char* dir) {
     for (int i = dir_stack_size; i > 0; i--) {
         dir_stack[i] = dir_stack[i - 1];
     }
-    dir_stack[0] = strdup(dir);
+    dir_stack[0] = mem_strdup(dir, MEM_CAT_BASH_RUNTIME);
     dir_stack_size++;
 }
 
 // helper: remove from front of stack
 static void dirstack_pop_front(void) {
     if (dir_stack_size == 0) return;
-    free(dir_stack[0]);
+    mem_free(dir_stack[0]);
     for (int i = 0; i < dir_stack_size - 1; i++) {
         dir_stack[i] = dir_stack[i + 1];
     }
@@ -2670,7 +2670,7 @@ static void dirstack_pop_front(void) {
 // helper: remove at index (0-based in the stack, not including PWD offset)
 static void dirstack_remove_at(int idx) {
     if (idx < 0 || idx >= dir_stack_size) return;
-    free(dir_stack[idx]);
+    mem_free(dir_stack[idx]);
     for (int i = idx; i < dir_stack_size - 1; i++) {
         dir_stack[i] = dir_stack[i + 1];
     }
@@ -2723,22 +2723,22 @@ extern "C" Item bash_builtin_pushd(Item* args, int argc) {
         }
         // swap PWD and stack[0]
         const char* old_pwd = dirstack_get_pwd();
-        char* saved = strdup(old_pwd);
+        char* saved = mem_strdup(old_pwd, MEM_CAT_BASH_RUNTIME);
         const char* target = dir_stack[0];
         if (!no_cd) {
             if (dirstack_chdir(target) != 0) {
                 dirstack_err_prefix(err, sizeof(err));
                 fflush(stdout);
                 fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, target);
-                free(saved);
+                mem_free(saved);
                 bash_set_exit_code(1);
                 return (Item){.item = i2it(1)};
             }
-            free(dir_stack[0]);
+            mem_free(dir_stack[0]);
             dir_stack[0] = saved;
         } else {
             // -n: just swap the entries without changing directory
-            free(dir_stack[0]);
+            mem_free(dir_stack[0]);
             dir_stack[0] = saved;
         }
         dirstack_sync_var();
@@ -2778,8 +2778,8 @@ extern "C" Item bash_builtin_pushd(Item* args, int argc) {
         // then rotate so idx becomes position 0
         char* full[DIRSTACK_MAX + 1];
         const char* pwd = dirstack_get_pwd();
-        full[0] = strdup(pwd);
-        for (int i = 0; i < dir_stack_size; i++) full[i + 1] = strdup(dir_stack[i]);
+        full[0] = mem_strdup(pwd, MEM_CAT_BASH_RUNTIME);
+        for (int i = 0; i < dir_stack_size; i++) full[i + 1] = mem_strdup(dir_stack[i], MEM_CAT_BASH_RUNTIME);
         // rotate left by idx
         char* rotated[DIRSTACK_MAX + 1];
         for (int i = 0; i < total; i++) {
@@ -2791,16 +2791,16 @@ extern "C" Item bash_builtin_pushd(Item* args, int argc) {
                 dirstack_err_prefix(err, sizeof(err));
                 fflush(stdout);
                 fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, rotated[0]);
-                for (int i = 0; i < total; i++) free(full[i]);
+                for (int i = 0; i < total; i++) mem_free(full[i]);
                 bash_set_exit_code(1);
                 return (Item){.item = i2it(1)};
             }
         }
         // update stack
-        for (int i = 0; i < dir_stack_size; i++) free(dir_stack[i]);
+        for (int i = 0; i < dir_stack_size; i++) mem_free(dir_stack[i]);
         dir_stack_size = total - 1;
         for (int i = 0; i < dir_stack_size; i++) dir_stack[i] = rotated[i + 1];
-        free(rotated[0]); // was used for chdir
+        mem_free(rotated[0]); // was used for chdir
         dirstack_sync_var();
         dirstack_print();
         bash_set_exit_code(0);
@@ -2982,7 +2982,7 @@ extern "C" Item bash_builtin_dirs(Item* args, int argc) {
 
     if (flag_c) {
         // clear the stack
-        for (int i = 0; i < dir_stack_size; i++) free(dir_stack[i]);
+        for (int i = 0; i < dir_stack_size; i++) mem_free(dir_stack[i]);
         dir_stack_size = 0;
         dirstack_sync_var();
         bash_set_exit_code(0);

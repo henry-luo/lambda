@@ -12,6 +12,7 @@
  *   HTML parse → Element* tree → DomElement* tree → execute_document_scripts()
  *   → CSS cascade → layout
  */
+#include "../lib/memtrack.h"
 
 #include "script_runner.h"
 #include "../lambda/lambda-data.hpp"
@@ -138,7 +139,7 @@ static const char* resolve_script_url(const char* src, Url* base_url, bool* out_
                 if (local_path) {
                     strncpy(resolved_path, local_path, sizeof(resolved_path) - 1);
                     resolved_path[sizeof(resolved_path) - 1] = '\0';
-                    free(local_path);
+                    mem_free(local_path);
                 } else {
                     strncpy(resolved_path, src, sizeof(resolved_path) - 1);
                     resolved_path[sizeof(resolved_path) - 1] = '\0';
@@ -255,7 +256,7 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
                 strbuf_append_str(script_buf, "try {\n");
                 strbuf_append_str(script_buf, content);
                 strbuf_append_str(script_buf, "\n} catch(_ext_err) {}\n");
-                free(content);
+                mem_free(content);
                 loaded_external_scripts++;
             } else {
                 failed_external_scripts++;
@@ -369,10 +370,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         Pool* pool = runtime.heap->gc->pool;
         runtime.heap->gc->pool = NULL;  // prevent gc_heap_destroy from destroying pool
         gc_heap_destroy(runtime.heap->gc);
-        free(runtime.heap);
+        mem_free(runtime.heap);
         s_js_reuse_pool = pool;
     } else if (runtime.heap) {
-        free(runtime.heap);
+        mem_free(runtime.heap);
     }
     if (runtime.nursery) {
         gc_nursery_destroy(runtime.nursery);

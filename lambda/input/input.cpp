@@ -7,6 +7,7 @@
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
 #include "../../lib/log.h"  // add logging support
+#include "../../lib/memtrack.h"
 #include "../../lib/file.h"
 
 // Include Target API
@@ -611,7 +612,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         input_context = pa_input_context;
     }
-    // Note: don't free(source) here - it's the caller's responsibility
+    // Note: don't mem_free(source) here - it's the caller's responsibility
     return input;
 }
 
@@ -685,7 +686,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         }
 
         Input* input = input_from_source(source, abs_url, type, flavor);
-        free(source);  // Free the source string after parsing
+        mem_free(source);  // Free the source string after parsing
         url_destroy(abs_url);
         return input;
     }
@@ -787,7 +788,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             // Create a copy of the URL for the input (input_from_source doesn't own the URL)
             Url* url_copy = url_parse(url->href->chars);
             Input* input = input_from_source(source, url_copy, type, flavor);
-            free(source);
+            mem_free(source);
             if (!input && url_copy) url_destroy(url_copy);
             return input;
         }
@@ -857,7 +858,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         strbuf_free(url_buf);
 
         Input* input = input_from_source(source, file_url, type, flavor);
-        free(source);
+        mem_free(source);
         strbuf_free(path_buf);
         if (!input && file_url) url_destroy(file_url);
         return input;

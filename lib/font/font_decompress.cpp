@@ -12,6 +12,7 @@
  */
 
 #include "font_internal.h"
+#include "../memtrack.h"
 #include <zlib.h>
 
 // WOFF2 C++ API — confined to this file
@@ -124,7 +125,7 @@ bool font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
     // allocate output SFNT buffer (malloc if arena is NULL, arena otherwise)
     uint8_t* sfnt = arena
         ? (uint8_t*)arena_calloc(arena, total_sfnt_sz)
-        : (uint8_t*)calloc(1, total_sfnt_sz);
+        : (uint8_t*)mem_calloc(1, total_sfnt_sz, MEM_CAT_FONT);
     if (!sfnt) {
         log_error("font_decompress_woff1: alloc failed for %u bytes", total_sfnt_sz);
         return false;
@@ -238,7 +239,7 @@ bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
     // allocate output buffer (malloc if arena is NULL, arena otherwise)
     uint8_t* buf = arena
         ? (uint8_t*)arena_alloc(arena, final_size)
-        : (uint8_t*)malloc(final_size);
+        : (uint8_t*)mem_alloc(final_size, MEM_CAT_FONT);
     if (!buf) {
         log_error("font_decompress_woff2: alloc failed for %zu bytes", final_size);
         return false;
@@ -249,7 +250,7 @@ bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
 
     if (!woff2::ConvertWOFF2ToTTF(data, len, &output)) {
         log_error("font_decompress_woff2: ConvertWOFF2ToTTF failed");
-        if (!arena) free(buf);
+        if (!arena) mem_free(buf);
         return false;
     }
 

@@ -13,6 +13,7 @@
 #include "js/js_runtime.h"
 #include "template_registry.h"
 #include "../lib/file.h"
+#include "../lib/memtrack.h"
 #include "../lib/file_utils.h"
 #include "../lib/shell.h"
 
@@ -66,7 +67,7 @@ void lambda_home_init(void) {
 char* lambda_home_path(const char* rel) {
     size_t home_len = strlen(g_lambda_home);
     size_t rel_len  = strlen(rel);
-    char* out = (char*)malloc(home_len + 1 + rel_len + 1);
+    char* out = (char*)mem_alloc(home_len + 1 + rel_len + 1, MEM_CAT_SYSTEM);
     if (!out) return NULL;
     memcpy(out, g_lambda_home, home_len);
     out[home_len] = '/';
@@ -715,7 +716,7 @@ static void add_dep(ImportGraphNode* nodes, int parent_idx, int dep_idx) {
     ImportGraphNode* parent = &nodes[parent_idx];
     if (parent->dep_count >= parent->dep_cap) {
         parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
-        parent->deps = (int*)realloc(parent->deps, sizeof(int) * parent->dep_cap);
+        parent->deps = (int*)mem_realloc(parent->deps, sizeof(int) * parent->dep_cap, MEM_CAT_SYSTEM);
     }
     parent->deps[parent->dep_count++] = dep_idx;
 }
@@ -757,12 +758,12 @@ static void discover_imports_recursive(
                     int dep_idx;
                     if (existing) {
                         dep_idx = existing->index;
-                        free(dep_path);
+                        mem_free(dep_path);
                     } else {
                         // new module discovered
                         if (*count >= *capacity) {
                             *capacity *= 2;
-                            *nodes = (ImportGraphNode*)realloc(*nodes, sizeof(ImportGraphNode) * (*capacity));
+                            *nodes = (ImportGraphNode*)mem_realloc(*nodes, sizeof(ImportGraphNode) * (*capacity), MEM_CAT_SYSTEM);
                         }
                         dep_idx = *count;
                         ImportGraphNode* n = &(*nodes)[dep_idx];
@@ -775,7 +776,7 @@ static void discover_imports_recursive(
                         const char* last_slash = strrchr(dep_path, '/');
                         if (last_slash) {
                             int dir_len = (int)(last_slash - dep_path + 1);
-                            n->directory = (char*)malloc(dir_len + 1);
+                            n->directory = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
                             memcpy(n->directory, dep_path, dir_len);
                             n->directory[dir_len] = '\0';
                         } else {
@@ -850,7 +851,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     const char* main_path = canonical ? canonical : main_script_path;
     const char* main_source = read_text_file(main_path);
     if (!main_source) {
-        if (canonical) free(canonical);
+        if (canonical) mem_free(canonical);
         return;
     }
 
@@ -859,7 +860,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     const char* last_slash = strrchr(main_path, '/');
     if (last_slash) {
         int dir_len = (int)(last_slash - main_path + 1);
-        main_dir = (char*)malloc(dir_len + 1);
+        main_dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
         memcpy(main_dir, main_path, dir_len);
         main_dir[dir_len] = '\0';
     } else {
@@ -869,7 +870,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     // initialize graph with main script as sentinel node (index 0, not compiled here)
     int capacity = 32;
     int count = 1;
-    ImportGraphNode* nodes = (ImportGraphNode*)calloc(capacity, sizeof(ImportGraphNode));
+    ImportGraphNode* nodes = (ImportGraphNode*)mem_calloc(capacity, sizeof(ImportGraphNode), MEM_CAT_SYSTEM);
     nodes[0].path = strdup(main_path);
     nodes[0].source = (char*)main_source;
     nodes[0].directory = main_dir;
@@ -918,7 +919,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
             if (batch_count == 0) continue;
 
             // skip already-cached modules
-            CompileWorkerArg* args = (CompileWorkerArg*)calloc(batch_count, sizeof(CompileWorkerArg));
+            CompileWorkerArg* args = (CompileWorkerArg*)mem_calloc(batch_count, sizeof(CompileWorkerArg), MEM_CAT_SYSTEM);
             int actual = 0;
             pthread_mutex_lock(&scripts_mutex);
             for (int i = 1; i < count; i++) {
@@ -942,7 +943,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
             pthread_mutex_unlock(&scripts_mutex);
 
             if (actual == 0) {
-                free(args);
+                mem_free(args);
                 continue;
             }
 
@@ -954,7 +955,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
                 tls_parser = NULL;
             } else {
                 // parallel compilation
-                pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * actual);
+                pthread_t* threads = (pthread_t*)mem_alloc(sizeof(pthread_t) * actual, MEM_CAT_SYSTEM);
                 pthread_attr_t attr;
                 pthread_attr_init(&attr);
                 pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); // 8MB stack for deep transpiler recursion
@@ -966,9 +967,9 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
                 for (int i = 0; i < actual; i++) {
                     pthread_join(threads[i], NULL);
                 }
-                free(threads);
+                mem_free(threads);
             }
-            free(args);
+            mem_free(args);
         }
 
         log_info("parallel import: pre-compilation complete");
@@ -992,16 +993,16 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     for (int i = 0; i < count; i++) {
         // don't free source for index 0 — that was read_text_file'd and will be freed
         // when load_script reads it again (or it might be the same pointer)
-        if (i > 0) free(nodes[i].source);
-        free(nodes[i].path);
-        free(nodes[i].directory);
-        free(nodes[i].deps);
+        if (i > 0) mem_free(nodes[i].source);
+        mem_free(nodes[i].path);
+        mem_free(nodes[i].directory);
+        mem_free(nodes[i].deps);
     }
     // index 0's source was malloc'd by read_text_file — free it
-    free((void*)main_source);
+    mem_free((void*)main_source);
     // main_dir is nodes[0].directory, already freed above
-    free(nodes);
-    if (canonical) free(canonical);
+    mem_free(nodes);
+    if (canonical) mem_free(canonical);
 }
 
 #endif  // !_WIN32
@@ -1048,19 +1049,19 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #endif
                 log_error("Circular import detected: %s", lookup_path);
                 fprintf(stderr, "Error: Circular import detected: %s\n", lookup_path);
-                if (canonical_path) free(canonical_path);
+                if (canonical_path) mem_free(canonical_path);
                 return NULL;
             }
 #ifndef _WIN32
             pthread_mutex_unlock(&scripts_mutex);
 #endif
             log_info("Script %s is already loaded.", lookup_path);
-            if (canonical_path) free(canonical_path);
+            if (canonical_path) mem_free(canonical_path);
             return script;
         }
     }
     // script not found — create stub and register immediately to prevent duplicates
-    Script *new_script = (Script*)calloc(1, sizeof(Script));
+    Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = strdup(lookup_path);
     new_script->is_loading = true;
     arraylist_append(runtime->scripts, new_script);
@@ -1075,7 +1076,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
         new_script->is_loading = false;
-        if (canonical_path) free(canonical_path);
+        if (canonical_path) mem_free(canonical_path);
         return NULL;
     }
 
@@ -1091,7 +1092,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         new_script->directory = strdup(runtime->import_base_dir);
     } else if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
-        char* dir = (char*)malloc(dir_len + 1);
+        char* dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
         memcpy(dir, lookup_path, dir_len);
         dir[dir_len] = '\0';
         new_script->directory = dir;
@@ -1099,7 +1100,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         new_script->directory = strdup("./");
     }
     log_debug("script directory: %s", new_script->directory);
-    if (canonical_path) free(canonical_path);
+    if (canonical_path) mem_free(canonical_path);
     new_script->source = script_source;
     log_debug("script source length: %d", (int)strlen(new_script->source));
     new_script->is_main = !is_import;  // main script is not an import
@@ -1458,14 +1459,14 @@ void runtime_cleanup(Runtime* runtime) {
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];
-            if (script->source) free((void*)script->source);
+            if (script->source) mem_free((void*)script->source);
             if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
             if (script->pool) pool_destroy(script->pool);
             if (script->type_list) arraylist_free(script->type_list);
             if (script->jit_context) jit_cleanup(script->jit_context);
             // decimal context is now shared global - don't free it
             script->decimal_ctx = NULL;
-            free(script);
+            mem_free(script);
         }
         arraylist_free(runtime->scripts);
     }

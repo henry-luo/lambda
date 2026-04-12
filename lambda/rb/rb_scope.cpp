@@ -9,7 +9,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Scope management
@@ -157,7 +157,7 @@ void rb_warning(RbTranspiler* tp, TSNode node, const char* format, ...) {
 // ============================================================================
 
 RbTranspiler* rb_transpiler_create(Runtime* runtime) {
-    RbTranspiler* tp = (RbTranspiler*)malloc(sizeof(RbTranspiler));
+    RbTranspiler* tp = (RbTranspiler*)mem_alloc(sizeof(RbTranspiler), MEM_CAT_RB_RUNTIME);
     memset(tp, 0, sizeof(RbTranspiler));
 
     // initialize memory pools
@@ -210,7 +210,7 @@ void rb_transpiler_destroy(RbTranspiler* tp) {
         strbuf_free(tp->error_buf);
     }
 
-    free(tp);
+    mem_free(tp);
 }
 
 bool rb_transpiler_parse(RbTranspiler* tp, const char* source, size_t length) {

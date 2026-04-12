@@ -18,7 +18,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 extern Input* py_input;
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -181,9 +181,9 @@ extern "C" Item py_compute_mro(Item cls) {
     // build list of arrays to merge: each base's MRO + the bases list itself
     // max lists = n + 1
     int max_lists = n + 1;
-    Item** lists     = (Item**)malloc(max_lists * sizeof(Item*));
-    int*   lengths   = (int*)  malloc(max_lists * sizeof(int));
-    Item** alloced   = (Item**)malloc(max_lists * sizeof(Item*));  // for free
+    Item** lists     = (Item**)mem_alloc(max_lists * sizeof(Item*), MEM_CAT_PY_RUNTIME);
+    int*   lengths   = (int*)  mem_alloc(max_lists * sizeof(int), MEM_CAT_PY_RUNTIME);
+    Item** alloced   = (Item**)mem_alloc(max_lists * sizeof(Item*), MEM_CAT_PY_RUNTIME);  // for free
 
     for (int i = 0; i < n; i++) {
         Item base = bases_arr->items[i];
@@ -195,7 +195,7 @@ extern "C" Item py_compute_mro(Item cls) {
             alloced[i] = NULL;  // not heap-owned here
         } else {
             // base has no MRO: treat as [base]
-            Item* single = (Item*)malloc(sizeof(Item));
+            Item* single = (Item*)mem_alloc(sizeof(Item), MEM_CAT_PY_RUNTIME);
             single[0] = base;
             lists[i]   = single;
             lengths[i] = 1;
@@ -229,11 +229,11 @@ extern "C" Item py_compute_mro(Item cls) {
     }
 
     for (int i = 0; i <= n; i++) {
-        if (alloced[i]) free(alloced[i]);
+        if (alloced[i]) mem_free(alloced[i]);
     }
-    free(lists);
-    free(lengths);
-    free(alloced);
+    mem_free(lists);
+    mem_free(lengths);
+    mem_free(alloced);
 
     return result;
 }

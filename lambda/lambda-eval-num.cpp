@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include <stdarg.h>
 #include <time.h>
@@ -1787,7 +1788,7 @@ Item fn_decimal(Item item) {
             return ItemError;
         }
         // decimal_from_string needs null-terminated string
-        char* null_term_str = (char*)malloc(len + 1);
+        char* null_term_str = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         if (!null_term_str) {
             log_debug("Failed to allocate string buffer");
             return ItemError;
@@ -1795,7 +1796,7 @@ Item fn_decimal(Item item) {
         memcpy(null_term_str, chars, len);
         null_term_str[len] = '\0';
         Item result = decimal_from_string(null_term_str, context);
-        free(null_term_str);
+        mem_free(null_term_str);
         return result;
     }
     else {
@@ -2101,7 +2102,7 @@ Item fn_float(Item item) {
         }
 
         // Create a null-terminated copy of the string
-        char* buf = (char*)malloc(len + 1);
+        char* buf = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         if (!buf) {
             log_debug("Failed to allocate buffer for string conversion");
             return ItemError;
@@ -2125,7 +2126,7 @@ Item fn_float(Item item) {
         double val = strtod(buf, &endptr);
         int saved_errno = errno;
         bool fully_parsed = (*endptr == '\0');
-        free(buf);
+        mem_free(buf);
 
         if (saved_errno != 0 || !fully_parsed) {
             log_debug("Cannot convert string to float: %.*s", (int)len, chars);

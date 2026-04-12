@@ -8,7 +8,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstring>
 #include <cstdio>
 
@@ -19,7 +19,7 @@ static const char b64_chars[] =
 
 static char* b64_encode(const char* data, size_t len) {
     size_t out_len = 4 * ((len + 2) / 3) + 1;
-    char* out = (char*)malloc(out_len);
+    char* out = (char*)mem_alloc(out_len, MEM_CAT_SERVE);
     if (!out) return nullptr;
     size_t i = 0, j = 0;
 
@@ -50,7 +50,7 @@ static int b64_decode_char(char c) {
 static char* b64_decode(const char* data, size_t* out_len) {
     size_t in_len = strlen(data);
     size_t alloc = 3 * in_len / 4 + 1;
-    char* out = (char*)malloc(alloc);
+    char* out = (char*)mem_alloc(alloc, MEM_CAT_SERVE);
     if (!out) { if (out_len) *out_len = 0; return nullptr; }
     size_t i = 0, j = 0;
 
@@ -127,14 +127,14 @@ char* ipc_build_request(HttpRequest* req, int request_id) {
         char* b64 = b64_encode(req->body, req->body_len);
         if (b64) {
             strbuf_append_str(buf, b64);
-            free(b64);
+            mem_free(b64);
         }
     }
     strbuf_append_char(buf, '"');
     strbuf_append_str(buf, "}\n");
 
     size_t len = buf->length;
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
     if (result) memcpy(result, buf->str, len + 1);
     strbuf_free(buf);
     return result;
@@ -209,18 +209,18 @@ void ipc_parse_response(const char* json, int json_len, HttpResponse* resp) {
         const char* body_end = strchr(body_field, '"');
         if (body_end) {
             int b64_len = (int)(body_end - body_field);
-            char* b64 = (char*)malloc(b64_len + 1);
+            char* b64 = (char*)mem_alloc(b64_len + 1, MEM_CAT_SERVE);
             if (b64) {
                 memcpy(b64, body_field, b64_len);
                 b64[b64_len] = '\0';
 
                 size_t decoded_len = 0;
                 char* decoded = b64_decode(b64, &decoded_len);
-                free(b64);
+                mem_free(b64);
 
                 if (decoded) {
                     http_response_write(resp, decoded, decoded_len);
-                    free(decoded);
+                    mem_free(decoded);
                 }
             }
         }

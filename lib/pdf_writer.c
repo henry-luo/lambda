@@ -9,6 +9,7 @@
  */
 
 #include "pdf_writer.h"
+#include "memtrack.h"
 #include "strbuf.h"
 #include "arraylist.h"
 #include "mempool.h"
@@ -823,7 +824,7 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     
     // sort objects by id
     int num_objects = doc->objects->length;
-    PdfObject** sorted = (PdfObject**)malloc(num_objects * sizeof(PdfObject*));
+    PdfObject** sorted = (PdfObject**)mem_alloc(num_objects * sizeof(PdfObject*), MEM_CAT_FORMAT);
     for (int i = 0; i < num_objects; i++) {
         sorted[i] = (PdfObject*)doc->objects->data[i];
     }
@@ -844,7 +845,7 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
     fprintf(file, "0000000000 65535 f \n");
     
     // create offset lookup
-    long* offsets = (long*)calloc(max_obj_id + 1, sizeof(long));
+    long* offsets = (long*)mem_calloc(max_obj_id + 1, sizeof(long), MEM_CAT_FORMAT);
     for (int i = 0; i < num_objects; i++) {
         offsets[sorted[i]->id] = sorted[i]->offset;
     }
@@ -858,8 +859,8 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         }
     }
     
-    free(offsets);
-    free(sorted);
+    mem_free(offsets);
+    mem_free(sorted);
     
     // --- Trailer ---
     fprintf(file, "trailer\n<<\n");

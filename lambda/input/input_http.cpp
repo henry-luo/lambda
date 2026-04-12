@@ -32,7 +32,7 @@ static HttpConfig default_http_config = {
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_INPUT_OTHER);
+    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_TEMP);  // tracked realloc: callers use mem_free()
 
     if (!new_data) {
         log_error("HTTP: Memory allocation failed");
@@ -121,7 +121,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (res != CURLE_OK) {
         log_error("HTTP: Download failed: %s", curl_easy_strerror(res));
-        mem_free(response.data);
+        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -132,7 +132,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
-        mem_free(response.data);
+        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -175,7 +175,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
             if (out_cache_path) {
                 *out_cache_path = cache_filename;
             } else {
-                free(cache_filename); // from file_cache_path() - raw malloc
+                mem_free(cache_filename); // from file_cache_path() - mem_alloc
             }
             return content;
         }
@@ -185,7 +185,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     size_t content_size;
     char* content = download_http_content(url, &content_size, NULL);
     if (!content) {
-        free(cache_filename); // from file_cache_path() - raw malloc
+        mem_free(cache_filename); // from file_cache_path() - mem_alloc
         return NULL;
     }
 
@@ -199,7 +199,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     if (out_cache_path) {
         *out_cache_path = cache_filename;
     } else {
-        free(cache_filename); // from file_cache_path() - raw malloc
+        mem_free(cache_filename); // from file_cache_path() - mem_alloc
     }
 
     return content;
@@ -225,8 +225,8 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     // Parse URL to create Url object
     Url* abs_url = url_parse(url);
     if (!abs_url) {
-        free(content); // from lib - raw malloc
-        free(cache_path); // from lib - raw malloc
+        mem_free(content); // from lib - uses mem_alloc
+        mem_free(cache_path); // from lib - uses mem_alloc
         return NULL;
     }
 
@@ -254,8 +254,8 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     Input* input = input_from_source(content, abs_url, type_str, flavor_str);
 
     // Cleanup
-    free(content); // from lib - raw malloc
-    free(cache_path); // from lib - raw malloc
+    mem_free(content); // from lib - uses mem_alloc
+    mem_free(cache_path); // from lib - uses mem_alloc
     mem_free(type_str);
     mem_free(flavor_str);
     return input;

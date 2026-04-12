@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #include <string.h>
+#include "memtrack.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -546,11 +547,11 @@ void repl_cleanup(void) {
 
     // Cleanup editor
     if (g_editor.buffer) {
-        free(g_editor.buffer);
+        mem_free(g_editor.buffer);
         g_editor.buffer = NULL;
     }
     if (g_editor.prompt) {
-        free(g_editor.prompt);
+        mem_free(g_editor.prompt);
         g_editor.prompt = NULL;
     }
 
@@ -683,7 +684,7 @@ int editor_init(struct line_editor *ed, const char *prompt) {
     memset(ed, 0, sizeof(*ed));
 
     // Allocate initial buffer
-    ed->buffer = malloc(INITIAL_BUFFER_SIZE);
+    ed->buffer = mem_alloc(INITIAL_BUFFER_SIZE, MEM_CAT_TEMP);
     if (!ed->buffer) {
         return -1;
     }
@@ -695,14 +696,14 @@ int editor_init(struct line_editor *ed, const char *prompt) {
 
     // Set prompt
     if (prompt) {
-        ed->prompt = strdup(prompt);
+        ed->prompt = mem_strdup(prompt, MEM_CAT_TEMP);
         if (!ed->prompt) {
-            free(ed->buffer);
+            mem_free(ed->buffer);
             return -1;
         }
         ed->prompt_len = cmdedit_utf8_display_width(prompt, strlen(prompt));
     } else {
-        ed->prompt = strdup("");
+        ed->prompt = mem_strdup("", MEM_CAT_TEMP);
         ed->prompt_len = 0;
     }
 
@@ -716,11 +717,11 @@ void editor_cleanup(struct line_editor *ed) {
     if (!ed) return;
 
     if (ed->buffer) {
-        free(ed->buffer);
+        mem_free(ed->buffer);
         ed->buffer = NULL;
     }
     if (ed->prompt) {
-        free(ed->prompt);
+        mem_free(ed->prompt);
         ed->prompt = NULL;
     }
 
@@ -747,7 +748,7 @@ static int editor_ensure_buffer_size(struct line_editor *ed, size_t needed) {
         new_size *= 2;
     }
 
-    char *new_buffer = realloc(ed->buffer, new_size);
+    char *new_buffer = mem_realloc(ed->buffer, new_size, MEM_CAT_TEMP);
     if (!new_buffer) {
         return -1;
     }
@@ -1087,16 +1088,16 @@ static char *editor_readline(const char *prompt) {
 #ifdef _WIN32
         // Windows doesn't have getline, so implement a simple version
         size_t capacity = 128;
-        line = malloc(capacity);
+        line = mem_alloc(capacity, MEM_CAT_TEMP);
         if (!line) return NULL;
 
         char c;
         while ((c = getchar()) != EOF && c != '\n') {
             if (len >= capacity - 1) {
                 capacity *= 2;
-                char *new_line = realloc(line, capacity);
+                char *new_line = mem_realloc(line, capacity, MEM_CAT_TEMP);
                 if (!new_line) {
-                    free(line);
+                    mem_free(line);
                     return NULL;
                 }
                 line = new_line;
@@ -1105,7 +1106,7 @@ static char *editor_readline(const char *prompt) {
         }
 
         if (c == EOF && len == 0) {
-            free(line);
+            mem_free(line);
             return NULL;
         }
 
@@ -1115,7 +1116,7 @@ static char *editor_readline(const char *prompt) {
         ssize_t nread = getline(&line, &len, stdin);
 
         if (nread == -1) {
-            if (line) free(line);
+            if (line) mem_free(line);
             return NULL; // EOF or error
         }
 
@@ -1198,7 +1199,7 @@ static char *editor_readline(const char *prompt) {
 
     if (done == 1) {
         // Normal completion - return the line
-        result = strdup(g_editor.buffer);
+        result = mem_strdup(g_editor.buffer, MEM_CAT_TEMP);
 
         // Add to history if it's not empty
         if (result && strlen(result) > 0) {
@@ -1237,15 +1238,15 @@ void history_cleanup(struct history *hist) {
     while (entry) {
         struct history_entry *next = entry->next;
         if (entry->line) {
-            free(entry->line);
+            mem_free(entry->line);
         }
-        free(entry);
+        mem_free(entry);
         entry = next;
     }
 
     // Free filename if set
     if (hist->filename) {
-        free(hist->filename);
+        mem_free(hist->filename);
     }
 
     memset(hist, 0, sizeof(*hist));
@@ -1267,14 +1268,14 @@ int history_add_entry(struct history *hist, const char *line) {
     }
 
     // Create new entry
-    struct history_entry *entry = malloc(sizeof(struct history_entry));
+    struct history_entry *entry = mem_alloc(sizeof(struct history_entry), MEM_CAT_TEMP);
     if (!entry) {
         return -1;
     }
 
-    entry->line = strdup(line);
+    entry->line = mem_strdup(line, MEM_CAT_TEMP);
     if (!entry->line) {
-        free(entry);
+        mem_free(entry);
         return -1;
     }
 
@@ -1301,9 +1302,9 @@ int history_add_entry(struct history *hist, const char *line) {
         }
 
         if (old_head->line) {
-            free(old_head->line);
+            mem_free(old_head->line);
         }
-        free(old_head);
+        mem_free(old_head);
         hist->count--;
     }
 
@@ -1491,12 +1492,12 @@ static int handle_tab_completion(struct line_editor *ed, int key, int count) {
     size_t prefix_len = ed->cursor_pos - word_start;
     char *prefix = NULL;
     if (prefix_len > 0) {
-        prefix = malloc(prefix_len + 1);
+        prefix = mem_alloc(prefix_len + 1, MEM_CAT_TEMP);
         if (!prefix) return -1;
         memcpy(prefix, ed->buffer + word_start, prefix_len);
         prefix[prefix_len] = '\0';
     } else {
-        prefix = malloc(1);
+        prefix = mem_alloc(1, MEM_CAT_TEMP);
         if (!prefix) return -1;
         prefix[0] = '\0';
     }
@@ -1548,12 +1549,12 @@ static int handle_tab_completion(struct line_editor *ed, int key, int count) {
 
         // Free the completions array
         for (int i = 0; completions[i]; i++) {
-            free(completions[i]);
+            mem_free(completions[i]);
         }
-        free(completions);
+        mem_free(completions);
     }
 
-    free(prefix);
+    mem_free(prefix);
     return 0;
 }
 
@@ -1662,11 +1663,11 @@ static void kill_ring_add(const char *text) {
 
     // Free old entry if ring is full
     if (g_kill_ring.count == KILL_RING_SIZE && g_kill_ring.entries[g_kill_ring.current]) {
-        free(g_kill_ring.entries[g_kill_ring.current]);
+        mem_free(g_kill_ring.entries[g_kill_ring.current]);
     }
 
     // Add new entry
-    g_kill_ring.entries[g_kill_ring.current] = strdup(text);
+    g_kill_ring.entries[g_kill_ring.current] = mem_strdup(text, MEM_CAT_TEMP);
 
     // Update counters
     g_kill_ring.current = (g_kill_ring.current + 1) % KILL_RING_SIZE;
@@ -1691,7 +1692,7 @@ static const char *kill_ring_get(int offset) {
 static void kill_ring_cleanup(void) {
     for (int i = 0; i < KILL_RING_SIZE; i++) {
         if (g_kill_ring.entries[i]) {
-            free(g_kill_ring.entries[i]);
+            mem_free(g_kill_ring.entries[i]);
             g_kill_ring.entries[i] = NULL;
         }
     }
@@ -1747,9 +1748,9 @@ static int handle_kill_line(struct line_editor *ed, int key, int count) {
     }
 
     // Kill from cursor to end of line
-    char *killed_text = strdup(ed->buffer + ed->cursor_pos);
+    char *killed_text = mem_strdup(ed->buffer + ed->cursor_pos, MEM_CAT_TEMP);
     kill_ring_add(killed_text);
-    free(killed_text);
+    mem_free(killed_text);
 
     // Truncate buffer at cursor
     ed->buffer[ed->cursor_pos] = '\0';

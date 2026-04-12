@@ -14,7 +14,7 @@
 
 #include <curl/curl.h>
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 extern Input* js_input;
 
@@ -85,7 +85,7 @@ static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdat
     if (fw->response_len + bytes >= fw->response_cap) {
         size_t new_cap = (fw->response_cap == 0) ? 4096 : fw->response_cap * 2;
         while (new_cap < fw->response_len + bytes + 1) new_cap *= 2;
-        char* new_buf = (char*)realloc(fw->response_buf, new_cap);
+        char* new_buf = (char*)mem_realloc(fw->response_buf, new_cap, MEM_CAT_JS_RUNTIME);
         if (!new_buf) return 0;
         fw->response_buf = new_buf;
         fw->response_cap = new_cap;
@@ -261,11 +261,11 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     js_microtask_flush();
 
     // cleanup
-    if (fw->method) free(fw->method);
-    if (fw->body) free(fw->body);
+    if (fw->method) mem_free(fw->method);
+    if (fw->body) mem_free(fw->body);
     if (fw->req_headers) curl_slist_free_all(fw->req_headers);
-    if (fw->response_buf) free(fw->response_buf);
-    free(fw);
+    if (fw->response_buf) mem_free(fw->response_buf);
+    mem_free(fw);
 }
 
 // =============================================================================
@@ -280,7 +280,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
     Item method_val = js_property_get(options, method_key);
     if (get_type_id(method_val) == LMD_TYPE_STRING) {
         String* ms = it2s(method_val);
-        fw->method = (char*)malloc(ms->len + 1);
+        fw->method = (char*)mem_alloc(ms->len + 1, MEM_CAT_JS_RUNTIME);
         memcpy(fw->method, ms->chars, ms->len);
         fw->method[ms->len] = '\0';
     }
@@ -290,7 +290,7 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
     Item body_val = js_property_get(options, body_key);
     if (get_type_id(body_val) == LMD_TYPE_STRING) {
         String* bs = it2s(body_val);
-        fw->body = (char*)malloc(bs->len + 1);
+        fw->body = (char*)mem_alloc(bs->len + 1, MEM_CAT_JS_RUNTIME);
         memcpy(fw->body, bs->chars, bs->len);
         fw->body[bs->len] = '\0';
         fw->body_len = bs->len;
@@ -312,10 +312,10 @@ static void fetch_apply_options(JsFetchWork* fw, Item options) {
                     String* vs = it2s(hval);
                     // "Header-Name: value"
                     size_t total = ks->len + 2 + vs->len + 1;
-                    char* line = (char*)malloc(total);
+                    char* line = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
                     snprintf(line, total, "%.*s: %.*s", (int)ks->len, ks->chars, (int)vs->len, vs->chars);
                     fw->req_headers = curl_slist_append(fw->req_headers, line);
-                    free(line);
+                    mem_free(line);
                 }
             }
         }
@@ -355,7 +355,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     }
 
     // allocate work context
-    JsFetchWork* fw = (JsFetchWork*)calloc(1, sizeof(JsFetchWork));
+    JsFetchWork* fw = (JsFetchWork*)mem_calloc(1, sizeof(JsFetchWork), MEM_CAT_JS_RUNTIME);
     if (!fw) {
         return js_promise_reject(js_new_error(make_string_item("fetch: allocation failed")));
     }
@@ -380,10 +380,10 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         Item args[1] = {js_new_error(make_string_item("fetch: failed to queue work"))};
         js_call_function(fw->reject_fn, ItemNull, args, 1);
         // fw will be freed by after_work_cb if queued; since it wasn't, free now
-        if (fw->method) free(fw->method);
-        if (fw->body) free(fw->body);
+        if (fw->method) mem_free(fw->method);
+        if (fw->body) mem_free(fw->body);
         if (fw->req_headers) curl_slist_free_all(fw->req_headers);
-        free(fw);
+        mem_free(fw);
     }
 
     return promise;
@@ -396,7 +396,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 extern "C" void js_fetch_reset(void) {
     for (int i = 0; i < response_body_count; i++) {
         if (response_bodies[i]) {
-            free(response_bodies[i]);
+            mem_free(response_bodies[i]);
             response_bodies[i] = NULL;
         }
     }

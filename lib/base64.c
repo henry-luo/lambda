@@ -1,4 +1,5 @@
 #include "base64.h"
+#include "memtrack.h"
 #include "log.h"
 #include "str.h"
 #include <stdlib.h>
@@ -75,7 +76,7 @@ uint8_t* base64_decode(const char* input, size_t input_len, size_t* output_len) 
     }
 
     // allocate output buffer
-    uint8_t* output = (uint8_t*)malloc(decoded_len + 1); // +1 for potential null terminator
+    uint8_t* output = (uint8_t*)mem_alloc(decoded_len + 1, MEM_CAT_TEMP); // +1 for potential null terminator
     if (!output) {
         log_error("base64_decode: malloc failed for %zu bytes", decoded_len);
         *output_len = 0;
@@ -187,7 +188,7 @@ uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size,
         // raw data (possibly URL-encoded) - just return as-is for now
         // note: proper implementation should URL-decode
         size_t data_len = strlen(data);
-        uint8_t* output = (uint8_t*)malloc(data_len + 1);
+        uint8_t* output = (uint8_t*)mem_alloc(data_len + 1, MEM_CAT_TEMP);
         if (!output) {
             *output_len = 0;
             return NULL;

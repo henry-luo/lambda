@@ -7,7 +7,7 @@
 
 #include "serve_utils.hpp"
 #include "../../lib/log.h"
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -19,7 +19,7 @@
 // ============================================================================
 
 void* serve_malloc(size_t size) {
-    void *ptr = malloc(size);
+    void *ptr = mem_alloc(size, MEM_CAT_SERVE);
     if (!ptr && size > 0) {
         log_error("serve_malloc: allocation failed for %zu bytes", size);
     }
@@ -27,7 +27,7 @@ void* serve_malloc(size_t size) {
 }
 
 void* serve_calloc(size_t count, size_t size) {
-    void *ptr = calloc(count, size);
+    void *ptr = mem_calloc(count, size, MEM_CAT_SERVE);
     if (!ptr && count > 0 && size > 0) {
         log_error("serve_calloc: allocation failed for %zu * %zu bytes", count, size);
     }
@@ -35,7 +35,7 @@ void* serve_calloc(size_t count, size_t size) {
 }
 
 void* serve_realloc(void *ptr, size_t size) {
-    void *new_ptr = realloc(ptr, size);
+    void *new_ptr = mem_realloc(ptr, size, MEM_CAT_SERVE);
     if (!new_ptr && size > 0) {
         log_error("serve_realloc: reallocation failed for %zu bytes", size);
     }
@@ -43,7 +43,7 @@ void* serve_realloc(void *ptr, size_t size) {
 }
 
 void serve_free(void *ptr) {
-    free(ptr);
+    mem_free(ptr);
 }
 
 char* serve_strdup(const char *str) {

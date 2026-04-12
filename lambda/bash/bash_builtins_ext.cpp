@@ -14,7 +14,7 @@
 #include <cstring>
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
