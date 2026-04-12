@@ -20,7 +20,7 @@
 #include "../../lambda/mark_reader.hpp"
 #include "../../lambda/input/input.hpp"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // Forward declarations
 extern "C" void parse_json(Input* input, const char* json_string);
@@ -281,7 +281,7 @@ static void handle_get_source(HttpRequest* req, HttpResponse* resp, void* user_d
     char* source = webdriver_session_get_source(session);
     if (source) {
         wd_send_value(resp, source);
-        free(source);
+        mem_free(source);
     } else {
         wd_send_value(resp, "");
     }
@@ -486,7 +486,7 @@ static void handle_element_text(HttpRequest* req, HttpResponse* resp, void* user
 
     char* text = webdriver_element_get_text(session, element);
     wd_send_value(resp, text ? text : "");
-    if (text) free(text);
+    if (text) mem_free(text);
 }
 
 static void handle_element_attribute(HttpRequest* req, HttpResponse* resp, void* user_data) {
@@ -660,7 +660,7 @@ static void handle_screenshot(HttpRequest* req, HttpResponse* resp, void* user_d
     char* base64_png = webdriver_screenshot(session);
     if (base64_png) {
         wd_send_value(resp, base64_png);
-        free(base64_png);
+        mem_free(base64_png);
     } else {
         wd_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
     }
@@ -686,7 +686,7 @@ static void handle_element_screenshot(HttpRequest* req, HttpResponse* resp, void
     char* base64_png = webdriver_element_screenshot(session, element);
     if (base64_png) {
         wd_send_value(resp, base64_png);
-        free(base64_png);
+        mem_free(base64_png);
     } else {
         wd_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
     }

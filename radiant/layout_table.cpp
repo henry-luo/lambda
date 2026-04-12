@@ -5170,7 +5170,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             // Use a simple grid simulation to find actual column count
             // Allocate a temporary occupancy array (rows × current_columns_estimate)
             int est_cols = columns * 2 + 4;  // generous estimate
-            bool* occupied = (bool*)calloc(rows * est_cols, sizeof(bool));
+            bool* occupied = (bool*)mem_calloc(rows * est_cols, sizeof(bool), MEM_CAT_LAYOUT);
             int max_col_used = 0;
 
             cur_row = 0;
@@ -5191,7 +5191,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 }
                 cur_row++;
             }
-            free(occupied);
+            mem_free(occupied);
             if (max_col_used > columns) {
                 log_debug("%s Recount columns after rowspan=0 resolution: %d -> %d", table->source_loc(), columns, max_col_used);
                 columns = max_col_used;

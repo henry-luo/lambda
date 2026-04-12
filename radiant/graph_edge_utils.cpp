@@ -1,6 +1,6 @@
 #include "graph_edge_utils.hpp"
 #include "../lib/log.h"
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <string.h>
 #include <math.h>
 
@@ -15,7 +15,7 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
 
     // copy first point
     Point2D* first = (Point2D*)points->data[0];
-    Point2D* first_copy = (Point2D*)calloc(1, sizeof(Point2D));
+    Point2D* first_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
     first_copy->x = first->x;
     first_copy->y = first->y;
     arraylist_append(result, first_copy);
@@ -29,7 +29,7 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
 
         // Already axis-aligned (or close enough)
         if (dx < 1.0f || dy < 1.0f) {
-            Point2D* curr_copy = (Point2D*)calloc(1, sizeof(Point2D));
+            Point2D* curr_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
             curr_copy->x = curr->x;
             curr_copy->y = curr->y;
             arraylist_append(result, curr_copy);
@@ -39,7 +39,7 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
         // Insert L-bend
         // TD/BT layouts: vertical first — edge drops along the rank axis, then adjusts
         // LR/RL layouts: horizontal first — edge moves along the rank axis, then adjusts
-        Point2D* bend = (Point2D*)calloc(1, sizeof(Point2D));
+        Point2D* bend = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
         if (vertical_first) {
             bend->x = prev->x;
             bend->y = curr->y;
@@ -49,7 +49,7 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
         }
         arraylist_append(result, bend);
 
-        Point2D* curr_copy = (Point2D*)calloc(1, sizeof(Point2D));
+        Point2D* curr_copy = (Point2D*)mem_calloc(1, sizeof(Point2D), MEM_CAT_LAYOUT);
         curr_copy->x = curr->x;
         curr_copy->y = curr->y;
         arraylist_append(result, curr_copy);
@@ -57,7 +57,7 @@ void snap_to_orthogonal(ArrayList* points, bool vertical_first) {
 
     // Replace original points with result
     for (int i = 0; i < points->length; i++) {
-        free(points->data[i]);
+        mem_free(points->data[i]);
     }
     arraylist_clear(points);
 
@@ -93,7 +93,7 @@ void remove_collinear_points(ArrayList* points) {
 
         if (same_x || same_y) {
             // Skip redundant middle point - free it
-            free(points->data[i]);
+            mem_free(points->data[i]);
             continue;
         }
 

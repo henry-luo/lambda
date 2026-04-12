@@ -15,7 +15,7 @@
 #include "../../lib/file.h"
 #include "../../lambda/input/css/dom_element.hpp"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <GLFW/glfw3.h>
 
 // Event handling from radiant (reusing existing infrastructure)
@@ -251,7 +251,7 @@ char* webdriver_element_get_text(WebDriverSession* session, View* element) {
     // Extract text recursively - simplified for now
     // TODO: Full text extraction
     
-    char* result = strdup(buf->str ? buf->str : "");
+    char* result = mem_strdup(buf->str ? buf->str : "", MEM_CAT_TEMP);
     strbuf_free(buf);
     return result;
 }
@@ -387,7 +387,7 @@ static const char base64_chars[] =
 
 static char* base64_encode_data(const unsigned char* data, size_t len) {
     size_t out_len = 4 * ((len + 2) / 3);
-    char* result = (char*)malloc(out_len + 1);
+    char* result = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
     if (!result) return NULL;
     
     size_t i = 0, j = 0;
@@ -439,7 +439,7 @@ char* webdriver_screenshot(WebDriverSession* session) {
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     
-    unsigned char* data = (unsigned char*)malloc(size);
+    unsigned char* data = (unsigned char*)mem_alloc(size, MEM_CAT_TEMP);
     if (!data) {
         fclose(f);
         return NULL;
@@ -450,7 +450,7 @@ char* webdriver_screenshot(WebDriverSession* session) {
     
     // Base64 encode
     char* encoded = base64_encode_data(data, size);
-    free(data);
+    mem_free(data);
     
     // Clean up temp file
     file_delete(tmp_file);
