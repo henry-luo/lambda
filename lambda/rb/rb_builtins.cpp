@@ -11,7 +11,7 @@
 
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cmath>
 #include <cctype>
 
@@ -30,7 +30,7 @@ extern TypeMap EmptyMap;
 static inline void rb_arr_push(Array* arr, Item value) {
     if (arr->length >= arr->capacity) {
         int64_t new_cap = arr->capacity < 8 ? 8 : arr->capacity * 2;
-        arr->items = (Item*)realloc(arr->items, new_cap * sizeof(Item));
+        arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
         arr->capacity = new_cap;
     }
     arr->items[arr->length++] = value;
@@ -68,33 +68,33 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .upcase
     if (strcmp(m, "upcase") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) buf[i] = toupper((unsigned char)s->chars[i]);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
     // .downcase
     if (strcmp(m, "downcase") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) buf[i] = tolower((unsigned char)s->chars[i]);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
     // .capitalize
     if (strcmp(m, "capitalize") == 0) {
         if (s->len == 0) return self;
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         buf[0] = toupper((unsigned char)s->chars[0]);
         for (int64_t i = 1; i < s->len; i++) buf[i] = tolower((unsigned char)s->chars[i]);
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -122,11 +122,11 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .reverse
     if (strcmp(m, "reverse") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) buf[i] = s->chars[s->len - 1 - i];
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -438,14 +438,14 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
 
     // .swapcase
     if (strcmp(m, "swapcase") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) {
             unsigned char c = (unsigned char)s->chars[i];
             buf[i] = isupper(c) ? tolower(c) : (islower(c) ? toupper(c) : c);
         }
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -454,7 +454,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         String* from = it2s(args[0]);
         String* to = it2s(args[1]);
         if (!from || !to) return self;
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_RB_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) {
             buf[i] = s->chars[i];
             for (int64_t j = 0; j < from->len; j++) {
@@ -466,7 +466,7 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         }
         buf[s->len] = '\0';
         Item result = rb_sitem_n(buf, s->len);
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -573,7 +573,7 @@ extern "C" Item rb_array_method(Item self, Item method_name, Item* args, int arg
         int64_t new_len = arr->length + argc;
         if (new_len > arr->capacity) {
             int64_t new_cap = new_len < 8 ? 8 : new_len * 2;
-            arr->items = (Item*)realloc(arr->items, new_cap * sizeof(Item));
+            arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
             arr->capacity = new_cap;
         }
         // shift right

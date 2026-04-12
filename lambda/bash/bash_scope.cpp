@@ -14,7 +14,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Scope management (compile-time, for the transpiler)
@@ -163,7 +163,7 @@ void bash_warning(BashTranspiler* tp, TSNode node, const char* format, ...) {
 // ============================================================================
 
 BashTranspiler* bash_transpiler_create(Runtime* runtime) {
-    BashTranspiler* tp = (BashTranspiler*)malloc(sizeof(BashTranspiler));
+    BashTranspiler* tp = (BashTranspiler*)mem_alloc(sizeof(BashTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(tp, 0, sizeof(BashTranspiler));
 
     // initialize memory pools
@@ -189,5 +189,5 @@ void bash_transpiler_destroy(BashTranspiler* tp) {
     if (tp->code_buf) strbuf_free(tp->code_buf);
     if (tp->error_buf) strbuf_free(tp->error_buf);
     if (tp->ast_pool) pool_destroy(tp->ast_pool);
-    free(tp);
+    mem_free(tp);
 }

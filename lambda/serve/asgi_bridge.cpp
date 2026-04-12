@@ -9,7 +9,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 
 // ============================================================================
@@ -21,7 +21,7 @@ static const char b64_table[] =
 
 static char* base64_encode(const char *data, size_t len) {
     size_t out_len = 4 * ((len + 2) / 3) + 1;
-    char *out = (char*)malloc(out_len);
+    char *out = (char*)mem_alloc(out_len, MEM_CAT_SERVE);
     size_t i = 0, j = 0;
 
     while (i < len) {
@@ -51,7 +51,7 @@ static int b64_decode_char(char c) {
 static char* base64_decode(const char *data, size_t *out_len) {
     size_t len = strlen(data);
     size_t alloc = 3 * len / 4 + 1;
-    char *out = (char*)malloc(alloc);
+    char *out = (char*)mem_alloc(alloc, MEM_CAT_SERVE);
     size_t i = 0, j = 0;
 
     while (i < len) {
@@ -133,14 +133,14 @@ static char* build_request_message(uint64_t id, HttpRequest *req) {
     if (req->body && req->body_len > 0) {
         char *b64 = base64_encode(req->body, req->body_len);
         strbuf_append_str(buf, b64);
-        free(b64);
+        mem_free(b64);
     }
     strbuf_append_char(buf, '"');
 
     strbuf_append_str(buf, "}\n");
 
     size_t len = buf->length;
-    char *result = (char*)malloc(len + 1);
+    char *result = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
     memcpy(result, buf->str, len + 1);
     strbuf_free(buf);
 
@@ -221,18 +221,18 @@ static int parse_response_message(const char *json, HttpResponse *resp) {
         while (*body_end && *body_end != '"') { if (*body_end == '\\') body_end++; body_end++; }
 
         size_t b64_len = body_end - body_p;
-        char *b64 = (char*)malloc(b64_len + 1);
+        char *b64 = (char*)mem_alloc(b64_len + 1, MEM_CAT_SERVE);
         memcpy(b64, body_p, b64_len);
         b64[b64_len] = '\0';
 
         size_t decoded_len = 0;
         char *decoded = base64_decode(b64, &decoded_len);
-        free(b64);
+        mem_free(b64);
 
         if (decoded && decoded_len > 0) {
             http_response_write(resp, decoded, decoded_len);
         }
-        free(decoded);
+        mem_free(decoded);
     }
 
     return 0;
@@ -253,7 +253,7 @@ static void on_worker_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *b
     AsgiWorker *worker = (AsgiWorker*)stream->data;
 
     if (nread <= 0) {
-        if (buf->base) free(buf->base);
+        if (buf->base) mem_free(buf->base);
         if (nread < 0) {
             worker->alive = 0;
         }
@@ -263,13 +263,13 @@ static void on_worker_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *b
     // accumulate into read buffer
     if (worker->read_buf_len + nread >= worker->read_buf_cap) {
         worker->read_buf_cap = (worker->read_buf_len + nread) * 2;
-        worker->read_buf = (char*)realloc(worker->read_buf, worker->read_buf_cap);
+        worker->read_buf = (char*)mem_realloc(worker->read_buf, worker->read_buf_cap, MEM_CAT_SERVE);
     }
     memcpy(worker->read_buf + worker->read_buf_len, buf->base, nread);
     worker->read_buf_len += nread;
     worker->read_buf[worker->read_buf_len] = '\0';
 
-    free(buf->base);
+    mem_free(buf->base);
 
     // check for complete JSON message (newline-delimited)
     char *newline = strchr(worker->read_buf, '\n');
@@ -290,14 +290,14 @@ static void on_worker_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *b
 }
 
 static void alloc_buffer(uv_handle_t *handle, size_t suggested, uv_buf_t *buf) {
-    buf->base = (char*)malloc(suggested);
+    buf->base = (char*)mem_alloc(suggested, MEM_CAT_SERVE);
     buf->len = suggested;
 }
 
 static int start_worker(AsgiBridge *bridge, int index) {
-    AsgiWorker *worker = (AsgiWorker*)calloc(1, sizeof(AsgiWorker));
+    AsgiWorker *worker = (AsgiWorker*)mem_calloc(1, sizeof(AsgiWorker), MEM_CAT_SERVE);
     worker->read_buf_cap = 4096;
-    worker->read_buf = (char*)malloc(worker->read_buf_cap);
+    worker->read_buf = (char*)mem_alloc(worker->read_buf_cap, MEM_CAT_SERVE);
     worker->read_buf_len = 0;
 
     uv_pipe_init(bridge->loop, &worker->stdin_pipe, 0);
@@ -343,8 +343,8 @@ static int start_worker(AsgiBridge *bridge, int index) {
     int r = uv_spawn(bridge->loop, &worker->process, &options);
     if (r != 0) {
         log_error("asgi: failed to spawn worker %d: %s", index, uv_strerror(r));
-        free(worker->read_buf);
-        free(worker);
+        mem_free(worker->read_buf);
+        mem_free(worker);
         return -1;
     }
 
@@ -366,12 +366,12 @@ AsgiBridge* asgi_bridge_create(Server *server, const char *python_app,
     if (!server || !python_app) return NULL;
     if (worker_count <= 0) worker_count = 4;
 
-    AsgiBridge *bridge = (AsgiBridge*)calloc(1, sizeof(AsgiBridge));
+    AsgiBridge *bridge = (AsgiBridge*)mem_calloc(1, sizeof(AsgiBridge), MEM_CAT_SERVE);
     bridge->server = server;
     bridge->python_app = python_app;
     bridge->transport = transport;
     bridge->worker_count = worker_count;
-    bridge->workers = (AsgiWorker**)calloc(worker_count, sizeof(AsgiWorker*));
+    bridge->workers = (AsgiWorker**)mem_calloc(worker_count, sizeof(AsgiWorker*), MEM_CAT_SERVE);
     bridge->next_request_id = 1;
     bridge->loop = server->loop;
 
@@ -431,19 +431,19 @@ int asgi_bridge_dispatch(AsgiBridge *bridge, HttpRequest *req, HttpResponse *res
 
     // write to worker stdin
     uv_buf_t write_buf = uv_buf_init(msg, (unsigned int)msg_len);
-    uv_write_t *write_req = (uv_write_t*)calloc(1, sizeof(uv_write_t));
+    uv_write_t *write_req = (uv_write_t*)mem_calloc(1, sizeof(uv_write_t), MEM_CAT_SERVE);
     write_req->data = msg;
 
     int r = uv_write(write_req, (uv_stream_t*)&worker->stdin_pipe, &write_buf, 1,
         [](uv_write_t *wr, int status) {
-            free(wr->data);
-            free(wr);
+            mem_free(wr->data);
+            mem_free(wr);
         });
 
     if (r != 0) {
         log_error("asgi: failed to write to worker: %s", uv_strerror(r));
-        free(msg);
-        free(write_req);
+        mem_free(msg);
+        mem_free(write_req);
         worker->busy = 0;
         http_response_status(resp, 502);
         http_response_write_str(resp, "{\"error\":\"failed to send to ASGI worker\"}");
@@ -509,12 +509,12 @@ void asgi_bridge_destroy(AsgiBridge *bridge) {
         if (!uv_is_closing((uv_handle_t*)&w->process))
             uv_close((uv_handle_t*)&w->process, close_handle_cb);
 
-        free(w->read_buf);
-        free(w);
+        mem_free(w->read_buf);
+        mem_free(w);
     }
 
-    free(bridge->workers);
-    free(bridge);
+    mem_free(bridge->workers);
+    mem_free(bridge);
 
     log_info("asgi: bridge destroyed");
 }

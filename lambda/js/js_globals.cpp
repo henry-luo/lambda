@@ -17,7 +17,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <time.h>
@@ -1333,7 +1333,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
         int len = ta->length;
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-        char* buf = (char*)malloc(len * 3 + 1);
+        char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         for (int i = 0; i < len; i++) {
             int code = 0;
@@ -1351,7 +1351,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         }
         buf[pos] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -1361,7 +1361,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)malloc(len * 3 + 1);
+    char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
@@ -1375,7 +1375,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -1427,7 +1427,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)malloc(len * 4 + 1);
+    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
@@ -1441,7 +1441,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -4131,7 +4131,7 @@ static Item assert_build_error_msg(Item actual, Item expected, Item message, boo
 
     int total = msg_len + (msg_len > 0 ? 1 : 0) + (int)strlen(head) + a_len +
                 (int)strlen(mid) + e_len + (int)strlen(tail) + 1;
-    char* buf = (char*)malloc(total);
+    char* buf = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     if (msg_chars) {
         memcpy(buf + pos, msg_chars, msg_len); pos += msg_len;
@@ -4148,7 +4148,7 @@ static Item assert_build_error_msg(Item actual, Item expected, Item message, boo
     buf[pos] = '\0';
 
     Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -4224,7 +4224,7 @@ static Item assert_format_array(Item arr) {
         slens[i] = ss ? (int)ss->len : 9;
         total += slens[i] + (i > 0 ? 2 : 0); // ", " separator
     }
-    char* buf = (char*)malloc(total + 1);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     buf[pos++] = '[';
     for (int i = 0; i < maxn; i++) {
@@ -4234,7 +4234,7 @@ static Item assert_format_array(Item arr) {
     buf[pos++] = ']';
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -4249,13 +4249,13 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
         const char* msg_prefix = "Actual argument shouldn't be nullish. ";
         String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
         int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
-        char* buf = (char*)malloc(total + 1);
+        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
         memcpy(buf, msg_prefix, strlen(msg_prefix));
         if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
         buf[total] = '\0';
         Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
         Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
-        free(buf);
+        mem_free(buf);
         js_throw_value(js_new_error_with_name(err_name, err_msg));
         return;
     }
@@ -4265,13 +4265,13 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
         const char* msg_prefix = "Expected argument shouldn't be nullish. ";
         String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
         int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
-        char* buf = (char*)malloc(total + 1);
+        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
         memcpy(buf, msg_prefix, strlen(msg_prefix));
         if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
         buf[total] = '\0';
         Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
         Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
-        free(buf);
+        mem_free(buf);
         js_throw_value(js_new_error_with_name(err_name, err_msg));
         return;
     }
@@ -4291,7 +4291,7 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
     const char* p3 = " should have the same contents. ";
     int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
                 (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
-    char* buf = (char*)malloc(total + 1);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     int l;
     l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
@@ -4304,7 +4304,7 @@ extern "C" void js_assert_compare_array(Item actual, Item expected, Item message
 
     Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
     Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
-    free(buf);
+    mem_free(buf);
     js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
@@ -4552,7 +4552,7 @@ extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
     const char* p3 = ". ";
     int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
                 (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
-    char* buf = (char*)malloc(total + 1);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     int l;
     l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
@@ -4565,7 +4565,7 @@ extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
 
     Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
     Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
-    free(buf);
+    mem_free(buf);
     js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
@@ -4729,13 +4729,13 @@ extern "C" void js_assert_base(Item must_be_true, Item message) {
     int plen = (int)strlen(prefix);
     int vlen = vs ? (int)vs->len : 9;
     const char* vchars = vs ? vs->chars : "undefined";
-    char* buf = (char*)malloc(plen + vlen + 1);
+    char* buf = (char*)mem_alloc(plen + vlen + 1, MEM_CAT_JS_RUNTIME);
     memcpy(buf, prefix, plen);
     memcpy(buf + plen, vchars, vlen);
     buf[plen + vlen] = '\0';
     Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
     Item err_msg  = (Item){.item = s2it(heap_create_name(buf, plen + vlen))};
-    free(buf);
+    mem_free(buf);
     js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
@@ -6042,7 +6042,7 @@ extern "C" Item js_atob(Item str_item) {
     int src_len = s->len;
 
     // skip whitespace and compute output size
-    char* buf = (char*)malloc(src_len); // output is always <= input
+    char* buf = (char*)mem_alloc(src_len, MEM_CAT_JS_RUNTIME); // output is always <= input
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -6063,7 +6063,7 @@ extern "C" Item js_atob(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -6077,7 +6077,7 @@ extern "C" Item js_btoa(Item str_item) {
     const unsigned char* src = (const unsigned char*)s->chars;
     int src_len = s->len;
     int out_len = ((src_len + 2) / 3) * 4;
-    char* buf = (char*)malloc(out_len + 1);
+    char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -6096,7 +6096,7 @@ extern "C" Item js_btoa(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -6107,7 +6107,7 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded);
+    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6135,7 +6135,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded);
+    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6147,7 +6147,7 @@ extern "C" Item js_encodeURI(Item str_item) {
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded);
+    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6171,7 +6171,7 @@ extern "C" Item js_decodeURI(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded);
+    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6196,7 +6196,7 @@ extern "C" Item js_unescape(Item str_item) {
 
     // allocate output buffer (worst case: all %XX with values >= 0x80 → 2 bytes each,
     // but that's still ≤ src_len since 3 input bytes → 2 output bytes)
-    char* buf = (char*)malloc(src_len * 2 + 1);
+    char* buf = (char*)mem_alloc(src_len * 2 + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -6245,7 +6245,7 @@ extern "C" Item js_unescape(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -6271,7 +6271,7 @@ extern "C" Item js_escape(Item str_item) {
     int src_len = s->len;
 
     // worst case: every char becomes %uXXXX (6 bytes per input byte)
-    char* buf = (char*)malloc(src_len * 6 + 1);
+    char* buf = (char*)mem_alloc(src_len * 6 + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     static const char hex[] = "0123456789ABCDEF";
@@ -6330,7 +6330,7 @@ extern "C" Item js_escape(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 

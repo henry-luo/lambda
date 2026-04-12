@@ -7,7 +7,7 @@
 #include "serve_utils.hpp"
 #include "mime.hpp"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <ctype.h>
@@ -31,19 +31,19 @@ CookieOptions cookie_options_default(void) {
 // ============================================================================
 
 static void on_write_done(uv_write_t *req, int status) {
-    free(req->data);
-    free(req);
+    mem_free(req->data);
+    mem_free(req);
 }
 
 static void uv_send_raw(uv_tcp_t *client, const char *data, size_t len) {
     if (!client || !data || len == 0) return;
 
-    char *buf = (char *)malloc(len);
+    char *buf = (char *)mem_alloc(len, MEM_CAT_SERVE);
     if (!buf) return;
     memcpy(buf, data, len);
 
-    uv_write_t *write_req = (uv_write_t *)malloc(sizeof(uv_write_t));
-    if (!write_req) { free(buf); return; }
+    uv_write_t *write_req = (uv_write_t *)mem_alloc(sizeof(uv_write_t), MEM_CAT_SERVE);
+    if (!write_req) { mem_free(buf); return; }
     write_req->data = buf;
 
     uv_buf_t uv_buf = uv_buf_init(buf, (unsigned int)len);
@@ -168,7 +168,7 @@ void http_response_send(HttpResponse *resp) {
     hdr_size += 128; // content-length, server, date
 
     size_t total = hdr_size + resp->body_len;
-    char *buf = (char *)malloc(total);
+    char *buf = (char *)mem_alloc(total, MEM_CAT_SERVE);
     if (!buf) return;
 
     // status line
@@ -199,8 +199,8 @@ void http_response_send(HttpResponse *resp) {
     }
 
     // send via libuv
-    uv_write_t *write_req = (uv_write_t *)malloc(sizeof(uv_write_t));
-    if (!write_req) { free(buf); return; }
+    uv_write_t *write_req = (uv_write_t *)mem_alloc(sizeof(uv_write_t), MEM_CAT_SERVE);
+    if (!write_req) { mem_free(buf); return; }
     write_req->data = buf;
 
     uv_buf_t uv_buf = uv_buf_init(buf, (unsigned int)off);
@@ -338,7 +338,7 @@ void http_response_start_chunked(HttpResponse *resp) {
         hdr_size += strlen(h->name) + strlen(h->value) + 4;
     }
 
-    char *buf = (char *)malloc(hdr_size);
+    char *buf = (char *)mem_alloc(hdr_size, MEM_CAT_SERVE);
     if (!buf) return;
 
     int off = snprintf(buf, hdr_size, "HTTP/1.1 %d %s\r\n",
@@ -356,7 +356,7 @@ void http_response_start_chunked(HttpResponse *resp) {
     off += snprintf(buf + off, hdr_size - (size_t)off, "\r\n");
 
     uv_send_raw(resp->client, buf, (size_t)off);
-    free(buf);
+    mem_free(buf);
 
     resp->headers_sent = 1;
 }
@@ -369,7 +369,7 @@ void http_response_write_chunk(HttpResponse *resp, const void *data, size_t len)
     int hdr_len = snprintf(header, sizeof(header), "%zx\r\n", len);
 
     size_t total = (size_t)hdr_len + len + 2;
-    char *buf = (char *)malloc(total);
+    char *buf = (char *)mem_alloc(total, MEM_CAT_SERVE);
     if (!buf) return;
 
     memcpy(buf, header, (size_t)hdr_len);
@@ -377,7 +377,7 @@ void http_response_write_chunk(HttpResponse *resp, const void *data, size_t len)
     memcpy(buf + hdr_len + len, "\r\n", 2);
 
     uv_send_raw(resp->client, buf, total);
-    free(buf);
+    mem_free(buf);
 }
 
 void http_response_end_chunked(HttpResponse *resp) {

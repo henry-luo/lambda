@@ -17,7 +17,7 @@
 #include "../../lib/str.h"
 #include <cstring>
 #include <cmath>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cctype>
 #include <string>
@@ -2757,7 +2757,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                     }
                     if (!ta->buffer) {
                         // Create a backing ArrayBuffer lazily for standalone typed arrays
-                        JsArrayBuffer* ab = (JsArrayBuffer*)malloc(sizeof(JsArrayBuffer));
+                        JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
                         ab->data = ta->data;  // share the same data pointer
                         ab->byte_length = ta->byte_length;
                         ta->buffer = ab;
@@ -3632,7 +3632,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         // Use direct realloc to avoid GC-triggering array_push loops.
                         if (new_len + 4 > arr->capacity) {
                             int64_t new_cap = new_len + 4;
-                            Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+                            Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                             if (arr->items && arr->length > 0) {
                                 memcpy(new_items, arr->items, arr->length * sizeof(Item));
                             }
@@ -4182,7 +4182,7 @@ extern "C" Item js_array_new(int length) {
     if (length > 0) {
         // Allocate items array directly
         arr->capacity = length + 4;
-        arr->items = (Item*)malloc(arr->capacity * sizeof(Item));
+        arr->items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_JS_RUNTIME);
         // Set length to the target size
         arr->length = length;
         // Initialize all slots to holes (deleted sentinel) per ES spec.
@@ -6145,13 +6145,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // name + ": " + msg
         int total = name_len + 2 + msg_len;
         char buf[1024];
-        char* p = (total + 1 <= (int)sizeof(buf)) ? buf : (char*)malloc(total + 1);
+        char* p = (total + 1 <= (int)sizeof(buf)) ? buf : (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
         memcpy(p, name_str, name_len);
         p[name_len] = ':';
         p[name_len + 1] = ' ';
         memcpy(p + name_len + 2, msg_str, msg_len);
         Item result = (Item){.item = s2it(heap_create_name(p, total))};
-        if (p != buf) free(p);
+        if (p != buf) mem_free(p);
         return result;
     }
     case JS_BUILTIN_BOOL_TO_STRING: {
@@ -8099,7 +8099,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 int len = ta->length;
                 // collect matching elements first
-                Item* temp = (Item*)malloc(len * sizeof(Item));
+                Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_JS_RUNTIME);
                 int count = 0;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
@@ -8112,7 +8112,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 for (int i = 0; i < count; i++) {
                     js_typed_array_set(result, (Item){.item = i2it(i)}, temp[i]);
                 }
-                free(temp);
+                mem_free(temp);
                 return result;
             }
             if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
@@ -9098,7 +9098,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
         if (!normalized) return str;
         String* result = heap_strcpy(normalized, norm_len);
-        free(normalized);
+        mem_free(normalized);
         return (Item){.item = s2it(result)};
     }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
@@ -10213,7 +10213,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // grow: ensure capacity, then memmove
             if (new_len + 4 > a->capacity) {
                 int new_cap = new_len + 4;
-                Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+                Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                 if (a->items && a->length > 0) {
                     memcpy(new_items, a->items, a->length * sizeof(Item));
                 }
@@ -10322,7 +10322,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         // ensure capacity
         if (new_len + 4 > a->capacity) {
             int new_cap = new_len + 4;
-            Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
+            Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
             if (a->items && a->length > 0) {
                 memcpy(new_items, a->items, a->length * sizeof(Item));
             }
@@ -12843,7 +12843,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* arr = input.array;
         if (arr && arr->length > 0) {
-            heap_buf = (uint8_t*)malloc(arr->length);
+            heap_buf = (uint8_t*)mem_alloc(arr->length, MEM_CAT_JS_RUNTIME);
             for (int i = 0; i < arr->length; i++)
                 heap_buf[i] = (uint8_t)js_get_number(arr->items[i]);
             bytes = heap_buf;
@@ -12851,12 +12851,12 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         }
     } else if (tid == LMD_TYPE_STRING) {
         // Pass-through if already a string
-        if (heap_buf) free(heap_buf);
+        if (heap_buf) mem_free(heap_buf);
         return input;
     }
 
     if (!bytes || byte_len == 0) {
-        if (heap_buf) free(heap_buf);
+        if (heap_buf) mem_free(heap_buf);
         return (Item){.item = s2it(heap_strcpy("", 0))};
     }
 
@@ -12877,7 +12877,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         }
         // Max output: each 2-byte unit → up to 4 UTF-8 bytes
         int max_out = ((byte_len - start) / 2) * 4 + 4;
-        char* out = (char*)malloc(max_out + 1);
+        char* out = (char*)mem_alloc(max_out + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         int i = start;
         while (i + 1 < byte_len) {
@@ -12908,7 +12908,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         }
         out[pos] = '\0';
         result = (Item){.item = s2it(heap_strcpy(out, pos))};
-        free(out);
+        mem_free(out);
     } else {
         // UTF-8 (default): strip BOM if present
         int start = 0;
@@ -12917,7 +12917,7 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         result = (Item){.item = s2it(heap_strcpy((char*)bytes + start, byte_len - start))};
     }
 
-    if (heap_buf) free(heap_buf);
+    if (heap_buf) mem_free(heap_buf);
     return result;
 }
 

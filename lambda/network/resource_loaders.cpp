@@ -18,7 +18,7 @@
 #include "../../radiant/font_face.h"
 #include "../../lib/font/font.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <strings.h>  // for strcasecmp
 
 // Helper: Read file contents into a string
@@ -35,7 +35,7 @@ static char* read_file_to_string(const char* path, size_t* out_size) {
     size_t size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    char* content = (char*)malloc(size + 1);
+    char* content = (char*)mem_alloc(size + 1, MEM_CAT_NETWORK);
     if (!content) {
         fclose(f);
         return NULL;
@@ -45,7 +45,7 @@ static char* read_file_to_string(const char* path, size_t* out_size) {
     fclose(f);
 
     if (read != size) {
-        free(content);
+        mem_free(content);
         return NULL;
     }
 
@@ -61,8 +61,8 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
     // ensure capacity
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
         int new_capacity = doc->stylesheet_capacity == 0 ? 4 : doc->stylesheet_capacity * 2;
-        CssStylesheet** new_sheets = (CssStylesheet**)realloc(
-            doc->stylesheets, new_capacity * sizeof(CssStylesheet*));
+        CssStylesheet** new_sheets = (CssStylesheet**)mem_realloc(
+            doc->stylesheets, new_capacity * sizeof(CssStylesheet*), MEM_CAT_NETWORK);
         if (!new_sheets) {
             log_error("resource_loaders: failed to expand stylesheet array");
             return false;
@@ -98,18 +98,18 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
         engine = css_engine_create(doc->pool);
         if (!engine) {
             log_error("network: failed to create CSS engine");
-            free(css_content);
+            mem_free(css_content);
             return;
         }
     } else {
         log_error("network: no CSS engine or pool available");
-        free(css_content);
+        mem_free(css_content);
         return;
     }
 
     // parse the stylesheet
     CssStylesheet* sheet = css_parse_stylesheet(engine, css_content, res->url);
-    free(css_content);  // content was copied by parser
+    mem_free(css_content);  // content was copied by parser
 
     if (!sheet) {
         log_error("network: failed to parse CSS: %s", res->url);
@@ -178,7 +178,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         if (img_element->doc && img_element->doc->pool) {
             img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->pool, sizeof(EmbedProp));
         } else {
-            img_element->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
+            img_element->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK);
         }
         if (!img_element->embed) {
             log_error("network: failed to allocate embed property");
@@ -237,7 +237,7 @@ void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* f
     // so that future text layout can find this font
     if (!font_face->src_url) {
         // set the successful source URL
-        font_face->src_url = strdup(res->local_path);
+        font_face->src_url = mem_strdup(res->local_path, MEM_CAT_NETWORK);
     }
 
     // schedule reflow for document to apply new font
@@ -289,7 +289,7 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
     log_debug("network: SVG resource loaded, target_id=%s, size=%zu bytes",
               target_id ? target_id : "(none)", svg_size);
 
-    free(svg_content);
+    mem_free(svg_content);
 
     // schedule reflow so the <use> element can incorporate the SVG
     if (res->manager) {

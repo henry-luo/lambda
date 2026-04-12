@@ -11,7 +11,7 @@
 
 // forward declaration from rb_class.cpp
 extern "C" Item rb_call_spaceship(Item left, Item right);
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cmath>
 #include <re2/re2.h>
 
@@ -589,7 +589,7 @@ extern "C" Item rb_array_push(Item array, Item value) {
     if (!arr) return array;
     if (arr->length >= arr->capacity) {
         int64_t new_cap = arr->capacity < 8 ? 8 : arr->capacity * 2;
-        arr->items = (Item*)realloc(arr->items, new_cap * sizeof(Item));
+        arr->items = (Item*)mem_realloc(arr->items, new_cap * sizeof(Item), MEM_CAT_RB_RUNTIME);
         arr->capacity = new_cap;
     }
     arr->items[arr->length++] = value;
@@ -927,7 +927,7 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char* source = (char*)malloc(fsize + 1);
+    char* source = (char*)mem_alloc(fsize + 1, MEM_CAT_RB_RUNTIME);
     if (!source) {
         fclose(f);
         log_error("require_relative: out of memory");
@@ -956,7 +956,7 @@ extern "C" Item rb_builtin_require_relative(Item path) {
         log_error("require_relative: unsupported file type '%s'", ext ? ext : "(none)");
     }
 
-    free(source);
+    mem_free(source);
     rb_current_file = prev_file;
     return result;
 }
@@ -1161,7 +1161,7 @@ extern "C" Item rb_file_read(Item path) {
     if (!content) return (Item){.item = ITEM_NULL};
     size_t len = strlen(content);
     Item result = (Item){.item = s2it(heap_create_name(content, len))};
-    free(content);
+    free(content); // from read_text_file (lib)
     return result;
 }
 
@@ -1173,11 +1173,11 @@ extern "C" Item rb_file_write(Item path, Item content) {
     if (!p || !c) return (Item){.item = ITEM_NULL};
     char filepath[1024];
     snprintf(filepath, sizeof(filepath), "%.*s", (int)p->len, p->chars);
-    char* buf = (char*)malloc(c->len + 1);
+    char* buf = (char*)mem_alloc(c->len + 1, MEM_CAT_RB_RUNTIME);
     memcpy(buf, c->chars, c->len);
     buf[c->len] = '\0';
     write_text_file(filepath, buf);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = i2it(c->len)};
 }
 

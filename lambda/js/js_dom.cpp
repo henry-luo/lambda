@@ -30,6 +30,7 @@
 
 #include <cstring>
 #include <cctype>
+#include "../../lib/mem.h"
 
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -1304,13 +1305,13 @@ static String* uppercase_tag_name(const char* tag_name) {
     size_t len = strlen(tag_name);
     // allocate temp on stack for short names
     char buf[64];
-    char* upper = (len < sizeof(buf)) ? buf : (char*)malloc(len + 1);
+    char* upper = (len < sizeof(buf)) ? buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     for (size_t i = 0; i < len; i++) {
         upper[i] = (char)toupper((unsigned char)tag_name[i]);
     }
     upper[len] = '\0';
     String* result = heap_create_name(upper);
-    if (upper != buf) free(upper);
+    if (upper != buf) mem_free(upper);
     return result;
 }
 

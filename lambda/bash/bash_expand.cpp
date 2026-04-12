@@ -11,7 +11,7 @@
 
 #include <string.h>
 #include <ctype.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 
 // local helper: convert Item to C string (mirrors bash_runtime.cpp static helper)
 static const char* item_to_cstr(Item value) {
