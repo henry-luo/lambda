@@ -5,7 +5,7 @@
 #include "rdt_vector.hpp"
 #include "../lib/log.h"
 #include <thorvg_capi.h>
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <string.h>
 
 // ============================================================================
@@ -46,7 +46,7 @@ struct RdtPicture {
 static void path_ensure_capacity(RdtPath* p) {
     if (p->count >= p->capacity) {
         int new_cap = p->capacity ? p->capacity * 2 : 16;
-        p->entries = (RdtPath::Entry*)realloc(p->entries, new_cap * sizeof(RdtPath::Entry));
+        p->entries = (RdtPath::Entry*)mem_realloc(p->entries, new_cap * sizeof(RdtPath::Entry), MEM_CAT_RENDER);
         p->capacity = new_cap;
     }
 }
@@ -118,7 +118,7 @@ static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform
 // ============================================================================
 
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
-    RdtVectorImpl* impl = (RdtVectorImpl*)calloc(1, sizeof(RdtVectorImpl));
+    RdtVectorImpl* impl = (RdtVectorImpl*)mem_calloc(1, sizeof(RdtVectorImpl), MEM_CAT_RENDER);
     impl->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
     impl->pixels = pixels;
     impl->width = w;
@@ -139,7 +139,7 @@ void rdt_vector_destroy(RdtVector* vec) {
     if (!vec || !vec->impl) return;
     RdtVectorImpl* impl = vec->impl;
     if (impl->canvas) tvg_canvas_destroy(impl->canvas);
-    free(impl);
+    mem_free(impl);
     vec->impl = nullptr;
 }
 
@@ -158,7 +158,7 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
 // ============================================================================
 
 RdtPath* rdt_path_new(void) {
-    RdtPath* p = (RdtPath*)calloc(1, sizeof(RdtPath));
+    RdtPath* p = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER);
     return p;
 }
 
@@ -212,8 +212,8 @@ void rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry) {
 
 void rdt_path_free(RdtPath* p) {
     if (!p) return;
-    free(p->entries);
-    free(p);
+    mem_free(p->entries);
+    mem_free(p);
 }
 
 // ============================================================================
@@ -419,9 +419,9 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
     }
 
     // copy the path for the duration of the clip
-    RdtPath* copy = (RdtPath*)calloc(1, sizeof(RdtPath));
+    RdtPath* copy = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER);
     if (clip_path->count > 0) {
-        copy->entries = (RdtPath::Entry*)malloc(clip_path->count * sizeof(RdtPath::Entry));
+        copy->entries = (RdtPath::Entry*)mem_alloc(clip_path->count * sizeof(RdtPath::Entry), MEM_CAT_RENDER);
         memcpy(copy->entries, clip_path->entries, clip_path->count * sizeof(RdtPath::Entry));
         copy->count = clip_path->count;
         copy->capacity = clip_path->count;
@@ -514,7 +514,7 @@ RdtPicture* rdt_picture_load(const char* path) {
     float w = 0, h = 0;
     tvg_picture_get_size(pic, &w, &h);
 
-    RdtPicture* p = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
     p->paint = pic;
     p->width = w;
     p->height = h;
@@ -536,7 +536,7 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     float w = 0, h = 0;
     tvg_picture_get_size(pic, &w, &h);
 
-    RdtPicture* p = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
     p->paint = pic;
     p->width = w;
     p->height = h;
@@ -547,7 +547,7 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     if (!pic || !pic->paint) return nullptr;
     Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
     if (!dup) return nullptr;
-    RdtPicture* p = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
     p->paint = dup;
     p->width = pic->width;
     p->height = pic->height;
@@ -591,7 +591,7 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
 void rdt_picture_free(RdtPicture* pic) {
     if (!pic) return;
     if (pic->paint) tvg_paint_unref(pic->paint, true);
-    free(pic);
+    mem_free(pic);
 }
 
 // ============================================================================
@@ -600,7 +600,7 @@ void rdt_picture_free(RdtPicture* pic) {
 
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
-    RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
     pic->paint = paint;
     pic->width = w;
     pic->height = h;

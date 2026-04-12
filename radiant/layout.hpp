@@ -8,6 +8,7 @@
 #include "layout_counters.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lib/scratch_arena.h"
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -328,6 +329,9 @@ typedef struct LayoutContext {
 
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
     CounterContext* counter_context;
+
+    // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
+    ScratchArena scratch;
 } LayoutContext;
 
 // ============================================================================

@@ -23,6 +23,15 @@
 
 // Guard byte patterns for buffer overflow detection
 #define GUARD_BYTE_HEAD     0xDE
+
+// Inline header for STATS mode — stores size and category for mem_free
+#define MEMTRACK_STATS_MAGIC  0xBEEF
+
+typedef struct MemAllocHeader {
+    uint32_t size;          // user-requested size (up to 4 GB)
+    uint16_t category;      // MemCategory
+    uint16_t magic;         // MEMTRACK_STATS_MAGIC — validates tracked allocation
+} MemAllocHeader;
 #define GUARD_BYTE_TAIL     0xAD
 #define GUARD_SIZE          16          // Bytes of guards on each side
 #define FILL_BYTE_ALLOC     0xCD        // Fill pattern for new allocations
@@ -78,6 +87,13 @@ const char* memtrack_category_names[MEM_CAT_COUNT] = {
     [MEM_CAT_CACHE_IMAGE]  = "cache-image",
     [MEM_CAT_CACHE_LAYOUT] = "cache-layout",
     [MEM_CAT_CACHE_OTHER]  = "cache-other",
+    [MEM_CAT_JS_RUNTIME]   = "js-runtime",
+    [MEM_CAT_PY_RUNTIME]   = "py-runtime",
+    [MEM_CAT_RB_RUNTIME]   = "rb-runtime",
+    [MEM_CAT_BASH_RUNTIME] = "bash-runtime",
+    [MEM_CAT_NETWORK]      = "network",
+    [MEM_CAT_SERVE]        = "serve",
+    [MEM_CAT_SYSTEM]       = "system",
     [MEM_CAT_TEMP]         = "temp",
 };
 
@@ -140,6 +156,10 @@ typedef struct MemtrackState {
     // Snapshots
     SnapshotEntry snapshots[MAX_SNAPSHOTS];
     uint32_t next_snapshot_handle;
+
+    // Pool/Arena lifecycle counters
+    int32_t pool_count;
+    int32_t arena_count;
 
 } MemtrackState;
 
@@ -309,9 +329,9 @@ bool memtrack_init(MemtrackMode mode) {
     return true;
 }
 
-void memtrack_shutdown(void) {
+size_t memtrack_shutdown(void) {
     if (!g_memtrack.initialized) {
-        return;
+        return 0;
     }
 
     lock_tracker();
@@ -320,11 +340,17 @@ void memtrack_shutdown(void) {
     size_t leak_count = 0;
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         leak_count = hashmap_count(g_memtrack.alloc_map);
+    } else if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
+        leak_count = g_memtrack.stats.current_count;
     }
 
     // Capture stats while holding lock
     size_t peak_bytes = g_memtrack.stats.peak_bytes;
     size_t total_allocs = g_memtrack.stats.total_allocs;
+    size_t current_bytes = g_memtrack.stats.current_bytes;
+    size_t current_count = g_memtrack.stats.current_count;
+    int32_t pool_count = g_memtrack.pool_count;
+    int32_t arena_count = g_memtrack.arena_count;
 
     unlock_tracker();
 
@@ -336,9 +362,30 @@ void memtrack_shutdown(void) {
         } else {
             log_info("memtrack: no memory leaks detected");
         }
+    } else if (g_memtrack.mode == MEMTRACK_MODE_STATS && current_count > 0) {
+        log_warn("memtrack: LEAK — %zu allocations (%zu bytes) still live at shutdown",
+                 current_count, current_bytes);
+        // log per-category breakdown
+        for (int i = 0; i < MEM_CAT_COUNT; i++) {
+            MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
+            if (cs->current_count > 0) {
+                log_warn("memtrack:   %s: %zu allocs, %zu bytes",
+                         memtrack_category_names[i], cs->current_count, cs->current_bytes);
+            }
+        }
+    }
+
+    if (pool_count > 0) {
+        log_warn("memtrack: %d pool(s) not destroyed at shutdown", pool_count);
+    }
+    if (arena_count > 0) {
+        log_warn("memtrack: %d arena(s) not destroyed at shutdown", arena_count);
     }
 
     // Log final stats WITHOUT holding lock
+    if (leak_count == 0 && pool_count == 0 && arena_count == 0) {
+        log_info("memtrack: clean shutdown — 0 live allocations");
+    }
     log_info("memtrack: shutdown - peak usage: %zu bytes, total allocs: %zu",
              peak_bytes, total_allocs);
 
@@ -353,6 +400,8 @@ void memtrack_shutdown(void) {
     pthread_mutex_destroy(&g_memtrack.lock);
 
     g_memtrack.initialized = false;
+
+    return leak_count;
 }
 
 MemtrackMode memtrack_get_mode(void) {
@@ -413,9 +462,14 @@ void* mem_alloc(size_t size, MemCategory category)
         user_ptr = (char*)real_ptr + GUARD_SIZE;
         memset(user_ptr, FILL_BYTE_ALLOC, size);
     } else {
-        user_ptr = malloc(size);
-        real_ptr = user_ptr;
-        if (!user_ptr) return NULL;
+        // STATS mode: prepend MemAllocHeader so mem_free can recover size/category
+        real_ptr = malloc(sizeof(MemAllocHeader) + size);
+        if (!real_ptr) return NULL;
+        MemAllocHeader* hdr = (MemAllocHeader*)real_ptr;
+        hdr->size = (uint32_t)size;
+        hdr->category = (uint16_t)category;
+        hdr->magic = MEMTRACK_STATS_MAGIC;
+        user_ptr = (void*)(hdr + 1);
     }
 
     lock_tracker();
@@ -497,10 +551,34 @@ void* mem_realloc(void* ptr, size_t new_size, MemCategory category)
         return realloc(ptr, new_size);
     }
 
-    // In STATS mode, just use stdlib realloc which preserves data correctly
-    // We don't track realloc separately - it's an implementation detail
+    // In STATS mode, realloc via header-aware path
     if (g_memtrack.mode == MEMTRACK_MODE_STATS) {
-        return realloc(ptr, new_size);
+        MemAllocHeader* old_hdr = ((MemAllocHeader*)ptr) - 1;
+        size_t old_size = 0;
+        MemCategory old_cat = category;
+        if (old_hdr->magic == MEMTRACK_STATS_MAGIC) {
+            old_size = old_hdr->size;
+            old_cat = (MemCategory)old_hdr->category;
+        }
+        // realloc the real block (header + user data)
+        MemAllocHeader* new_hdr = (MemAllocHeader*)realloc(old_hdr, sizeof(MemAllocHeader) + new_size);
+        if (!new_hdr) return NULL;
+
+        lock_tracker();
+        // remove old stats
+        if (old_size > 0) {
+            update_category_stats_free(old_cat, old_size);
+            update_global_stats_free(old_size);
+        }
+        // add new stats
+        update_category_stats_alloc(category, new_size);
+        update_global_stats_alloc(new_size);
+        unlock_tracker();
+
+        new_hdr->size = (uint32_t)new_size;
+        new_hdr->category = (uint16_t)category;
+        new_hdr->magic = MEMTRACK_STATS_MAGIC;
+        return (void*)(new_hdr + 1);
     }
 
     // DEBUG mode: need to track old allocation info for proper memcpy
@@ -599,11 +677,23 @@ void mem_free(void* ptr)
         hashmap_delete(g_memtrack.alloc_map, &key);
 
     } else {
-        // Stats-only mode: we don't know the size, so we can't update accurately
-        // In production, you might want to store size in a header
-        g_memtrack.stats.current_count--;
-        g_memtrack.stats.total_frees++;
-        free(ptr);
+        // STATS mode: recover size and category from inline header
+        MemAllocHeader* hdr = ((MemAllocHeader*)ptr) - 1;
+        if (hdr->magic == MEMTRACK_STATS_MAGIC) {
+            size_t alloc_size = hdr->size;
+            MemCategory cat = (MemCategory)hdr->category;
+            update_category_stats_free(cat, alloc_size);
+            update_global_stats_free(alloc_size);
+            hdr->magic = 0;  // invalidate to catch double-free
+            free(hdr);
+        } else {
+            // not a tracked allocation (or double-free) — best-effort
+            g_memtrack.stats.current_count--;
+            g_memtrack.stats.total_frees++;
+            g_memtrack.stats.invalid_frees++;
+            log_error("memtrack: stats-mode free of untracked pointer %p (bad magic 0x%04X)", ptr, hdr->magic);
+            // cannot safely free — we don't know the real base pointer
+        }
     }
 
     unlock_tracker();
@@ -984,38 +1074,65 @@ void memtrack_thread_enable(bool enable) {
 // Implementation depends on your Pool/Arena internals
 
 Pool* memtrack_pool_create(MemCategory category) {
-    // TODO: Create pool and associate category
-    // For now, just create regular pool
+    (void)category;
     extern Pool* pool_create(void);
-    return pool_create();
+    Pool* pool = pool_create();
+    if (pool) {
+        lock_tracker();
+        g_memtrack.pool_count++;
+        unlock_tracker();
+    }
+    return pool;
 }
 
 void* memtrack_pool_alloc(Pool* pool, size_t size) {
-    // TODO: Track pool allocations
+    // pool allocations are bulk-freed; no per-object tracking
     extern void* pool_alloc(Pool* pool, size_t size);
     return pool_alloc(pool, size);
 }
 
 void memtrack_pool_destroy(Pool* pool) {
-    // TODO: Update stats when pool is destroyed
     extern void pool_destroy(Pool* pool);
+    if (pool) {
+        lock_tracker();
+        g_memtrack.pool_count--;
+        unlock_tracker();
+    }
     pool_destroy(pool);
 }
 
 Arena* memtrack_arena_create(Pool* pool, MemCategory category) {
-    // TODO: Create arena and associate category
+    (void)category;
     extern Arena* arena_create_default(Pool* pool);
-    return arena_create_default(pool);
+    Arena* arena = arena_create_default(pool);
+    if (arena) {
+        lock_tracker();
+        g_memtrack.arena_count++;
+        unlock_tracker();
+    }
+    return arena;
 }
 
 void* memtrack_arena_alloc(Arena* arena, size_t size) {
-    // TODO: Track arena allocations
+    // arena allocations are bulk-freed; no per-object tracking
     extern void* arena_alloc(Arena* arena, size_t size);
     return arena_alloc(arena, size);
 }
 
 void memtrack_arena_destroy(Arena* arena) {
-    // TODO: Update stats when arena is destroyed
     extern void arena_destroy(Arena* arena);
+    if (arena) {
+        lock_tracker();
+        g_memtrack.arena_count--;
+        unlock_tracker();
+    }
     arena_destroy(arena);
+}
+
+int32_t memtrack_get_pool_count(void) {
+    return g_memtrack.pool_count;
+}
+
+int32_t memtrack_get_arena_count(void) {
+    return g_memtrack.arena_count;
 }

@@ -59,6 +59,13 @@ struct RenderBackend {
     void (*begin_transform)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
     void (*end_transform)(void* ctx);
 
+    // ── List marker rendering ───────────────────────────────────────────
+    // Called for RDT_VIEW_MARKER nodes (::marker pseudo-elements).
+    // Renders bullets (disc/circle/square), numbers (decimal/roman/alpha),
+    // or disclosure triangles (for <summary>).
+    void (*render_marker)(void* ctx, ViewSpan* marker, float abs_x, float abs_y,
+                          FontBox* font, Color color);
+
     // ── Column rules ───────────────────────────────────────────────────
     void (*render_column_rules)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
 

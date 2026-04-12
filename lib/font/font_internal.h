@@ -377,6 +377,7 @@ float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
 char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);
+char*               font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index);
 
 // CoreText GPOS kerning (macOS only): create/destroy CTFont, get pair kerning
 #ifdef __APPLE__
@@ -438,6 +439,7 @@ const char**        font_get_aliases(const char* family);
 FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style);
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                                   uint32_t codepoint);
+void                font_fallback_reset_platform_cache(void);
 
 // font_face.c
 const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,

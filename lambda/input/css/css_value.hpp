@@ -464,6 +464,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_LOWER_GREEK,
     CSS_VALUE_ARMENIAN,
     CSS_VALUE_GEORGIAN,
+    CSS_VALUE_DISCLOSURE_CLOSED,
+    CSS_VALUE_DISCLOSURE_OPEN,
     // Flex layout
     CSS_VALUE_SPACE_EVENLY,
     // Background properties

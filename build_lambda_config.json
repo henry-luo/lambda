@@ -274,6 +274,7 @@
             "sources": [
                 "lib/mempool.c",
                 "lib/arena.c",
+                "lib/scratch_arena.c",
                 "lib/arraylist.c",
                 "lib/pdf_writer.c",
                 "lib/strbuf.c",
@@ -1570,6 +1571,25 @@
                         "icon": "🏟️"
                     },
                     {
+                        "source": "test_scratch_arena_gtest.cpp",
+                        "name": "Scratch Arena Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/scratch_arena.c",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/str.c"
+                        ],
+                        "binary": "test_scratch_arena_gtest.exe",
+                        "icon": "📋"
+                    },
+                    {
                         "source": "test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
@@ -2256,6 +2276,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/str.c",
                             "lib/log.c"
                         ],
@@ -2279,6 +2301,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/string.c",
                             "lib/str.c",
                             "lib/hashmap.c",
@@ -2769,18 +2793,6 @@
                         "icon": "🟨"
                     },
                     {
-                        "source": "test/test_js_test262_gtest.cpp",
-                        "name": "test262 Compliance Tests",
-                        "category": "extended",
-                        "disabled": false,
-                        "dependencies": [],
-                        "binary": "test_js_test262_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "icon": "📋"
-                    },
-                    {
                         "source": "test/test_wpt_css_syntax_gtest.cpp",
                         "name": "WPT CSS Syntax Tests",
                         "category": "extended",
@@ -3016,6 +3028,19 @@
                         ],
                         "requires_jube_exe": true,
                         "icon": "🔍"
+                    },
+                    {
+                        "source": "test/test_js_test262_gtest.cpp",
+                        "name": "test262 Compliance Tests",
+                        "category": "extended",
+                        "disabled": false,
+                        "dependencies": [],
+                        "binary": "test_js_test262_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📋"
                     }
                 ],
                 "type": "jube",

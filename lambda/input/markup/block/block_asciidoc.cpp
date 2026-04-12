@@ -8,7 +8,7 @@
  * - Delimited blocks: ==== ---- **** ++++
  */
 #include "block_common.hpp"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include <cstring>
 
 namespace lambda {
@@ -227,7 +227,7 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
         Element* dt = create_element(parser, "dt");
         if (dt) {
             size_t term_len = term_end - term_start;
-            char* term_text = (char*)malloc(term_len + 1);
+            char* term_text = (char*)mem_alloc(term_len + 1, MEM_CAT_INPUT_MARKUP);
             if (term_text) {
                 memcpy(term_text, term_start, term_len);
                 term_text[term_len] = '\0';
@@ -237,7 +237,7 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
                     list_push((List*)dt, term_content);
                     increment_element_content_length(dt);
                 }
-                free(term_text);
+                mem_free(term_text);
             }
             list_push((List*)dl, Item{.item = (uint64_t)dt});
             increment_element_content_length(dl);

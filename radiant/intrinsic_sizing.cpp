@@ -1711,8 +1711,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (col_count > 1) {
             // Compute per-column max-content: assign each child to a column (auto-placement)
             // and take max of children's max-content in each column
-            float* col_min = (float*)calloc(col_count, sizeof(float));
-            float* col_max = (float*)calloc(col_count, sizeof(float));
+            float* col_min = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
+            float* col_max = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
 
             int item_idx = 0;
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -1764,8 +1764,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 total_max += column_gap * (col_count - 1);
             }
 
-            free(col_min);
-            free(col_max);
+            scratch_free(&lycon->scratch, col_max);
+            scratch_free(&lycon->scratch, col_min);
 
             // Add padding and border
             float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;

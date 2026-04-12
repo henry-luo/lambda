@@ -755,7 +755,7 @@ void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Backgroun
  * The blur_radius is the CSS blur radius (σ); box size = ceil(σ * 2 / 3) * 2 + 1.
  * Operates on pre-multiplied RGBA pixels in-place.
  */
-void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
+void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
     if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
 
     // Clamp region to surface bounds
@@ -777,7 +777,7 @@ void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, floa
 
     // Allocate temporary buffer for one pass
     size_t buf_size = (size_t)rw * rh;
-    uint32_t* temp = (uint32_t*)mem_alloc(buf_size * sizeof(uint32_t), MEM_CAT_RENDER);
+    uint32_t* temp = (uint32_t*)scratch_alloc(sa, buf_size * sizeof(uint32_t));
     if (!temp) return;
 
     // 3-pass box blur (horizontal then vertical each pass)
@@ -888,7 +888,7 @@ void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, floa
         }
     }
 
-    mem_free(temp);
+    scratch_free(sa, temp);
 }
 
 /**
@@ -1019,7 +1019,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             int br_y = (int)floorf(shadow_y - blur_px);
             int br_w = (int)ceilf(shadow_w + blur_px * 2);
             int br_h = (int)ceilf(shadow_h + blur_px * 2);
-            box_blur_region(rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
             log_debug("[BOX-SHADOW] Applied 3-pass box blur radius=%.1f on region (%d,%d,%d,%d)",
                       blur_px, br_x, br_y, br_w, br_h);
         }
@@ -1195,7 +1195,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             int br_y = (int)floorf(rect.y);
             int br_w = (int)ceilf(rect.width);
             int br_h = (int)ceilf(rect.height);
-            box_blur_region(rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
             log_debug("[BOX-SHADOW INSET] Applied box blur radius=%.1f on region (%d,%d,%d,%d)",
                       blur_px, br_x, br_y, br_w, br_h);
         }

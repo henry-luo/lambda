@@ -2139,11 +2139,13 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     if (parent->doc->input->ui_mode) {
         // Copy DOM properties from old text_node to new embedded DomText
         DomText* new_dt = string_to_dom_text(new_string_item.get_string());
-        new_dt->content_type = text_node->content_type;
-        new_dt->rect = text_node->rect;
-        new_dt->font = text_node->font;
-        new_dt->color = text_node->color;
-        // dom_relink_children already set parent/siblings on new_dt
+        if (new_dt->node_type == DOM_NODE_TEXT) {
+            new_dt->content_type = text_node->content_type;
+            new_dt->rect = text_node->rect;
+            new_dt->font = text_node->font;
+            new_dt->color = text_node->color;
+            // dom_relink_children already set parent/siblings on new_dt
+        }
     }
 
     // Update text_node fields to point to new String (backward compat for callers)
@@ -2292,8 +2294,14 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
 
     DomText* text_node;
     if (parent->doc->input->ui_mode) {
-        // DomText is already embedded before the String; dom_relink_children linked it
-        text_node = string_to_dom_text(string_item.get_string());
+        // Check if DomText is embedded before the String (arena-allocated)
+        DomText* candidate = string_to_dom_text(string_item.get_string());
+        if (candidate->node_type == DOM_NODE_TEXT) {
+            text_node = candidate;
+        } else {
+            text_node = dom_text_create(string_item.get_string(), parent);
+            if (text_node) dom_append_to_sibling_chain(parent, text_node);
+        }
     } else {
         // Create separate DomText wrapper with Lambda backing
         text_node = dom_text_create(string_item.get_string(), parent);
@@ -2875,14 +2883,31 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Process all children - including text nodes, comments, and elements
     // Elements are Lists, so iterate through items
 
-    log_debug("Processing %lld children for <%s> (dom_elem=%p)", (long long)elem->length, tag_name, (void*)dom_elem);
+    if (elem->length > 0 && !elem->items) {
+        log_error("build_dom_tree: <%s> has length=%lld but items=NULL", tag_name, (long long)elem->length);
+        return dom_elem;
+    }
+    // Sanity check: reject absurdly large length values
+    if (elem->length > 100000) {
+        log_error("build_dom_tree: <%s> has suspicious length=%lld, skipping", tag_name, (long long)elem->length);
+        return dom_elem;
+    }
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);
-        log_debug("  Child %lld: type=%d", i, child_type);
+        // Guard: skip items with invalid type IDs (corrupted memory)
+        if (child_type == 0 || child_type > LMD_TYPE_OBJECT) {
+            log_error("build_dom_tree: <%s> child %lld has invalid type=%d (raw=0x%llx), skipping",
+                      tag_name, (long long)i, child_type, (unsigned long long)child_item.item);
+            continue;
+        }
         if (child_type == LMD_TYPE_ELEMENT) {
             // element node - recursively build
             Element* child_elem = child_item.element;
+            if (!child_elem || (uintptr_t)child_elem < 0x1000) {
+                log_error("build_dom_tree: <%s> child %lld has invalid element pointer %p", tag_name, (long long)i, (void*)child_elem);
+                continue;
+            }
             TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
@@ -2923,9 +2948,17 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             if (text_str && text_str->len > 0) {
                 DomText* text_node;
                 if (ui_mode) {
-                    // UI mode: DomText already allocated before String by MarkBuilder
-                    text_node = string_to_dom_text(text_str);
-                    text_node->parent = dom_elem;
+                    // UI mode: check if String was allocated with DomText prefix on arena
+                    // (done by ui_copy_string_to_arena / MarkBuilder). Non-arena strings
+                    // (GC heap, const pool) do NOT have this prefix — using string_to_dom_text
+                    // on them would produce a bogus pointer that corrupts adjacent memory.
+                    DomText* candidate = string_to_dom_text(text_str);
+                    if (candidate->node_type == DOM_NODE_TEXT) {
+                        text_node = candidate;
+                        text_node->parent = dom_elem;
+                    } else {
+                        text_node = dom_text_create(text_str, dom_elem);
+                    }
                 } else {
                     // Create text node (preserves Lambda String reference)
                     text_node = dom_text_create(text_str, dom_elem);
@@ -2968,8 +3001,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                         if (text_str && text_str->len > 0) {
                             DomText* text_node;
                             if (ui_mode) {
-                                text_node = string_to_dom_text(text_str);
-                                text_node->parent = dom_elem;
+                                DomText* candidate = string_to_dom_text(text_str);
+                                if (candidate->node_type == DOM_NODE_TEXT) {
+                                    text_node = candidate;
+                                    text_node->parent = dom_elem;
+                                } else {
+                                    text_node = dom_text_create(text_str, dom_elem);
+                                }
                             } else {
                                 text_node = dom_text_create(text_str, dom_elem);
                             }
@@ -2999,8 +3037,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                     if (s && s->len > 0) {
                                         DomText* tn;
                                         if (ui_mode) {
-                                            tn = string_to_dom_text(s);
-                                            tn->parent = dom_elem;
+                                            DomText* candidate = string_to_dom_text(s);
+                                            if (candidate->node_type == DOM_NODE_TEXT) {
+                                                tn = candidate;
+                                                tn->parent = dom_elem;
+                                            } else {
+                                                tn = dom_text_create(s, dom_elem);
+                                            }
                                         } else {
                                             tn = dom_text_create(s, dom_elem);
                                         }

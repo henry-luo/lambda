@@ -315,6 +315,12 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     // uses 16px, the cached 24px handle would be returned for 16px lookups,
     // producing wrong line-height metrics. Clearing all entries is safe
     // because glyph caches are also cleared between documents.
+    //
+    // IMPORTANT: clear the static platform-fallback handle cache FIRST.
+    // It holds raw (non-retained) pointers to handles owned by the codepoint
+    // cache. Clearing the codepoint cache releases those handles, so the
+    // platform cache must be invalidated beforehand to avoid dangling pointers.
+    font_fallback_reset_platform_cache();
     if (ctx->codepoint_fallback_cache) {
         hashmap_clear(ctx->codepoint_fallback_cache, true);
     }

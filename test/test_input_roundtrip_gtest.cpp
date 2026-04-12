@@ -421,11 +421,11 @@ TEST_F(JsonTests, JsonEmptyStringHandling) {
     printf("Formatted JSON: %.*s\n", formatted_json->len, formatted_json->chars);
 
     // Verify:
-    // 1. Empty string value should become null
+    // 1. Empty string value should be preserved as empty string
     // 2. Empty key "" should become "''"
-    EXPECT_TRUE(strstr(formatted_json->chars, "\"empty_value\":null") != nullptr ||
-                strstr(formatted_json->chars, "\"empty_value\": null") != nullptr)
-        << "Empty string value should be output as null";
+    EXPECT_TRUE(strstr(formatted_json->chars, "\"empty_value\":\"\"") != nullptr ||
+                strstr(formatted_json->chars, "\"empty_value\": \"\"") != nullptr)
+        << "Empty string value should be preserved as empty string";
     EXPECT_TRUE(strstr(formatted_json->chars, "\"''\":") != nullptr)
         << "Empty key should be transformed to \"''\"";
 

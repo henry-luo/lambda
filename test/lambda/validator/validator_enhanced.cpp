@@ -105,7 +105,7 @@ ValidationResult* validate_item_with_recovery(SchemaValidator* validator, Item i
 
     // Merge results
     if (type_result) {
-        merge_validation_results(result, type_result);
+        merge_validation_results(result, type_result, context->pool);
     }
 
     // Run custom validators with error isolation
@@ -113,7 +113,7 @@ ValidationResult* validate_item_with_recovery(SchemaValidator* validator, Item i
         ValidationResult* custom_result = run_custom_validators_with_recovery(
             item, schema, context);
         if (custom_result) {
-            merge_validation_results(result, custom_result);
+            merge_validation_results(result, custom_result, context->pool);
         }
     }
 
@@ -233,7 +233,7 @@ ValidationResult* validate_array_with_recovery(SchemaValidator* validator, Item 
 
             // Merge results and continue even if element fails
             if (element_result) {
-                merge_validation_results(result, element_result);
+                merge_validation_results(result, element_result, ctx->pool);
             }
 
             // Pop path
@@ -330,7 +330,7 @@ ValidationResult* validate_map_with_recovery(SchemaValidator* validator, Item it
                         validator, value_item, field_schema->type, ctx);
 
                     if (field_result) {
-                        merge_validation_results(result, field_result);
+                        merge_validation_results(result, field_result, ctx->pool);
                     }
 
                     // Pop path
@@ -428,7 +428,7 @@ ValidationResult* validate_union_with_recovery(SchemaValidator* validator, Item 
         if (union_result && union_result->valid) {
             any_valid = true;
             // For unions, we only need one type to match
-            merge_validation_results(result, union_result);
+            merge_validation_results(result, union_result, ctx->pool);
             break;
         } else if (union_result) {
             // Store error for potential reporting
@@ -456,7 +456,7 @@ ValidationResult* validate_union_with_recovery(SchemaValidator* validator, Item 
             for (long i = 0; i < union_errors->length; i++) {
                 ValidationResult* union_error_result = (ValidationResult*)list_get(union_errors, i).pointer;
                 if (union_error_result) {
-                    merge_validation_results(result, union_error_result);
+                    merge_validation_results(result, union_error_result, ctx->pool);
                 }
             }
         }

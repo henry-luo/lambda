@@ -14,7 +14,7 @@
 #include "block_common.hpp"
 #include <cctype>
 #include <cstdio>
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include "lib/arraylist.h"
 
 namespace lambda {
@@ -299,7 +299,7 @@ static const char* strip_indentation(const char* line, int n) {
  * Returns a newly allocated string that must be freed.
  */
 static char* strip_indentation_with_tabs(const char* line, int n) {
-    if (!line) return strdup("");
+    if (!line) return mem_strdup("", MEM_CAT_INPUT_MARKUP);
 
     // First pass: calculate total output columns needed
     int orig_col = 0;
@@ -323,8 +323,8 @@ static char* strip_indentation_with_tabs(const char* line, int n) {
     }
 
     // Allocate result buffer
-    char* result = (char*)malloc(expanded_len + 1);
-    if (!result) return strdup("");
+    char* result = (char*)mem_alloc(expanded_len + 1, MEM_CAT_INPUT_MARKUP);
+    if (!result) return mem_strdup("", MEM_CAT_INPUT_MARKUP);
 
     // Second pass: output characters as spaces for the columns >= n
     char* out = result;
@@ -398,7 +398,7 @@ static const char* strip_to_column(const char* line, int target_col) {
  * Returns a newly allocated string that must be freed.
  */
 static char* strip_to_column_with_tabs(const char* line, int target_col) {
-    if (!line) return strdup("");
+    if (!line) return mem_strdup("", MEM_CAT_INPUT_MARKUP);
 
     // First pass: determine column and character positions
     const char* pos = line;
@@ -438,8 +438,8 @@ static char* strip_to_column_with_tabs(const char* line, int target_col) {
     }
 
     // Allocate and build result
-    char* result = (char*)malloc(expanded_len + 1);
-    if (!result) return strdup(pos);
+    char* result = (char*)mem_alloc(expanded_len + 1, MEM_CAT_INPUT_MARKUP);
+    if (!result) return mem_strdup(pos, MEM_CAT_INPUT_MARKUP);
 
     // Fill virtual spaces
     char* out = result;
@@ -661,7 +661,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             }
 
             // Continue with empty line as part of content
-            arraylist_append(content_lines, strdup(""));
+            arraylist_append(content_lines, mem_strdup("", MEM_CAT_INPUT_MARKUP));
             had_blank_line = true;
             parser->current_line++;
             continue;
@@ -679,7 +679,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             // Check for lazy continuation (paragraph continuation)
             if (!had_blank_line && is_lazy_continuation(line)) {
                 // Lazy continuation is allowed for paragraphs
-                arraylist_append(content_lines, strdup(line));
+                arraylist_append(content_lines, mem_strdup(line, MEM_CAT_INPUT_MARKUP));
                 parser->current_line++;
                 continue;
             }
@@ -702,7 +702,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
 
     // Now parse the collected content lines as block elements
     size_t num_lines = content_lines->length;
-    char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+    char** lines_array = (char**)mem_alloc(sizeof(char*) * num_lines, MEM_CAT_INPUT_MARKUP);
     for (size_t i = 0; i < num_lines; i++) {
         lines_array[i] = (char*)content_lines->data[i];
     }
@@ -799,9 +799,9 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
 
     // Free allocated lines and array
     for (size_t i = 0; i < num_lines; i++) {
-        free(lines_array[i]);
+        mem_free(lines_array[i]);
     }
-    free(lines_array);
+    mem_free(lines_array);
     arraylist_free(content_lines);
 
     return Item{.item = (uint64_t)content_container};
@@ -973,7 +973,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             char* first_line_stripped = nullptr;
             if (item_info.valid && item_info.is_task && item_info.text_start) {
                 // Use text_start directly - it already points past [x]/[ ] and any trailing space
-                first_line_stripped = strdup(item_info.text_start);
+                first_line_stripped = mem_strdup(item_info.text_start, MEM_CAT_INPUT_MARKUP);
             } else {
                 // Get properly stripped first line content (preserves indentation for code blocks)
                 // Use strip_to_column_with_tabs for proper tab expansion
@@ -989,7 +989,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, Item{.item = (uint64_t)hr});
                     increment_element_content_length(item);
                 }
-                free(first_line_stripped);
+                mem_free(first_line_stripped);
                 parser->current_line++;
             }
             // Check if the content itself starts with a list marker (nested list case: "- - foo")
@@ -1000,7 +1000,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, nested_list);
                     increment_element_content_length(item);
                 }
-                free(first_line_stripped);
+                mem_free(first_line_stripped);
                 parser->current_line++;
             } else {
                 // Collect first line content and all continuation lines,
@@ -1015,7 +1015,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 if (!first_line_empty) {
                     arraylist_append(content_lines, first_line_stripped);
                 } else {
-                    free(first_line_stripped);
+                    mem_free(first_line_stripped);
                 }
 
                 parser->current_line++;
@@ -1071,7 +1071,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         if (next_indent >= content_column) {
                             // Add all the blank lines we skipped
                             for (int b = 0; b < blank_count; b++) {
-                                arraylist_append(content_lines, strdup(""));
+                                arraylist_append(content_lines, mem_strdup("", MEM_CAT_INPUT_MARKUP));
                             }
                             had_blank = true;
                             parser->current_line = next_idx;
@@ -1133,7 +1133,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 // Now parse collected content as blocks
                 if (content_lines->length > 0) {
                     size_t num_lines = content_lines->length;
-                    char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+                    char** lines_array = (char**)mem_alloc(sizeof(char*) * num_lines, MEM_CAT_INPUT_MARKUP);
                     for (size_t i = 0; i < num_lines; i++) {
                         lines_array[i] = (char*)content_lines->data[i];
                     }
@@ -1277,9 +1277,9 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
                     // Free allocated lines and array
                     for (size_t i = 0; i < num_lines; i++) {
-                        free(lines_array[i]);
+                        mem_free(lines_array[i]);
                     }
-                    free(lines_array);
+                    mem_free(lines_array);
                     arraylist_free(content_lines);
 
                     // Check for loose list: If we found a blank line between two
@@ -1361,7 +1361,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     increment_element_content_length(item);
                 }
             }
-            free(first_line_stripped);
+            mem_free(first_line_stripped);
 
             parser->current_line++;
             list_push((List*)list, Item{.item = (uint64_t)item});
@@ -1392,7 +1392,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     increment_element_content_length(last_item);
                 }
             }
-            free(literal_text);
+            mem_free(literal_text);
             parser->current_line++;
         } else {
             // Not a list item and not properly indented, end list

@@ -13,11 +13,10 @@
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/font/font_internal.h"
-#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <ctype.h>
 #include <math.h>
 
@@ -1293,7 +1292,7 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
  * out_font_name: returns the actual font name used (may be different due to fallback)
  */
 // helper: try font database lookup for a given family name
-// returns malloc'd path string (caller frees), or nullptr
+// returns mem_alloc'd path string (caller frees), or nullptr
 static char* resolve_font_via_database(FontContext* font_ctx, const char* family,
                                        const char** out_font_name) {
     if (!font_ctx || !font_ctx->database || !family) return nullptr;
@@ -1311,9 +1310,9 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
             return nullptr;
         }
         if (out_font_name) *out_font_name = result.font->family_name;
-        // return a malloc'd copy so caller can free() uniformly
+        // return a mem_alloc'd copy so caller can mem_free() uniformly
         size_t len = strlen(result.font->file_path);
-        char* path = (char*)malloc(len + 1);
+        char* path = (char*)mem_alloc(len + 1, MEM_CAT_RENDER);
         if (path) memcpy(path, result.font->file_path, len + 1);
         return path;
     }
@@ -1435,7 +1434,7 @@ static char* trim_whitespace(const char* str, size_t len) {
     if (end <= start) return nullptr;  // all whitespace
 
     size_t trimmed_len = end - start;
-    char* result = (char*)malloc(trimmed_len + 1);
+    char* result = (char*)mem_alloc(trimmed_len + 1, MEM_CAT_RENDER);
     if (!result) return nullptr;
 
     memcpy(result, str + start, trimmed_len);
@@ -1623,7 +1622,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     }
 
     if (text_segments == 0) {
-        free(font_path);
+        mem_free(font_path);
         return;
     }
 
@@ -1643,10 +1642,10 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
             Tvg_Paint text = create_text_segment(text_content, base_x, base_y,
                                                   font_path, font_name, font_size, default_fill,
                                                   anchor_x);
-            free((void*)text_content);
+            mem_free((void*)text_content);
             draw_text_paint(text);
         }
-        free(font_path);
+        mem_free(font_path);
         return;
     }
 
@@ -1671,7 +1670,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                         draw_text_paint(text_obj);
                         cur_x += estimate_text_width(text_copy, font_size);
                     }
-                    free(text_copy);
+                    mem_free(text_copy);
                 }
             }
         } else if (type == LMD_TYPE_ELEMENT) {
@@ -1717,13 +1716,13 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                         draw_text_paint(text_obj);
                         cur_x += estimate_text_width(text_content, tspan_font_size);
                     }
-                    free((void*)text_content);
+                    mem_free((void*)text_content);
                 }
             }
         }
     }
 
-    free(font_path);
+    mem_free(font_path);
 
     log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)",
               text_segments, base_x, base_y);
@@ -2309,6 +2308,11 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     // compute document position
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
+
+    log_debug("[SVG] render_inline_svg: doc pos=(%.1f,%.1f) block pos=(%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f)",
+              x, y, rdcon->block.x, rdcon->block.y,
+              rdcon->block.clip.left, rdcon->block.clip.top,
+              rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // build base transform: Translate(x,y) * Scale(scale)
     RdtMatrix base_transform = {

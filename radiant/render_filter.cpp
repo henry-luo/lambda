@@ -193,7 +193,7 @@ void filter_opacity(uint8_t* a, float amount) {
  * Filters are applied in order to the pixel data.
  * The surface is in ABGR8888 format (ThorVG default).
  */
-void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip) {
+void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip) {
     if (!surface || !surface->pixels || !filter || !filter->functions) {
         return;
     }
@@ -304,7 +304,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
     FilterFunction* blur_func = filter->functions;
     while (blur_func) {
         if (blur_func->type == FILTER_BLUR && blur_func->params.blur_radius > 0) {
-            box_blur_region(surface, left, top, right - left, bottom - top, blur_func->params.blur_radius);
+            box_blur_region(sa, surface, left, top, right - left, bottom - top, blur_func->params.blur_radius);
             log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
                       blur_func->params.blur_radius, left, top, right - left, bottom - top);
         }
@@ -332,7 +332,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
             if (ew <= 0 || eh <= 0) { ds_func = ds_func->next; continue; }
 
             // Allocate shadow buffer same size as element region (ABGR pixel format)
-            uint32_t* shadow_px = (uint32_t*)mem_alloc((size_t)ew * eh * sizeof(uint32_t), MEM_CAT_RENDER);
+            uint32_t* shadow_px = (uint32_t*)scratch_alloc(sa, (size_t)ew * eh * sizeof(uint32_t));
             if (!shadow_px) { ds_func = ds_func->next; continue; }
 
             // Fill shadow buffer: shadow color with alpha = elem_alpha * color.a / 255
@@ -357,7 +357,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                 shadow_surf.height = eh;
                 shadow_surf.pitch  = ew * 4;
                 shadow_surf.pixels = shadow_px;
-                box_blur_region(&shadow_surf, 0, 0, ew, eh, blur_r);
+                box_blur_region(sa, &shadow_surf, 0, 0, ew, eh, blur_r);
             }
 
             // Composite blurred shadow onto main surface at (left+dx, top+dy), destination-over
@@ -371,8 +371,8 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                     if ((float)sx < clip->left || (float)sx >= clip->right) continue;
 
                     uint32_t sp = shadow_px[row * ew + col];
-                    uint8_t sa = (sp >> 24) & 0xFF;
-                    if (sa == 0) continue;
+                    uint8_t shadow_a = (sp >> 24) & 0xFF;
+                    if (shadow_a == 0) continue;
 
                     uint32_t* dst = &pixels[sy * pitch + sx];
                     uint32_t ep = *dst;
@@ -383,7 +383,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                     // result.a = dst.a + src.a * (1 - dst.a)
                     // result.rgb = (dst.rgb * dst.a + src.rgb * src.a * (1 - dst.a)) / result.a
                     float fa  = ea  / 255.0f;
-                    float fsa = sa  / 255.0f;
+                    float fsa = shadow_a  / 255.0f;
                     float res_af = fa + fsa * (1.0f - fa);
                     uint8_t new_a = (uint8_t)(res_af * 255.0f + 0.5f);
                     if (new_a == 0) continue;
@@ -401,7 +401,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                 }
             }
 
-            mem_free(shadow_px);
+            scratch_free(sa, shadow_px);
             log_debug("[FILTER] Applied drop-shadow(%d,%d,%.1fpx rgba(%d,%d,%d,%d)) to region (%d,%d,%d,%d)",
                       dx, dy, blur_r, sc.r, sc.g, sc.b, sc.a, left, top, ew, eh);
         }

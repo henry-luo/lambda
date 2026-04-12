@@ -17,7 +17,6 @@
 extern "C" {
 #include "../../../../lib/log.h"
 }
-#include <cstdlib>
 #include <cstring>
 #include <cctype>
 
@@ -592,7 +591,7 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     }
 
     // Parse inner content (may contain more emphasis)
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         memcpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -602,7 +601,7 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
             list_push((List*)elem, inner);
             increment_element_content_length(elem);
         }
-        free(content);
+        mem_free(content);
     }
 
     // Advance position past used closing delimiters

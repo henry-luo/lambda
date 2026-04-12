@@ -18,7 +18,7 @@
 #include "../../utf_string.h"
 #include "lib/log.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../../lib/mem.h"
 
 namespace lambda {
 namespace markup {
@@ -108,7 +108,7 @@ void MarkupParser::splitLines(const char* content) {
     }
 
     // Allocate line array
-    lines = (char**)calloc(count + 1, sizeof(char*));
+    lines = (char**)mem_calloc(count + 1, sizeof(char*), MEM_CAT_INPUT_MARKUP);
     if (!lines) {
         log_error("markup_parser: failed to allocate line array");
         line_count = 0;
@@ -129,7 +129,7 @@ void MarkupParser::splitLines(const char* content) {
             }
 
             // Allocate and copy line
-            char* line = (char*)malloc(len + 1);
+            char* line = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
             if (line) {
                 memcpy(line, line_start, len);
                 line[len] = '\0';
@@ -145,9 +145,9 @@ void MarkupParser::splitLines(const char* content) {
 void MarkupParser::freeLines() {
     if (lines) {
         for (int i = 0; i < line_count; i++) {
-            free(lines[i]);
+            mem_free(lines[i]);
         }
-        free(lines);
+        mem_free(lines);
         lines = nullptr;
     }
     line_count = 0;
@@ -577,7 +577,7 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
 
     // First, collapse whitespace and trim
     // We need to do this before Unicode case folding
-    char* temp = (char*)malloc(len + 1);
+    char* temp = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
     if (!temp) {
         out[0] = '\0';
         return;
@@ -614,17 +614,17 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
     // Now apply Unicode case folding using utf8proc
     int folded_len = 0;
     char* folded = normalize_utf8proc_casefold(temp, (int)temp_pos, &folded_len);
-    free(temp);
+    mem_free(temp);
 
     if (folded && folded_len > 0) {
         // Copy the folded result to output
         size_t copy_len = (size_t)folded_len < out_size - 1 ? (size_t)folded_len : out_size - 1;
         memcpy(out, folded, copy_len);
         out[copy_len] = '\0';
-        free(folded);
+        free(folded);  // utf8proc uses raw malloc internally
     } else {
         // Fallback: if case folding fails, do simple ASCII lowercase
-        if (folded) free(folded);
+        if (folded) free(folded);  // utf8proc uses raw malloc internally
         out[0] = '\0';
     }
 }

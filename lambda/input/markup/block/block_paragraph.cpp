@@ -8,7 +8,7 @@
  * type is encountered or a blank line is found.
  */
 #include "block_common.hpp"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include <cctype>
 #include <cstring>
 #include "lib/arraylist.h"

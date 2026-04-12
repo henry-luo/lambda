@@ -14,7 +14,6 @@
 #include "inline_common.hpp"
 #include "../../html_entities.h"
 #include "../../input-utils.h"
-#include <cstdlib>
 #include <cstring>
 
 namespace lambda {
@@ -64,7 +63,7 @@ static bool is_escapable_char(char c) {
  * Caller must free the result.
  */
 static char* unescape_string(const char* start, size_t len) {
-    char* result = (char*)malloc(len * 4 + 1); // Worst case: all entities expand
+    char* result = (char*)mem_alloc(len * 4 + 1, MEM_CAT_INPUT_MARKUP); // Worst case: all entities expand
     if (!result) return nullptr;
 
     char* out = result;
@@ -185,7 +184,7 @@ static Item create_link_from_definition(MarkupParser* parser,
 
     // Parse link text content
     if (text_len > 0) {
-        char* text_copy = (char*)malloc(text_len + 1);
+        char* text_copy = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
         if (text_copy) {
             memcpy(text_copy, link_text, text_len);
             text_copy[text_len] = '\0';
@@ -195,7 +194,7 @@ static Item create_link_from_definition(MarkupParser* parser,
                 list_push((List*)link, inner_content);
                 increment_element_content_length(link);
             }
-            free(text_copy);
+            mem_free(text_copy);
         }
     }
 
@@ -709,7 +708,7 @@ Item parse_link(MarkupParser* parser, const char** text) {
                 char* url = unescape_string(url_start, url_len);
                 if (url) {
                     add_attribute_to_element(parser, link, "href", url);
-                    free(url);
+                    mem_free(url);
                 }
             } else {
                 // Empty URL
@@ -722,14 +721,14 @@ Item parse_link(MarkupParser* parser, const char** text) {
                 char* title = unescape_string(title_start, title_len);
                 if (title) {
                     add_attribute_to_element(parser, link, "title", title);
-                    free(title);
+                    mem_free(title);
                 }
             }
 
             // Parse link text content (can contain inline elements)
             if (text_end > text_start) {
                 size_t text_len = text_end - text_start;
-                char* link_text = (char*)malloc(text_len + 1);
+                char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
                 if (link_text) {
                     strncpy(link_text, text_start, text_len);
                     link_text[text_len] = '\0';
@@ -741,7 +740,7 @@ Item parse_link(MarkupParser* parser, const char** text) {
                         increment_element_content_length(link);
                     }
 
-                    free(link_text);
+                    mem_free(link_text);
                 }
             }
 

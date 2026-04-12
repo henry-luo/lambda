@@ -39,6 +39,11 @@ int edit_bridge_init(void* input_ptr) {
             log_error("edit_bridge_init: failed to create Input from runtime pool");
             return -1;
         }
+        // Propagate ui_mode so MarkEditor knows data buffers are arena-allocated
+        // and must NOT be freed via pool_free (they live on the result_arena).
+        if (_lambda_rt->ui_mode) {
+            input->ui_mode = true;
+        }
         s_editor_input = input;
         log_debug("edit_bridge_init: created Input from runtime pool");
     }

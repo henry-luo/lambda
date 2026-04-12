@@ -431,16 +431,18 @@ void expand_list(List *list, Arena* arena = nullptr) {
     bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
-        // Use arena alloc/realloc for arena-allocated buffers (MarkBuilder/Input path)
-        if (old_items == nullptr) {
-            // First allocation — use arena_alloc
-            list->items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
-        } else {
-            // Realloc existing arena buffer
-            list->items = (Item*)arena_realloc(arena, list->items,
-                                               (list->capacity/2) * sizeof(Item),
-                                               list->capacity * sizeof(Item));
+        // Use arena alloc for arena-allocated buffers (MarkBuilder/Input path).
+        // Always allocate fresh — do NOT arena_realloc (which frees the old
+        // buffer to the arena's free-list).  In ui_mode the old items buffer
+        // may still be pointed-to by other Element structs in the retained
+        // tree (siblings of a retransformed subtree).  Freeing it allows the
+        // arena to recycle that memory for new DomElement allocations, which
+        // overwrites the items data and causes use-after-free crashes.
+        Item* new_items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
+        if (new_items && old_items) {
+            memcpy(new_items, old_items, (list->capacity/2) * sizeof(Item));
         }
+        list->items = new_items;
     } else {
         // Use data zone allocation for GC-managed runtime containers.
         // Allocate new buffer; old buffer is abandoned in the data zone
@@ -1059,7 +1061,8 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             continue;
         }
         // compare both name AND namespace
-        if (strncmp(field->name->str, key, field->name->length) == 0 &&
+        if (field->name->str &&
+            strncmp(field->name->str, key, field->name->length) == 0 &&
             strlen(key) == field->name->length &&
             target_equal(field->ns, key_ns)) {
             *is_found = true;

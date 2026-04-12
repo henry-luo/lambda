@@ -5,6 +5,7 @@
 #include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/mempool.h"
+#include "../lib/arena.h"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -1330,6 +1331,7 @@ inline bool is_quirks_mode(HtmlVersion v) {
 
 struct ViewTree {
     Pool *pool;
+    Arena *arena;  // bump allocator for view allocations (O(1) alloc, bulk free)
     View* root;
     HtmlVersion html_version;
 };

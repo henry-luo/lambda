@@ -11168,6 +11168,21 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         set_state_var(mt, sname, state_val, MIR_T_I64, LMD_TYPE_ANY, sname);
     }
 
+    // re-emit view body let declarations so handlers can reference them
+    // (the AST scope says handler inherits template scope which includes body lets)
+    if (view->body && view->body->node_type == AST_NODE_CONTENT) {
+        AstListNode* body_list = (AstListNode*)view->body;
+        AstNode* body_item = body_list->item;
+        while (body_item) {
+            if (body_item->node_type == AST_NODE_LET_STAM ||
+                body_item->node_type == AST_NODE_PUB_STAM ||
+                body_item->node_type == AST_NODE_VAR_STAM) {
+                transpile_let_stam(mt, (AstLetNode*)body_item);
+            }
+            body_item = body_item->next;
+        }
+    }
+
     // transpile handler body (procedural)
     if (handler->body) {
         transpile_expr(mt, handler->body);

@@ -12,7 +12,7 @@
  */
 #include "block_common.hpp"
 #include <cstdio>
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 
 namespace lambda {
 namespace markup {
@@ -110,7 +110,7 @@ Item parse_header(MarkupParser* parser, const char* line) {
 
     // Create content string and parse inline elements
     if (text_len > 0) {
-        char* header_text = (char*)malloc(text_len + 1);
+        char* header_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
         if (header_text) {
             memcpy(header_text, text_start, text_len);
             header_text[text_len] = '\0';
@@ -129,7 +129,7 @@ Item parse_header(MarkupParser* parser, const char* line) {
                 increment_element_content_length(header);
             }
 
-            free(header_text);
+            mem_free(header_text);
         }
     }
 

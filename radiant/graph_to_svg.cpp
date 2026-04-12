@@ -6,13 +6,13 @@
 #include "../lib/stringbuf.h"
 #include "../lib/mempool.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <stdio.h>
 #include <math.h>
 
 // Create default SVG generator options
 SvgGeneratorOptions* create_default_svg_options() {
-    SvgGeneratorOptions* opts = (SvgGeneratorOptions*)calloc(1, sizeof(SvgGeneratorOptions));
+    SvgGeneratorOptions* opts = (SvgGeneratorOptions*)mem_calloc(1, sizeof(SvgGeneratorOptions), MEM_CAT_FORMAT);
     opts->canvas_padding = 20.0f;
     opts->default_fill = "lightblue";
     opts->default_stroke = "black";
@@ -26,7 +26,7 @@ SvgGeneratorOptions* create_default_svg_options() {
 
 // Create SVG options with a theme
 SvgGeneratorOptions* create_themed_svg_options(const char* theme_name) {
-    SvgGeneratorOptions* opts = (SvgGeneratorOptions*)calloc(1, sizeof(SvgGeneratorOptions));
+    SvgGeneratorOptions* opts = (SvgGeneratorOptions*)mem_calloc(1, sizeof(SvgGeneratorOptions), MEM_CAT_FORMAT);
     opts->canvas_padding = 20.0f;
     opts->font_family = "Arial";
     opts->font_size = 14.0f;
@@ -780,6 +780,6 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
 Item graph_to_svg(Element* graph, GraphLayout* layout, Input* input) {
     SvgGeneratorOptions* opts = create_default_svg_options();
     Item result = graph_to_svg_with_options(graph, layout, opts, input);
-    free(opts);
+    mem_free(opts);
     return result;
 }

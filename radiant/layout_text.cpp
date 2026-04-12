@@ -1398,6 +1398,14 @@ void line_break(LayoutContext* lycon) {
         lycon->line.hanging_space_text_trim = 0;
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
+    // CSS Text 3 §8: Letter-spacing must not be applied at the end of a line.
+    // Subtract the trailing letter-spacing from advance_x (line width) for
+    // alignment purposes (center, right, justify). Do NOT subtract before
+    // max_width, as browsers include trailing letter-spacing in intrinsic sizing.
+    if (lycon->line.trailing_letter_spacing != 0) {
+        lycon->line.advance_x -= lycon->line.trailing_letter_spacing;
+        lycon->line.trailing_letter_spacing = 0;
+    }
 
     // CSS Inline §5.2.1: When trailing whitespace is "collapsed away" at the end of a line,
     // it should not contribute to line height. If the last text rect was entirely trailing
@@ -1781,7 +1789,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        if (lycon->line.advance_x + text_width > line_right) { // line filled up
+        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
+        // Subtract the trailing letter-spacing in the overflow check.
+        if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right) { // line filled up
             // CSS Text 3 §5.2: If a break opportunity (hyphen, soft hyphen, ZWSP,
             // CJK) existed before the overflow, the text can be split during actual
             // layout at that break point.  Don't signal LINE_FILLED — let the text
@@ -2374,7 +2384,23 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 wd = unicode_space_em * lycon->font.current_font_size * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
+                // Peek ahead for VS16 (U+FE0F) — forces emoji/color presentation
+                bool emoji_presentation = false;
+                if (next_ch) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)next_ch, (size_t)(text_end - next_ch), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) {
+                        emoji_presentation = true;
+                    }
+                }
+                // For layout metrics, use the regular font path even for Emoji_Presentation=Yes
+                // codepoints (without explicit VS16). The regular fallback chain gives metrics
+                // consistent with browser layout. The raster renderer (render.cpp) separately
+                // forces emoji font for color output. VS16-preceded codepoints still use
+                // emoji font since the author explicitly requested emoji presentation.
+                LoadedGlyph* glyph = emoji_presentation
+                    ? font_load_glyph_emoji(lycon->font.font_handle, &_sd, codepoint, false)
+                    : font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -2433,6 +2459,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // CSS 2.1 §16.4: letter-spacing is added after every character
             // Browsers include trailing letter-spacing in text node width
             wd += lycon->font.style->letter_spacing;
+            // CSS Text 3 §8: Track trailing letter-spacing for trimming at line ends.
+            // letter-spacing must not be applied at the start or end of a line.
+            lycon->line.trailing_letter_spacing = lycon->font.style->letter_spacing;
 
             // Full case mapping expansion: add advance widths for extra codepoints
             // (e.g., ß → S,S — the second S needs its own advance width + letter-spacing)
@@ -2491,7 +2520,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        if (wrap_lines && rect->x + rect->width > line_right) { // line filled up and wrapping enabled
+        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
+        // Subtract the trailing letter-spacing when checking overflow, since the
+        // last character's letter-spacing would be trimmed at line break time.
+        if (wrap_lines && rect->x + rect->width - lycon->line.trailing_letter_spacing > line_right) { // line filled up and wrapping enabled
             log_debug("line filled up");
             if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.
@@ -2635,28 +2667,49 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text
-                    // CSS Text 3 §5.2: When overflow-wrap: break-word is active and
-                    // the last soft-wrap opportunity (space) is in a previous text node,
-                    // perform an emergency mid-word break at the overflow point rather
-                    // than moving the entire text to a new line.  This creates a
-                    // multi-line inline box (e.g. <code>) matching browser behavior,
-                    // where characters that fit on the current line stay there and the
-                    // remainder continues on the next line.
+                    // CSS Text 3 §5.2: overflow-wrap: break-word with last_space in
+                    // a previous text node. First check if the word would fit on a fresh
+                    // line. If so, rewind to the text start and move it to the next line
+                    // (the space in the previous node serves as the natural wrap point).
+                    // Only do an emergency mid-word break when the word itself is wider
+                    // than the full line (i.e., it would overflow even on a fresh line).
                     if (break_word && !lycon->line.is_line_start) {
-                        log_debug("break-word: mid-word break (last_space outside text)");
-                        rect->width -= wd;  // undo the char that overflowed
-                        int text_len = str - text_start - rect->start_index;
-                        if (text_len > 0) {
-                            output_text(lycon, text_view, rect, text_len, rect->width);
-                        } else {
-                            // first char already overflows: unlink the empty rect
-                            if (text_view->rect == rect) {
-                                text_view->rect = nullptr;
+                        float full_line_width = lycon->line.right - lycon->line.left;
+                        // rect->width includes chars measured so far (including overflow char).
+                        // The total word width is at least rect->width - wd (chars that fit)
+                        // plus the remaining unmeasured chars. Use rect->width - wd as a
+                        // lower bound: if even that exceeds a full line, mid-word break.
+                        // If it fits, the whole word likely fits — move to next line.
+                        if (rect->width - wd > full_line_width) {
+                            // Word is wider than a full line: emergency mid-word break
+                            log_debug("break-word: mid-word break (word wider than line)");
+                            rect->width -= wd;  // undo the char that overflowed
+                            int text_len = str - text_start - rect->start_index;
+                            if (text_len > 0) {
+                                output_text(lycon, text_view, rect, text_len, rect->width);
                             } else {
-                                TextRect* prev = text_view->rect;
-                                while (prev && prev->next != rect) prev = prev->next;
-                                if (prev) prev->next = nullptr;
+                                // first char already overflows: unlink the empty rect
+                                if (text_view->rect == rect) {
+                                    text_view->rect = nullptr;
+                                } else {
+                                    TextRect* prev = text_view->rect;
+                                    while (prev && prev->next != rect) prev = prev->next;
+                                    if (prev) prev->next = nullptr;
+                                }
                             }
+                            line_break(lycon);
+                            goto LAYOUT_TEXT;
+                        }
+                        // Word fits on a fresh line: rewind to text start and wrap
+                        log_debug("break-word: rewinding text to next line (word fits on fresh line)");
+                        str = text_start + rect->start_index;  // rewind to text start
+                        // Unlink the partially-measured rect
+                        if (text_view->rect == rect) {
+                            text_view->rect = nullptr;
+                        } else {
+                            TextRect* prev = text_view->rect;
+                            while (prev && prev->next != rect) prev = prev->next;
+                            if (prev) prev->next = nullptr;
                         }
                         line_break(lycon);
                         goto LAYOUT_TEXT;
@@ -2850,6 +2903,25 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
             lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
         }
+        else if (is_other_space_separator(codepoint) && codepoint != 0x3000
+                 && codepoint != 0x00A0 && codepoint != 0x202F) {
+            // UAX #14: Other space separators (Unicode Zs category) have line break
+            // class BA (Break After). These are NOT CSS "white space" — they are
+            // content characters that happen to provide break opportunities.
+            // Unlike U+0020 (regular space), they are not collapsed, not trimmed,
+            // and not hung at end of line. They always render at their natural width.
+            // Includes: U+1680 OGHAM SPACE MARK, U+2000-U+200A (EN QUAD through
+            // HAIR SPACE), U+205F MEDIUM MATHEMATICAL SPACE.
+            str = next_ch;
+            lycon->line.last_space = str - 1;
+            lycon->line.last_space_pos = rect->width;
+            lycon->line.last_space_kind = BRK_HYPHEN;  // BA class: break-after, width included
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
+        }
         else if (codepoint == 0x002D || codepoint == 0x2010 || codepoint == 0x2013 || codepoint == 0x2014) {
             // Hyphens and dashes are break opportunities (CSS Text 3 §5.2, UAX #14)
             //   U+002D hyphen-minus, U+2010 hyphen: break after (UAX #14 class HY)
@@ -2933,6 +3005,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                     // EX/IS/SY prevents break, but loose mode allows break before fullwidth ！？
                     else if (is_line_break_ex_is_sy(next_cp) && !(is_loose && is_fullwidth_ex(next_cp))) {
+                        allow_break = false;
+                    }
+                    // UAX #14 LB21: × BA — no break before Break After characters.
+                    // Other space separators (U+1680, U+2000-U+200A, U+205F) have
+                    // class BA. Suppress CJK/break-all break if one follows.
+                    else if (is_other_space_separator(next_cp)
+                             && next_cp != 0x00A0 && next_cp != 0x202F && next_cp != 0x3000) {
                         allow_break = false;
                     }
                 }

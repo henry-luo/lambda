@@ -12,7 +12,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <ctype.h>
 
 // FontTables for parsing embedded font data (name, OS/2, cmap, hmtx, head)
@@ -618,7 +618,7 @@ static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry,
 
     // Free decompressed data if allocated
     if (decompressed) {
-        free(decompressed);  // from pdf_decompress_stream which uses stdlib malloc
+        mem_free(decompressed);  // from pdf_decompress_stream which uses mem_alloc
     }
 
     return result;

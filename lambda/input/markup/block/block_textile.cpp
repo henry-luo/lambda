@@ -7,7 +7,7 @@
  * - Block modifiers: (class#id), {style}, [lang], alignment
  */
 #include "block_common.hpp"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include <cstring>
 #include <cctype>
 
@@ -87,7 +87,7 @@ Item parse_textile_definition_list(MarkupParser* parser, const char* line) {
 
         // Extract term (before :=)
         size_t term_len = sep - p;
-        char* term_text = (char*)malloc(term_len + 1);
+        char* term_text = (char*)mem_alloc(term_len + 1, MEM_CAT_INPUT_MARKUP);
         if (!term_text) {
             parser->current_line++;
             continue;
@@ -130,7 +130,7 @@ Item parse_textile_definition_list(MarkupParser* parser, const char* line) {
             increment_element_content_length(dl);
         }
 
-        free(term_text);
+        mem_free(term_text);
         parser->current_line++;
     }
 

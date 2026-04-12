@@ -20,6 +20,10 @@ typedef struct MmapChunk {
 
 #define MMAP_CHUNK_SIZE (4 * 1024 * 1024)  // 4 MB per chunk
 
+// Size header for mmap bump allocations (enables safe realloc)
+// Stored immediately before the returned pointer, 16-byte aligned
+#define MMAP_SIZE_HEADER 16
+
 struct Pool {
     rpmalloc_heap_t* heap;  // rpmalloc heap handle (NULL for mmap mode)
     unsigned pool_id;       // unique pool identifier
@@ -98,6 +102,8 @@ static void mmap_pool_grow(Pool* pool, size_t min_size) {
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {
         log_error("mmap_pool_grow: mmap failed for %zu bytes", chunk_size);
+        pool->cursor = NULL;
+        pool->limit = NULL;
         return;
     }
     MmapChunk* chunk = (MmapChunk*)malloc(sizeof(MmapChunk));
@@ -204,13 +210,18 @@ void* pool_alloc(Pool* pool, size_t size) {
         }
         return result;
     }
-    // mmap mode: bump allocate (16-byte aligned)
+    // mmap mode: bump allocate (16-byte aligned) with size header
     size = (size + 15) & ~15;
-    if (pool->cursor + size > pool->limit) {
-        mmap_pool_grow(pool, size);
+    size_t total = MMAP_SIZE_HEADER + size;
+    if (!pool->cursor || pool->cursor + total > pool->limit) {
+        mmap_pool_grow(pool, total);
+        if (!pool->cursor) return NULL;  // mmap failed
     }
-    void* ptr = pool->cursor;
-    pool->cursor += size;
+    // store allocation size in header
+    size_t* header = (size_t*)pool->cursor;
+    *header = size;
+    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
+    pool->cursor += total;
     return ptr;
 }
 
@@ -229,14 +240,19 @@ void* pool_calloc(Pool* pool, size_t size) {
         }
         return rpmalloc_heap_calloc(pool->heap, 1, size);
     }
-    // mmap mode: bump allocate (pages are pre-zeroed by mmap)
+    // mmap mode: bump allocate (pages are pre-zeroed by mmap) with size header
     size = (size + 15) & ~15;
-    if (pool->cursor + size > pool->limit) {
-        mmap_pool_grow(pool, size);
+    size_t total = MMAP_SIZE_HEADER + size;
+    if (!pool->cursor || pool->cursor + total > pool->limit) {
+        mmap_pool_grow(pool, total);
+        if (!pool->cursor) return NULL;  // mmap failed
     }
-    void* ptr = pool->cursor;
-    pool->cursor += size;
-    return ptr;  // zeroed by MAP_ANONYMOUS
+    // store allocation size in header (pages are zeroed, so write size)
+    size_t* header = (size_t*)pool->cursor;
+    *header = size;
+    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
+    pool->cursor += total;
+    return ptr;  // data area zeroed by MAP_ANONYMOUS
 }
 
 void pool_free(Pool* pool, void* ptr) {
@@ -266,14 +282,15 @@ void* pool_realloc(Pool* pool, void* ptr, size_t size) {
         if (size == 0) { rpmalloc_heap_free(pool->heap, ptr); return NULL; }
         return rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
     }
-    // mmap mode: allocate new + copy (can't free old in bump allocator)
+    // mmap mode: allocate new + copy using size header
     if (!ptr) return pool_alloc(pool, size);
     if (size == 0) return NULL;
     void* new_ptr = pool_alloc(pool, size);
     if (new_ptr && ptr) {
-        // copy min(old_size, new_size) — we don't track old sizes,
-        // so copy new_size (caller ensures size >= needed data)
-        memcpy(new_ptr, ptr, size);
+        // read old allocation size from embedded header
+        size_t old_size = *(size_t*)((uint8_t*)ptr - MMAP_SIZE_HEADER);
+        size_t copy_size = old_size < size ? old_size : size;
+        memcpy(new_ptr, ptr, copy_size);
     }
     return new_ptr;
 }

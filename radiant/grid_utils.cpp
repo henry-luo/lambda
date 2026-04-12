@@ -166,7 +166,7 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
 //   "header header header"
 //   "sidebar main aside"
 //   "footer footer footer"
-void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
+void parse_grid_template_areas(GridProp* grid, const char* areas_string, ScratchArena* sa) {
     log_debug("parse_grid_template_areas: grid=%p, areas='%s'", grid, areas_string ? areas_string : "NULL");
     if (!grid || !areas_string || areas_string[0] == '\0') {
         return;
@@ -186,22 +186,24 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     const int MAX_NAME_LEN = 32;    // Area names up to 31 chars
     const int MAX_AREAS = 32;       // Max unique named areas
 
-    // Heap-allocated grid cell storage to avoid stack overflow
-    char*** grid_cells = (char***)mem_calloc(MAX_GRID_SIZE, sizeof(char**), MEM_CAT_LAYOUT);
+    // Use scratch mark/restore: all temp allocations freed in one shot at scope exit
+    ScratchMark mark = scratch_mark(sa);
+
+    // Scratch-allocated grid cell storage
+    char*** grid_cells = (char***)scratch_calloc(sa, MAX_GRID_SIZE * sizeof(char**));
     if (!grid_cells) {
         log_debug("parse_grid_template_areas: allocation failed");
+        scratch_restore(sa, mark);
         return;
     }
     for (int r = 0; r < MAX_GRID_SIZE; r++) {
-        grid_cells[r] = (char**)mem_calloc(MAX_GRID_SIZE, sizeof(char*), MEM_CAT_LAYOUT);
+        grid_cells[r] = (char**)scratch_calloc(sa, MAX_GRID_SIZE * sizeof(char*));
         if (!grid_cells[r]) {
-            // cleanup and return
-            for (int j = 0; j < r; j++) mem_free(grid_cells[j]);
-            mem_free(grid_cells);
+            scratch_restore(sa, mark);
             return;
         }
         for (int c = 0; c < MAX_GRID_SIZE; c++) {
-            grid_cells[r][c] = (char*)mem_calloc(MAX_NAME_LEN, sizeof(char), MEM_CAT_LAYOUT);
+            grid_cells[r][c] = (char*)scratch_calloc(sa, MAX_NAME_LEN * sizeof(char));
         }
     }
 
@@ -245,12 +247,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     log_debug("parse_grid_template_areas: parsed %d rows x %d cols", rows, cols);
 
     if (rows == 0 || cols == 0) {
-        // cleanup
-        for (int r = 0; r < MAX_GRID_SIZE; r++) {
-            for (int c = 0; c < MAX_GRID_SIZE; c++) mem_free(grid_cells[r][c]);
-            mem_free(grid_cells[r]);
-        }
-        mem_free(grid_cells);
+        scratch_restore(sa, mark);
         return;
     }
 
@@ -259,7 +256,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
     grid->computed_column_count = cols;
 
     // Collect unique area names (excluding "." which means empty cell)
-    char** unique_names = (char**)mem_calloc(MAX_AREAS, sizeof(char*), MEM_CAT_LAYOUT);
+    char** unique_names = (char**)scratch_calloc(sa, MAX_AREAS * sizeof(char*));
     int unique_count = 0;
 
     for (int r = 0; r < rows; r++) {
@@ -276,7 +273,10 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
                 }
             }
             if (!found && unique_count < MAX_AREAS) {
-                unique_names[unique_count] = mem_strdup(name, MEM_CAT_LAYOUT);
+                size_t len = strlen(name);
+                char* copy = (char*)scratch_alloc(sa, len + 1);
+                memcpy(copy, name, len + 1);
+                unique_names[unique_count] = copy;
                 unique_count++;
             }
         }
@@ -333,17 +333,8 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string) {
         }
     }
 
-    // Cleanup
-    for (int i = 0; i < unique_count; i++) {
-        mem_free(unique_names[i]);
-    }
-    mem_free(unique_names);
-
-    for (int r = 0; r < MAX_GRID_SIZE; r++) {
-        for (int c = 0; c < MAX_GRID_SIZE; c++) mem_free(grid_cells[r][c]);
-        mem_free(grid_cells[r]);
-    }
-    mem_free(grid_cells);
+    // Cleanup all scratch allocations at once
+    scratch_restore(sa, mark);
 
     log_debug("parse_grid_template_areas: successfully parsed %d areas", grid->area_count);
 }

@@ -77,6 +77,49 @@ static inline bool ws_preserve_spaces(CssEnum ws) {
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
 }
 
+// Check if a codepoint has Emoji_Presentation=Yes (Unicode 15.0, UTS #51).
+// Mirrors is_emoji_presentation_default in layout_text.cpp.
+static inline bool is_emoji_presentation_default(uint32_t cp) {
+    if (cp >= 0x1F000 && cp <= 0x1FFFF) return true;
+    if (cp >= 0xE0020 && cp <= 0xE007F) return true;
+    if (cp < 0x231A || cp > 0x3299) return false;
+    if (cp <= 0x231B) return true;
+    if (cp >= 0x23E9 && cp <= 0x23F3) return true;
+    if (cp >= 0x23F8 && cp <= 0x23FA) return true;
+    if (cp == 0x25AA || cp == 0x25AB) return true;
+    if (cp == 0x25B6 || cp == 0x25C0) return true;
+    if (cp >= 0x25FB && cp <= 0x25FE) return true;
+    if (cp == 0x2614 || cp == 0x2615) return true;
+    if (cp >= 0x2648 && cp <= 0x2653) return true;
+    if (cp == 0x267F || cp == 0x2693 || cp == 0x26A1) return true;
+    if (cp == 0x26AA || cp == 0x26AB) return true;
+    if (cp == 0x26BD || cp == 0x26BE) return true;
+    if (cp == 0x26C4 || cp == 0x26C5) return true;
+    if (cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA) return true;
+    if (cp == 0x26F2 || cp == 0x26F3 || cp == 0x26F5) return true;
+    if (cp == 0x26FA || cp == 0x26FD) return true;
+    if (cp == 0x2702 || cp == 0x2705) return true;
+    if (cp >= 0x2708 && cp <= 0x270D) return true;
+    if (cp == 0x270F || cp == 0x2712) return true;
+    if (cp == 0x2714 || cp == 0x2716) return true;
+    if (cp == 0x271D || cp == 0x2721 || cp == 0x2728) return true;
+    if (cp == 0x2733 || cp == 0x2734) return true;
+    if (cp == 0x2744 || cp == 0x2747) return true;
+    if (cp == 0x274C || cp == 0x274E) return true;
+    if (cp >= 0x2753 && cp <= 0x2755) return true;
+    if (cp == 0x2757) return true;
+    if (cp == 0x2763 || cp == 0x2764) return true;
+    if (cp >= 0x2795 && cp <= 0x2797) return true;
+    if (cp == 0x27A1 || cp == 0x27B0 || cp == 0x27BF) return true;
+    if (cp == 0x2934 || cp == 0x2935) return true;
+    if (cp >= 0x2B05 && cp <= 0x2B07) return true;
+    if (cp == 0x2B1B || cp == 0x2B1C) return true;
+    if (cp == 0x2B50 || cp == 0x2B55) return true;
+    if (cp == 0x3030 || cp == 0x303D) return true;
+    if (cp == 0x3297 || cp == 0x3299) return true;
+    return false;
+}
+
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
@@ -161,7 +204,7 @@ struct ClipMask {
     uint32_t* saved;          // saved pixel data (w * h)
 };
 
-static ClipMask* save_clip_region(ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
+static ClipMask* save_clip_region(ScratchArena* sa, ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
     if (!surface || !surface->pixels) return nullptr;
     int x0 = (int)fx0, y0 = (int)fy0;
     int x1 = (int)(fx0 + fw + 0.5f), y1 = (int)(fy0 + fh + 0.5f);
@@ -171,9 +214,9 @@ static ClipMask* save_clip_region(ImageSurface* surface, float fx0, float fy0, f
     int w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return nullptr;
 
-    ClipMask* mask = (ClipMask*)malloc(sizeof(ClipMask));
+    ClipMask* mask = (ClipMask*)scratch_alloc(sa, sizeof(ClipMask));
     mask->x0 = x0; mask->y0 = y0; mask->w = w; mask->h = h;
-    mask->saved = (uint32_t*)malloc(w * h * sizeof(uint32_t));
+    mask->saved = (uint32_t*)scratch_alloc(sa, (size_t)w * h * sizeof(uint32_t));
     for (int row = 0; row < h; row++) {
         uint32_t* src = (uint32_t*)((uint8_t*)surface->pixels + (y0 + row) * surface->pitch) + x0;
         memcpy(mask->saved + row * w, src, w * sizeof(uint32_t));
@@ -289,22 +332,22 @@ static void apply_clip_mask(ImageSurface* surface, ClipMask* mask, ClipShape* sh
     }
 }
 
-static void free_clip_mask(ClipMask* mask) {
-    if (mask) { free(mask->saved); free(mask); }
+static void free_clip_mask(ScratchArena* sa, ClipMask* mask) {
+    if (mask) { scratch_free(sa, mask->saved); scratch_free(sa, mask); }
 }
 
-static void free_clip_shape(ClipShape* shape) {
+static void free_clip_shape(ScratchArena* sa, ClipShape* shape) {
     if (shape) {
         if (shape->type == CLIP_SHAPE_POLYGON) {
-            free(shape->polygon.vx);
-            free(shape->polygon.vy);
+            scratch_free(sa, shape->polygon.vy);
+            scratch_free(sa, shape->polygon.vx);
         }
-        free(shape);
+        scratch_free(sa, shape);
     }
 }
 
 // Parse CSS clip-path value and return a ClipShape
-static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float elem_h,
+static ClipShape* parse_css_clip_shape(ScratchArena* sa, const char* value, float elem_w, float elem_h,
                                         float abs_x, float abs_y) {
     if (!value || strncmp(value, "none", 4) == 0) return nullptr;
 
@@ -340,7 +383,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             rx = parse_len(s, elem_w);
             ry = rx;
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         if (rx > 0 || ry > 0) {
             cs->type = CLIP_SHAPE_ROUNDED_RECT;
             cs->rounded_rect = {abs_x + left_v, abs_y + top,
@@ -365,7 +408,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             cx = abs_x + parse_len(s, elem_w);
             cy = abs_y + parse_len(s, elem_h);
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_CIRCLE;
         cs->circle = {cx, cy, r};
         return cs;
@@ -382,7 +425,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             cx = abs_x + parse_len(s, elem_w);
             cy = abs_y + parse_len(s, elem_h);
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_ELLIPSE;
         cs->ellipse = {cx, cy, rx, ry};
         return cs;
@@ -409,13 +452,13 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
         }
         if (count < 3) return nullptr;
 
-        float* vx = (float*)malloc(count * sizeof(float));
-        float* vy = (float*)malloc(count * sizeof(float));
+        float* vx = (float*)scratch_alloc(sa, count * sizeof(float));
+        float* vy = (float*)scratch_alloc(sa, count * sizeof(float));
         for (int i = 0; i < count; i++) {
             vx[i] = parse_len(s, elem_w) + abs_x;
             vy[i] = parse_len(s, elem_h) + abs_y;
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_POLYGON;
         cs->polygon = {vx, vy, count};
         return cs;
@@ -819,12 +862,27 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         parent = parent->parent;
     }
 
-    // Check if parent inline element has a background color to render
+    // Check if parent inline element has a background color to render.
+    // Only paint per-fragment backgrounds for true inline parents (e.g., <span>, <em>).
+    // Block-level parents (flex items, blocks, table cells) already have their
+    // background painted by render_bound — re-painting here with padding offsets
+    // would cover sibling elements like inline SVGs.
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
     Color* bg_color = nullptr;
-    if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
+    float bg_pad_top = 0, bg_pad_right = 0, bg_pad_bottom = 0, bg_pad_left = 0;
+    float bg_radius = 0;
+    if (parent_elem && parent_elem->view_type == RDT_VIEW_INLINE &&
+        parent_elem->bound && parent_elem->bound->background &&
         parent_elem->bound->background->color.a > 0) {
         bg_color = &parent_elem->bound->background->color;
+        // include parent inline padding in per-fragment background
+        bg_pad_top    = parent_elem->bound->padding.top * s;
+        bg_pad_right  = parent_elem->bound->padding.right * s;
+        bg_pad_bottom = parent_elem->bound->padding.bottom * s;
+        bg_pad_left   = parent_elem->bound->padding.left * s;
+        // use border-radius for rounded fragment backgrounds
+        if (parent_elem->bound->border)
+            bg_radius = parent_elem->bound->border->radius.top_left * s;
     }
 
     // Get text-shadow from parent element's font property
@@ -837,10 +895,43 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // Apply scale to convert CSS pixel positions to physical surface pixels
         float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
 
-        // Render background for inline element if present
+        // Render background for inline element if present (per-fragment for correct wrapping)
         if (bg_color) {
-            Rect bg_rect = {x, y, text_rect->width * s, text_rect->height * s};
-            fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+            bool is_first = (text_rect == text_view->rect);
+            bool is_last  = (text_rect->next == nullptr);
+            float pl = is_first ? bg_pad_left  : 0;
+            float pr = is_last  ? bg_pad_right : 0;
+            Rect bg_rect = {
+                x - pl,
+                y - bg_pad_top,
+                text_rect->width * s + pl + pr,
+                text_rect->height * s + bg_pad_top + bg_pad_bottom
+            };
+            if (bg_radius > 0) {
+                // first fragment: left radii; last fragment: right radii
+                float r_left  = is_first ? bg_radius : 0;
+                float r_right = is_last  ? bg_radius : 0;
+                // build per-corner rounded rect path
+                RdtPath* p = rdt_path_new();
+                float fx = bg_rect.x, fy = bg_rect.y, fw = bg_rect.width, fh = bg_rect.height;
+                rdt_path_move_to(p, fx + r_left, fy);
+                rdt_path_line_to(p, fx + fw - r_right, fy);
+                if (r_right > 0) rdt_path_cubic_to(p, fx+fw-r_right*0.45f, fy, fx+fw, fy+r_right*0.45f, fx+fw, fy+r_right);
+                else             rdt_path_line_to(p, fx+fw, fy);
+                rdt_path_line_to(p, fx + fw, fy + fh - r_right);
+                if (r_right > 0) rdt_path_cubic_to(p, fx+fw, fy+fh-r_right*0.45f, fx+fw-r_right*0.45f, fy+fh, fx+fw-r_right, fy+fh);
+                else             rdt_path_line_to(p, fx+fw, fy+fh);
+                rdt_path_line_to(p, fx + r_left, fy + fh);
+                if (r_left > 0) rdt_path_cubic_to(p, fx+r_left*0.45f, fy+fh, fx, fy+fh-r_left*0.45f, fx, fy+fh-r_left);
+                else            rdt_path_line_to(p, fx, fy+fh);
+                rdt_path_line_to(p, fx, fy + r_left);
+                if (r_left > 0) rdt_path_cubic_to(p, fx, fy+r_left*0.45f, fx+r_left*0.45f, fy, fx+r_left, fy);
+                rdt_path_close(p);
+                rdt_fill_path(&rdcon->vec, p, *bg_color, RDT_FILL_WINDING, NULL);
+                rdt_path_free(p);
+            } else {
+                fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+            }
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
@@ -1008,7 +1099,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
                 int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
                 int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
-                box_blur_region(rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
+                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
                 log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d)", max_shadow_blur, bx, by, bw, bh);
             }
         }
@@ -1077,7 +1168,24 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 FontStyleDesc _sd2 = font_style_desc_from_prop(rdcon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd2, render_cp, true);
+                // Peek ahead for VS16 (U+FE0F) — forces emoji/color presentation
+                bool emoji_presentation = false;
+                if (p < end) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) {
+                        emoji_presentation = true;
+                        log_debug("render emoji: VS16 peek hit for U+%04X", render_cp);
+                    }
+                }
+                // Force emoji presentation for codepoints that browsers render as
+                // color emoji by default, even without explicit VS16 selector
+                if (!emoji_presentation && is_emoji_presentation_default(render_cp)) {
+                    emoji_presentation = true;
+                }
+                LoadedGlyph* glyph = emoji_presentation
+                    ? font_load_glyph_emoji(rdcon->font.font_handle, &_sd2, render_cp, true)
+                    : font_load_glyph(rdcon->font.font_handle, &_sd2, render_cp, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -1406,6 +1514,48 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
             rdt_fill_rect(&rdcon->vec, sx, sy, bullet_size, bullet_size, color);
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
+            break;
+        }
+
+        case CSS_VALUE_DISCLOSURE_CLOSED: {
+            // Right-pointing triangle ▸ for <summary> elements
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            float cy = y + baseline_offset - font_size * 0.35f;
+
+            RdtPath* p = rdt_path_new();
+            // right-pointing triangle: left edge at cx, top at cy - tri_size/2, bottom at cy + tri_size/2
+            rdt_path_move_to(p, cx, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx + tri_size, cy);
+            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_close(p);
+            rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
+            log_debug("[MARKER RENDER] Drew disclosure-closed triangle at (%.1f, %.1f)", cx, cy);
+            break;
+        }
+
+        case CSS_VALUE_DISCLOSURE_OPEN: {
+            // Down-pointing triangle ▾ for open <details> elements
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            float cy = y + baseline_offset - font_size * 0.35f;
+
+            RdtPath* p = rdt_path_new();
+            // down-pointing triangle
+            rdt_path_move_to(p, cx - tri_size / 2.0f, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx + tri_size / 2.0f, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_close(p);
+            rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
+            log_debug("[MARKER RENDER] Drew disclosure-open triangle at (%.1f, %.1f)", cx, cy);
             break;
         }
 
@@ -1992,9 +2142,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 float elem_h = block->height * s;
                 float abs_x = pa_block.x + block->x * s;
                 float abs_y = pa_block.y + block->y * s;
-                css_clip_shape = parse_css_clip_shape(clip_str, elem_w, elem_h, abs_x, abs_y);
+                css_clip_shape = parse_css_clip_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
                 if (css_clip_shape) {
-                    css_clip_mask = save_clip_region(rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
+                    css_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
                     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
                 }
             }
@@ -2022,7 +2172,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             mbw = mx1 - mbx0;
             mbh = my1 - mby0;
             if (mbw > 0 && mbh > 0) {
-                mix_blend_backdrop = (uint32_t*)mem_alloc((size_t)mbw * mbh * sizeof(uint32_t), MEM_CAT_RENDER);
+                mix_blend_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)mbw * mbh * sizeof(uint32_t));
                 if (mix_blend_backdrop) {
                     uint32_t* px = (uint32_t*)surface->pixels;
                     int pitch = surface->pitch / 4;
@@ -2102,9 +2252,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             float cw = clip->right - clip->left;
             float ch = clip->bottom - clip->top;
             if (cw > 0 && ch > 0) {
-                overflow_clip_mask = save_clip_region(rdcon->ui_context->surface,
+                overflow_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface,
                     clip->left, clip->top, cw, ch);
-                overflow_clip_shape = (ClipShape*)calloc(1, sizeof(ClipShape));
+                overflow_clip_shape = (ClipShape*)scratch_calloc(&rdcon->scratch, sizeof(ClipShape));
                 overflow_clip_shape->type = CLIP_SHAPE_ROUNDED_RECT;
                 overflow_clip_shape->rounded_rect = {clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
@@ -2151,8 +2301,8 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // Apply rounded overflow clip mask
         if (overflow_clip_mask && overflow_clip_shape) {
             apply_clip_mask(rdcon->ui_context->surface, overflow_clip_mask, overflow_clip_shape);
-            free_clip_mask(overflow_clip_mask);
-            free_clip_shape(overflow_clip_shape);
+            free_clip_mask(&rdcon->scratch, overflow_clip_mask);
+            free_clip_shape(&rdcon->scratch, overflow_clip_shape);
         }
     }
     else {
@@ -2184,7 +2334,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                   block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
 
         // Apply the filter chain to the rendered pixels
-        apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+        apply_css_filters(&rdcon->scratch, rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
     }
 
     // Apply CSS opacity: multiply alpha of all pixels in the element's region
@@ -2230,15 +2380,15 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                     composite_blend_pixel(backdrop, source, mix_blend);
             }
         }
-        mem_free(mix_blend_backdrop);
+        scratch_free(&rdcon->scratch, mix_blend_backdrop);
         log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
     }
 
     // Apply CSS clip-path mask (pixel-level masking)
     if (css_clip_mask && css_clip_shape) {
         apply_clip_mask(rdcon->ui_context->surface, css_clip_mask, css_clip_shape);
-        free_clip_mask(css_clip_mask);
-        free_clip_shape(css_clip_shape);
+        free_clip_mask(&rdcon->scratch, css_clip_mask);
+        free_clip_shape(&rdcon->scratch, css_clip_shape);
     }
 
     // Restore transform state
@@ -2469,9 +2619,15 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
     bool self_hidden = view_span->in_line && view_span->in_line->visibility == VIS_HIDDEN;
 
-    // Render border/background for inline elements (e.g. <span> with border)
+    // Render border/outline for inline elements.
+    // Background is rendered per-line-fragment in render_text_view so that
+    // wrapping inline elements (e.g. <code> spanning two lines) don't fill
+    // the entire bounding-box rectangle with background color.
     if (!self_hidden && view_span->bound) {
+        BackgroundProp* saved_bg = view_span->bound->background;
+        view_span->bound->background = nullptr;
         render_bound(rdcon, (ViewBlock*)view_span);
+        view_span->bound->background = saved_bg;
     }
 
     View* view = view_span->first_child;
@@ -2867,6 +3023,9 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
 
+    // Initialize scratch allocator for scoped temporary buffers
+    scratch_init(&rdcon->scratch, view_tree->arena);
+
     // initialize vector renderer (owns the ThorVG canvas internally)
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
@@ -2897,6 +3056,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
 }
 
 void render_clean_up(RenderContext* rdcon) {
+    scratch_release(&rdcon->scratch);
     rdt_vector_destroy(&rdcon->vec);
 }
 

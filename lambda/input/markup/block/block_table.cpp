@@ -9,7 +9,7 @@
  * - Textile: |_. headers and | cells
  */
 #include "block_common.hpp"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include "lib/arraylist.h"
 
 namespace lambda {
@@ -142,7 +142,7 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
     }
 
     // Create trimmed copy with escaped pipes unescaped
-    char* trimmed = (char*)malloc(len + 1);
+    char* trimmed = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
     if (!trimmed) {
         return Item{.item = ITEM_ERROR};
     }
@@ -160,7 +160,7 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
 
     // Parse inline content
     Item result = parse_inline_spans(parser, trimmed);
-    free(trimmed);
+    mem_free(trimmed);
 
     return result;
 }
@@ -246,7 +246,7 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
 
         // Extract cell content
         size_t cell_len = cell_end - cell_start;
-        char* cell_text = (char*)malloc(cell_len + 1);
+        char* cell_text = (char*)mem_alloc(cell_len + 1, MEM_CAT_INPUT_MARKUP);
         if (!cell_text) break;
 
         memcpy(cell_text, cell_start, cell_len);
@@ -283,7 +283,7 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
             increment_element_content_length(row);
         }
 
-        free(cell_text);
+        mem_free(cell_text);
 
         // Move to next cell
         pos = cell_end;

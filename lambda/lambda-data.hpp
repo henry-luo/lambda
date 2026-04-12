@@ -264,7 +264,7 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
         uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
         ShapeEntry* e = tm->field_index[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (e->name && (e->name->str == key ||  // A6: interned pointer match (fast)
+        if (e->name && e->name->str && (e->name->str == key ||  // A6: interned pointer match (fast)
             (e->name->length == (size_t)key_len &&
              memcmp(e->name->str, key, key_len) == 0))) {
             return e;

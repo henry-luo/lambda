@@ -175,6 +175,14 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
                 }
                 break;
 
+            case RDT_VIEW_MARKER:
+                if (backend->render_marker) {
+                    backend->render_marker(backend->ctx, (ViewSpan*)view,
+                                           state->x, state->y,
+                                           &state->font, state->color);
+                }
+                break;
+
             default:
                 break;
         }

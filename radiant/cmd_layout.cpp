@@ -19,7 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
+#include "../lib/mem.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
@@ -39,7 +39,6 @@ extern "C" {
 #include "../lib/url.h"
 #include "../lib/log.h"
 #include "../lib/image.h"
-#include "../lib/memtrack.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/font/font.h"
@@ -78,6 +77,10 @@ extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 extern "C" void script_runner_cleanup_heap(void);
+
+// Thread-local eval context (set by runner during JIT execution, stale after return)
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
 // print_view_tree is declared in layout.hpp
 // print_item is declared in lambda/ast.hpp
 
@@ -2903,7 +2906,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                     }
 
                     if (math_src && math_src_len > 0) {
-                        MathInfo* mi = (MathInfo*)malloc(sizeof(MathInfo));
+                        MathInfo* mi = (MathInfo*)mem_alloc(sizeof(MathInfo), MEM_CAT_LAYOUT);
                         mi->parent = elem;
                         mi->index = i;
                         mi->source = math_src;
@@ -3802,7 +3805,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = std::chrono::high_resolution_clock::now();
 
-    Runtime* runtime = (Runtime*)calloc(1, sizeof(Runtime));
+    Runtime* runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     runtime_init(runtime);
 
     // Phase 5: Create result Input with arena for unified DOM allocation.
@@ -3817,10 +3820,29 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
     Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
 
+    // After run_script_mir returns, the thread-local context points to a
+    // stack-local Runner that has been destroyed. Restore it from the retained
+    // runtime so that GC operations (e.g. render_map_set_doc_root →
+    // heap_register_gc_root) can access context->heap->gc safely.
+    EvalContext retained_ctx;
+    memset(&retained_ctx, 0, sizeof(retained_ctx));
+    if (runtime->heap) {
+        retained_ctx.heap = runtime->heap;
+        retained_ctx.nursery = runtime->nursery;
+        retained_ctx.name_pool = runtime->name_pool;
+        retained_ctx.pool = runtime->heap->pool;
+        if (runtime->ui_mode && runtime->result_arena) {
+            retained_ctx.ui_mode = true;
+            retained_ctx.arena = runtime->result_arena;
+        }
+        context = &retained_ctx;
+        input_context = (Context*)&retained_ctx;
+    }
+
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3837,7 +3859,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         return nullptr;
     }
@@ -3856,7 +3878,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             "</style></head><body>%s</body></html>",
             svg_content);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         pool_destroy(result_pool);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
@@ -3875,7 +3897,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             }
             log_error("[Lambda Script] Failed to format SVG element");
             runtime_cleanup(runtime);
-            free(runtime);
+            mem_free(runtime);
             pool_destroy(result_pool);
             return nullptr;
         }
@@ -3892,7 +3914,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
             runtime_cleanup(runtime);
-            free(runtime);
+            mem_free(runtime);
             pool_destroy(result_pool);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
@@ -3986,7 +4008,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_error("[Lambda Script] Failed to create DomDocument");
         pool_destroy(result_pool);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
 
@@ -4000,7 +4022,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         dom_document_destroy(dom_doc);
         pool_destroy(result_pool);
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
 
@@ -4014,7 +4036,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!css_engine) {
         log_error("[Lambda Script] Failed to create CSS engine");
         runtime_cleanup(runtime);
-        free(runtime);
+        mem_free(runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -4363,7 +4385,14 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                 break;
             }
             Element* old_elem = results[i].old_result.element;
-            if (!old_elem || !element_dom_map_lookup(doc->element_dom_map, old_elem)) {
+            DomElement* old_dom = old_elem ? element_dom_map_lookup(doc->element_dom_map, old_elem) : nullptr;
+            if (!old_dom || old_dom->node_type != DOM_NODE_ELEMENT || !old_dom->parent) {
+                can_incremental = false;
+                break;
+            }
+            // Verify parent DOM is still valid (not GC-collected)
+            DomElement* parent_dom = (DomElement*)old_dom->parent;
+            if (parent_dom->node_type != DOM_NODE_ELEMENT || !parent_dom->tag_name) {
                 can_incremental = false;
                 break;
             }
@@ -4476,13 +4505,14 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         // Build new DOM subtree from the new Lambda element (not linked to parent yet)
         DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
+
         if (!new_dom) {
             log_debug("rebuild_lambda_doc_incremental: failed to build subtree for entry %d", i);
             continue;
         }
 
         // Replace old DOM child with new subtree in parent's linked list
-        dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
+        bool replaced = dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty
@@ -5068,9 +5098,12 @@ int cmd_layout(int argc, char** argv) {
         log_debug("[Layout] Added font directory: %s", opts.font_dirs[i]);
     }
 
-    // Set viewport dimensions
+    // Set viewport dimensions (both window and viewport must be set so layout_init
+    // uses the correct initial containing block width via uicon->viewport_width)
     ui_context.window_width = opts.viewport_width;
     ui_context.window_height = opts.viewport_height;
+    ui_context.viewport_width = opts.viewport_width;
+    ui_context.viewport_height = opts.viewport_height;
 
     // Create surface for layout calculations
     log_debug("[Layout] Creating surface for layout calculations...");

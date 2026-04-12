@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "state_store.hpp"
 #include "rdt_vector.hpp"
+#include "../lib/scratch_arena.h"
 
 // format to SDL_PIXELFORMAT_ARGB8888
 #define RDT_PIXELFORMAT_RGB(r, g, b)    ((uint32_t)((r << 16) | (g << 8) | b))
@@ -27,6 +28,9 @@ typedef struct {
 
     // Phase 18: Dirty-region tracking for render tree clipping
     DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
+
+    // LIFO scratch allocator for scoped temporary buffers (pixel buffers, clip masks, etc.)
+    ScratchArena scratch;
 } RenderContext;
 
 // Function declarations

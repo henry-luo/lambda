@@ -1,4 +1,5 @@
 #include "arena.h"
+#include "log.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -72,8 +73,55 @@ static inline int _arena_get_bin(size_t size) {
     return 7;  // 2048+ goes to last bin
 }
 
+// Helper: remove a specific free block from its bin
+// Returns true if the block was found and removed
+static bool _arena_remove_free_block(Arena* arena, ArenaFreeBlock* target) {
+    int bin = _arena_get_bin(target->size);
+    ArenaFreeBlock** prev_ptr = &arena->free_lists[bin];
+    ArenaFreeBlock* block = arena->free_lists[bin];
+
+    while (block) {
+        if (block == target) {
+            *prev_ptr = block->next;
+            arena->free_bytes -= block->size;
+            return true;
+        }
+        prev_ptr = &block->next;
+        block = block->next;
+    }
+    return false;
+}
+
+// Helper: find and remove a free block adjacent to [addr, addr+size)
+// Scans all bins for a block whose end touches addr (left neighbor)
+// or whose start is at addr+size (right neighbor).
+// Returns the removed block, or NULL if no adjacent block found.
+static ArenaFreeBlock* _arena_find_adjacent_block(Arena* arena, uintptr_t addr, size_t size) {
+    uintptr_t block_end = addr + size;
+
+    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
+        ArenaFreeBlock** prev_ptr = &arena->free_lists[i];
+        ArenaFreeBlock* block = arena->free_lists[i];
+
+        while (block) {
+            uintptr_t fb_start = (uintptr_t)block;
+            uintptr_t fb_end = fb_start + block->size;
+
+            if (fb_end == addr || fb_start == block_end) {
+                // adjacent — remove from bin
+                *prev_ptr = block->next;
+                arena->free_bytes -= block->size;
+                return block;
+            }
+            prev_ptr = &block->next;
+            block = block->next;
+        }
+    }
+    return NULL;
+}
+
 // Forward declarations
-static void* _arena_alloc_from_freelist(Arena* arena, size_t size);
+static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment);
 
 /**
  * Allocate a new chunk from the pool
@@ -190,19 +238,16 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     }
 
     // Calculate aligned size for proper accounting
+    // Ensure minimum size so all blocks can participate in free-list (A1 fix)
     size_t aligned_size = ALIGN_UP(size, alignment);
+    if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) {
+        aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
+    }
 
-    // Try to allocate from free-list first
-    void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size);
+    // Try to allocate from free-list first (alignment-aware, A3 fix)
+    void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size, alignment);
     if (free_ptr) {
-        // Check if free block is properly aligned
-        uintptr_t ptr_addr = (uintptr_t)free_ptr;
-        if ((ptr_addr & (alignment - 1)) == 0) {
-            // Already aligned, use it
-            return free_ptr;
-        }
-        // Not aligned, put it back and fall through to chunk allocation
-        arena_free(arena, free_ptr, aligned_size);
+        return free_ptr;
     }
 
     ArenaChunk* chunk = arena->current;
@@ -345,6 +390,12 @@ void arena_reset(Arena* arena) {
     arena->current = arena->first;
     arena->total_used = 0;
 
+    // Clear free-lists (pointers into reset chunks are now stale)
+    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
+        arena->free_lists[i] = NULL;
+    }
+    arena->free_bytes = 0;
+
     // Note: chunk_size is NOT reset - keeps grown size for efficiency
 }
 
@@ -370,6 +421,12 @@ void arena_clear(Arena* arena) {
     arena->total_allocated = arena->first->capacity;
     arena->total_used = 0;
     arena->chunk_count = 1;
+
+    // Clear free-lists (pointers into freed chunks are now stale)
+    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
+        arena->free_lists[i] = NULL;
+    }
+    arena->free_bytes = 0;
 
     // Reset chunk size to initial
     arena->chunk_size = arena->initial_chunk_size;
@@ -424,29 +481,81 @@ bool arena_owns(Arena* arena, const void* ptr) {
     return false;
 }
 
+Pool* arena_pool(Arena* arena) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return NULL;
+    return arena->pool;
+}
+
 void arena_free(Arena* arena, void* ptr, size_t size) {
     if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) {
         return;
     }
 
-    // Must be large enough to hold a free block header
+    // validate that ptr belongs to this arena before adding to free-list
+    if (!arena_owns(arena, ptr)) {
+        log_error("arena_free: ptr %p (size %zu) not owned by arena %p", ptr, size, (void*)arena);
+        return;
+    }
+
+    // Promote small sizes to minimum free block size (A1 fix)
+    // Safe because arena_alloc_aligned guarantees at least ARENA_MIN_FREE_BLOCK_SIZE
     if (size < ARENA_MIN_FREE_BLOCK_SIZE) {
+        size = ARENA_MIN_FREE_BLOCK_SIZE;
+    }
+
+    // Bump-back coalescing: if block is at the end of current chunk,
+    // reclaim space directly instead of adding to free-list (A4 fix)
+    ArenaChunk* chunk = arena->current;
+    uintptr_t data_start = (uintptr_t)&chunk->data[0];
+    uintptr_t block_end = (uintptr_t)ptr + size;
+    uintptr_t chunk_cursor = data_start + chunk->used;
+    if (block_end == chunk_cursor) {
+        chunk->used -= size;
+        arena->total_used -= size;
         return;
     }
 
     // Determine bin index based on size
     int bin = _arena_get_bin(size);
 
-    // Add to free-list
-    ArenaFreeBlock* block = (ArenaFreeBlock*)ptr;
-    block->size = size;
+    // Coalesce with adjacent free blocks
+    uintptr_t merged_addr = (uintptr_t)ptr;
+    size_t merged_size = size;
+
+    // Repeatedly scan for adjacent free blocks and merge them
+    ArenaFreeBlock* adj;
+    while ((adj = _arena_find_adjacent_block(arena, merged_addr, merged_size)) != NULL) {
+        uintptr_t adj_addr = (uintptr_t)adj;
+        if (adj_addr + adj->size == merged_addr) {
+            // left neighbor: adj is before our block
+            merged_addr = adj_addr;
+            merged_size += adj->size;
+        } else {
+            // right neighbor: adj is after our block
+            merged_size += adj->size;
+        }
+    }
+
+    // After coalescing, check if merged block reaches the bump cursor (bump-back)
+    uintptr_t merged_end = merged_addr + merged_size;
+    chunk_cursor = data_start + chunk->used;
+    if (merged_end == chunk_cursor) {
+        chunk->used -= merged_size;
+        arena->total_used -= merged_size;
+        return;
+    }
+
+    // Add merged block to free-list in appropriate bin
+    bin = _arena_get_bin(merged_size);
+    ArenaFreeBlock* block = (ArenaFreeBlock*)merged_addr;
+    block->size = merged_size;
     block->next = arena->free_lists[bin];
     arena->free_lists[bin] = block;
-    arena->free_bytes += size;
+    arena->free_bytes += merged_size;
 }
 
-// Try to allocate from free-list
-static void* _arena_alloc_from_freelist(Arena* arena, size_t size) {
+// Try to allocate from free-list (alignment-aware, A3 fix)
+static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment) {
     int bin = _arena_get_bin(size);
 
     // Search current bin and larger bins for suitable block
@@ -455,7 +564,8 @@ static void* _arena_alloc_from_freelist(Arena* arena, size_t size) {
         ArenaFreeBlock* block = arena->free_lists[i];
 
         while (block) {
-            if (block->size >= size) {
+            // Check both size and alignment before selecting (A3 fix)
+            if (block->size >= size && ((uintptr_t)block & (alignment - 1)) == 0) {
                 // Found suitable block - remove from free-list
                 *prev_ptr = block->next;
                 arena->free_bytes -= block->size;
