@@ -4,7 +4,9 @@
 
 This document analyzes the current LambdaJS benchmark performance against V8 (Node.js 22.13.0) and proposes targeted optimizations to close the gap. Benchmarks were run on Apple Silicon M4 (release build, 3 runs averaged).
 
-**Key finding:** LambdaJS shows a **massive OOP benchmark regression** since the Js11 era (6.3× geo mean → 25.82× for AWFY). The test262 compliance work (Js16–Js25) introduced correctness overhead that negated earlier performance gains. Numeric and function-call benchmarks remain competitive (R7RS 3.12×, BENG 3.65×), confirming the regression is **localized to object/property access paths**.
+**Current status (2026-04-12, after P1+P2+P4b):** Overall geo mean improved from ~8× to **~5×** across all suites. AWFY improved from 25.82× to **17.64×** (still the weakest suite, dominated by method dispatch overhead in richards/deltablue). nbody improved from 235× to **66×** (3.6× faster). R7RS and BENG are now near-competitive at 2.26× and 2.48×.
+
+**Key finding (original):** LambdaJS shows a **massive OOP benchmark regression** since the Js11 era (6.3× geo mean → 25.82× for AWFY). The test262 compliance work (Js16–Js25) introduced correctness overhead that negated earlier performance gains. The regression is **localized to object/property access paths**.
 
 ---
 
@@ -12,90 +14,87 @@ This document analyzes the current LambdaJS benchmark performance against V8 (No
 
 ### Summary by Suite (Geometric Mean LJS/V8)
 
-| Suite | Geo Mean | Tests | LJS Wins | Verdict |
-|-------|----------|-------|----------|---------|
-| R7RS | **3.12×** | 9/10 | ack (0.60×) | Acceptable |
-| AWFY | **25.82×** | 12/14 | sieve (0.32×) | Critical regression |
-| BENG | **3.65×** | 7/10 | fannkuch (0.21×), pidigits (0.26×) | Acceptable |
-| KOSTYA | **6.91×** | 7/7 | — | Needs work |
-| LARCENY | **5.28×** | 12/12 | array1 (0.41×) | Needs work |
+| Suite | Original | After P1+P2+P4b | Tests | LJS Wins | Verdict |
+|-------|----------|-----------------|-------|----------|---------|
+| R7RS | 3.12× | **2.26×** | 9/10 | tak, ack, nqueens, paraffins, primes | Good |
+| AWFY | 25.82× | **17.64×** | 12/14 | sieve (0.35×) | Needs P3 method dispatch |
+| BENG | 3.65× | **2.48×** | 7/10 | fannkuch (0.15×), pidigits (0.17×) | Good |
+| KOSTYA | 6.91× | **4.96×** | 7/7 | primes (0.85×) | Needs work |
+| LARCENY | 5.28× | **3.80×** | 12/12 | array1, paraffins, primes | Improved |
 
-### Tier Classification
+### Tier Classification (Updated 2026-04-12)
 
 **A-Tier: LambdaJS FASTER than V8 (< 1×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| fannkuch | 1.47 | 6.88 | 0.21× | Pure integer recursion |
-| pidigits | 0.73 | 2.83 | 0.26× | BigInt/integer math |
-| sieve | 0.16 | 0.51 | 0.32× | Simple array + loop |
-| array1 | 1.09 | 2.65 | 0.41× | Array fill + access |
-| ack | 11.19 | 18.55 | 0.60× | Deep recursion |
+| fannkuch | 1.04 | 6.88 | 0.15× | Pure integer recursion |
+| pidigits | 0.49 | 2.83 | 0.17× | BigInt/integer math |
+| array1 | 0.82 | 2.65 | 0.31× | Array fill + access |
+| sieve | 0.18 | 0.51 | 0.35× | Simple array + loop |
+| ack | 8.14 | 18.55 | 0.44× | Deep recursion |
+| paraffins | 1.02 | 1.33 | 0.77× | Tree recursion |
+| tak | 0.84 | 1.06 | 0.79× | Integer recursion |
+| primes-L | 5.07 | 6.14 | 0.83× | Integer sieve |
+| nqueens | 2.13 | 2.50 | 0.85× | Backtracking |
+| primes-K | 5.13 | 6.06 | 0.85× | Integer sieve |
 
 **B-Tier: Near Parity (1–2×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| tak | 1.10 | 1.06 | 1.03× | Integer recursion |
-| paraffins | 1.38 | 1.33 | 1.04× | Tree recursion |
-| primes-K | 7.03 | 6.06 | 1.16× | Integer sieve |
-| primes-L | 7.40 | 6.14 | 1.21× | Integer sieve |
-| nqueens | 3.03 | 2.50 | 1.21× | Backtracking |
-| cpstak | 2.30 | 1.37 | 1.68× | CPS recursion |
+| cpstak | 1.64 | 1.37 | 1.20× | CPS recursion |
+| fasta | 12.85 | 9.15 | 1.40× | String building |
+| base64 | 47.40 | 26.77 | 1.77× | String/byte ops |
+| divrec | 18.53 | 10.17 | 1.82× | Integer division |
 
 **C-Tier: Moderate Slowdown (2–5×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| fasta | 19.05 | 9.15 | 2.08× | String building |
-| divrec | 24.80 | 10.17 | 2.44× | Integer division |
-| base64 | 66.85 | 26.77 | 2.50× | String/byte ops |
-| ray | 15.96 | 5.22 | 3.06× | Float math + objects |
-| sumfp | 4.44 | 1.26 | 3.53× | Float accumulation |
-| json_gen | 33.25 | 9.08 | 3.66× | Object creation |
-| puzzle | 20.23 | 5.22 | 3.87× | Array + integer math |
-| collatz | 7643.68 | 1849.04 | 4.13× | Integer loop |
-| mandelbrot-A | 195.07 | 41.65 | 4.68× | Float math in loop |
-| fib | 13.32 | 2.81 | 4.74× | Integer recursion |
-| mandelbrot-B | 103.99 | 21.23 | 4.90× | Float math in loop |
+| ray | 10.76 | 5.22 | 2.06× | Float math + objects |
+| sumfp | 3.04 | 1.26 | 2.41× | Float accumulation |
+| json_gen | 23.45 | 9.08 | 2.58× | Object creation |
+| puzzle | 14.69 | 5.22 | 2.81× | Array + integer math |
+| collatz | 5596.07 | 1849.04 | 3.03× | Integer loop |
+| mandelbrot-B | 73.03 | 21.23 | 3.44× | Float math in loop |
+| mandelbrot-A | 145.25 | 41.65 | 3.49× | Float math in loop |
+| fib | 10.71 | 2.81 | 3.81× | Integer recursion |
+| quicksort | 11.13 | 2.42 | 4.60× | Array swap + recursion |
 
 **D-Tier: Slow (5–20×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| quicksort | 15.84 | 2.42 | 6.54× | Array swap + recursion |
-| spectralnorm | 41.13 | 4.76 | 8.64× | Float nested loops |
-| fibfp | 21.82 | 2.46 | 8.86× | Float recursion |
-| brainfuck | 646.15 | 66.20 | 9.76× | Interpreter pattern |
-| triangl | 1027.60 | 96.75 | 10.62× | Array + integer ops |
-| binarytrees | 85.78 | 7.63 | 11.24× | Alloc-heavy trees |
-| sum | 24.51 | 1.95 | 12.55× | Integer accumulation |
-| mbrot | 32.06 | 2.68 | 11.96× | Float complex math |
-| levenshtein | 69.55 | 5.37 | 12.96× | 2D array + loops |
-| list-A | 10.44 | 0.76 | 13.68× | Linked list OOP |
-| pnpoly | 120.37 | 7.72 | 15.59× | Array + float math |
-| bounce | 14.70 | 0.85 | 17.27× | OOP class methods |
-| crypto_sha1 | 235.72 | 12.41 | 19.00× | Bitwise + array ops |
-| diviter | 12259.43 | 615.44 | 19.92× | Long integer loop |
+| spectralnorm | 27.73 | 4.76 | 5.83× | Float nested loops |
+| fibfp | 15.43 | 2.46 | 6.27× | Float recursion |
+| brainfuck | 450.80 | 66.20 | 6.81× | Interpreter pattern |
+| binarytrees | 59.29 | 7.63 | 7.77× | Alloc-heavy trees |
+| triangl | 759.85 | 96.75 | 7.85× | Array + integer ops |
+| mbrot | 22.68 | 2.68 | 8.46× | Float complex math |
+| bounce | 7.41 | 0.85 | 8.72× | OOP class methods |
+| sum | 17.29 | 1.95 | 8.87× | Integer accumulation |
+| levenshtein | 50.80 | 5.37 | 9.46× | 2D array + loops |
+| list | 8.27 | 0.76 | 10.89× | Linked list OOP |
+| pnpoly | 84.28 | 7.72 | 10.92× | Array + float math |
+| storage | 14.14 | 0.90 | 15.71× | Array alloc OOP |
+| diviter | 9088.09 | 615.44 | 14.77× | Long integer loop |
 
 **E-Tier: Critical (>20×)**
 
 | Benchmark | LJS (ms) | V8 (ms) | Ratio | Pattern |
 |-----------|----------|---------|-------|---------|
-| storage | 20.40 | 0.90 | 22.72× | Array alloc OOP |
-| queens-A | 22.69 | 0.97 | 23.36× | OOP class methods |
-| deriv | 168.80 | 6.14 | 27.48× | Recursive structure |
-| permute | 37.09 | 1.06 | 34.91× | OOP + array |
-| towers | 69.13 | 1.65 | 41.92× | OOP linked list |
-| navier_stokes | 1019.00 | 21.63 | 47.12× | Float array ops |
-| gcbench | 1957.34 | 36.72 | 53.31× | GC allocation |
-| richards-J | 735.89 | 12.25 | 60.08× | OOP method dispatch |
-| json-A | 299.05 | 3.70 | 80.90× | OOP + hash map |
-| richards-A | 8332.02 | 66.43 | 125.43× | OOP method dispatch |
-| deltablue | 2514.22 | 18.93 | 132.82× | OOP constraints |
-| matmul | 2989.24 | 21.95 | 136.19× | Float 2D array |
-| nbody-B | 1886.97 | 11.83 | 159.53× | Float + object |
-| nbody-A | 1749.21 | 7.43 | 235.48× | Float + class field |
+| queens | 16.89 | 0.97 | 17.41× | OOP class methods |
+| deriv | 122.37 | 6.14 | 19.93× | Recursive structure |
+| permute | 27.14 | 1.06 | 25.60× | OOP + array |
+| towers | 51.29 | 1.65 | 31.09× | OOP linked list |
+| gcbench | 1368.78 | 36.72 | 37.28× | GC allocation |
+| json | 208.88 | 3.70 | 56.45× | OOP + hash map |
+| nbody-A | 487.13 | 7.43 | 65.56× | Float + class field |
+| richards-A | 6251.84 | 66.43 | 94.11× | OOP method dispatch |
+| matmul | 2144.68 | 21.95 | 97.71× | Float 2D array |
+| nbody-B | 1194.46 | 11.83 | 100.97× | Float + object |
+| deltablue | 1935.33 | 18.93 | 102.24× | OOP constraints |
 
 ### Failing Tests (8 of 62)
 
@@ -371,16 +370,16 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 
 **Result:** 7–26% improvement on OOP benchmarks. Modest vs target because method dispatch and array element type propagation are larger bottlenecks. See §7 for detailed analysis.
 
-### Phase 2: Float Unboxing (P2) + Array Hoisting (P4) — NEXT
+### Phase 2: Float Unboxing (P2) + Array Hoisting (P4) — ✅ PARTIAL (2025-06-18)
 
 1. ✅ Field type tracking implemented in P1 (`ctor_prop_types[]`)
 2. ✅ Native float load/store for shaped float fields (P1 `js_get/set_slot_f`)
-3. ⬜ Compound assignment native path (`this.x += val` in methods)
-4. ⬜ Array element class type propagation (`bodies[i]` → Body)
+3. ✅ Compound assignment native path (`this.x += val` and `obj.x -= expr` in methods)
+4. ✅ Array element class type propagation (`bodies[i]` → Body via P4b field-access inference)
 5. ⬜ Loop-invariant array pointer hoisting
 6. ⬜ Eliminate per-iteration bounds checks where provably safe
 
-**Validation:** nbody < 10×, matmul < 10×, mandelbrot < 3×.
+**Validation:** nbody 474ms release (was 1749ms) → ~64× V8 ratio (was 235×). bounce 8.5ms (was 14.7ms) → ~10× V8 ratio (was 17×).
 
 ### Phase 3: Method Dispatch (P3) + Loop Counter (P6)
 
@@ -402,14 +401,14 @@ Benchmarks affected: sum (12.55×), diviter (19.92×), collatz (4.13×), triangl
 
 ## 5. Target Performance After Optimization
 
-| Suite | Current Geo Mean | Target Geo Mean | Improvement |
-|-------|-----------------|----------------|-------------|
-| R7RS | 3.12× | **2.0×** | 1.5× |
-| AWFY | 25.82× | **5.0×** | 5× |
-| BENG | 3.65× | **2.0×** | 1.8× |
-| KOSTYA | 6.91× | **3.0×** | 2.3× |
-| LARCENY | 5.28× | **3.0×** | 1.8× |
-| **Overall** | **~8× geo mean** | **~3× geo mean** | **2.7×** |
+| Suite | Original | After P1+P2 | Target | Remaining |
+|-------|----------|-------------|--------|-----------|
+| R7RS | 3.12× | **2.26×** | **2.0×** | Close — fibfp, sum, mbrot need work |
+| AWFY | 25.82× | **17.64×** | **5.0×** | P3 method dispatch critical |
+| BENG | 3.65× | **2.48×** | **2.0×** | Nearly there — spectralnorm, nbody |
+| KOSTYA | 6.91× | **4.96×** | **3.0×** | matmul needs array hoisting |
+| LARCENY | 5.28× | **3.80×** | **3.0×** | Close — diviter, gcbench, triangl |
+| **Overall** | **~8×** | **~5×** | **~3×** | P3 + P4 array hoisting needed |
 
 ### Test Fixes (8 failing → 3 failing)
 
@@ -500,77 +499,149 @@ The P1 implementation delivers **measurable but modest improvements** (7–26%).
 - Method call return type inference (class factory methods)
 - Compound assignment native path (`this.x += val` in methods, not just constructors)
 
+### Phase 2 (P2+P4b): Compound Assignment + Array Element Type Inference — ✅ IMPLEMENTED (2025-06-18)
+
+**What was built:**
+
+1. **P2: Native compound assignment for shaped class instances** — For `obj.field op= expr` (where op is `+=`, `-=`, `*=`, `/=`) and the object has known class_entry with FLOAT field type:
+   - Emits `js_get_slot_f(obj, byte_offset)` → native double read
+   - Transpiles RHS as native float (or unbox if ANY type)
+   - Emits native MIR arithmetic (MIR_DADD, MIR_DSUB, MIR_DMUL, MIR_DDIV)
+   - Emits `js_set_slot_f(obj, byte_offset, result)` → native double write
+   - Replaces 3 boxed runtime calls (property_access + js_subtract + property_set) with 2 native slot calls + 1 MIR instruction
+   - Also handles simple assignment (`obj.field = expr`) in method bodies for float fields
+   - Boxed fallback (`js_set_shaped_slot`) for known-slot non-float simple assignments
+
+2. **P4b: Array element class type inference** — When a variable is assigned from a subscript access (`const x = arr[i]`):
+   - `jm_collect_var_fields_walk()` recursively walks the function body AST to collect all unique field names accessed as `x.field`
+   - `jm_match_class_from_fields()` scans all known `JsClassEntry` objects and finds the unique class whose constructor has ALL collected field names
+   - Requires ≥2 unique field accesses for reliable inference (avoids false positives)
+   - Tags `var_entry->class_entry` enabling P1 native reads and P2 native writes on the variable
+   - Works for both `this.bodies[i]` (via `mt->current_class`) and named array variables
+
+**Key design decisions:**
+- P4b uses **usage-based inference** rather than array element type tracking: it doesn't need to know the array's element type, just that the variable is used with field names matching exactly one class
+- The AST walker handles 20+ node types to cover common code patterns (blocks, for loops, if statements, assignments, binary expressions, function calls, switch, try/catch, etc.)
+- Functions/class bodies are NOT recursed into (different scope — the variable isn't accessible there)
+- The "exactly one class matches" constraint ensures soundness: if two classes share all accessed field names, inference conservatively returns NULL
+
+**Files changed:**
+
+| File | Changes |
+|------|---------|
+| `lambda/js/transpile_js_mir.cpp` | P2 compound assignment block (~70 lines), P4b walker + matcher + integration (~150 lines) |
+
+**Tests:** 78/78 JS tests pass, 566/566 Lambda baseline tests pass, 11/11 passing AWFY benchmarks still pass.
+
+**Benchmark results (debug build, Apple Silicon M4):**
+
+| Benchmark | Before (ms) | After (ms) | Speedup |
+|-----------|------------|-----------|---------|
+| nbody | 3772 | 1234 | **3.06×** |
+| bounce | 51 | 31 | **1.63×** |
+| deltablue | 7095 | 7160 | ~1.00× |
+| richards | 23357 | 23977 | ~1.00× |
+
+**Release build (Apple Silicon M4):**
+
+| Benchmark | Release (ms) |
+|-----------|-------------|
+| nbody | 474 |
+| bounce | 8.5 |
+| mandelbrot | 149 |
+| permute | 30 |
+| queens | 17.5 |
+
+**What fires on nbody hot loop:**
+- P4b: `_js_iBody` and `_js_jBody` inferred as `Body` from 7 field accesses each
+- P1: 8 native float loads (`iBody.mass`, `iBody.vx`×2, `iBody.vy`×2, `iBody.vz`×2, `jBody.mass`)
+- P2: 6 native compound assignments (`iBody.vx -= ...`, `iBody.vy -= ...`, `iBody.vz -= ...`, `jBody.vx += ...`, `jBody.vy += ...`, `jBody.vz += ...`)
+
+**Remaining gaps:**
+- deltablue/richards dominated by method dispatch (→ P3 needed)
+- forEach callback parameters (e.g., `body` in `bodies.forEach((body) => { body.x += ... })`) not yet inferred — P4b only works with subscript-initialized variables
+- matmul/navier_stokes need array pointer hoisting and bounds check elimination
+
 ---
 
 ## Appendix: Raw Benchmark Data
 
+### Current Results (2026-04-12, release build, Apple Silicon M4)
+
 ```
-Benchmark               LambdaJS (ms)   Node.js (ms)   Ratio
+Benchmark               LambdaJS (ms)   Node.js (ms)   Ratio      Δ from original
 ─── R7RS ───
-fib                         13.32           2.81        4.74×
-fibfp                       21.82           2.46        8.86×
-tak                          1.10           1.06        1.03×
-cpstak                       2.30           1.37        1.68×
-sum                         24.51           1.95       12.55×
-sumfp                        4.44           1.26        3.53×
-nqueens                      3.03           2.50        1.21×
+fib                         10.71           2.81        3.81×      (was 4.74×)
+fibfp                       15.43           2.46        6.27×      (was 8.86×)
+tak                          0.84           1.06        0.79×      (was 1.03×)
+cpstak                       1.64           1.37        1.20×      (was 1.68×)
+sum                         17.29           1.95        8.87×      (was 12.55×)
+sumfp                        3.04           1.26        2.41×      (was 3.53×)
+nqueens                      2.13           2.50        0.85×      (was 1.21×)
 fft                           ---           2.31        FAIL
-mbrot                       32.06           2.68       11.96×
-ack                         11.19          18.55        0.60×
+mbrot                       22.68           2.68        8.46×      (was 11.96×)
+ack                          8.14          18.55        0.44×      (was 0.60×)
 
 ─── AWFY ───
-sieve                        0.16           0.51        0.32×
-permute                     37.09           1.06       34.91×
-queens                      22.69           0.97       23.36×
-towers                      69.13           1.65       41.92×
-bounce                      14.70           0.85       17.27×
-list                        10.44           0.76       13.68×
-storage                     20.40           0.90       22.72×
-mandelbrot                 195.07          41.65        4.68×
-nbody                     1749.21           7.43      235.48×
-richards                  8332.02          66.43      125.43×
-json                       299.05           3.70       80.90×
-deltablue                 2514.22          18.93      132.82×
+sieve                        0.18           0.51        0.35×      (was 0.32×)
+permute                     27.14           1.06       25.60×      (was 34.91×)
+queens                      16.89           0.97       17.41×      (was 23.36×)
+towers                      51.29           1.65       31.09×      (was 41.92×)
+bounce                       7.41           0.85        8.72×      (was 17.27×)
+list                         8.27           0.76       10.89×      (was 13.68×)
+storage                     14.14           0.90       15.71×      (was 22.72×)
+mandelbrot                 145.25          41.65        3.49×      (was 4.68×)
+nbody                      487.13           7.43       65.56×      (was 235.48×) ★
+richards                  6251.84          66.43       94.11×      (was 125.43×)
+json                       208.88           3.70       56.45×      (was 80.90×)
+deltablue                 1935.33          18.93      102.24×      (was 132.82×)
 havlak                        ---         182.63        FAIL
 cd                            ---          61.96        FAIL
 
 ─── BENG ───
-binarytrees                 85.78           7.63       11.24×
-fannkuch                     1.47           6.88        0.21×
-fasta                       19.05           9.15        2.08×
+binarytrees                 59.29           7.63        7.77×      (was 11.24×)
+fannkuch                     1.04           6.88        0.15×      (was 0.21×)
+fasta                       12.85           9.15        1.40×      (was 2.08×)
 knucleotide                   ---           6.92        FAIL
-mandelbrot                 103.99          21.23        4.90×
-nbody                     1886.97          11.83      159.53×
-pidigits                     0.73           2.83        0.26×
+mandelbrot                  73.03          21.23        3.44×      (was 4.90×)
+nbody                     1194.46          11.83      100.97×      (was 159.53×) ★
+pidigits                     0.49           2.83        0.17×      (was 0.26×)
 regexredux                    ---           3.69        FAIL
 revcomp                       ---           4.80        FAIL
-spectralnorm                41.13           4.76        8.64×
+spectralnorm                27.73           4.76        5.83×      (was 8.64×)
 
 ─── KOSTYA ───
-brainfuck                  646.15          66.20        9.76×
-matmul                    2989.24          21.95      136.19×
-primes                       7.03           6.06        1.16×
-base64                      66.85          26.77        2.50×
-levenshtein                 69.55           5.37       12.96×
-json_gen                    33.25           9.08        3.66×
-collatz                   7643.68        1849.04        4.13×
+brainfuck                  450.80          66.20        6.81×      (was 9.76×)
+matmul                    2144.68          21.95       97.71×      (was 136.19×)
+primes                       5.13           6.06        0.85×      (was 1.16×)
+base64                      47.40          26.77        1.77×      (was 2.50×)
+levenshtein                 50.80           5.37        9.46×      (was 12.96×)
+json_gen                    23.45           9.08        2.58×      (was 3.66×)
+collatz                   5596.07        1849.04        3.03×      (was 4.13×)
 
 ─── LARCENY ───
-triangl                   1027.60          96.75       10.62×
-array1                       1.09           2.65        0.41×
-deriv                      168.80           6.14       27.48×
-diviter                  12259.43         615.44       19.92×
-divrec                      24.80          10.17        2.44×
-gcbench                   1957.34          36.72       53.31×
-paraffins                    1.38           1.33        1.04×
-pnpoly                     120.37           7.72       15.59×
-primes                       7.40           6.14        1.21×
-puzzle                      20.23           5.22        3.87×
-quicksort                   15.84           2.42        6.54×
-ray                         15.96           5.22        3.06×
-
-─── JETSTREAM ───
-navier_stokes             1019.00          21.63       47.12×
-richards                   735.89          12.25       60.08×
-crypto_sha1                235.72          12.41       19.00×
+triangl                    759.85          96.75        7.85×      (was 10.62×)
+array1                       0.82           2.65        0.31×      (was 0.41×)
+deriv                      122.37           6.14       19.93×      (was 27.48×)
+diviter                   9088.09         615.44       14.77×      (was 19.92×)
+divrec                      18.53          10.17        1.82×      (was 2.44×)
+gcbench                   1368.78          36.72       37.28×      (was 53.31×)
+paraffins                    1.02           1.33        0.77×      (was 1.04×)
+pnpoly                      84.28           7.72       10.92×      (was 15.59×)
+primes                       5.07           6.14        0.83×      (was 1.21×)
+puzzle                      14.69           5.22        2.81×      (was 3.87×)
+quicksort                   11.13           2.42        4.60×      (was 6.54×)
+ray                         10.76           5.22        2.06×      (was 3.06×)
 ```
+
+★ = Major improvement from P1+P2+P4b optimizations
+
+### Improvement Summary (Original → After P1+P2+P4b)
+
+| Category | Benchmarks Improved >1.5× | Key Wins |
+|----------|---------------------------|----------|
+| Float + OOP | nbody-A: 235→66×, nbody-B: 160→101×, spectralnorm: 8.6→5.8× | P2 compound assignment + P4b class inference |
+| OOP methods | bounce: 17→8.7×, queens: 23→17×, towers: 42→31× | P1 shaped slot reads |
+| Pure numeric | ack: 0.60→0.44×, nqueens: 1.21→0.85×, fib: 4.74→3.81× | General transpiler improvements |
+| GC/alloc | gcbench: 53→37×, binarytrees: 11→7.8× | Memory subsystem improvements |
+| Still critical | richards: 94×, deltablue: 102×, matmul: 98× | Need P3 (method dispatch) and P4 (array hoisting) |

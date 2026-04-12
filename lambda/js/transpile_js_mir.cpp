@@ -3795,6 +3795,209 @@ static int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int pro
     return -1;
 }
 
+// ============================================================================
+// P4b: Infer class type for variables assigned from subscript access (arr[i]).
+// Walks the function body AST to collect field names accessed on the variable,
+// then finds the unique class whose constructor has ALL those fields.
+// ============================================================================
+
+// Recursive AST walker: collect unique field names from `varname.field` accesses.
+static void jm_collect_var_fields_walk(JsAstNode* node, const char* varname, int varlen,
+                                       char fields[][64], int* count, int max_fields) {
+    if (!node || *count >= max_fields) return;
+
+    // check for varname.field pattern
+    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        if (!mem->computed && mem->object && mem->property &&
+            mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
+            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+            if (obj->name && (int)obj->name->len == varlen &&
+                strncmp(obj->name->chars, varname, varlen) == 0 && prop->name) {
+                bool dup = false;
+                for (int i = 0; i < *count; i++) {
+                    if ((int)strlen(fields[i]) == (int)prop->name->len &&
+                        strncmp(fields[i], prop->name->chars, prop->name->len) == 0) {
+                        dup = true; break;
+                    }
+                }
+                if (!dup && *count < max_fields) {
+                    int len = (int)prop->name->len < 63 ? (int)prop->name->len : 63;
+                    memcpy(fields[*count], prop->name->chars, len);
+                    fields[*count][len] = 0;
+                    (*count)++;
+                }
+            }
+        }
+        // recurse into object (for chained access like iBody.mass.toString())
+        jm_collect_var_fields_walk(mem->object, varname, varlen, fields, count, max_fields);
+        return;
+    }
+
+    // recurse into children based on node type
+    switch (node->node_type) {
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* s = blk->statements; s; s = s->next)
+            jm_collect_var_fields_walk(s, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* n = (JsForNode*)node;
+        jm_collect_var_fields_walk(n->init, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->test, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->update, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->body, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* n = (JsExpressionStatementNode*)node;
+        jm_collect_var_fields_walk(n->expression, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* n = (JsAssignmentNode*)node;
+        jm_collect_var_fields_walk(n->left, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->right, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* n = (JsBinaryNode*)node;
+        jm_collect_var_fields_walk(n->left, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->right, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* n = (JsCallNode*)node;
+        jm_collect_var_fields_walk(n->callee, varname, varlen, fields, count, max_fields);
+        for (JsAstNode* a = n->arguments; a; a = a->next)
+            jm_collect_var_fields_walk(a, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* n = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = n->declarations; d; d = d->next)
+            jm_collect_var_fields_walk(d, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* n = (JsVariableDeclaratorNode*)node;
+        jm_collect_var_fields_walk(n->init, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* n = (JsReturnNode*)node;
+        jm_collect_var_fields_walk(n->argument, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        jm_collect_var_fields_walk(n->test, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->consequent, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->alternate, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* n = (JsWhileNode*)node;
+        jm_collect_var_fields_walk(n->test, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->body, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* n = (JsDoWhileNode*)node;
+        jm_collect_var_fields_walk(n->body, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->test, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* n = (JsConditionalNode*)node;
+        jm_collect_var_fields_walk(n->test, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->consequent, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->alternate, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* n = (JsUnaryNode*)node;
+        jm_collect_var_fields_walk(n->operand, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* n = (JsSequenceNode*)node;
+        for (JsAstNode* e = n->expressions; e; e = e->next)
+            jm_collect_var_fields_walk(e, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* n = (JsSwitchNode*)node;
+        jm_collect_var_fields_walk(n->discriminant, varname, varlen, fields, count, max_fields);
+        for (JsAstNode* c = n->cases; c; c = c->next) {
+            JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
+            jm_collect_var_fields_walk(sc->test, varname, varlen, fields, count, max_fields);
+            for (JsAstNode* s = sc->consequent; s; s = s->next)
+                jm_collect_var_fields_walk(s, varname, varlen, fields, count, max_fields);
+        }
+        break;
+    }
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT: {
+        JsForOfNode* n = (JsForOfNode*)node;
+        jm_collect_var_fields_walk(n->left, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->right, varname, varlen, fields, count, max_fields);
+        jm_collect_var_fields_walk(n->body, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* n = (JsTryNode*)node;
+        jm_collect_var_fields_walk(n->block, varname, varlen, fields, count, max_fields);
+        if (n->handler) {
+            JsCatchNode* ch = (JsCatchNode*)n->handler;
+            jm_collect_var_fields_walk(ch->body, varname, varlen, fields, count, max_fields);
+        }
+        jm_collect_var_fields_walk(n->finalizer, varname, varlen, fields, count, max_fields);
+        break;
+    }
+    // skip function/class bodies (different scope)
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_DECLARATION:
+        break;
+    default:
+        break;
+    }
+}
+
+// Match collected field names against all known classes.
+// Returns the unique class whose constructor has ALL field names, or NULL.
+static JsClassEntry* jm_match_class_from_fields(JsMirTranspiler* mt,
+                                                  char fields[][64], int field_count) {
+    if (field_count < 2) return NULL; // require at least 2 fields for reliable inference
+    JsClassEntry* match = NULL;
+    int match_count = 0;
+    for (int c = 0; c < mt->class_count; c++) {
+        JsClassEntry* ce = &mt->class_entries[c];
+        if (!ce->constructor || !ce->constructor->fc) continue;
+        JsFuncCollected* fc = ce->constructor->fc;
+        if (fc->ctor_prop_count < field_count) continue; // class has fewer props than accessed fields
+        bool all_match = true;
+        for (int f = 0; f < field_count; f++) {
+            if (jm_ctor_prop_slot(fc, fields[f], (int)strlen(fields[f])) < 0) {
+                all_match = false;
+                break;
+            }
+        }
+        if (all_match) {
+            match = ce;
+            match_count++;
+            if (match_count > 1) return NULL; // ambiguous — multiple classes match
+        }
+    }
+    return (match_count == 1) ? match : NULL;
+}
+
 // detect typed array constructor type from a new expression
 // also detects chained method calls like new Uint8Array(n).map(fn)
 static int jm_detect_typed_array_new(JsAstNode* rhs) {
@@ -6996,6 +7199,115 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 return jm_call_2(mt, "js_math_set_property", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
+        }
+
+        // P2: Native compound assignment for shaped class instances.
+        // For `obj.field += expr` where obj has known class_entry and field is typed FLOAT/INT:
+        //   1. js_get_slot_f(obj, offset) → native double
+        //   2. jm_transpile_as_native(rhs) → native double
+        //   3. native MIR arithmetic (DADD, DSUB, DMUL, DDIV)
+        //   4. js_set_slot_f(obj, offset, result)
+        // Replaces 3 boxed runtime calls (property_access + js_add + property_set) with
+        // 2 native slot calls + 1 MIR instruction.
+        // Also handles simple assignment (obj.field = expr) in method bodies (not just constructors).
+        if (!member->computed && !member->optional &&
+            member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* p2_obj = (JsIdentifierNode*)member->object;
+            JsIdentifierNode* p2_prop = (JsIdentifierNode*)member->property;
+            JsClassEntry* p2_ce = nullptr;
+            // Check for `this` in class method context
+            if (mt->current_class &&
+                p2_obj->name->len == 4 && strncmp(p2_obj->name->chars, "this", 4) == 0) {
+                p2_ce = mt->current_class;
+            }
+            // Check for named variable with class_entry
+            if (!p2_ce) {
+                char p2_vname[132];
+                snprintf(p2_vname, sizeof(p2_vname), "_js_%.*s", (int)p2_obj->name->len, p2_obj->name->chars);
+                JsMirVarEntry* p2_var = jm_find_var(mt, p2_vname);
+                if (p2_var && p2_var->class_entry) p2_ce = p2_var->class_entry;
+            }
+            if (p2_ce && p2_ce->constructor && p2_ce->constructor->fc) {
+                JsFuncCollected* p2_fc = p2_ce->constructor->fc;
+                int p2_slot = jm_ctor_prop_slot(p2_fc,
+                    p2_prop->name->chars, (int)p2_prop->name->len);
+                if (p2_slot >= 0) {
+                    TypeId field_type = p2_fc->ctor_prop_types[p2_slot];
+                    int64_t byte_offset = (int64_t)p2_slot * (int64_t)sizeof(void*);
+
+                    if (field_type == LMD_TYPE_FLOAT) {
+                        MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
+
+                        if (asgn->op == JS_OP_ASSIGN) {
+                            // Simple assignment: obj.field = expr → native slot write
+                            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                            if (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT) {
+                                MIR_reg_t native_rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
+                                jm_call_void_3(mt, "js_set_slot_f",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
+                                    MIR_T_D,  MIR_new_reg_op(mt->ctx, native_rhs));
+                                return jm_box_float(mt, native_rhs);
+                            }
+                        } else {
+                            // Compound: +=, -=, *=, /=
+                            // Determine MIR instruction for this compound op
+                            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
+                            switch (asgn->op) {
+                            case JS_OP_ADD_ASSIGN: mir_op = MIR_DADD; break;
+                            case JS_OP_SUB_ASSIGN: mir_op = MIR_DSUB; break;
+                            case JS_OP_MUL_ASSIGN: mir_op = MIR_DMUL; break;
+                            case JS_OP_DIV_ASSIGN: mir_op = MIR_DDIV; break;
+                            default: break;
+                            }
+                            if (mir_op != (MIR_insn_code_t)0) {
+                                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+                                if (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_ANY) {
+                                    // Read current value natively
+                                    MIR_reg_t cur_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                                    // Compute RHS natively as float
+                                    MIR_reg_t rhs_f;
+                                    if (rhs_type == LMD_TYPE_ANY) {
+                                        MIR_reg_t rhs_boxed = jm_transpile_box_item(mt, asgn->right);
+                                        rhs_f = jm_emit_unbox_float(mt, rhs_boxed);
+                                    } else {
+                                        rhs_f = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
+                                    }
+                                    // Native MIR arithmetic
+                                    MIR_reg_t result_f = jm_new_reg(mt, "p2r", MIR_T_D);
+                                    jm_emit(mt, MIR_new_insn(mt->ctx, mir_op,
+                                        MIR_new_reg_op(mt->ctx, result_f),
+                                        MIR_new_reg_op(mt->ctx, cur_f),
+                                        MIR_new_reg_op(mt->ctx, rhs_f)));
+                                    // Write back natively
+                                    jm_call_void_3(mt, "js_set_slot_f",
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
+                                        MIR_T_D,  MIR_new_reg_op(mt->ctx, result_f));
+                                    log_debug("P2: native compound %.*s.%.*s op=%d → offset %lld",
+                                              (int)p2_obj->name->len, p2_obj->name->chars,
+                                              (int)p2_prop->name->len, p2_prop->name->chars,
+                                              (int)asgn->op, (long long)byte_offset);
+                                    return jm_box_float(mt, result_f);
+                                }
+                            }
+                        }
+                    }
+                    // P2 fallback: use boxed shaped slot access (still avoids hash lookup)
+                    if (asgn->op == JS_OP_ASSIGN) {
+                        MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
+                        MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                        jm_call_void_3(mt, "js_set_shaped_slot",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p2_slot),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+                        return new_val;
+                    }
+                }
             }
         }
 
@@ -12975,6 +13287,39 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                             var_entry->typed_array_type = ta_type;
                                             log_debug("P9b: var '%s' is typed array type %d (from this.%.*s)",
                                                       vname, ta_type, (int)prop_id->name->len, prop_id->name->chars);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // P4b: Infer class type for variables from subscript access (arr[i]).
+                        // Pattern: const iBody = expr[i] → scan function body for iBody.field accesses
+                        // → find unique class whose constructor has all accessed fields → tag variable.
+                        if (d->init->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                            JsMemberNode* sub = (JsMemberNode*)d->init;
+                            if (sub->computed) {
+                                JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                if (var_entry && !var_entry->class_entry) {
+                                    // get the original variable name (without _js_ prefix)
+                                    const char* orig_name = id->name->chars;
+                                    int orig_len = (int)id->name->len;
+                                    // scan the current function body for field accesses
+                                    JsAstNode* scan_root = NULL;
+                                    if (mt->current_fc && mt->current_fc->node && mt->current_fc->node->body)
+                                        scan_root = mt->current_fc->node->body;
+                                    if (scan_root) {
+                                        char p4b_fields[16][64];
+                                        int p4b_count = 0;
+                                        jm_collect_var_fields_walk(scan_root, orig_name, orig_len,
+                                                                   p4b_fields, &p4b_count, 16);
+                                        if (p4b_count >= 2) {
+                                            JsClassEntry* p4b_ce = jm_match_class_from_fields(mt, p4b_fields, p4b_count);
+                                            if (p4b_ce) {
+                                                var_entry->class_entry = p4b_ce;
+                                                log_debug("P4b: var '%s' inferred as '%.*s' from %d field accesses",
+                                                          vname, (int)p4b_ce->name->len, p4b_ce->name->chars, p4b_count);
+                                            }
                                         }
                                     }
                                 }
