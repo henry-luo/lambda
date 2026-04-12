@@ -106,8 +106,8 @@ static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test 
 static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
 // Slow tests (>= 3s) should be moved to temp/_t262_crashers.txt with SLOW status.
-static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
-static const char* NONBATCH_FILE = "test/js/test262_nonbatch.txt";
+static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
+static const char* NONBATCH_FILE = "test/js262/test262_nonbatch.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.

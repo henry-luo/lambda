@@ -885,7 +885,7 @@ test-c2mir: build-test
 
 # test262 baseline: run only tests in baseline, must pass 100%
 test262-baseline: build-test
-	@echo "Running test262 baseline ($(shell wc -l < test/js/test262_baseline.txt | tr -d ' ') entries)..."
+	@echo "Running test262 baseline ($(shell wc -l < test/js262/test262_baseline.txt | tr -d ' ') entries)..."
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only
 
 # test262 full: run all discovered test262 tests (slow, ~5min)
