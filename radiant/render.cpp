@@ -862,12 +862,17 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         parent = parent->parent;
     }
 
-    // Check if parent inline element has a background color to render
+    // Check if parent inline element has a background color to render.
+    // Only paint per-fragment backgrounds for true inline parents (e.g., <span>, <em>).
+    // Block-level parents (flex items, blocks, table cells) already have their
+    // background painted by render_bound — re-painting here with padding offsets
+    // would cover sibling elements like inline SVGs.
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
     Color* bg_color = nullptr;
     float bg_pad_top = 0, bg_pad_right = 0, bg_pad_bottom = 0, bg_pad_left = 0;
     float bg_radius = 0;
-    if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
+    if (parent_elem && parent_elem->view_type == RDT_VIEW_INLINE &&
+        parent_elem->bound && parent_elem->bound->background &&
         parent_elem->bound->background->color.a > 0) {
         bg_color = &parent_elem->bound->background->color;
         // include parent inline padding in per-fragment background

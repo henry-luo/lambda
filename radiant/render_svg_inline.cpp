@@ -2310,6 +2310,11 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
 
+    log_debug("[SVG] render_inline_svg: doc pos=(%.1f,%.1f) block pos=(%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f)",
+              x, y, rdcon->block.x, rdcon->block.y,
+              rdcon->block.clip.left, rdcon->block.clip.top,
+              rdcon->block.clip.right, rdcon->block.clip.bottom);
+
     // build base transform: Translate(x,y) * Scale(scale)
     RdtMatrix base_transform = {
         scale, 0, x,
