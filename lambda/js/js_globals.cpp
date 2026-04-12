@@ -6404,6 +6404,9 @@ extern "C" void js_globals_batch_reset() {
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
     js_ctor_cache_reset();
+    // reset global builtin function cache (JsFunctionLayout* in old pool)
+    extern void js_global_builtin_fn_cache_reset();
+    js_global_builtin_fn_cache_reset();
     // reset process.argv cache and process object
     js_process_argv_items = (Item){.item = ITEM_NULL};
     js_process_object = (Item){.item = ITEM_NULL};
@@ -6522,6 +6525,10 @@ extern "C" Item js_get_global_property_strict(Item key) {
 #define GLOBAL_BUILTIN_CACHE_SIZE 32
 static Item global_builtin_fn_cache[GLOBAL_BUILTIN_CACHE_SIZE];
 static bool global_builtin_fn_cache_init = false;
+
+void js_global_builtin_fn_cache_reset() {
+    global_builtin_fn_cache_init = false;
+}
 
 extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) {
     if (!global_builtin_fn_cache_init) {

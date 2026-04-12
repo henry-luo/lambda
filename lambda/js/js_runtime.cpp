@@ -301,6 +301,9 @@ extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
+// forward declarations for module namespace cache resets
+extern "C" void js_child_process_reset();
+extern "C" void js_fs_reset();
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -346,6 +349,9 @@ extern "C" void js_batch_reset() {
     // deep reset: generators, promises, async contexts, pending calls
     extern void js_deep_batch_reset();
     js_deep_batch_reset();
+    // reset module namespace caches (pool-allocated function wrappers become dangling)
+    js_child_process_reset();
+    js_fs_reset();
 }
 
 // Get current module var count (for checkpointing)

@@ -541,6 +541,6 @@ extern "C" Item js_get_fs_namespace(void) {
 }
 
 // Reset fs namespace (for re-initialization between runs)
-void js_fs_reset(void) {
+extern "C" void js_fs_reset(void) {
     fs_namespace = (Item){0};
 }

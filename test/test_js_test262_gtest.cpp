@@ -832,6 +832,7 @@ struct BatchTiming {
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
+static std::unordered_map<std::string, std::string> known_crasher_tags;  // test_name → original tag (e.g. "CRASH_139")
 static std::set<std::string> g_nonbatch_tests;  // tests that must run individually (from test262_nonbatch.txt)
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
@@ -914,6 +915,9 @@ static void load_known_crashers(const char* path) {
             name_start[--len] = '\0';
         if (len > 0) {
             g_known_crashers.insert(std::string(name_start));
+            // Store the tag (e.g. "CRASH_139") for use in quarantine retention logic
+            *first_tab = '\0';  // null-terminate the tag
+            known_crasher_tags[std::string(name_start)] = std::string(buf);
             if (strncmp(buf, "SLOW_", 5) == 0)
                 g_known_slow_tests.insert(std::string(name_start));
         }
@@ -1593,6 +1597,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
     }
     if (!lost_indices.empty()) {
+        auto retry_start = std::chrono::steady_clock::now();
         fprintf(stderr, "[test262] Phase 2b (retry): %zu batch-lost tests, re-running in small batches...\n",
                 lost_indices.size());
 
@@ -1647,7 +1652,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
 
         auto retry_time = std::chrono::steady_clock::now();
-        double retry_secs = std::chrono::duration<double>(retry_time - exec_time).count();
+        double retry_secs = std::chrono::duration<double>(retry_time - retry_start).count();
         fprintf(stderr, "[test262] Phase 2b (retry): %.1fs — recovered %zu of %zu lost tests\n",
                 retry_secs, recovered, lost_indices.size());
 
@@ -1723,8 +1728,14 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // skip timeout tests — they are already above, don't re-emit as CRASH_
             written.insert(timeout_names.begin(), timeout_names.end());
 
-            // Retain previously-quarantined crashers that still crash in Phase 2a.
-            // (Tests that pass individually in Phase 2a are removed from quarantine.)
+            // Retain previously-quarantined crashers.
+            // CRASH entries are kept even if they pass individually in Phase 2a,
+            // because they may only crash when running in batch context (shared
+            // heap state causes SIGSEGV/SIGBUS). Removing and re-adding them each
+            // run causes quarantine oscillation — they crash in batch, get quarantined,
+            // pass individually, get un-quarantined, crash again in batch, etc.
+            // MISSING entries are removed if they pass individually (they were likely
+            // collateral from a batch kill, not inherently crashing).
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
@@ -1737,8 +1748,17 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                             p.test_name.c_str(), p.test_path.c_str());
                     written.insert(p.test_name);
                     crash_exit++;
+                } else if (known_crasher_tags.count(p.test_name) &&
+                           known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
+                    // Was a CRASH entry — keep quarantined even though it passed individually.
+                    // The original crash tag is preserved so it can be re-quarantined next run.
+                    fprintf(crasher_log, "%s\t%s\t%s\n",
+                            known_crasher_tags[p.test_name].c_str(),
+                            p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
+                    crash_exit++;
                 }
-                // else: test passed individually → removed from quarantine
+                // else: MISSING/SLOW test passed individually → removed from quarantine
             }
 
             // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
