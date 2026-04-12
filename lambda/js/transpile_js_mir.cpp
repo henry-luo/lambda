@@ -9901,6 +9901,143 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return r;
             }
 
+            // P3: Direct method dispatch for known class instances
+            // When receiver is 'this' (current_class known) or a named var with class_entry,
+            // resolve the method at compile time and emit a direct MIR call, bypassing:
+            //   js_map_method (670 lines of type checks) → js_property_access (hash + prototype walk)
+            //   → js_call_function (type check + this binding + invoke)
+            if (!m->computed && prop && prop->name) {
+                JsClassEntry* p3_ce = NULL;
+                bool p3_recv_is_this = (m->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                    ((JsIdentifierNode*)m->object)->name->len == 4 &&
+                    strncmp(((JsIdentifierNode*)m->object)->name->chars, "this", 4) == 0);
+                if (p3_recv_is_this && mt->current_class) {
+                    p3_ce = mt->current_class;
+                } else if (m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+                    JsMirVarEntry* obj_var = jm_find_var(mt, vname);
+                    if (obj_var && obj_var->class_entry) {
+                        p3_ce = obj_var->class_entry;
+                    }
+                }
+                if (p3_ce) {
+                    // Search class + superclass chain for the method
+                    JsClassMethodEntry* p3_method = NULL;
+                    for (JsClassEntry* sc = p3_ce; sc && !p3_method; sc = sc->superclass) {
+                        for (int i = 0; i < sc->method_count; i++) {
+                            JsClassMethodEntry* me = &sc->methods[i];
+                            if (me->is_constructor || me->is_static) continue;
+                            if (me->is_getter || me->is_setter) continue;
+                            if (!me->name || !me->fc) continue;
+                            if (me->name->len == prop->name->len &&
+                                strncmp(me->name->chars, prop->name->chars, me->name->len) == 0) {
+                                p3_method = me;
+                                break;
+                            }
+                        }
+                    }
+
+                    // For 'this' receiver, check if any subclass overrides this method.
+                    // If overridden, we can't devirtualize because 'this' might be a subclass.
+                    // Named vars (from new ClassName()) are exact types — no override check needed.
+                    bool p3_overridden = false;
+                    if (p3_method && p3_recv_is_this) {
+                        for (int ci = 0; ci < mt->class_count && !p3_overridden; ci++) {
+                            JsClassEntry* sub = &mt->class_entries[ci];
+                            if (sub == p3_ce) continue;
+                            // Check if sub is a subclass of p3_ce
+                            bool is_sub = false;
+                            for (JsClassEntry* walker = sub->superclass; walker; walker = walker->superclass) {
+                                if (walker == p3_ce) { is_sub = true; break; }
+                            }
+                            if (!is_sub) continue;
+                            // Check if sub overrides the method
+                            for (int mi = 0; mi < sub->method_count; mi++) {
+                                JsClassMethodEntry* sme = &sub->methods[mi];
+                                if (sme->is_constructor || sme->is_static) continue;
+                                if (!sme->name) continue;
+                                if (sme->name->len == prop->name->len &&
+                                    strncmp(sme->name->chars, prop->name->chars, sme->name->len) == 0) {
+                                    p3_overridden = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (p3_method && p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
+                        log_debug("P3: direct method call %.*s.%.*s() in %s",
+                            (int)(p3_ce->name ? p3_ce->name->len : 0),
+                            p3_ce->name ? p3_ce->name->chars : "",
+                            (int)prop->name->len, prop->name->chars,
+                            mt->current_fc ? mt->current_fc->name : "__main__");
+
+                        int p3_param_count = p3_method->param_count;
+
+                        // Transpile arguments FIRST, before changing 'this'.
+                        // Args may reference 'this' (e.g., object.add(name, this.readValue()))
+                        // and must see the original 'this', not the P3 receiver.
+                        MIR_reg_t* p3_arg_regs = (MIR_reg_t*)alloca(p3_param_count * sizeof(MIR_reg_t));
+                        JsAstNode* p3_arg = call->arguments;
+                        for (int i = 0; i < p3_param_count; i++) {
+                            if (p3_arg) {
+                                p3_arg_regs[i] = jm_transpile_box_item(mt, p3_arg);
+                                p3_arg = p3_arg->next;
+                            } else {
+                                p3_arg_regs[i] = jm_new_reg(mt, "p3u", MIR_T_I64);
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_reg_op(mt->ctx, p3_arg_regs[i]),
+                                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                            }
+                        }
+
+                        // Save/set this, clear new.target (AFTER arg transpilation)
+                        MIR_reg_t p3_prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                        jm_call_void_1(mt, "js_set_this",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                        MIR_reg_t p3_prev_nt = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+                        MIR_reg_t p3_undef = jm_emit_undefined(mt);
+                        jm_call_void_1(mt, "js_set_direct_new_target",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_undef));
+
+                        // Build proto + call ops
+                        char p3_pname[160];
+                        snprintf(p3_pname, sizeof(p3_pname), "%s_p3_%d", p3_method->fc->name, mt->label_counter++);
+                        MIR_var_t* p3_pargs = (MIR_var_t*)alloca(p3_param_count * sizeof(MIR_var_t));
+                        for (int i = 0; i < p3_param_count; i++) {
+                            p3_pargs[i] = {MIR_T_I64, "a", 0};
+                        }
+                        MIR_type_t p3_ret[1] = {MIR_T_I64};
+                        MIR_item_t p3_proto = MIR_new_proto_arr(mt->ctx, p3_pname, 1, p3_ret, p3_param_count, p3_pargs);
+
+                        int p3_nops = 3 + p3_param_count;
+                        MIR_op_t* p3_ops = (MIR_op_t*)alloca(p3_nops * sizeof(MIR_op_t));
+                        int p3_oi = 0;
+                        p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_proto);
+                        p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_method->fc->func_item);
+                        MIR_reg_t p3_result = jm_new_reg(mt, "p3call", MIR_T_I64);
+                        p3_ops[p3_oi++] = MIR_new_reg_op(mt->ctx, p3_result);
+
+                        // Use pre-transpiled argument registers
+                        for (int i = 0; i < p3_param_count; i++) {
+                            p3_ops[p3_oi++] = MIR_new_reg_op(mt->ctx, p3_arg_regs[i]);
+                        }
+
+                        jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p3_nops, p3_ops));
+
+                        // Restore this + new.target
+                        jm_call_void_1(mt, "js_set_this",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_prev_this));
+                        jm_call_void_1(mt, "js_set_direct_new_target",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_prev_nt));
+
+                        jm_readback_closure_env(mt);
+                        return p3_result;
+                    }
+                }
+            }
+
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
 
@@ -9940,7 +10077,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
             }
             if (recv_type == LMD_TYPE_MAP) {
-                // Known map receiver — dispatch through js_map_method which handles
+                // Fallback: dispatch through js_map_method which handles
                 // collections (Map/Set) and falls back to property access + call
                 MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
