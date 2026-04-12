@@ -6695,7 +6695,7 @@ struct JsCtor {
     int16_t formal_length; // must match JsFunction layout
 };
 
-// Reset constructor prototype objects and globalThis between batch tests.
+// Reset constructor prototype objects between batch tests.
 // Tests may mutate built-in prototypes (e.g., Object.prototype.__proto__,
 // Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
 // Clearing the prototype field forces lazy re-creation of a fresh prototype
@@ -6708,10 +6708,11 @@ extern "C" void js_reset_constructor_prototypes() {
         JsCtor* ctor = (JsCtor*)js_constructor_cache[i].function;
         if (ctor) {
             ctor->prototype = ItemNull;
-            ctor->properties_map = (Item){0};
         }
     }
-    // Clear globalThis so it's re-populated with constructors that have fresh prototypes
+    // Clear globalThis so constructor .prototype references are refreshed on next access.
+    // The old globalThis holds constructors whose .prototype fields now point to stale
+    // (freed or mutated) prototype objects.
     js_global_this_obj = (Item){0};
 }
 

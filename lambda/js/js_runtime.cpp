@@ -350,8 +350,7 @@ extern "C" void js_batch_reset() {
     extern void js_deep_batch_reset();
     js_deep_batch_reset();
     // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.) which persist on
-    // cached constructor objects.  Reset prototype fields to force lazy re-creation.
+    // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
     // reset module namespace caches (pool-allocated function wrappers become dangling)
@@ -409,8 +408,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     extern void js_deep_batch_reset();
     js_deep_batch_reset();
     // reset constructor prototypes and globalThis — tests may mutate built-in
-    // prototypes (Object.prototype, Error.prototype, etc.) which persist on
-    // cached constructor objects.  Reset prototype fields to force lazy re-creation.
+    // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
 }
