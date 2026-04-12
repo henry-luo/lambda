@@ -793,7 +793,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // summary elements use inside marker position (disclosure triangle before text)
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->list_style_position = (CssEnum)1;  // 1 = inside
-        block->blk->list_style_type = CSS_VALUE_DISC;   // disc as proxy for disclosure triangle
+        block->blk->list_style_type = CSS_VALUE_DISCLOSURE_CLOSED;
         break;
     // ========== Table elements ==========
     case HTM_TAG_TABLE: {

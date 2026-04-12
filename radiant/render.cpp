@@ -1120,7 +1120,19 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                 auto t1 = std::chrono::high_resolution_clock::now();
                 FontStyleDesc _sd2 = font_style_desc_from_prop(rdcon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd2, render_cp, true);
+                // Peek ahead for VS16 (U+FE0F) — forces emoji/color presentation
+                bool emoji_presentation = false;
+                if (p < end) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) {
+                        emoji_presentation = true;
+                        log_debug("render emoji: VS16 peek hit for U+%04X", render_cp);
+                    }
+                }
+                LoadedGlyph* glyph = emoji_presentation
+                    ? font_load_glyph_emoji(rdcon->font.font_handle, &_sd2, render_cp, true)
+                    : font_load_glyph(rdcon->font.font_handle, &_sd2, render_cp, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -1449,6 +1461,48 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
             rdt_fill_rect(&rdcon->vec, sx, sy, bullet_size, bullet_size, color);
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
+            break;
+        }
+
+        case CSS_VALUE_DISCLOSURE_CLOSED: {
+            // Right-pointing triangle ▸ for <summary> elements
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            float cy = y + baseline_offset - font_size * 0.35f;
+
+            RdtPath* p = rdt_path_new();
+            // right-pointing triangle: left edge at cx, top at cy - tri_size/2, bottom at cy + tri_size/2
+            rdt_path_move_to(p, cx, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx + tri_size, cy);
+            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_close(p);
+            rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
+            log_debug("[MARKER RENDER] Drew disclosure-closed triangle at (%.1f, %.1f)", cx, cy);
+            break;
+        }
+
+        case CSS_VALUE_DISCLOSURE_OPEN: {
+            // Down-pointing triangle ▾ for open <details> elements
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            float cy = y + baseline_offset - font_size * 0.35f;
+
+            RdtPath* p = rdt_path_new();
+            // down-pointing triangle
+            rdt_path_move_to(p, cx - tri_size / 2.0f, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx + tri_size / 2.0f, cy - tri_size / 2.0f);
+            rdt_path_line_to(p, cx, cy + tri_size / 2.0f);
+            rdt_path_close(p);
+            rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(p);
+            log_debug("[MARKER RENDER] Drew disclosure-open triangle at (%.1f, %.1f)", cx, cy);
             break;
         }
 

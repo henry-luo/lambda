@@ -217,6 +217,12 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering);
 
+// Like font_load_glyph but skips the primary font and forces codepoint
+// fallback to an emoji font. Used when VS16 (U+FE0F) follows a dual-
+// presentation codepoint to force emoji/color rendering.
+LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* style,
+                                    uint32_t codepoint, bool for_rendering);
+
 // ============================================================================
 // Text Measurement — convenience for layout
 // ============================================================================

@@ -2374,7 +2374,18 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 wd = unicode_space_em * lycon->font.current_font_size * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
+                // Peek ahead for VS16 (U+FE0F) — forces emoji/color presentation
+                bool emoji_presentation = false;
+                if (next_ch) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)next_ch, (size_t)(text_end - next_ch), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) {
+                        emoji_presentation = true;
+                    }
+                }
+                LoadedGlyph* glyph = emoji_presentation
+                    ? font_load_glyph_emoji(lycon->font.font_handle, &_sd, codepoint, false)
+                    : font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;

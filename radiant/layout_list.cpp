@@ -567,10 +567,17 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     }
 
     // Generate list marker if list-style-type is not 'none'
-    // CSS 2.1 §12.5: Initial value of list-style-type is 'disc'.
+    // CSS 2.1 §12.5: list-style-type is inherited. Check element first, then parent.
     CssEnum effective_list_style = block->blk ? block->blk->list_style_type : (CssEnum)0;
     if (effective_list_style == 0) {
-        effective_list_style = CSS_VALUE_DISC;
+        // Inherit from parent <ol>/<ul> element
+        DomElement* parent_elem = dom_element_get_parent(dom_elem);
+        if (parent_elem && parent_elem->blk) {
+            effective_list_style = parent_elem->blk->list_style_type;
+        }
+        if (effective_list_style == 0) {
+            effective_list_style = CSS_VALUE_DISC;
+        }
     }
 
     // CSS Lists 3 §4.1: check for string marker value
@@ -615,7 +622,9 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     bool is_bullet_marker = !is_string_marker && !marker_css_content &&
                             (marker_style == CSS_VALUE_DISC ||
                             marker_style == CSS_VALUE_CIRCLE ||
-                            marker_style == CSS_VALUE_SQUARE);
+                            marker_style == CSS_VALUE_SQUARE ||
+                            marker_style == CSS_VALUE_DISCLOSURE_CLOSED ||
+                            marker_style == CSS_VALUE_DISCLOSURE_OPEN);
 
     if (!block->pseudo) {
         block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));

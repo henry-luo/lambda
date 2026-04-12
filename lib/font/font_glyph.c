@@ -10,6 +10,7 @@
 
 #include "font_internal.h"
 
+#include "../memtrack.h"
 #include <math.h>
 
 // ============================================================================
@@ -720,6 +721,50 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     }
 
     return NULL;
+}
+
+LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* style,
+                                    uint32_t codepoint, bool for_rendering) {
+    if (!handle || !style) return NULL;
+    FontContext* ctx = handle->ctx;
+    if (!ctx) return font_load_glyph(handle, style, codepoint, for_rendering);
+
+    // Use platform emoji font lookup: passes codepoint + VS16 (U+FE0F) to
+    // CoreText so it selects Apple Color Emoji instead of a CJK text font.
+    float pixel_ratio = ctx->config.pixel_ratio;
+    float physical_size = style->size_px * pixel_ratio;
+
+    int face_index = 0;
+    char* font_path = font_platform_find_emoji_font(codepoint, &face_index);
+    if (font_path) {
+        FontHandle* emoji_handle = font_load_face_internal(
+            ctx, font_path, face_index,
+            style->size_px, physical_size,
+            style->weight, style->slant);
+        mem_free(font_path);
+
+        if (emoji_handle) {
+            LoadedGlyph* result = NULL;
+#ifdef __APPLE__
+            if (emoji_handle->ct_raster_ref) {
+                result = try_load_from_handle_ct(emoji_handle, codepoint);
+            }
+#else
+            FT_Int32 load_flags = for_rendering
+                ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+                : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+            result = try_load_from_handle(emoji_handle, codepoint, load_flags);
+#endif
+            if (result) {
+                fill_loaded_glyph_font_metrics(emoji_handle);
+            }
+            font_handle_release(emoji_handle);
+            if (result) return result;
+        }
+    }
+
+    // If emoji font lookup didn't work, fall back to normal loading
+    return font_load_glyph(handle, style, codepoint, for_rendering);
 }
 
 // ============================================================================
