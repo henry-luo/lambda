@@ -1694,7 +1694,8 @@ static void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names) {
 }
 
 static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
-                                struct hashmap* module_consts) {
+                                struct hashmap* module_consts,
+                                struct hashmap* ancestor_func_locals) {
     JsFunctionNode* fn = fc->node;
     fc->capture_count = 0;
 
@@ -1738,8 +1739,10 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
             continue; // handle after we know if there are other captures
         }
         // Skip module-level constants — they're resolved at compile time via module_consts,
-        // not at runtime via closure environment
-        if (module_consts) {
+        // not at runtime via closure environment.
+        // BUT: if a parent function declares a local with the same name, the parent's
+        // local shadows the module constant, so we must capture it.
+        if (module_consts && !(ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name))) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
@@ -2386,9 +2389,10 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         case JS_OP_MOD:
-            // modulo: int%int → int; float mod handled by runtime (no native DMOD)
-            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
-                return LMD_TYPE_INT;
+            // modulo uses fmod() → always returns float (handles x%0 → NaN)
+            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
+                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
+                return LMD_TYPE_FLOAT;
             return LMD_TYPE_ANY;
         case JS_OP_BIT_AND: case JS_OP_BIT_OR: case JS_OP_BIT_XOR:
         case JS_OP_BIT_LSHIFT: case JS_OP_BIT_RSHIFT: case JS_OP_BIT_URSHIFT:
@@ -2706,9 +2710,6 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         // Determine if the native path is actually taken
         bool native_binary = both_numeric &&
             bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
-        if (native_binary && bin->op == JS_OP_MOD) {
-            native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
-        }
         // Comparisons return native 0/1 only when BOTH sides are typed numeric.
         // With one untyped side, the comparison falls through to boxed runtime
         // and returns a boxed boolean Item, not a native value.
@@ -4420,7 +4421,7 @@ static bool jm_expression_has_float_hint(JsAstNode* node) {
     }
     case JS_AST_NODE_BINARY_EXPRESSION: {
         JsBinaryNode* bin = (JsBinaryNode*)node;
-        if (bin->op == JS_OP_DIV) return true;
+        if (bin->op == JS_OP_DIV || bin->op == JS_OP_MOD) return true;
         return jm_expression_has_float_hint(bin->left) || jm_expression_has_float_hint(bin->right);
     }
     case JS_AST_NODE_UNARY_EXPRESSION: {
@@ -5138,15 +5139,13 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             }
         }
         case JS_OP_MOD: {
-            if (both_int) {
-                MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
-                MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
-                MIR_reg_t r = jm_new_reg(mt, "mod", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOD,
-                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
-                return r;
-            }
-            break;  // float modulo → fall through to boxed runtime
+            // Use float modulo for both int and float: correctly handles x % 0 → NaN
+            MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
+            MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
+            MIR_reg_t fmod_r = jm_call_2(mt, "fmod", MIR_T_D,
+                MIR_T_D, MIR_new_reg_op(mt->ctx, fl),
+                MIR_T_D, MIR_new_reg_op(mt->ctx, fr));
+            return fmod_r;
         }
         case JS_OP_EXP:
             break;  // power → fall through to boxed runtime (no native MIR op)
@@ -11523,13 +11522,9 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
         bool both_numeric = left_num && right_num;
         // Native path is only taken if both_numeric AND the op is handled natively
-        // (EXP, AND, OR, float MOD fall through to boxed runtime)
+        // (EXP, AND, OR fall through to boxed runtime)
         bool native_binary = both_numeric &&
             bin->op != JS_OP_EXP && bin->op != JS_OP_AND && bin->op != JS_OP_OR;
-        if (native_binary && bin->op == JS_OP_MOD) {
-            // Float modulo falls through to boxed
-            native_binary = (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT);
-        }
         // Comparisons return native 0/1 only when BOTH sides are typed numeric.
         // With one untyped side, comparison falls to boxed runtime (returns Item).
         TypeId etype = jm_get_effective_type(mt, item);
@@ -18479,6 +18474,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // ALL functions indiscriminately (the loop at lines 13118+).
             // Instead, only add names from the actual ancestor chain.
             // Strategy: walk parent_index chain and add params+locals from each ancestor.
+            // Also build a separate set of ancestor function-local names (not module-level)
+            // so we can detect when a parent function's local shadows a module constant.
+            struct hashmap* ancestor_func_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
             int ancestor_idx = fc->parent_index;
             while (ancestor_idx >= 0 && ancestor_idx < mt->func_count) {
                 JsFuncCollected* anc = &mt->func_entries[ancestor_idx];
@@ -18488,6 +18487,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 JsAstNode* ap = afn->params;
                 while (ap) {
                     jm_collect_pattern_names(ap, ancestor_names);
+                    jm_collect_pattern_names(ap, ancestor_func_locals);
                     ap = ap->next;
                 }
                 // Add ancestor's function name (for recursive references)
@@ -18495,6 +18495,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     char aname[128];
                     snprintf(aname, sizeof(aname), "_js_%.*s", (int)afn->name->len, afn->name->chars);
                     jm_name_set_add(ancestor_names, aname);
+                    jm_name_set_add(ancestor_func_locals, aname);
                 }
                 // Add ancestor's body locals
                 if (afn->body) {
@@ -18505,13 +18506,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     while (hashmap_iter(anc_locals, &al_iter, &al_item)) {
                         JsNameSetEntry* e = (JsNameSetEntry*)al_item;
                         jm_name_set_add(ancestor_names, e->name);
+                        jm_name_set_add(ancestor_func_locals, e->name);
                     }
                     hashmap_free(anc_locals);
                 }
                 ancestor_idx = anc->parent_index;
             }
 
-            jm_analyze_captures(fc, ancestor_names, mt->module_consts);
+            jm_analyze_captures(fc, ancestor_names, mt->module_consts, ancestor_func_locals);
+            hashmap_free(ancestor_func_locals);
             hashmap_free(ancestor_names);
         }
 
