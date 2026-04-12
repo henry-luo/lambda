@@ -1226,37 +1226,39 @@ struct TableMetadata {
     float collapsed_border_bottom;
     float collapsed_border_left;
 
-    TableMetadata(int cols, int rows)
-        : column_count(cols), row_count(rows),
+    ScratchArena* sa;  // scratch allocator (not owned)
+
+    TableMetadata(ScratchArena* scratch, int cols, int rows)
+        : column_count(cols), row_count(rows), sa(scratch),
           collapsed_border_top(0), collapsed_border_right(0),
           collapsed_border_bottom(0), collapsed_border_left(0) {
-        grid_occupied = (bool*)mem_calloc(rows * cols, sizeof(bool), MEM_CAT_LAYOUT);
-        col_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
-        col_min_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Minimum content widths (CSS MCW)
-        col_max_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Preferred content widths (CSS PCW)
-        row_heights = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
-        row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
-        row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
-        col_collapsed = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
-        col_original_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
-        row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
-        col_edge_max_border = (float*)mem_calloc(cols + 1, sizeof(float), MEM_CAT_LAYOUT);
-        col_has_explicit_width = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
+        grid_occupied = (bool*)scratch_calloc(sa, rows * cols * sizeof(bool));
+        col_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        col_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        col_max_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        row_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
+        row_y_positions = (float*)scratch_calloc(sa, rows * sizeof(float));
+        row_collapsed = (bool*)scratch_calloc(sa, rows * sizeof(bool));
+        col_collapsed = (bool*)scratch_calloc(sa, cols * sizeof(bool));
+        col_original_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        row_has_percent_height = (bool*)scratch_calloc(sa, rows * sizeof(bool));
+        col_edge_max_border = (float*)scratch_calloc(sa, (cols + 1) * sizeof(float));
+        col_has_explicit_width = (bool*)scratch_calloc(sa, cols * sizeof(bool));
     }
 
     ~TableMetadata() {
-        mem_free(grid_occupied);
-        mem_free(col_widths);
-        mem_free(col_min_widths);
-        mem_free(col_max_widths);
-        mem_free(row_heights);
-        mem_free(row_y_positions);
-        mem_free(row_collapsed);
-        mem_free(col_collapsed);
-        mem_free(col_original_widths);
-        mem_free(row_has_percent_height);
-        mem_free(col_edge_max_border);
-        mem_free(col_has_explicit_width);
+        scratch_free(sa, col_has_explicit_width);
+        scratch_free(sa, col_edge_max_border);
+        scratch_free(sa, row_has_percent_height);
+        scratch_free(sa, col_original_widths);
+        scratch_free(sa, col_collapsed);
+        scratch_free(sa, row_collapsed);
+        scratch_free(sa, row_y_positions);
+        scratch_free(sa, row_heights);
+        scratch_free(sa, col_max_widths);
+        scratch_free(sa, col_min_widths);
+        scratch_free(sa, col_widths);
+        scratch_free(sa, grid_occupied);
     }
 
     // Grid accessor
@@ -5198,7 +5200,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     }
 
     // Create metadata structure
-    TableMetadata* meta = new TableMetadata(columns, rows);
+    TableMetadata* meta = new TableMetadata(&lycon->scratch, columns, rows);
 
     // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
@@ -5963,7 +5965,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         log_debug("Content width for columns: %dpx", content_width);
         // STEP 3: Read explicit column widths from FIRST ROW cells
-        float* explicit_col_widths = (float*)mem_calloc(columns, sizeof(float), MEM_CAT_LAYOUT);
+        float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
         // Find first row using navigation helper
@@ -6083,7 +6085,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // STEP 5: Replace col_widths with fixed layout widths
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
-        mem_free(explicit_col_widths);
+        scratch_free(&lycon->scratch, explicit_col_widths);
 
         log_debug("=== FIXED LAYOUT COMPLETE ===");
         for (int i = 0; i < columns; i++) {
@@ -6666,7 +6668,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Step 4: Position cells and calculate row heights with CSS 2.1 border model
 
-    float* col_x_positions = (float*)mem_calloc(columns + 1, sizeof(float), MEM_CAT_LAYOUT);
+    float* col_x_positions = (float*)scratch_calloc(&lycon->scratch, (columns + 1) * sizeof(float));
 
     // Start with table padding and left border-spacing for separate border model
     // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
@@ -8622,7 +8624,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
     delete meta;
-    mem_free(col_x_positions);
+    scratch_free(&lycon->scratch, col_x_positions);
 
     #undef GRID
 }

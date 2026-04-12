@@ -196,7 +196,7 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
 void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);
 
 // Grid item positioning and alignment
-void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container);
+void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 
@@ -207,7 +207,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(struct LayoutContext* lycon, 
 int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line);
 
 // Grid template area parsing
-void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string);
+void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
 void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 
 // Grid content layout functions - now in layout_grid_multipass.cpp
