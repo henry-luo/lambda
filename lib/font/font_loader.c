@@ -288,7 +288,7 @@ static void file_data_cache_insert(FontContext* ctx, const char* path,
                                     uint8_t* data, size_t len) {
     struct hashmap* cache = ensure_file_data_cache(ctx);
     if (!cache) return;
-    char* dup_path = mem_strdup(path, MEM_CAT_FONT);
+    char* dup_path = strdup(path);  // raw strdup: freed by file_data_free/raw free
     FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len, .ref_count = 1};
     FontFileDataEntry* old = (FontFileDataEntry*)hashmap_set(cache, &entry);
     if (old) {
@@ -365,7 +365,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                                 size_px, physical_size, weight, slant);
 #endif
             if (handle) {
-                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
+                handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
             }
@@ -425,7 +425,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                             size_px, physical_size, weight, slant);
 #endif
         if (handle) {
-            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
+            handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
             log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);
         }
@@ -455,7 +455,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                                 size_px, physical_size, weight, slant);
 #endif
             if (handle) {
-                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
+                handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
             }
@@ -503,7 +503,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                             size_px, physical_size, weight, slant);
 #endif
         if (handle) {
-            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
+            handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
             log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);
         }

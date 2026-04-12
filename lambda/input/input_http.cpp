@@ -32,7 +32,7 @@ static HttpConfig default_http_config = {
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_INPUT_OTHER);
+    char* new_data = (char*)realloc(response->data, response->size + total_size + 1);  // raw realloc: callers free() the result
 
     if (!new_data) {
         log_error("HTTP: Memory allocation failed");
@@ -121,7 +121,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (res != CURLE_OK) {
         log_error("HTTP: Download failed: %s", curl_easy_strerror(res));
-        mem_free(response.data);
+        free(response.data);  // raw free: matches raw realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -132,7 +132,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
-        mem_free(response.data);
+        free(response.data);  // raw free: matches raw realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
