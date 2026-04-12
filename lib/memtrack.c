@@ -1136,3 +1136,27 @@ int32_t memtrack_get_pool_count(void) {
 int32_t memtrack_get_arena_count(void) {
     return g_memtrack.arena_count;
 }
+
+// ============================================================================
+// Raw Allocation Escape Hatches
+// ============================================================================
+
+void* raw_malloc(size_t size) {
+    return malloc(size);
+}
+
+void* raw_calloc(size_t count, size_t size) {
+    return calloc(count, size);
+}
+
+void* raw_realloc(void* ptr, size_t new_size) {
+    return realloc(ptr, new_size);
+}
+
+void raw_free(void* ptr) {
+    free(ptr);
+}
+
+char* raw_strdup(const char* str) {
+    return str ? strdup(str) : NULL;
+}

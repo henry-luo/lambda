@@ -7,6 +7,7 @@
 #include "../mark_builder.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/strbuf.h"
+#include "../../lib/memtrack.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -44,7 +45,7 @@ public:
         : input_(input)
         , builder(input)
         , errors_(100)
-        , owned_source_((char*)malloc(len + 1))
+        , owned_source_((char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER))
         , owned_source_len_(len)
         , msg_buf_(strbuf_new_cap(256))
         , tracker(owned_source_, len)
@@ -63,7 +64,7 @@ public:
 
     // Destructor
     ~InputContext() {
-        if (owned_source_) free(owned_source_);
+        if (owned_source_) mem_free(owned_source_);
         strbuf_free(msg_buf_);
     }
 

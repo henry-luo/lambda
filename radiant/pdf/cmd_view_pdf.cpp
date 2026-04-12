@@ -833,14 +833,14 @@ int view_pdf_in_window(const char* pdf_file) {
     Input* input = InputManager::create_input(nullptr); // URL not needed for direct parsing
     if (!input) {
         log_error("Failed to create Input structure");
-        free(pdf_content);
+        mem_free(pdf_content);
         return 1;
     }
 
     // Parse PDF content with explicit size
     log_info("Parsing PDF content...");
     parse_pdf(input, pdf_content, pdf_size);
-    free(pdf_content); // Done with raw content
+    mem_free(pdf_content); // Done with raw content
 
     // Check if parsing succeeded
     if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {

@@ -1228,12 +1228,12 @@ EventSimContext* event_sim_load(const char* json_file) {
     Input* input = InputManager::create_input(url);
     if (!input) {
         log_error("event_sim: failed to create input for JSON parsing");
-        free(json_content);
+        mem_free(json_content);
         return NULL;
     }
 
     parse_json(input, json_content);
-    free(json_content);
+    mem_free(json_content);
 
     // Check if parsing succeeded
     if (input->root.item == 0) {

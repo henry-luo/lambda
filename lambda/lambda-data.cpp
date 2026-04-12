@@ -2,6 +2,7 @@
 #include "lambda-decimal.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
 #ifndef LAMBDA_STATIC
@@ -19,7 +20,7 @@ Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
 extern "C" {
     __attribute__((weak))
     void* heap_data_alloc(size_t size) {
-        return malloc(size);
+        return raw_malloc(size);  // RAWALLOC_OK: GC heap allocation — managed by garbage collector, not memtrack
     }
 }
 

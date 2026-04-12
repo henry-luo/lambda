@@ -449,8 +449,10 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     return ItemNull;
 }
 
-// Process argv storage
+// Process argv storage — C-level copy (safe before heap init)
 static Item js_process_argv_items = {.item = ITEM_NULL};
+static const char** js_process_argv_raw = NULL;
+static int js_process_argc_raw = 0;
 
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
@@ -742,8 +744,14 @@ extern "C" Item js_date_parse(Item str_item) {
     return (Item){.item = d2it(fp)};
 }
 
+extern "C" void js_store_process_argv(int argc, const char** argv) {
+    // Store C-level copy — no heap allocation (safe before runtime context is ready)
+    js_process_argc_raw = argc;
+    js_process_argv_raw = argv;
+}
+
 extern "C" void js_set_process_argv(int argc, const char** argv) {
-    // Build a Lambda array from the argv
+    // Build a Lambda array from the argv (requires heap to be active)
     Array* arr = array();
     for (int i = 0; i < argc; i++) {
         array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
@@ -752,7 +760,30 @@ extern "C" void js_set_process_argv(int argc, const char** argv) {
 }
 
 extern "C" Item js_get_process_argv(void) {
+    // Lazy build: if raw argv was stored but Lambda array not yet built, build it now
+    if (js_process_argv_items.item == ITEM_NULL && js_process_argc_raw > 0) {
+        js_set_process_argv(js_process_argc_raw, js_process_argv_raw);
+    }
+    // Return an empty array if process.argv was never set (prevents null subscript crash)
+    if (js_process_argv_items.item == ITEM_NULL) {
+        Array* arr = array();
+        js_process_argv_items = array_end(arr);
+    }
     return js_process_argv_items;
+}
+
+// process object (lazy-initialized for `var p = process` standalone usage)
+static Item js_process_object = {.item = ITEM_NULL};
+
+extern "C" Item js_get_process_object_value(void) {
+    if (js_process_object.item == ITEM_NULL) {
+        js_process_object = js_object_create(ItemNull);
+        heap_register_gc_root(&js_process_object.item);
+        // Set argv
+        Item argv_key = (Item){.item = s2it(heap_create_name("argv", 4))};
+        js_property_set(js_process_object, argv_key, js_get_process_argv());
+    }
+    return js_process_object;
 }
 
 // =============================================================================
@@ -1809,8 +1840,10 @@ extern "C" Item js_in(Item key, Item object) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                // v24: -0.0 should stringify to "0" per ES spec
-                if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
+                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
+                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
+                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
+                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -5312,13 +5345,35 @@ extern "C" Item js_array_from(Item iterable) {
         return result;
     }
     if (tid == LMD_TYPE_STRING) {
-        // split string into array of single characters
+        // split string into individual code points (not bytes)
         String* s = it2s(iterable);
         if (!s) return js_array_new(0);
         Item result = js_array_new(0);
-        for (int i = 0; i < (int)s->len; i++) {
-            String* ch = heap_strcpy(&s->chars[i], 1);
+        int i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            int cp_len = 1;
+            if (lead >= 0xF0 && i + 4 <= (int)s->len)      cp_len = 4;
+            else if (lead >= 0xE0 && i + 3 <= (int)s->len)  cp_len = 3;
+            else if (lead >= 0xC0 && i + 2 <= (int)s->len)  cp_len = 2;
+            int total_len = cp_len;
+            // combine WTF-8/CESU-8 surrogate pairs
+            if (cp_len == 3 && lead == 0xED && i + 1 < (int)s->len) {
+                unsigned char second = (unsigned char)s->chars[i + 1];
+                if (second >= 0xA0 && second <= 0xAF) {
+                    int next = i + 3;
+                    if (next + 2 < (int)s->len &&
+                        (unsigned char)s->chars[next] == 0xED) {
+                        unsigned char ns = (unsigned char)s->chars[next + 1];
+                        if (ns >= 0xB0 && ns <= 0xBF) {
+                            total_len = 6;
+                        }
+                    }
+                }
+            }
+            String* ch = heap_strcpy(&s->chars[i], total_len);
             js_array_push(result, (Item){.item = s2it(ch)});
+            i += total_len;
         }
         return result;
     }
@@ -6107,7 +6162,7 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6135,7 +6190,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6147,7 +6202,7 @@ extern "C" Item js_encodeURI(Item str_item) {
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6171,7 +6226,7 @@ extern "C" Item js_decodeURI(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6349,8 +6404,11 @@ extern "C" void js_globals_batch_reset() {
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
     js_ctor_cache_reset();
-    // reset process.argv cache
+    // reset process.argv cache and process object
     js_process_argv_items = (Item){.item = ITEM_NULL};
+    js_process_object = (Item){.item = ITEM_NULL};
+    js_process_argc_raw = 0;
+    js_process_argv_raw = NULL;
 }
 
 // forward declaration for populating globalThis with constructors
@@ -6393,6 +6451,29 @@ extern "C" Item js_get_global_this() {
         }
         // globalThis self-reference
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
+
+        // populate namespace objects on globalThis (Math, JSON, Reflect, console)
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
+
+        // populate global functions as own properties
+        static const struct { const char* name; int len; int param_count; } global_fns[] = {
+            {"parseInt", 8, 2}, {"parseFloat", 10, 1},
+            {"isNaN", 5, 1}, {"isFinite", 8, 1},
+            {"eval", 4, 1},
+            {"decodeURI", 9, 1}, {"encodeURI", 9, 1},
+            {"decodeURIComponent", 18, 1}, {"encodeURIComponent", 18, 1},
+            {"escape", 6, 1}, {"unescape", 8, 1},
+            {NULL, 0, 0}
+        };
+        for (int i = 0; global_fns[i].name; i++) {
+            Item name_item = (Item){.item = s2it(heap_create_name(global_fns[i].name, global_fns[i].len))};
+            Item fn = js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
+            js_property_set(js_global_this_obj, name_item, fn);
+        }
+
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
     }

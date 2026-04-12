@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <string.h>
+#include "memtrack.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -54,7 +55,7 @@ char* read_text_file(const char *filename) {
     long fileSize = ftell(file);
     rewind(file); // reset file pointer to the beginning
 
-    char* buf = (char*)malloc(fileSize + 1); // allocate memory for the file content
+    char* buf = (char*)mem_alloc(fileSize + 1, MEM_CAT_TEMP); // allocate memory for the file content
     if (!buf) {
         perror("Memory allocation failed");
         fclose(file);
@@ -72,7 +73,7 @@ char* read_text_file(const char *filename) {
 
 // Read binary file with explicit size output
 // Returns allocated buffer, sets out_size to number of bytes read
-// Caller must free() the returned buffer
+// Caller must mem_free() the returned buffer
 char* read_binary_file(const char *filename, size_t *out_size) {
     if (out_size) *out_size = 0;
     
@@ -98,7 +99,7 @@ char* read_binary_file(const char *filename, size_t *out_size) {
     long fileSize = ftell(file);
     rewind(file);
 
-    char* buf = (char*)malloc(fileSize + 1);
+    char* buf = (char*)mem_alloc(fileSize + 1, MEM_CAT_TEMP);
     if (!buf) {
         perror("Memory allocation failed");
         fclose(file);
@@ -136,7 +137,7 @@ bool create_dir(const char* dir_path) {
     }
     
     // Create a mutable copy of the path for manipulation
-    char* path_copy = strdup(dir_path);
+    char* path_copy = mem_strdup(dir_path, MEM_CAT_TEMP);
     if (!path_copy) {
         fprintf(stderr, "Memory allocation failed for path copy\n");
         return false;
@@ -149,12 +150,12 @@ bool create_dir(const char* dir_path) {
         
         // Recursively create parent directory
         if (!create_dir(path_copy)) {
-            free(path_copy);
+            mem_free(path_copy);
             return false;
         }
     }
     
-    free(path_copy);
+    mem_free(path_copy);
     
     // Now create this directory
     int ret;
@@ -176,7 +177,7 @@ bool create_dir(const char* dir_path) {
 
 // ensure parent directory of a file path exists
 static void ensure_parent_dir(const char* filepath) {
-    char* copy = strdup(filepath);
+    char* copy = mem_strdup(filepath, MEM_CAT_TEMP);
     if (!copy) return;
     char* last = strrchr(copy, '/');
 #ifdef _WIN32
@@ -186,7 +187,7 @@ static void ensure_parent_dir(const char* filepath) {
         *last = '\0';
         create_dir(copy);
     }
-    free(copy);
+    mem_free(copy);
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +260,7 @@ int write_text_file_atomic(const char* filename, const char* content) {
     // build temp file name in same directory
     size_t flen = strlen(filename);
     size_t tlen = flen + 8; // ".XXXXXX"
-    char* tmp = (char*)malloc(tlen + 1);
+    char* tmp = (char*)mem_alloc(tlen + 1, MEM_CAT_TEMP);
     if (!tmp) return -1;
     snprintf(tmp, tlen + 1, "%s.XXXXXX", filename);
 
@@ -267,14 +268,14 @@ int write_text_file_atomic(const char* filename, const char* content) {
     // _mktemp modifies in-place
     if (_mktemp(tmp) == NULL) {
         log_error("write_text_file_atomic: _mktemp failed");
-        free(tmp);
+        mem_free(tmp);
         return -1;
     }
 #else
     int fd = mkstemp(tmp);
     if (fd < 0) {
         log_error("write_text_file_atomic: mkstemp failed: %s", strerror(errno));
-        free(tmp);
+        mem_free(tmp);
         return -1;
     }
     close(fd);
@@ -284,14 +285,14 @@ int write_text_file_atomic(const char* filename, const char* content) {
     FILE* f = fopen(tmp, "w");
     if (!f) {
         log_error("write_text_file_atomic: cannot open temp '%s': %s", tmp, strerror(errno));
-        free(tmp);
+        mem_free(tmp);
         return -1;
     }
     if (fprintf(f, "%s", content) < 0) {
         log_error("write_text_file_atomic: write error on '%s'", tmp);
         fclose(f);
         remove(tmp);
-        free(tmp);
+        mem_free(tmp);
         return -1;
     }
     fclose(f);
@@ -301,11 +302,11 @@ int write_text_file_atomic(const char* filename, const char* content) {
         log_error("write_text_file_atomic: rename '%s' -> '%s' failed: %s",
                   tmp, filename, strerror(errno));
         remove(tmp);
-        free(tmp);
+        mem_free(tmp);
         return -1;
     }
 
-    free(tmp);
+    mem_free(tmp);
     return 0;
 }
 
@@ -664,7 +665,7 @@ char* file_getcwd(void) {
 #else
     if (!getcwd(buf, sizeof(buf))) return NULL;
 #endif
-    return strdup(buf);
+    return mem_strdup(buf, MEM_CAT_TEMP);
 }
 
 char* file_realpath(const char* path) {
@@ -673,10 +674,13 @@ char* file_realpath(const char* path) {
     char buf[MAX_PATH];
     DWORD len = GetFullPathNameA(path, MAX_PATH, buf, NULL);
     if (len == 0 || len >= MAX_PATH) return NULL;
-    return strdup(buf);
+    return mem_strdup(buf, MEM_CAT_TEMP);
 #else
-    char* resolved = realpath(path, NULL);
-    return resolved; // already malloc'd by realpath
+    char* resolved = realpath(path, NULL);  // system malloc'd
+    if (!resolved) return NULL;
+    char* result = mem_strdup(resolved, MEM_CAT_TEMP);
+    free(resolved);  // free system-allocated original
+    return result;
 #endif
 }
 
@@ -730,7 +734,7 @@ char* file_temp_path(const char* prefix, const char* suffix) {
     char buf[512];
     snprintf(buf, sizeof(buf), "temp/%s_%ld_%d%s",
              pfx, ++s_temp_counter, (int)getpid(), sfx);
-    return strdup(buf);
+    return mem_strdup(buf, MEM_CAT_TEMP);
 }
 
 char* file_temp_create(const char* prefix, const char* suffix) {
@@ -740,7 +744,7 @@ char* file_temp_create(const char* prefix, const char* suffix) {
     FILE* f = fopen(path, "w");
     if (!f) {
         log_error("file_temp_create: cannot create '%s': %s", path, strerror(errno));
-        free(path);
+        mem_free(path);
         return NULL;
     }
     fclose(f);
@@ -760,7 +764,7 @@ char* dir_temp_create(const char* prefix) {
         log_error("dir_temp_create: cannot create '%s'", buf);
         return NULL;
     }
-    return strdup(buf);
+    return mem_strdup(buf, MEM_CAT_TEMP);
 }
 
 // ---------------------------------------------------------------------------
@@ -776,8 +780,8 @@ char* dir_temp_create(const char* prefix) {
 #endif
 
 char* file_path_join(const char* base, const char* relative) {
-    if (!base || !*base) return relative ? strdup(relative) : NULL;
-    if (!relative || !*relative) return strdup(base);
+    if (!base || !*base) return relative ? mem_strdup(relative, MEM_CAT_TEMP) : NULL;
+    if (!relative || !*relative) return mem_strdup(base, MEM_CAT_TEMP);
 
     size_t blen = strlen(base);
     size_t rlen = strlen(relative);
@@ -787,7 +791,7 @@ char* file_path_join(const char* base, const char* relative) {
     bool rel_has_sep = IS_SEP(relative[0]);
 
     size_t need = blen + rlen + 2; // separator + nul
-    char* out = (char*)malloc(need);
+    char* out = (char*)mem_alloc(need, MEM_CAT_TEMP);
     if (!out) return NULL;
 
     if (base_has_sep && rel_has_sep) {
@@ -802,7 +806,7 @@ char* file_path_join(const char* base, const char* relative) {
 }
 
 char* file_path_dirname(const char* path) {
-    if (!path || !*path) return strdup(".");
+    if (!path || !*path) return mem_strdup(".", MEM_CAT_TEMP);
 
     size_t len = strlen(path);
     // skip trailing separators
@@ -814,11 +818,11 @@ char* file_path_dirname(const char* path) {
         if (IS_SEP(path[i])) last = path + i;
     }
 
-    if (!last) return strdup(".");
-    if (last == path) return strdup("/");
+    if (!last) return mem_strdup(".", MEM_CAT_TEMP);
+    if (last == path) return mem_strdup("/", MEM_CAT_TEMP);
 
     size_t dir_len = (size_t)(last - path);
-    char* out = (char*)malloc(dir_len + 1);
+    char* out = (char*)mem_alloc(dir_len + 1, MEM_CAT_TEMP);
     if (!out) return NULL;
     memcpy(out, path, dir_len);
     out[dir_len] = '\0';
@@ -880,7 +884,7 @@ char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
     size_t dir_len = strlen(cache_dir);
     size_t ext_len = strlen(ext);
     // "<dir>/<8hex><ext>\0"
-    char* buf = (char*)malloc(dir_len + 1 + 8 + ext_len + 1);
+    char* buf = (char*)mem_alloc(dir_len + 1 + 8 + ext_len + 1, MEM_CAT_TEMP);
     if (!buf) return NULL;
     snprintf(buf, dir_len + 1 + 8 + ext_len + 1, "%s/%08lx%s", cache_dir, hash, ext);
     return buf;

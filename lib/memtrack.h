@@ -569,6 +569,29 @@ int32_t memtrack_get_pool_count(void);
  */
 int32_t memtrack_get_arena_count(void);
 
+// ============================================================================
+// Raw Allocation Escape Hatches
+// ============================================================================
+
+/**
+ * Raw allocation wrappers for documented exceptions where tracked allocation
+ * cannot be used (e.g., GC heap, Container item arrays, utf8proc returns).
+ *
+ * These survive #pragma GCC poison because they are declared before the poison
+ * directive in mem.h and call malloc/free internally from memtrack.c (in lib/,
+ * which is not subject to poison enforcement).
+ *
+ * Usage in lambda/radiant code:
+ *   void* p = raw_malloc(size);    // instead of malloc(size)
+ *   raw_free(p);                   // instead of free(p)
+ *   p = raw_realloc(p, new_size);  // instead of realloc(p, new_size)
+ */
+void* raw_malloc(size_t size);
+void* raw_calloc(size_t count, size_t size);
+void* raw_realloc(void* ptr, size_t new_size);
+void  raw_free(void* ptr);
+char* raw_strdup(const char* str);
+
 #ifdef __cplusplus
 }
 #endif

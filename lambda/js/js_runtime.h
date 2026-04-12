@@ -185,6 +185,7 @@ Item js_math_set_property(Item key, Item value);
 Item js_get_math_object_value(void);
 Item js_get_json_object_value(void);
 Item js_get_console_object_value(void);
+Item js_get_reflect_object_value(void);
 
 // =============================================================================
 // v5: Process I/O
@@ -192,8 +193,10 @@ Item js_get_console_object_value(void);
 
 Item js_process_stdout_write(Item str_item);
 Item js_process_hrtime_bigint(void);
+void js_store_process_argv(int argc, const char** argv);
 void js_set_process_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
+Item js_get_process_object_value(void);
 
 // =============================================================================
 // v5: Global Functions

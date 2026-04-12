@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/str.h"
+#include "../../lib/memtrack.h"
 #include "../transpiler.hpp"
 #include "validator.hpp"
 #include "../schema_ast.hpp"
@@ -374,7 +375,7 @@ ValidationResult* create_validation_result(Pool* pool) {
         result = (ValidationResult*)pool_calloc(pool, sizeof(ValidationResult));
     } else {
         // For error cases with null pool, use malloc
-        result = (ValidationResult*)calloc(1, sizeof(ValidationResult));
+        result = (ValidationResult*)mem_calloc(1, sizeof(ValidationResult), MEM_CAT_EVAL);
     }
     if (!result) return nullptr;
 
@@ -392,8 +393,8 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
     if (pool) {
         error = (ValidationError*)pool_calloc(pool, sizeof(ValidationError));
     } else {
-        // For error cases with null pool, use malloc
-        error = (ValidationError*)calloc(1, sizeof(ValidationError));
+        // For non-pool allocation, use tracked allocator
+        error = (ValidationError*)mem_calloc(1, sizeof(ValidationError), MEM_CAT_EVAL);
     }
     if (!error) return nullptr;
 
@@ -407,7 +408,7 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
         } else {
             // For non-pool allocation, create a simple string copy
             size_t len = strlen(message);
-            error->message = (String*)malloc(sizeof(String) + len + 1);
+            error->message = (String*)mem_alloc(sizeof(String) + len + 1, MEM_CAT_EVAL);
             if (error->message) {
                 error->message->len = len;
                 str_copy(error->message->chars, error->message->len + 1, message, error->message->len);
@@ -791,7 +792,7 @@ ValidationResult* schema_validator_validate(SchemaValidator* validator, ConstIte
 ValidationResult* schema_validator_validate_type(SchemaValidator* validator, ConstItem item, Type* type) {
     if (!validator) {
         // return an invalid result for null validator
-        ValidationResult* result = (ValidationResult*)calloc(1, sizeof(ValidationResult));
+        ValidationResult* result = (ValidationResult*)mem_calloc(1, sizeof(ValidationResult), MEM_CAT_EVAL);
         result->valid = false;
         result->error_count = 0;
         result->errors = nullptr;

@@ -5,6 +5,11 @@
     "compiler": "clang",
     "output": "lambda.exe",
     "enable_sanitizer_main": false,
+    "memtrack_poison": false,
+    "memtrack_poison_dirs": ["lambda", "radiant"],
+    "memtrack_poison_exempt": [
+        "lambda/lambda-wasm-main.c"
+    ],
     "source_dirs": [
         "lib",
         "lib/gc",
@@ -273,6 +278,8 @@
             ],
             "sources": [
                 "lib/mempool.c",
+                "lib/memtrack.c",
+                "lib/hashmap.c",
                 "lib/arena.c",
                 "lib/scratch_arena.c",
                 "lib/arraylist.c",
@@ -1364,7 +1371,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_strview_gtest.exe",
                         "icon": "👀"
@@ -1377,7 +1385,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_num_stack_gtest.exe",
                         "icon": "🔢"
@@ -1438,6 +1447,7 @@
                             "lib/font/woff2/table_tags.cpp",
                             "lib/font/woff2/variable_length.cpp",
                             "lib/arena.c",
+                            "lib/memtrack.c",
                             "lib/mempool.c",
                             "lib/log.c",
                             "lib/hashmap.c",
@@ -1456,7 +1466,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_url_gtest.exe",
                         "icon": "🔗"
@@ -1469,7 +1480,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_url_extra_gtest.exe",
                         "icon": "🌐"
@@ -1483,7 +1495,8 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "utf8proc"
+                            "utf8proc",
+                            "rpmalloc"
                         ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
@@ -1611,7 +1624,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "binary": "test_shell_gtest.exe",
                         "icon": "🐚"
@@ -1624,7 +1638,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lib/file.c"

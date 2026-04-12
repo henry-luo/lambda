@@ -401,7 +401,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    verify-windows verify-linux \
@@ -1723,6 +1723,43 @@ lint:
 # Binary size analysis by library group
 analyze-binary:
 	@python3 utils/analyze_binary.py lambda.exe -v
+
+# Check for raw malloc/calloc/realloc/free usage in lambda/ and radiant/ source files.
+# All allocations in lambda/radiant should use mem_alloc/mem_free from lib/memtrack.h.
+# Documented exceptions that need raw allocation should use raw_malloc/raw_free from lib/memtrack.h
+# and be marked with a comment: // RAWALLOC_OK: <reason>
+check-raw-alloc:
+	@echo "Checking for raw malloc/free usage in lambda/ and radiant/..."
+	@VIOLATIONS=$$(grep -rn '\bmalloc\s*(\|\bcalloc\s*(\|\brealloc\s*(\|\bfree\s*(\|\bstrdup\s*(\|\bstrndup\s*(' \
+		lambda/ radiant/ \
+		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+		| grep -v 'tree-sitter' \
+		| grep -v 'mem_alloc\|mem_calloc\|mem_realloc\|mem_free\|mem_strdup\|mem_strndup' \
+		| grep -v 'raw_malloc\|raw_calloc\|raw_realloc\|raw_free\|raw_strdup' \
+		| grep -v 'arena_alloc\|arena_calloc\|pool_alloc\|pool_calloc' \
+		| grep -v 'rpmalloc\|rpfree\|rpcalloc\|rprealloc' \
+		| grep -v 'hashmap_free\|strbuf_free\|stringbuf_free\|arraylist_free\|mempool_free\|arena_free\|pool_free' \
+		| grep -v 'utf8proc_free\|curl_free\|xml_free\|yaml_free\|hb_free' \
+		| grep -v 'RAWALLOC_OK' \
+		| grep -v '^\s*//' \
+		| grep -v '//.*\(malloc\|calloc\|realloc\|free\|strdup\)' \
+		| grep -v '^\s*\*' \
+		| grep -v ':[0-9]*:\s*/\*\|:[0-9]*:\s*\*' \
+		| grep -v '^\s*#' \
+		| grep -v 'lambda-wasm-main.c' \
+		| grep -v 'windows_compat.h' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found raw allocation calls (use mem_alloc/mem_free or raw_malloc/raw_free + RAWALLOC_OK):"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT violation(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No raw allocation violations found"; \
+	fi
 
 # Clang-tidy static analysis
 tidy:

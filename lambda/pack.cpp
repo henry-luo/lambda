@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 #include <string.h>
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -35,7 +36,7 @@ static size_t get_page_size() {
 }
 
 Pack* pack_init(size_t initial_size) {
-    Pack* pack = (Pack*)malloc(sizeof(Pack));
+    Pack* pack = (Pack*)mem_alloc(sizeof(Pack), MEM_CAT_EVAL);
     if (!pack) return NULL;
     
     // Use the provided initial size or default if 0
@@ -58,14 +59,14 @@ Pack* pack_init(size_t initial_size) {
         // Reserve virtual memory
         void* mem = vm_reserve(reserve_size);
         if (!mem) {
-            free(pack);
+            mem_free(pack);
             return NULL;
         }
         
         // Commit initial portion
         if (!vm_commit(mem, aligned_capacity)) {
             vm_release(mem, reserve_size);
-            free(pack);
+            mem_free(pack);
             return NULL;
         }
         
@@ -74,9 +75,9 @@ Pack* pack_init(size_t initial_size) {
         pack->committed_size = aligned_capacity; // Currently committed size
         #else
         // Fallback for unsupported platforms
-        pack->data = malloc(actual_size);
+        pack->data = mem_alloc(actual_size, MEM_CAT_EVAL);
         if (!pack->data) {
-            free(pack);
+            mem_free(pack);
             return NULL;
         }
         pack->capacity = actual_size;
@@ -86,9 +87,9 @@ Pack* pack_init(size_t initial_size) {
         // Standard allocation for smaller sizes
         pack->capacity = actual_size;
         pack->committed_size = 0; // Non-virtual
-        pack->data = malloc(actual_size);
+        pack->data = mem_alloc(actual_size, MEM_CAT_EVAL);
         if (!pack->data) {
-            free(pack);
+            mem_free(pack);
             return NULL;
         }
     }
@@ -115,7 +116,7 @@ void* pack_alloc(Pack* pack, size_t size) {
                     new_capacity *= 2;
                 }
                 
-                void* new_data = realloc(pack->data, new_capacity);
+                void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
                 if (!new_data) return NULL;
                 
                 pack->data = new_data;
@@ -131,7 +132,7 @@ void* pack_alloc(Pack* pack, size_t size) {
                 new_capacity *= 2;
             }
             
-            void* new_data = realloc(pack->data, new_capacity);
+            void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
             if (!new_data) return NULL;
             
             pack->data = new_data;
@@ -204,7 +205,7 @@ static int convert_to_virtual_impl(Pack* pack) {
     
     // Copy data from old allocation
     memcpy(new_data, old_data, old_size);
-    free(old_data);
+    mem_free(old_data);
     
     // Update pack
     pack->data = new_data;
@@ -258,9 +259,9 @@ void pack_free(Pack* pack) {
     if (pack->committed_size > 0) {
         vm_release(pack->data, pack->capacity);
     } else {
-        free(pack->data);
+        mem_free(pack->data);
     }
-    free(pack);
+    mem_free(pack);
 }
 
 #else // Windows or other platforms
@@ -277,7 +278,7 @@ static void vm_grow(Pack* pack, size_t needed_size) {
         new_capacity *= 2;
     }
     
-    void* new_data = realloc(pack->data, new_capacity);
+    void* new_data = mem_realloc(pack->data, new_capacity, MEM_CAT_EVAL);
     if (new_data) {
         pack->data = new_data;
         pack->capacity = new_capacity;
@@ -286,7 +287,7 @@ static void vm_grow(Pack* pack, size_t needed_size) {
 }
 
 void pack_free(Pack* pack) {
-    free(pack->data);
-    free(pack);
+    mem_free(pack->data);
+    mem_free(pack);
 }
 #endif

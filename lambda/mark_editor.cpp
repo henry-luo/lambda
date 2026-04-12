@@ -5,6 +5,7 @@
 #include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 
 // Maximum number of batch updates supported
 #define MAX_BATCH_UPDATES 64
@@ -119,7 +120,7 @@ EditVersion* MarkEditor::create_version(Item root, const char* description) {
 
     version->root = root;
     version->version_number = next_version_num_++;
-    version->description = description ? strdup(description) : nullptr;
+    version->description = description ? mem_strdup(description, MEM_CAT_SYSTEM) : nullptr;
     version->prev = nullptr;
     version->next = nullptr;
 
@@ -134,7 +135,7 @@ void MarkEditor::free_version_chain(EditVersion* version) {
     while (current) {
         EditVersion* next = current->next;
         if (current->description) {
-            free((void*)current->description);
+            mem_free((void*)current->description);
         }
         pool_free(pool_, current);
         current = next;
@@ -1349,7 +1350,7 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
                 }
                 elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items — heap-allocated, freed by free_container
                 if (!new_items) {
                     log_error("elmt_insert_child: realloc failed");
                     return ItemError;
@@ -1452,7 +1453,7 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
                 }
                 elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                 if (!new_items) return ItemError;
                 elmt->items = new_items;
             }
@@ -1777,7 +1778,7 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
                     }
                     arr->items = new_items;
                 } else {
-                    Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
+                    Item* new_items = (Item*)raw_realloc(arr->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                     if (!new_items) return ItemError;
                     arr->items = new_items;
                 }

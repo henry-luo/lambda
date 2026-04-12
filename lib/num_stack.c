@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include "memtrack.h"
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -21,20 +22,20 @@ num_stack_t* num_stack_create(size_t initial_capacity) {
         initial_capacity = 16; // default initial capacity
     }
     
-    num_stack_t *stack = malloc(sizeof(num_stack_t));
+    num_stack_t *stack = mem_alloc(sizeof(num_stack_t), MEM_CAT_EVAL);
     if (!stack) return NULL;
     
     // allocate the first chunk
-    num_chunk_t *first_chunk = malloc(sizeof(num_chunk_t));
+    num_chunk_t *first_chunk = mem_alloc(sizeof(num_chunk_t), MEM_CAT_EVAL);
     if (!first_chunk) {
-        free(stack);
+        mem_free(stack);
         return NULL;
     }
     
-    first_chunk->data = malloc(sizeof(num_value_t) * initial_capacity);
+    first_chunk->data = mem_alloc(sizeof(num_value_t) * initial_capacity, MEM_CAT_EVAL);
     if (!first_chunk->data) {
-        free(first_chunk);
-        free(stack);
+        mem_free(first_chunk);
+        mem_free(stack);
         return NULL;
     }
     
@@ -56,13 +57,13 @@ num_stack_t* num_stack_create(size_t initial_capacity) {
 
 // allocate a new chunk with double the capacity of the previous one
 static num_chunk_t* allocate_new_chunk(num_chunk_t *prev_chunk) {
-    num_chunk_t *new_chunk = malloc(sizeof(num_chunk_t));
+    num_chunk_t *new_chunk = mem_alloc(sizeof(num_chunk_t), MEM_CAT_EVAL);
     if (!new_chunk) return NULL;
     
     size_t new_capacity = prev_chunk->capacity * 2;
-    new_chunk->data = malloc(sizeof(num_value_t) * new_capacity);
+    new_chunk->data = mem_alloc(sizeof(num_value_t) * new_capacity, MEM_CAT_EVAL);
     if (!new_chunk->data) {
-        free(new_chunk);
+        mem_free(new_chunk);
         return NULL;
     }
     
@@ -170,8 +171,8 @@ bool num_stack_reset_to_index(num_stack_t *stack, size_t index) {
             while (chunk_to_free) {
                 log_debug("freeing num_stack chunk: %p, used: %zu, index: %d", chunk_to_free, chunk_to_free->used, chunk_to_free->index);
                 num_chunk_t *next = chunk_to_free->next;
-                free(chunk_to_free->data);
-                free(chunk_to_free);
+                mem_free(chunk_to_free->data);
+                mem_free(chunk_to_free);
                 chunk_to_free = next;
             }
             
@@ -215,11 +216,11 @@ void num_stack_destroy(num_stack_t *stack) {
     num_chunk_t *chunk = stack->head;
     while (chunk) {
         num_chunk_t *next = chunk->next;
-        free(chunk->data);
-        free(chunk);
+        mem_free(chunk->data);
+        mem_free(chunk);
         chunk = next;
     }
-    free(stack);
+    mem_free(stack);
 }
 
 // check if stack is empty

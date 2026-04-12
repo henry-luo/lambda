@@ -1,4 +1,5 @@
 #include "image.h"
+#include "memtrack.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

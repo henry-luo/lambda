@@ -247,7 +247,7 @@ static Item py_os_getcwd(void) {
     char* cwd = file_getcwd();
     if (cwd) {
         Item result = mk_str(cwd);
-        free(cwd); // cwd from file_getcwd (lib)
+        mem_free(cwd); // cwd from file_getcwd (lib)
         return result;
     }
     return mk_str(".");
@@ -348,7 +348,7 @@ static Item py_os_path_abspath(Item p) {
     char* resolved = file_realpath(s->chars);
     if (resolved) {
         Item result = mk_str(resolved);
-        free(resolved); // resolved from file_realpath (lib)
+        mem_free(resolved); // resolved from file_realpath (lib)
         return result;
     }
     // fallback: prepend cwd
@@ -360,7 +360,7 @@ static Item py_os_path_abspath(Item p) {
         strbuf_append_str(sb, s->chars);
         Item result = mk_str(sb->str);
         strbuf_free(sb);
-        free(cwd); // cwd from file_getcwd (lib)
+        mem_free(cwd); // cwd from file_getcwd (lib)
         return result;
     }
     return p;

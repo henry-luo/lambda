@@ -7,6 +7,7 @@
 #include "validator.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/arraylist.h"
+#include "../../lib/memtrack.h"
 #include <string.h>
 #include <stdlib.h>
 #include <algorithm>
@@ -40,7 +41,7 @@ static int levenshtein_distance(const char* s1, const char* s2) {
     if (len1 <= max_stack_size && len2 <= max_stack_size) {
         matrix = stack_matrix;
     } else {
-        heap_matrix = (int*)malloc((len1 + 1) * (len2 + 1) * sizeof(int));
+        heap_matrix = (int*)mem_alloc((len1 + 1) * (len2 + 1) * sizeof(int), MEM_CAT_SYSTEM);
         matrix = heap_matrix;
     }
 
@@ -68,7 +69,7 @@ static int levenshtein_distance(const char* s1, const char* s2) {
     int result = matrix[len1 * (len2 + 1) + len2];
 
     if (heap_matrix) {
-        free(heap_matrix);
+        mem_free(heap_matrix);
     }
 
     return result;

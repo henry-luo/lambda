@@ -1,5 +1,6 @@
 // strview.c — string view implementation (delegates to str.h)
 #include "strview.h"
+#include "memtrack.h"
 #include "str.h"
 #include <string.h>
 #include <stdlib.h>
@@ -58,7 +59,7 @@ int strview_to_int(StrView* s) {
 
 char* strview_to_cstr(const StrView* s) {
     if (!s || !s->length) {
-        char* empty = (char*)malloc(1);
+        char* empty = (char*)mem_alloc(1, MEM_CAT_TEMP);
         if (empty) empty[0] = '\0';
         return empty;
     }

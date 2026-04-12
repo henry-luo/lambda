@@ -335,7 +335,7 @@ void font_context_reset_document_fonts(FontContext* ctx) {
             const char** keys = stack_keys;
             int capacity = 64;
             if (count > 64) {
-                keys = (const char**)malloc(count * sizeof(const char*));
+                keys = (const char**)mem_alloc(count * sizeof(const char*), MEM_CAT_FONT);
                 capacity = (int)count;
             }
 
@@ -352,7 +352,7 @@ void font_context_reset_document_fonts(FontContext* ctx) {
                 }
             }
 
-            if (keys != stack_keys) free(keys);
+            if (keys != stack_keys) mem_free(keys);
 
             log_info("font_context_reset_document_fonts: removed %d document font entries, kept %zu system entries",
                      state.count, hashmap_count(ctx->face_cache));
@@ -513,7 +513,7 @@ void font_handle_release(FontHandle* handle) {
                     const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
                         handle->ctx->file_data_cache, &search);
                     if (removed) {
-                        free(removed->data);
+                        mem_free(removed->data);
                         mem_free(removed->path);
                     }
                 }
@@ -525,7 +525,7 @@ void font_handle_release(FontHandle* handle) {
             // no file_data_path means memory_buffer was malloc'd independently
             // (e.g. from data URI or font_load_memory)
             if (handle->memory_buffer) {
-                free(handle->memory_buffer);
+                mem_free(handle->memory_buffer);
                 handle->memory_buffer = NULL;
             }
         }

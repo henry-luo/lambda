@@ -7646,14 +7646,14 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     PyTranspiler* tp = py_transpiler_create(runtime);
     if (!tp) {
         log_error("py-mir: module: failed to create transpiler for '%s'", py_path);
-        free(source); // source from read_text_file (lib)
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
     if (!py_transpiler_parse(tp, source, strlen(source))) {
         log_error("py-mir: module: parse failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source); // source from read_text_file (lib)
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
@@ -7662,7 +7662,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     if (!ast) {
         log_error("py-mir: module: AST build failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source); // source from read_text_file (lib)
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
@@ -7670,7 +7670,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     if (!ctx) {
         log_error("py-mir: module: MIR context init failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source); // source from read_text_file (lib)
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
@@ -7679,7 +7679,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         log_error("py-mir: module: failed to allocate transpiler for '%s'", py_path);
         MIR_finish(ctx);
         py_transpiler_destroy(tp);
-        free(source); // source from read_text_file (lib)
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
@@ -7771,7 +7771,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     mem_free(mt);
     pm_defer_mir_cleanup(ctx);
     py_transpiler_destroy(tp);
-    free(source); // source from read_text_file (lib)
+    mem_free(source); // source from read_text_file (lib)
 
     log_info("py-mir: module '%s' loaded successfully", py_path);
     return ns;

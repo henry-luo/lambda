@@ -15,6 +15,7 @@
  */
 
 #include "font_internal.h"
+#include "../memtrack.h"
 #include "../str.h"
 #include "../strbuf.h"
 #include "../file.h"
@@ -242,12 +243,12 @@ void font_database_destroy_internal(FontDatabase* db) {
 // ============================================================================
 
 static bool read_ttf_table_directory(FILE* file, TTF_Header* header, TTF_Table_Dir** tables) {
-    *tables = (TTF_Table_Dir*)calloc(header->num_tables, sizeof(TTF_Table_Dir));
+    *tables = (TTF_Table_Dir*)mem_calloc(header->num_tables, sizeof(TTF_Table_Dir), MEM_CAT_FONT);
     if (!*tables) return false;
 
     for (int i = 0; i < header->num_tables; i++) {
         if (fread(&(*tables)[i], sizeof(TTF_Table_Dir), 1, file) != 1) {
-            free(*tables);
+            mem_free(*tables);
             *tables = NULL;
             return false;
         }
@@ -445,7 +446,7 @@ static bool parse_font_metadata(const char* file_path, FontEntry* entry, Arena* 
         parse_os2_table(file, os2_tbl, entry);
     }
 
-    free(tables);
+    mem_free(tables);
     fclose(file);
 
     // fallback: use filename as family name
@@ -531,7 +532,7 @@ static bool parse_ttc_font_metadata(const char* file_path, FontDatabase* db, Are
         TTF_Table_Dir* os2_tbl = find_ttf_table(tables, header.num_tables, TTF_TAG_OS2);
         if (os2_tbl) parse_os2_table(file, os2_tbl, entry);
 
-        free(tables);
+        mem_free(tables);
 
         if (entry->family_name) {
             arraylist_append(db->all_fonts, entry);
