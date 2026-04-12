@@ -179,6 +179,17 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     int bmp_width  = px_right - px_left;
     int bmp_height = px_top - px_bottom;
 
+    // guard against extreme font sizes producing absurd bitmaps (fuzzer-found)
+    if (bmp_width > 4096 || bmp_height > 4096) {
+        log_debug("font_rasterize_ct: glyph bitmap too large (%dx%d), clamping to empty", bmp_width, bmp_height);
+        GlyphBitmap* bmp = (GlyphBitmap*)arena_calloc(arena, sizeof(GlyphBitmap));
+        if (!bmp) return NULL;
+        bmp->mode = mode;
+        bmp->pixel_mode = GLYPH_PIXEL_GRAY;
+        bmp->bitmap_scale = bitmap_scale;
+        return bmp;
+    }
+
     if (bmp_width <= 0 || bmp_height <= 0) {
         // zero-width glyph (e.g. space) — return empty bitmap
         GlyphBitmap* bmp = (GlyphBitmap*)arena_calloc(arena, sizeof(GlyphBitmap));

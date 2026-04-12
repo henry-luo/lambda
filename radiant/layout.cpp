@@ -1339,6 +1339,27 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
+    // guard against stack overflow from deeply nested DOM (fuzzer-found)
+    static const int MAX_LAYOUT_DEPTH = 128;
+    if (lycon->depth >= MAX_LAYOUT_DEPTH) {
+        log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
+                  MAX_LAYOUT_DEPTH, node->source_loc());
+        return;
+    }
+
+    // guard against pathological layouts with extreme node counts (fuzzer-found)
+    static const int MAX_LAYOUT_NODES = 50000;
+    lycon->node_count++;
+    if (lycon->node_count > MAX_LAYOUT_NODES) {
+        if (lycon->node_count == MAX_LAYOUT_NODES + 1) {
+            log_error("layout_flow_node: max node count %d exceeded, skipping remaining nodes",
+                      MAX_LAYOUT_NODES);
+        }
+        return;
+    }
+
+    lycon->depth++;
+
     log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
 
     // HTML spec §4.11.1: <details> without the 'open' attribute only renders
@@ -1680,6 +1701,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // skip the node
     }
     log_debug("%s end flow node, block advance_y: %.0f", node->source_loc(), lycon->block.advance_y);
+    lycon->depth--;
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {

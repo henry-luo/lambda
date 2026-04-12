@@ -10,6 +10,10 @@
 #include "../lib/strbuf.h"
 #include <cmath>
 
+// Limits for flex layout recursion
+static const int MAX_FLEX_DEPTH = 16;
+static const int MAX_FLEX_NODES = 5000;
+
 // Forward declarations
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
@@ -57,6 +61,12 @@ static void print_view_tree_snapshot(ViewBlock* container, const char* phase_nam
     log_info("=== VIEW TREE SNAPSHOT: %s ===", phase_name);
     StrBuf* buf = strbuf_new_cap(2048);
     print_view_block(container, buf, 0);
+    // limit snapshot output to avoid huge log writes in deeply nested trees
+    static const size_t MAX_SNAPSHOT_LEN = 64 * 1024;
+    if (buf->length > MAX_SNAPSHOT_LEN) {
+        buf->str[MAX_SNAPSHOT_LEN] = '\0';
+        buf->length = MAX_SNAPSHOT_LEN;
+    }
     log_info("%s", buf->str);
     log_info("=== END VIEW TREE SNAPSHOT ===");
     strbuf_free(buf);
@@ -67,6 +77,14 @@ static void print_view_tree_snapshot(ViewBlock* container, const char* phase_nam
 static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* container) {
     log_enter();
     log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
+
+    // guard: skip if flex node budget is exhausted (reuse flex limit)
+    if (lycon->node_count > MAX_FLEX_NODES) {
+        log_debug("layout_flex_absolute_children: node budget exhausted (%d), skipping",
+                  lycon->node_count);
+        log_leave();
+        return;
+    }
 
     // Get flex direction from the container parameter directly (not lycon->flex_container!)
     // This is critical for nested flex containers - lycon->flex_container points to the
@@ -420,10 +438,10 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
     log_leave();
 }
 
-// Helper function: Validate coordinates for debugging
-static int validate_flex_coordinates(ViewBlock* container, const char* phase_name) {
-    log_enter();
-    log_debug("Validating coordinates for phase: %s", phase_name);
+// Helper function: Validate coordinates for debugging (with depth limit)
+static int validate_flex_coordinates_impl(ViewBlock* container, const char* phase_name, int depth) {
+    static const int MAX_VALIDATE_DEPTH = 32;
+    if (depth > MAX_VALIDATE_DEPTH) return 0;
 
     int invalid_count = 0;
     View* child = container->first_child;
@@ -446,7 +464,7 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
 
             // Recursively check children
             if (view->first_child) {
-                invalid_count += validate_flex_coordinates(view, phase_name);
+                invalid_count += validate_flex_coordinates_impl(view, phase_name, depth + 1);
             }
         }
         child = child->next();
@@ -458,8 +476,15 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
         log_error("Found %d invalid coordinates in %s", invalid_count, phase_name);
     }
 
-    log_leave();
     return invalid_count;
+}
+
+static int validate_flex_coordinates(ViewBlock* container, const char* phase_name) {
+    log_enter();
+    log_debug("Validating coordinates for phase: %s", phase_name);
+    int result = validate_flex_coordinates_impl(container, phase_name, 0);
+    log_leave();
+    return result;
 }
 
 // Multi-pass flex layout implementation
@@ -467,6 +492,17 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
 
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container) return;
+
+    // guard against excessive recursive flex nesting (fuzzer-found timeout)
+    lycon->depth++;
+    lycon->node_count++;
+    if (lycon->depth > MAX_FLEX_DEPTH || lycon->node_count > MAX_FLEX_NODES) {
+        log_error("layout_flex: depth=%d nodes=%d exceeds limit (max_depth=%d, max_nodes=%d), skipping %s",
+                  lycon->depth, lycon->node_count, MAX_FLEX_DEPTH, MAX_FLEX_NODES,
+                  flex_container->source_loc());
+        lycon->depth--;
+        return;
+    }
 
     log_enter();
     log_info("ENHANCED FLEX ALGORITHM START: container=%p (%s)", flex_container, flex_container->node_name());
@@ -850,6 +886,7 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
     log_debug("ENHANCED FLEX ALGORITHM COMPLETED for %s", flex_container->node_name());
     log_debug("Enhanced flex algorithm completed");
     log_leave();
+    lycon->depth--;
 }
 
 // Apply auto margin centering after flex algorithm
@@ -1501,8 +1538,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
     }
 
-    // Restore parent context
+    // Restore parent context, but preserve depth and node_count guards
+    int current_depth = lycon->depth;
+    int current_node_count = lycon->node_count;
     *lycon = saved_context;
+    lycon->depth = current_depth;
+    lycon->node_count = current_node_count;
 
     log_info("SUB-PASS 2 END: item=%p, content=%dx%d",
               flex_item, flex_item->content_width, flex_item->content_height);
