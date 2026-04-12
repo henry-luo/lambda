@@ -135,7 +135,14 @@ extern "C" Item js_make_getter_key(Item key) {
     if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char nbuf[64];
         if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else snprintf(nbuf, sizeof(nbuf), "%g", it2d(key));
+        else {
+            double dv = it2d(key);
+            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
+            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
+            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
+            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
+            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
+        }
         key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
     } else if (kt == LMD_TYPE_BOOL) {
         const char* s = it2b(key) ? "true" : "false";
@@ -162,7 +169,14 @@ extern "C" Item js_make_setter_key(Item key) {
     if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
         char nbuf[64];
         if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else snprintf(nbuf, sizeof(nbuf), "%g", it2d(key));
+        else {
+            double dv = it2d(key);
+            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
+            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
+            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
+            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
+            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
+        }
         key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
     } else if (kt == LMD_TYPE_BOOL) {
         const char* s = it2b(key) ? "true" : "false";
@@ -2880,8 +2894,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                // v24: -0.0 should stringify to "0" per ES spec
-                if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
+                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
+                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
+                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
+                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -3717,8 +3733,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                // v24: -0.0 should stringify to "0" per ES spec
-                if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
+                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
+                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
+                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
+                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -6506,7 +6524,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_REGEXP_SYMBOL_SPLIT:
         return js_regexp_symbol_split(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
 
-    // v55: Set/Map keys/values/entries — return arrays for backward compat
+    // v55: Set/Map keys/values/entries — return proper iterator objects
     case JS_BUILTIN_SET_VALUES:   // Set.prototype.values() / Set.prototype[@@iterator]()
     case JS_BUILTIN_SET_KEYS:     // Set.prototype.keys() — same as values for Set
     case JS_BUILTIN_SET_ENTRIES:  // Set.prototype.entries()
@@ -6527,27 +6545,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         else if (builtin_id == JS_BUILTIN_MAP_KEYS) mode = 1;
         else if (builtin_id == JS_BUILTIN_MAP_VALUES) mode = 0;
         else if (builtin_id == JS_BUILTIN_SET_VALUES || builtin_id == JS_BUILTIN_SET_KEYS) mode = 0;
-        // build array from insertion-order linked list
-        Item arr = js_array_new(0);
-        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
-            if (mode == 2) {
-                // entries: [key, value] for Map; [value, value] for Set
-                Item pair = js_array_new(0);
-                if (cd->type == JS_COLLECTION_SET) {
-                    js_array_push(pair, node->key);
-                    js_array_push(pair, node->key);
-                } else {
-                    js_array_push(pair, node->key);
-                    js_array_push(pair, node->value);
-                }
-                js_array_push(arr, pair);
-            } else if (mode == 1) {
-                js_array_push(arr, node->key);
-            } else {
-                js_array_push(arr, (cd->type == JS_COLLECTION_SET) ? node->key : node->value);
-            }
-        }
-        return arr;
+        // create proper iterator object with __node_ptr__, __iter_mode__, __coll_type__, and next()
+        Item iter = js_new_object();
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
+                        (Item){.item = i2it((int64_t)(uintptr_t)cd->order_head)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__iter_mode__", 13))},
+                        (Item){.item = i2it(mode)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__coll_type__", 13))},
+                        (Item){.item = i2it(cd->type)});
+        Item next_fn = js_get_or_create_builtin(JS_BUILTIN_COLL_ITER_NEXT, "next", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        return iter;
     }
     case JS_BUILTIN_COLL_ITER_NEXT: {
         // Collection iterator .next()
@@ -11693,8 +11701,30 @@ extern "C" Item js_iterator_step(Item iterator) {
         int idx = has_idx ? (int)it2i(idx_val) : 0;
         String* str = it2s(str_val);
         if (idx >= (int)str->len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
-        String* ch = heap_create_name(str->chars + idx, 1);
-        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
+        // advance by full UTF-8 code point (1-4 bytes)
+        unsigned char lead = (unsigned char)str->chars[idx];
+        int cp_len = 1;
+        if (lead >= 0xF0 && idx + 4 <= (int)str->len)      cp_len = 4;
+        else if (lead >= 0xE0 && idx + 3 <= (int)str->len)  cp_len = 3;
+        else if (lead >= 0xC0 && idx + 2 <= (int)str->len)  cp_len = 2;
+        int total_len = cp_len;
+        // combine WTF-8/CESU-8 surrogate pairs: high surrogate (ED A0-AF xx) + low surrogate (ED B0-BF xx)
+        if (cp_len == 3 && lead == 0xED && idx + 1 < (int)str->len) {
+            unsigned char second = (unsigned char)str->chars[idx + 1];
+            if (second >= 0xA0 && second <= 0xAF) {
+                // high surrogate — check for following low surrogate
+                int next = idx + 3;
+                if (next + 2 < (int)str->len &&
+                    (unsigned char)str->chars[next] == 0xED) {
+                    unsigned char ns = (unsigned char)str->chars[next + 1];
+                    if (ns >= 0xB0 && ns <= 0xBF) {
+                        total_len = 6;  // combine both surrogates
+                    }
+                }
+            }
+        }
+        String* ch = heap_create_name(str->chars + idx, total_len);
+        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + total_len)});
         return (Item){.item = s2it(ch)};
     }
 
@@ -11829,10 +11859,32 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         String* str = it2s(iterable);
         if (str) {
             Item arr = js_array_new(0);
-            for (int i = 0; i < (int)str->len; i++) {
-                String* ch = heap_create_name(str->chars + i, 1);
+            int i = 0;
+            while (i < (int)str->len) {
+                unsigned char lead = (unsigned char)str->chars[i];
+                int cp_len = 1;
+                if (lead >= 0xF0 && i + 4 <= (int)str->len)      cp_len = 4;
+                else if (lead >= 0xE0 && i + 3 <= (int)str->len)  cp_len = 3;
+                else if (lead >= 0xC0 && i + 2 <= (int)str->len)  cp_len = 2;
+                int total_len = cp_len;
+                // combine WTF-8/CESU-8 surrogate pairs
+                if (cp_len == 3 && lead == 0xED && i + 1 < (int)str->len) {
+                    unsigned char second = (unsigned char)str->chars[i + 1];
+                    if (second >= 0xA0 && second <= 0xAF) {
+                        int next = i + 3;
+                        if (next + 2 < (int)str->len &&
+                            (unsigned char)str->chars[next] == 0xED) {
+                            unsigned char ns = (unsigned char)str->chars[next + 1];
+                            if (ns >= 0xB0 && ns <= 0xBF) {
+                                total_len = 6;
+                            }
+                        }
+                    }
+                }
+                String* ch = heap_create_name(str->chars + i, total_len);
                 Item ch_item = (Item){.item = s2it(ch)};
                 js_array_push_item_direct(arr.array, ch_item);
+                i += total_len;
             }
             return arr;
         }
