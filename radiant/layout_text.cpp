@@ -2383,6 +2383,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         emoji_presentation = true;
                     }
                 }
+                // For layout metrics, use the regular font path even for Emoji_Presentation=Yes
+                // codepoints (without explicit VS16). The regular fallback chain gives metrics
+                // consistent with browser layout. The raster renderer (render.cpp) separately
+                // forces emoji font for color output. VS16-preceded codepoints still use
+                // emoji font since the author explicitly requested emoji presentation.
                 LoadedGlyph* glyph = emoji_presentation
                     ? font_load_glyph_emoji(lycon->font.font_handle, &_sd, codepoint, false)
                     : font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
