@@ -8,7 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/arraylist.h"
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <string.h>
 #include <time.h>
 
@@ -35,7 +35,7 @@ static int resource_entry_compare(const void* a, const void* b, void* udata) {
 // free function for resource entries (only frees URL, not resource)
 static void resource_entry_free(void* item) {
     ResourceEntry* entry = (ResourceEntry*)item;
-    if (entry->url) free(entry->url);
+    if (entry->url) mem_free(entry->url);
     // note: resource itself freed via resource_release
 }
 
@@ -54,10 +54,10 @@ NetworkResource* create_network_resource(const char* url,
                                                 ResourceType type,
                                                 ResourcePriority priority,
                                                 struct DomElement* owner) {
-    NetworkResource* res = (NetworkResource*)calloc(1, sizeof(NetworkResource));
+    NetworkResource* res = (NetworkResource*)mem_calloc(1, sizeof(NetworkResource), MEM_CAT_NETWORK);
     if (!res) return NULL;
     
-    res->url = strdup(url);
+    res->url = mem_strdup(url, MEM_CAT_NETWORK);
     res->type = type;
     res->priority = priority;
     res->owner_element = owner;
@@ -79,10 +79,10 @@ NetworkResource* create_network_resource(const char* url,
 void free_network_resource(NetworkResource* res) {
     if (!res) return;
     
-    free(res->url);
-    free(res->local_path);
-    free(res->error_message);
-    free(res);
+    mem_free(res->url);
+    mem_free(res->local_path);
+    mem_free(res->error_message);
+    mem_free(res);
 }
 
 }  // namespace
@@ -184,7 +184,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
                                                 EnhancedFileCache* cache) {
     if (!doc || !pool) return NULL;
     
-    NetworkResourceManager* mgr = (NetworkResourceManager*)calloc(1, sizeof(NetworkResourceManager));
+    NetworkResourceManager* mgr = (NetworkResourceManager*)mem_calloc(1, sizeof(NetworkResourceManager), MEM_CAT_NETWORK);
     if (!mgr) return NULL;
     
     mgr->document = doc;
@@ -203,7 +203,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     );
     
     if (!mgr->resources) {
-        free(mgr);
+        mem_free(mgr);
         return NULL;
     }
     
@@ -215,7 +215,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
         hashmap_free((struct hashmap*)mgr->resources);
         if (mgr->pending_reflows) arraylist_free((ArrayList*)mgr->pending_reflows);
         if (mgr->pending_repaints) arraylist_free((ArrayList*)mgr->pending_repaints);
-        free(mgr);
+        mem_free(mgr);
         return NULL;
     }
     
@@ -258,7 +258,7 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
     if (mgr->pending_repaints) arraylist_free((ArrayList*)mgr->pending_repaints);
     
     pthread_mutex_destroy(&mgr->mutex);
-    free(mgr);
+    mem_free(mgr);
 }
 
 // set CSS engine for stylesheet parsing
@@ -333,7 +333,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                 res->end_time = get_time_seconds();
                 
                 // add to hashmap
-                ResourceEntry entry = { .url = strdup(url), .res = res };
+                ResourceEntry entry = { .url = mem_strdup(url, MEM_CAT_NETWORK), .res = res };
                 hashmap_set((struct hashmap*)mgr->resources, &entry);
                 
                 mgr->total_resources++;
@@ -344,7 +344,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                 pthread_mutex_unlock(&mgr->mutex);
                 return res;
             }
-            free(cached_path);
+            mem_free(cached_path);
         }
     }
     
@@ -361,7 +361,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     res->timeout_ms = mgr->default_timeout_ms;
     
     // add to hashmap
-    ResourceEntry entry = { .url = strdup(url), .res = res };
+    ResourceEntry entry = { .url = mem_strdup(url, MEM_CAT_NETWORK), .res = res };
     hashmap_set((struct hashmap*)mgr->resources, &entry);
     
     mgr->total_resources++;
@@ -404,7 +404,7 @@ void resource_manager_mark_failed(NetworkResourceManager* mgr, NetworkResource* 
     pthread_mutex_lock(&mgr->mutex);
     
     res->state = STATE_FAILED;
-    res->error_message = strdup(error ? error : "Unknown error");
+    res->error_message = mem_strdup(error ? error : "Unknown error", MEM_CAT_NETWORK);
     mgr->failed_resources++;
     
     log_error("network: resource failed: %s - %s", res->url, res->error_message);
@@ -608,7 +608,7 @@ void resource_manager_cancel(NetworkResourceManager* mgr, NetworkResource* res) 
     
     if (res->state == STATE_PENDING || res->state == STATE_DOWNLOADING) {
         res->state = STATE_FAILED;
-        res->error_message = strdup("Cancelled");
+        res->error_message = mem_strdup("Cancelled", MEM_CAT_NETWORK);
         mgr->failed_resources++;
         
         log_debug("network: cancelled resource: %s", res->url);
@@ -631,7 +631,7 @@ void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct Dom
         if (entry->res && entry->res->owner_element == elmt) {
             if (entry->res->state == STATE_PENDING || entry->res->state == STATE_DOWNLOADING) {
                 entry->res->state = STATE_FAILED;
-                entry->res->error_message = strdup("Owner element removed");
+                entry->res->error_message = mem_strdup("Owner element removed", MEM_CAT_NETWORK);
                 mgr->failed_resources++;
                 cancelled++;
             }

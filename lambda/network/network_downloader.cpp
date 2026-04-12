@@ -7,7 +7,7 @@
 #include "../../lib/file_utils.h"
 #include <curl/curl.h>
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <time.h>
 
 // Response data structure
@@ -19,7 +19,7 @@ typedef struct {
 // Callback for curl to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-    char* new_data = (char*)realloc(response->data, response->size + total_size + 1);
+    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_NETWORK);
     
     if (!new_data) {
         log_error("network: memory allocation failed during download");
@@ -72,16 +72,16 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     if (!init_curl()) {
-        if (res->error_message) free(res->error_message);
-        res->error_message = strdup("Failed to initialize libcurl");
+        if (res->error_message) mem_free(res->error_message);
+        res->error_message = mem_strdup("Failed to initialize libcurl", MEM_CAT_NETWORK);
         return false;
     }
     
     CURL* curl = curl_easy_init();
     if (!curl) {
         log_error("network: failed to create curl handle");
-        if (res->error_message) free(res->error_message);
-        res->error_message = strdup("Failed to create curl handle");
+        if (res->error_message) mem_free(res->error_message);
+        res->error_message = mem_strdup("Failed to create curl handle", MEM_CAT_NETWORK);
         return false;
     }
     
@@ -119,10 +119,10 @@ bool network_download_resource(NetworkResource* res) {
         const char* error_str = curl_easy_strerror(curl_res);
         log_error("network: download failed for %s: %s", res->url, error_str);
         
-        if (res->error_message) free(res->error_message);
-        res->error_message = strdup(error_str);
+        if (res->error_message) mem_free(res->error_message);
+        res->error_message = mem_strdup(error_str, MEM_CAT_NETWORK);
         
-        free(response.data);
+        mem_free(response.data);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -138,10 +138,10 @@ bool network_download_resource(NetworkResource* res) {
         // Set appropriate error message
         char error_msg[128];
         snprintf(error_msg, sizeof(error_msg), "HTTP %ld", http_code);
-        if (res->error_message) free(res->error_message);
-        res->error_message = strdup(error_msg);
+        if (res->error_message) mem_free(res->error_message);
+        res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
-        free(response.data);
+        mem_free(response.data);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -158,7 +158,7 @@ bool network_download_resource(NetworkResource* res) {
         char* cached_path = enhanced_cache_store(res->cache, res->url, 
                                                   response.data, response.size, NULL);
         if (cached_path) {
-            if (res->local_path) free(res->local_path);
+            if (res->local_path) mem_free(res->local_path);
             res->local_path = cached_path;
         }
     }
@@ -175,14 +175,14 @@ bool network_download_resource(NetworkResource* res) {
         if (f) {
             fwrite(response.data, 1, response.size, f);
             fclose(f);
-            res->local_path = strdup(temp_path);
+            res->local_path = mem_strdup(temp_path, MEM_CAT_NETWORK);
             log_debug("network: saved to temporary file: %s", temp_path);
         } else {
             log_error("network: failed to write temporary file: %s", temp_path);
         }
     }
     
-    free(response.data);
+    mem_free(response.data);
     curl_easy_cleanup(curl);
     
     return true;

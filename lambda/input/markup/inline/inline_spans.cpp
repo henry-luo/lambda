@@ -75,7 +75,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // Make a local copy of the text since we use the shared parser->sb which
     // might be the source of the text pointer (e.g., when called from block_quote)
     size_t text_len = strlen(text);
-    char* text_copy = (char*)malloc(text_len + 1);
+    char* text_copy = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
     if (!text_copy) {
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
@@ -283,7 +283,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             char* saved_buffer = nullptr;
             size_t saved_length = sb->length;
             if (saved_length > 0) {
-                saved_buffer = (char*)malloc(saved_length + 1);
+                saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
                 if (saved_buffer) {
                     memcpy(saved_buffer, sb->str->chars, saved_length);
                     saved_buffer[saved_length] = '\0';
@@ -306,7 +306,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 increment_element_content_length(span);
                 pos = try_pos;  // Advance past the emphasis
                 stringbuf_reset(sb);  // Reset buffer for subsequent text
-                if (saved_buffer) free(saved_buffer);
+                if (saved_buffer) mem_free(saved_buffer);
             } else {
                 // Emphasis parsing failed - restore saved buffer and treat markers as text
                 // Restore the buffer contents that may have been clobbered
@@ -316,7 +316,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         stringbuf_append_char(sb, saved_buffer[i]);
                     }
                 }
-                if (saved_buffer) free(saved_buffer);
+                if (saved_buffer) mem_free(saved_buffer);
 
                 // Check if parse_emphasis advanced the position (e.g., for runs that can't open)
                 // In that case, add all the skipped characters to the buffer
@@ -343,7 +343,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             char* saved_buffer = nullptr;
             size_t saved_length = sb->length;
             if (saved_length > 0) {
-                saved_buffer = (char*)malloc(saved_length + 1);
+                saved_buffer = (char*)mem_alloc(saved_length + 1, MEM_CAT_INPUT_MARKUP);
                 if (saved_buffer) {
                     memcpy(saved_buffer, sb->str->chars, saved_length);
                     saved_buffer[saved_length] = '\0';
@@ -366,7 +366,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 increment_element_content_length(span);
                 pos = try_pos;  // Advance past the emphasis
                 stringbuf_reset(sb);  // Reset buffer for subsequent text
-                if (saved_buffer) free(saved_buffer);
+                if (saved_buffer) mem_free(saved_buffer);
             } else {
                 // Emphasis parsing failed - restore saved buffer
                 stringbuf_reset(sb);
@@ -375,7 +375,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         stringbuf_append_char(sb, saved_buffer[i]);
                     }
                 }
-                if (saved_buffer) free(saved_buffer);
+                if (saved_buffer) mem_free(saved_buffer);
 
                 // Treat marker as plain text
                 stringbuf_append_char(sb, *pos);
@@ -1028,7 +1028,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         stringbuf_reset(sb);  // Reset for any subsequent/parent calls
     }
 
-    free(text_copy);  // Free the local copy we made
+    mem_free(text_copy);  // Free the local copy we made
     return Item{.item = (uint64_t)span};
 }
 

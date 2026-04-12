@@ -27,7 +27,7 @@
 #include <mir-gen.h>
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
 #else
@@ -321,6 +321,12 @@ struct JsMirTranspiler {
     JsModuleConstEntry* preamble_entries;   // array of entries to pre-seed (owned by caller)
     int preamble_entry_count;
     int preamble_var_count;                 // starting module_var_count from preamble
+
+    // Eval completion value: when set, expression statements store their value into this register.
+    // Used by js_main to capture the result of the last evaluated expression (even inside
+    // control flow statements like for/while/if/switch), implementing ES spec §13.5.1.
+    MIR_reg_t eval_completion_reg;           // 0 if not tracking completion values
+    bool in_typeof;                          // true when transpiling operand of typeof
 };
 
 // ============================================================================
@@ -432,6 +438,16 @@ static void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         return;
     }
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
+}
+
+// Eval completion value: reset completion register to undefined.
+// Called at the point where the ES spec says "Let V = undefined" for compound statements.
+static inline void jm_eval_cptn_reset(JsMirTranspiler* mt) {
+    if (mt->eval_completion_reg) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+    }
 }
 
 // v11: push loop labels, consuming any pending label from a labeled statement
@@ -3489,7 +3505,13 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         JsFunctionNode* fn = (JsFunctionNode*)md->value;
                         // Track inner functions before recursion
                         int method_children_start = mt->func_count;
-                        // Recurse into method body first
+                        // Recurse into parameters first — default values may contain function expressions
+                        // e.g. method(fn = () => {}) {} or method([cls = class {}]) {}
+                        {
+                            JsAstNode* param = fn->params;
+                            while (param) { jm_collect_functions(mt, param); param = param->next; }
+                        }
+                        // Recurse into method body
                         if (fn->body) jm_collect_functions(mt, fn->body);
                         int method_children_end = mt->func_count;
                         // Add as collected function
@@ -3503,6 +3525,11 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             String* method_name = NULL;
                             if (md->key && md->key->node_type == JS_AST_NODE_IDENTIFIER) {
                                 method_name = ((JsIdentifierNode*)md->key)->name;
+                            } else if (md->key && md->key->node_type == JS_AST_NODE_LITERAL) {
+                                JsLiteralNode* lit = (JsLiteralNode*)md->key;
+                                if (lit->literal_type == JS_LITERAL_STRING) {
+                                    method_name = lit->value.string_value;
+                                }
                             } else if (md->key && md->key->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
                                 // computed key like [Symbol.iterator] — use the property name
                                 JsMemberNode* mem = (JsMemberNode*)md->key;
@@ -3612,6 +3639,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_ASSIGNMENT_PATTERN: {
         // default param: (x = expr) — recurse into default value in case it's a function
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
+        if (ap->left) jm_collect_functions(mt, ap->left);
         if (ap->right) jm_collect_functions(mt, ap->right);
         break;
     }
@@ -5026,9 +5054,11 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
 
     // Fallback: look up property on global object (browser-like named access)
     // This resolves element IDs as globals, module-level assignments, etc.
+    // Uses strict version that throws ReferenceError for undeclared identifiers.
     {
         MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-        return jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+        const char* fn = mt->in_typeof ? "js_get_global_property" : "js_get_global_property_strict";
+        return jm_call_1(mt, fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
     }
 }
@@ -5570,8 +5600,12 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 }
             }
         }
+        // typeof must not throw ReferenceError for undeclared identifiers
+        mt->in_typeof = true;
+        MIR_reg_t operand_val = jm_transpile_box_item(mt, un->operand);
+        mt->in_typeof = false;
         return jm_call_1(mt, "js_typeof", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_transpile_box_item(mt, un->operand)));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, operand_val));
     }
     case JS_OP_PLUS:
     case JS_OP_ADD: {
@@ -6072,6 +6106,38 @@ static void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, M
     } else if (target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
         MIR_reg_t resolved = jm_emit_destructure_default(mt, val, ap->right);
+        // function name inference for destructuring defaults
+        if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER && ap->right) {
+            JsIdentifierNode* id = (JsIdentifierNode*)ap->left;
+            bool is_anon_func = false;
+            bool is_anon_class = false;
+            if (ap->right->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+                is_anon_func = true;
+            } else if (ap->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION) {
+                JsFunctionNode* fn = (JsFunctionNode*)ap->right;
+                is_anon_func = (fn->name == NULL);
+            } else if (ap->right->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                JsClassNode* cls = (JsClassNode*)ap->right;
+                is_anon_class = (cls->name == NULL);
+            }
+            if (is_anon_func && id->name && id->name->chars) {
+                jm_emit_set_function_name(mt, resolved, id->name->chars);
+            } else if (is_anon_class && id->name && id->name->chars) {
+                MIR_reg_t name_key = jm_box_string_literal(mt, "name", 4);
+                MIR_reg_t name_val = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
+                // class name must be non-enumerable, non-writable, configurable
+                jm_call_void_2(mt, "js_mark_non_enumerable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key));
+                jm_call_void_2(mt, "js_mark_non_writable",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key));
+            }
+        }
         jm_emit_destructure_target(mt, ap->left, resolved);
     } else if (target->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         // assignment target: obj.prop or obj[expr]
@@ -8068,7 +8134,8 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 while (search && !found) {
                     for (int i = 0; i < search->method_count; i++) {
                         JsClassMethodEntry* me = &search->methods[i];
-                        if (me->is_static && me->name && method_id->name &&
+                        if (me->is_static && !me->is_getter && !me->is_setter &&
+                            me->name && method_id->name &&
                             me->name->len == method_id->name->len &&
                             strncmp(me->name->chars, method_id->name->chars, me->name->len) == 0) {
                             found = me;
@@ -12877,6 +12944,10 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
     MIR_label_t l_else = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
+    // Eval completion: reset to undefined (spec: if false → NormalCompletion(undefined),
+    // if true → UpdateEmpty(body, undefined))
+    jm_eval_cptn_reset(mt);
+
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_else),
         MIR_new_reg_op(mt->ctx, test_val)));
 
@@ -13000,6 +13071,9 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     // Push loop labels
     jm_push_loop_labels(mt, l_test, l_end);
 
+    // Eval completion: Let V = undefined (spec §14.7.3.2)
+    jm_eval_cptn_reset(mt);
+
     jm_emit_label(mt, l_test);
 
     // Reload scope-env variables so the loop condition sees values updated by
@@ -13041,6 +13115,9 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     if (for_node->init) {
         jm_transpile_statement(mt, for_node->init);
     }
+
+    // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
+    jm_eval_cptn_reset(mt);
 
     // --- For-loop specialization: detect and cache loop bound ---
     // Three tiers of test optimization:
@@ -14014,6 +14091,9 @@ static void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     MIR_reg_t discriminant = jm_transpile_box_item(mt, sw->discriminant);
     MIR_label_t l_end = jm_new_label(mt);
 
+    // Eval completion: reset to undefined (spec §14.12.4)
+    jm_eval_cptn_reset(mt);
+
     // Push break label for the switch (break exits the switch)
     jm_push_loop_labels(mt, 0, l_end);
 
@@ -14085,6 +14165,9 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 
     jm_push_loop_labels(mt, l_test, l_end);
 
+    // Eval completion: Let V = undefined (spec §14.7.2.2)
+    jm_eval_cptn_reset(mt);
+
     // Body first
     jm_emit_label(mt, l_body);
     if (dw->body) {
@@ -14118,6 +14201,9 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 // Uses fn_len + js_property_access for arrays, or js_object_keys for objects
 static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_push_scope(mt);
+
+    // Eval completion: Let V = undefined (spec §14.7.5.8 ForIn/OfBodyEvaluation)
+    jm_eval_cptn_reset(mt);
 
     // Check if the loop variable is a destructuring pattern
     JsArrayPatternNode* destr_pattern = NULL;
@@ -15098,7 +15184,15 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     case JS_AST_NODE_EXPRESSION_STATEMENT: {
         JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
         if (es->expression) {
-            jm_transpile_box_item(mt, es->expression);
+            MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
+            // Eval completion value: update the completion register so that
+            // expression statements inside control flow (for/while/if/switch)
+            // propagate their value as the eval() result.
+            if (mt->eval_completion_reg) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
         }
         break;
     }
@@ -15106,6 +15200,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         JsTryNode* try_node = (JsTryNode*)stmt;
         bool has_catch = (try_node->handler != NULL);
         bool has_finally = (try_node->finalizer != NULL);
+
+        // Eval completion: reset to undefined (spec §14.15.11)
+        jm_eval_cptn_reset(mt);
 
         // Create labels
         MIR_label_t catch_label = has_catch ? jm_new_label(mt) : 0;
@@ -15226,6 +15323,18 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // === Finally block ===
         if (has_finally) {
             jm_emit_label(mt, finally_label);
+
+            // Eval completion: save completion value before finally body.
+            // Per spec, if finally completes normally, the completion value is
+            // from the try/catch block, not the finally block.
+            MIR_reg_t saved_cptn = 0;
+            if (mt->eval_completion_reg) {
+                saved_cptn = jm_new_reg(mt, "_fin_cptn", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, saved_cptn),
+                    MIR_new_reg_op(mt->ctx, mt->eval_completion_reg)));
+            }
+
             if (try_node->finalizer->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 jm_push_scope(mt);
                 jm_init_block_tdz(mt, try_node->finalizer);  // v20 TDZ
@@ -15233,6 +15342,13 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 JsAstNode* s = fin->statements;
                 while (s) { jm_transpile_statement(mt, s); s = s->next; }
                 jm_pop_scope(mt);
+            }
+
+            // Eval completion: restore saved value (finally completed normally)
+            if (saved_cptn) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
+                    MIR_new_reg_op(mt->ctx, saved_cptn)));
             }
 
             // After finally: check if we had a delayed return
@@ -15487,6 +15603,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         bool saved_in_native = mt->in_native_func;
         JsFuncCollected* saved_fc = mt->current_fc;
         JsClassEntry* saved_class_n = mt->current_class;
+        MIR_reg_t saved_eval_completion_n = mt->eval_completion_reg;
         // Save TCO state
         JsFuncCollected* saved_tco_func = mt->tco_func;
         MIR_label_t saved_tco_label = mt->tco_label;
@@ -15500,6 +15617,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->pending_label_len = 0;
         mt->in_native_func = true;
         mt->current_fc = fc;
+        mt->eval_completion_reg = 0;  // disable in native functions
         mt->tco_func = NULL;
         mt->in_tail_position = false;
         mt->tco_jumped = false;
@@ -15677,6 +15795,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->in_native_func = saved_in_native;
         mt->current_fc = saved_fc;
         mt->current_class = saved_class_n;
+        mt->eval_completion_reg = saved_eval_completion_n;
         mt->tco_func = saved_tco_func;
         mt->tco_label = saved_tco_label;
         mt->tco_count_reg = saved_tco_count;
@@ -16442,11 +16561,13 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     MIR_reg_t saved_scope_env_reg = mt->scope_env_reg;
     int saved_scope_env_slot_count = mt->scope_env_slot_count;
     int saved_func_index = mt->current_func_index;
+    MIR_reg_t saved_eval_completion_reg = mt->eval_completion_reg;
 
     // Set current function index for scope env lookups
     mt->current_func_index = (int)(fc - mt->func_entries);
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
+    mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
 
     // Determine if this function is a class method and set current_class
     mt->current_class = NULL;
@@ -17151,6 +17272,7 @@ finish_boxed:
     mt->scope_env_reg = saved_scope_env_reg;
     mt->scope_env_slot_count = saved_scope_env_slot_count;
     mt->current_func_index = saved_func_index;
+    mt->eval_completion_reg = saved_eval_completion_reg;
 }
 
 // ============================================================================
@@ -18692,10 +18814,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     jm_push_scope(mt);
 
-    // Initialize result register
+    // Initialize result register to undefined (JS completion value default)
     MIR_reg_t result = jm_new_reg(mt, "result", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+
+    // Enable eval completion value tracking: expression statements inside
+    // control flow (for/while/if/switch/try) will update this register,
+    // so eval() returns the last evaluated expression value per ES spec.
+    mt->eval_completion_reg = result;
 
     // v20 TDZ: Initialize let/const module vars to TDZ sentinel
     if (mt->module_consts) {
@@ -19533,7 +19660,7 @@ static void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx) {
     JsImportGraphNode* parent = &nodes[parent_idx];
     if (parent->dep_count >= parent->dep_cap) {
         parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
-        parent->deps = (int*)realloc(parent->deps, sizeof(int) * parent->dep_cap);
+        parent->deps = (int*)mem_realloc(parent->deps, sizeof(int) * parent->dep_cap, MEM_CAT_JS_RUNTIME);
     }
     parent->deps[parent->dep_count++] = dep_idx;
 }
@@ -19593,12 +19720,12 @@ static void jm_discover_js_imports_recursive(
             // new module discovered
             if (*count >= *capacity) {
                 *capacity *= 2;
-                *nodes = (JsImportGraphNode*)realloc(*nodes, sizeof(JsImportGraphNode) * (*capacity));
+                *nodes = (JsImportGraphNode*)mem_realloc(*nodes, sizeof(JsImportGraphNode) * (*capacity), MEM_CAT_JS_RUNTIME);
             }
             dep_idx = *count;
             JsImportGraphNode* n = &(*nodes)[dep_idx];
             memset(n, 0, sizeof(JsImportGraphNode));
-            n->path = strdup(resolved);
+            n->path = mem_strdup(resolved, MEM_CAT_JS_RUNTIME);
             n->source = read_text_file(resolved);
             n->depth = -1;
 
@@ -19701,7 +19828,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         MIR_set_error_func(ctx, g_batch_mir_error_handler);
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
     if (!mt) {
         log_error("js-parallel: failed to allocate JsMirTranspiler for '%s'", node->path);
         MIR_finish(ctx);
@@ -19738,7 +19865,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         js_transpiler_destroy(tp);
         MIR_finish(ctx);
         return false;
@@ -19757,7 +19884,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
     // JIT code embeds raw String* pointers interned in the name pool.
     // Freeing the pool would leave dangling pointers in the generated code.
@@ -19804,9 +19931,9 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
     // initialize graph with main script as sentinel (index 0, not compiled here)
     int capacity = 16;
     int count = 1;
-    JsImportGraphNode* nodes = (JsImportGraphNode*)calloc(capacity, sizeof(JsImportGraphNode));
-    nodes[0].path = strdup(filename);
-    nodes[0].source = strdup(js_source);
+    JsImportGraphNode* nodes = (JsImportGraphNode*)mem_calloc(capacity, sizeof(JsImportGraphNode), MEM_CAT_JS_RUNTIME);
+    nodes[0].path = mem_strdup(filename, MEM_CAT_JS_RUNTIME);
+    nodes[0].source = mem_strdup(js_source, MEM_CAT_JS_RUNTIME);
     nodes[0].depth = -1;
 
     struct hashmap* path_map = hashmap_new(sizeof(JsPathIndexEntry), 64, 0, 0,
@@ -19823,11 +19950,11 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
     if (import_count < 2) {
         // not enough modules to justify parallelism — let serial jm_load_imports handle it
         for (int i = 0; i < count; i++) {
-            free(nodes[i].path);
-            free(nodes[i].source);
-            free(nodes[i].deps);
+            mem_free(nodes[i].path);
+            mem_free(nodes[i].source);
+            mem_free(nodes[i].deps);
         }
-        free(nodes);
+        mem_free(nodes);
         return 0;
     }
 
@@ -19865,8 +19992,8 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
             // single module — compile inline without thread overhead
             jm_compile_js_module(runtime, &nodes[batch_indices[0]]);
         } else {
-            JsCompileWorkerArg* args = (JsCompileWorkerArg*)calloc(batch_count, sizeof(JsCompileWorkerArg));
-            pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * batch_count);
+            JsCompileWorkerArg* args = (JsCompileWorkerArg*)mem_calloc(batch_count, sizeof(JsCompileWorkerArg), MEM_CAT_JS_RUNTIME);
+            pthread_t* threads = (pthread_t*)mem_alloc(sizeof(pthread_t) * batch_count, MEM_CAT_JS_RUNTIME);
             pthread_attr_t attr;
             pthread_attr_init(&attr);
             pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
@@ -19883,8 +20010,8 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
                 pthread_join(threads[i], NULL);
             }
 
-            free(threads);
-            free(args);
+            mem_free(threads);
+            mem_free(args);
         }
 
         // serial execute phase: run js_main for each compiled module at this level
@@ -19916,12 +20043,12 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
 
     // cleanup graph
     for (int i = 0; i < count; i++) {
-        free(nodes[i].path);
-        free(nodes[i].source);
-        free(nodes[i].deps);
+        mem_free(nodes[i].path);
+        mem_free(nodes[i].source);
+        mem_free(nodes[i].deps);
         if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
     }
-    free(nodes);
+    mem_free(nodes);
 
     return precompiled;
 }
@@ -19965,7 +20092,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
         return ItemNull;
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
     if (!mt) {
         log_error("js-mir: module: failed to allocate transpiler for '%s'", filename);
         MIR_finish(ctx);
@@ -20002,7 +20129,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -20022,7 +20149,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -20051,7 +20178,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     jm_defer_mir_cleanup(ctx);
     // Detach name_pool and ast_pool so they survive transpiler cleanup.
     // JIT code holds raw String* pointers into the name pool.
@@ -20122,7 +20249,7 @@ static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filena
                     char* mod_source = read_text_file(resolved);
                     if (mod_source) {
                         transpile_js_module_to_mir(runtime, mod_source, resolved);
-                        free(mod_source);
+                        mem_free(mod_source);
                     } else {
                         log_error("js-mir: cannot read module '%s'", resolved);
                     }
@@ -20179,7 +20306,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     strbuf_append_str(sb, "})");
 
     // null-terminate — use malloc; the transpiler will copy as needed
-    char* source = (char*)malloc(sb->length + 1);
+    char* source = (char*)mem_alloc(sb->length + 1, MEM_CAT_JS_RUNTIME);
     if (!source) {
         strbuf_free(sb);
         log_error("js-new-function: malloc failed for source buffer");
@@ -20202,14 +20329,14 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     if (!js_transpiler_parse(tp, source, strlen(source))) {
         log_error("js-new-function: parse failed for '%s'", source);
-        free(source);
+        mem_free(source);
         js_transpiler_destroy(tp);
         return ItemNull;
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
     JsAstNode* js_ast = build_js_ast(tp, root);
-    free(source);  // source only needed for parsing and AST building
+    mem_free(source);  // source only needed for parsing and AST building
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         js_transpiler_destroy(tp);
@@ -20228,7 +20355,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         MIR_set_error_func(ctx, g_batch_mir_error_handler);
     }
 
-    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
     if (!mt) {
         log_error("js-new-function: failed to allocate transpiler");
         MIR_finish(ctx);
@@ -20274,7 +20401,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -20294,7 +20421,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return ItemNull;
@@ -20314,7 +20441,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     jm_defer_mir_cleanup(ctx);
     // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
     // These leak intentionally — their lifetime must match the JIT code.
@@ -20324,6 +20451,98 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     log_debug("js-new-function: compiled dynamic function OK (type=%d)", get_type_id(fn_item));
     return fn_item;
+}
+
+// ============================================================================
+// eval() helper: insert "return " before the last expression statement
+// to capture the completion value. Returns malloc'd string or NULL.
+// ============================================================================
+static char* eval_try_insert_return(const char* code, size_t len) {
+    // Forward-scan to find the start of the last top-level statement,
+    // handling strings, comments, and nesting so inner semicolons are skipped.
+    size_t last_stmt_start = 0;
+    int brace = 0, paren = 0, bracket = 0;
+    bool in_sq = false, in_dq = false, in_tpl = false;
+    bool in_line_cmt = false, in_block_cmt = false;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = code[i];
+        char n = (i + 1 < len) ? code[i + 1] : 0;
+
+        if (in_line_cmt)  { if (c == '\n') in_line_cmt = false; continue; }
+        if (in_block_cmt) { if (c == '*' && n == '/') { in_block_cmt = false; i++; } continue; }
+
+        if (!in_sq && !in_dq && !in_tpl) {
+            if (c == '/' && n == '/') { in_line_cmt  = true;  i++; continue; }
+            if (c == '/' && n == '*') { in_block_cmt = true;  i++; continue; }
+        }
+
+        if (in_sq)  { if (c == '\\') { i++; continue; } if (c == '\'') in_sq  = false; continue; }
+        if (in_dq)  { if (c == '\\') { i++; continue; } if (c == '"')  in_dq  = false; continue; }
+        if (in_tpl) { if (c == '\\') { i++; continue; } if (c == '`')  in_tpl = false; continue; }
+
+        if (c == '\'') { in_sq  = true; continue; }
+        if (c == '"')  { in_dq  = true; continue; }
+        if (c == '`')  { in_tpl = true; continue; }
+
+        if (c == '(') paren++;   else if (c == ')') { if (paren   > 0) paren--;   }
+        if (c == '[') bracket++; else if (c == ']') { if (bracket > 0) bracket--; }
+        if (c == '{') brace++;   else if (c == '}') { if (brace   > 0) brace--;   }
+
+        // Top-level semicolon — next non-whitespace char starts next statement
+        if (c == ';' && brace == 0 && paren == 0 && bracket == 0) {
+            size_t nxt = i + 1;
+            while (nxt < len && (code[nxt] == ' ' || code[nxt] == '\t' ||
+                                 code[nxt] == '\n' || code[nxt] == '\r'))
+                nxt++;
+            if (nxt < len) last_stmt_start = nxt;
+        }
+    }
+
+    // Skip leading whitespace of last statement
+    size_t ls = last_stmt_start;
+    while (ls < len && (code[ls] == ' ' || code[ls] == '\t' ||
+                        code[ls] == '\n' || code[ls] == '\r'))
+        ls++;
+    if (ls >= len) return NULL;
+
+    // Extract the first identifier-word of the last statement
+    size_t we = ls;
+    while (we < len && ((code[we] >= 'a' && code[we] <= 'z') ||
+                        (code[we] >= 'A' && code[we] <= 'Z') ||
+                        (code[we] >= '0' && code[we] <= '9') ||
+                        code[we] == '_' || code[we] == '$'))
+        we++;
+    size_t wlen = we - ls;
+
+    // Keywords that start non-expression statements — don't prepend return
+    static const char* kw[] = {
+        "var", "let", "const", "function", "class",
+        "if", "for", "while", "do", "switch", "try", "with",
+        "throw", "return", "break", "continue", "debugger",
+        "import", "export", NULL
+    };
+    for (int k = 0; kw[k]; k++) {
+        size_t klen = strlen(kw[k]);
+        if (wlen == klen && memcmp(code + ls, kw[k], klen) == 0)
+            return NULL;
+    }
+
+    // Also skip if last statement starts with '{' (block)
+    if (code[ls] == '{') return NULL;
+
+    // Skip if last statement is empty (just ';') — completion is from the previous stmt
+    if (code[ls] == ';') return NULL;
+
+    // Build: code[0..ls] + "return " + code[ls..len]
+    size_t total = len + 7 + 1;
+    char* result = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+    if (!result) return NULL;
+    memcpy(result, code, ls);
+    memcpy(result + ls, "return ", 7);
+    memcpy(result + ls + 7, code + ls, len - ls);
+    result[total - 1] = '\0';
+    return result;
 }
 
 // ============================================================================
@@ -20342,27 +20561,78 @@ extern "C" Item js_builtin_eval(Item code_item) {
     String* code_str = it2s(code_item);
     if (!code_str || code_str->len == 0) return ItemNull;
 
+    // Check for whitespace/comment-only code — should return undefined
+    {
+        const char* s = code_str->chars;
+        size_t slen = code_str->len;
+        size_t i = 0;
+        bool has_code = false;
+        while (i < slen) {
+            char c = s[i];
+            // skip whitespace
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
+            // skip line comments
+            if (c == '/' && i + 1 < slen && s[i+1] == '/') {
+                i += 2;
+                while (i < slen && s[i] != '\n') i++;
+                continue;
+            }
+            // skip block comments
+            if (c == '/' && i + 1 < slen && s[i+1] == '*') {
+                i += 2;
+                while (i + 1 < slen && !(s[i] == '*' && s[i+1] == '/')) i++;
+                if (i + 1 < slen) i += 2;
+                continue;
+            }
+            has_code = true;
+            break;
+        }
+        if (!has_code) return ItemNull;
+    }
+
     extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
     // Try expression form first: body = "return (code)\n"
     // js_new_function_from_string wraps as (function() { return (code)\n })
+    // Skip if code starts with a declaration keyword — wrapping in parens would
+    // turn a declaration into an expression (e.g. function f(){} → function expression),
+    // giving a wrong completion value (should be undefined, not the function).
     {
-        const char* prefix = "return (";
-        const char* suffix = "\n)";
-        size_t plen = strlen(prefix), slen = strlen(suffix);
-        size_t total = plen + code_len + slen + 1;
-        char* body = (char*)malloc(total);
-        if (!body) return ItemNull;
-        memcpy(body, prefix, plen);
-        memcpy(body + plen, code_str->chars, code_len);
-        memcpy(body + plen + code_len, suffix, slen);
-        body[total - 1] = '\0';
+        bool skip_expr_form = false;
+        const char* s = code_str->chars;
+        size_t slen = code_str->len;
+        // Skip leading whitespace
+        size_t i = 0;
+        while (i < slen && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++;
+        if (i < slen) {
+            if (slen - i >= 8 && memcmp(s + i, "function", 8) == 0 &&
+                (i + 8 >= slen || s[i+8] == ' ' || s[i+8] == '*' || s[i+8] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "class", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == '{'))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "async", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' '))
+                skip_expr_form = true;
+        }
+        if (!skip_expr_form) {
+            const char* prefix = "return (";
+            const char* suffix = "\n)";
+            size_t plen = strlen(prefix), slen2 = strlen(suffix);
+            size_t total = plen + code_len + slen2 + 1;
+            char* body = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+            if (!body) return ItemNull;
+            memcpy(body, prefix, plen);
+            memcpy(body + plen, code_str->chars, code_len);
+            memcpy(body + plen + code_len, suffix, slen2);
+            body[total - 1] = '\0';
 
-        Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
-        free(body);
-        fn_item = js_new_function_from_string(&body_item, 1);
+            Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
+            mem_free(body);
+            fn_item = js_new_function_from_string(&body_item, 1);
+        }
     }
 
     // If expression form succeeded, call and return
@@ -20370,17 +20640,149 @@ extern "C" Item js_builtin_eval(Item code_item) {
         return js_call_function(fn_item, ItemNull, NULL, 0);
     }
 
-    // Try statement form: body = code as-is
+    // Try statement form with "return" inserted before last expression statement
     {
-        Item body_item = code_item;
-        fn_item = js_new_function_from_string(&body_item, 1);
+        char* modified = eval_try_insert_return(code_str->chars, code_str->len);
+        if (modified) {
+            log_debug("js-eval: trying completion-value form: %.80s", modified);
+            Item body_item = (Item){.item = s2it(heap_create_name(modified, strlen(modified)))};
+            mem_free(modified);
+            fn_item = js_new_function_from_string(&body_item, 1);
+            if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
+                return js_call_function(fn_item, ItemNull, NULL, 0);
+            }
+        }
     }
 
-    if (fn_item.item == 0 || fn_item.item == ITEM_NULL || fn_item.item == ITEM_ERROR) {
-        return ItemNull;
-    }
+    // Fallback: compile code directly as a top-level script (not wrapped in a function).
+    // This allows js_main to execute the code and return the completion value via
+    // eval_completion_reg, which tracks the last evaluated expression statement
+    // even inside control flow (for/while/if/switch/try).
+    {
+        const char* source = code_str->chars;
+        size_t source_len = code_str->len;
 
-    return js_call_function(fn_item, ItemNull, NULL, 0);
+        JsTranspiler* tp = js_transpiler_create(js_source_runtime);
+        if (!tp) {
+            log_error("js-eval: failed to create transpiler for direct script");
+            return ItemNull;
+        }
+
+        if (!js_transpiler_parse(tp, source, source_len)) {
+            log_error("js-eval: parse failed for direct script");
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        TSNode root = ts_tree_root_node(tp->tree);
+        JsAstNode* js_ast = build_js_ast(tp, root);
+        if (!js_ast) {
+            log_error("js-eval: AST build failed for direct script");
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        MIR_context_t eval_ctx = jit_init(g_js_mir_optimize_level);
+        if (!eval_ctx) {
+            log_error("js-eval: MIR context init failed");
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        if (g_batch_mir_error_handler) {
+            MIR_set_error_func(eval_ctx, g_batch_mir_error_handler);
+        }
+
+        JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
+        if (!mt) {
+            log_error("js-eval: failed to allocate transpiler");
+            MIR_finish(eval_ctx);
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+        memset(mt, 0, sizeof(JsMirTranspiler));
+        mt->tp = tp;
+        mt->ctx = eval_ctx;
+        mt->is_module = false;
+        mt->filename = "<eval>";
+        mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 16, 0, 0,
+            js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+        mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 8, 0, 0,
+            js_local_func_hash, js_local_func_cmp, NULL, NULL);
+        mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 8, 0, 0,
+            js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+        mt->scope_depth = 0;
+        mt->collect_parent_func_index = -1;
+        mt->scope_env_reg = 0;
+        mt->scope_env_slot_count = 0;
+        mt->current_func_index = -1;
+
+        // Inherit outer script's module_consts so eval() can resolve var declarations
+        if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
+            mt->preamble_entries = g_eval_preamble_entries;
+            mt->preamble_entry_count = g_eval_preamble_entry_count;
+            mt->preamble_var_count = g_eval_preamble_var_count;
+        }
+
+        char module_name[48];
+        snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
+        mt->module = MIR_new_module(eval_ctx, module_name);
+
+        transpile_js_mir_ast(mt, js_ast);
+
+        if (!jm_validate_mir_labels(eval_ctx)) {
+            log_error("js-eval: NULL labels detected in direct script");
+            hashmap_free(mt->import_cache);
+            hashmap_free(mt->local_funcs);
+            if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+            for (int i = 0; i <= mt->scope_depth; i++) {
+                if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+            }
+            mem_free(mt);
+            MIR_finish(eval_ctx);
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        MIR_link(eval_ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+
+        typedef Item (*js_main_func_t)(Context*);
+        js_main_func_t js_main_fn = (js_main_func_t)find_func(eval_ctx, (char*)"js_main");
+
+        if (!js_main_fn) {
+            log_error("js-eval: failed to find js_main in direct script");
+            hashmap_free(mt->import_cache);
+            hashmap_free(mt->local_funcs);
+            if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+            if (mt->module_consts) hashmap_free(mt->module_consts);
+            for (int i = 0; i <= mt->scope_depth; i++) {
+                if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+            }
+            mem_free(mt);
+            MIR_finish(eval_ctx);
+            js_transpiler_destroy(tp);
+            return ItemNull;
+        }
+
+        // Execute js_main directly — returns the completion value
+        Item result = js_main_fn((Context*)context);
+
+        // Cleanup
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        mem_free(mt);
+        jm_defer_mir_cleanup(eval_ctx);
+        tp->name_pool = NULL;
+        tp->ast_pool = NULL;
+        js_transpiler_destroy(tp);
+
+        return result;
+    }
 }
 
 // ============================================================================
@@ -20432,7 +20834,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
 
     // set up MIR transpiler
-    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
     if (!mt) {
         log_error("js-mir-ast: failed to allocate JsMirTranspiler");
         MIR_finish(ctx);
@@ -20506,7 +20908,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -20526,7 +20928,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         context = old_context;
         return (Item){.item = ITEM_ERROR};
@@ -20569,7 +20971,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     MIR_finish(ctx);
 
     // stash ephemeral GC heap on Runtime for caller cleanup
@@ -20712,7 +21114,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
-    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    JsMirTranspiler* mt = (JsMirTranspiler*)mem_alloc(sizeof(JsMirTranspiler), MEM_CAT_JS_RUNTIME);
     if (!mt) {
         log_error("js-mir: failed to allocate JsMirTranspiler");
         MIR_finish(ctx);
@@ -20798,7 +21200,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -20820,7 +21222,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -20845,9 +21247,9 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // eval()/new Function() called during js_main can resolve outer-scope
     // var declarations via the shared static js_module_vars[] array.
     if (mt->module_consts && !g_jm_preamble_mode) {
-        free(g_eval_preamble_entries);
+        mem_free(g_eval_preamble_entries);
         int ecount = (int)hashmap_count(mt->module_consts);
-        g_eval_preamble_entries = (JsModuleConstEntry*)malloc(ecount * sizeof(JsModuleConstEntry));
+        g_eval_preamble_entries = (JsModuleConstEntry*)mem_alloc(ecount * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
         g_eval_preamble_entry_count = 0;
         size_t eiter = 0; void* eitem;
         while (hashmap_iter(mt->module_consts, &eiter, &eitem)) {
@@ -20872,7 +21274,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     if (g_jm_preamble_out && mt->module_consts) {
         g_jm_preamble_out->module_var_count = mt->module_var_count;
         int count = (int)hashmap_count(mt->module_consts);
-        g_jm_preamble_out->entries = (JsModuleConstEntry*)malloc(count * sizeof(JsModuleConstEntry));
+        g_jm_preamble_out->entries = (JsModuleConstEntry*)mem_alloc(count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
         g_jm_preamble_out->entry_count = 0;
         size_t snap_iter = 0; void* snap_item;
         while (hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
@@ -20917,7 +21319,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
         g_jm_preamble_out->mir_ctx = ctx;
@@ -21000,7 +21402,7 @@ void preamble_state_destroy(JsPreambleState* state) {
         pool_destroy((Pool*)state->tp_ast_pool);
         state->tp_ast_pool = NULL;
     }
-    free(state->entries);
+    mem_free(state->entries);
     state->entries = NULL;
     state->entry_count = 0;
     state->module_var_count = 0;
@@ -21022,7 +21424,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
     // (normally provided by transpile_js_to_mir). When called from build_ast
     // during Lambda→JS import, no context exists yet. Set up a persistent one.
     if (!context || !context->heap) {
-        EvalContext* temp_ctx = (EvalContext*)calloc(1, sizeof(EvalContext));
+        EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_JS_RUNTIME);
         temp_ctx->pool = pool_create();
         temp_ctx->result = ItemNull;
         temp_ctx->nursery = gc_nursery_create(0);
@@ -21040,6 +21442,6 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
     }
 
     Item ns = transpile_js_module_to_mir(runtime, source, js_path);
-    free(source);
+    mem_free(source);
     return ns;
 }

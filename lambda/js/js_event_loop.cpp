@@ -14,7 +14,7 @@
 #include "../../lib/uv_loop.h"
 
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <setjmp.h>
 #include <signal.h>
 
@@ -96,7 +96,7 @@ static void timer_close_cb(uv_handle_t *handle) {
             break;
         }
     }
-    free(th);
+    mem_free(th);
 }
 
 static void timer_fire_cb(uv_timer_t *handle) {
@@ -131,7 +131,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     double ms = item_to_ms(delay);
     if (ms < 0) ms = 0;
 
-    JsTimerHandle *th = (JsTimerHandle *)calloc(1, sizeof(JsTimerHandle));
+    JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
 
     th->id = next_timer_id++;
@@ -159,7 +159,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     double ms = item_to_ms(delay);
     if (ms < 1) ms = 1; // minimum interval
 
-    JsTimerHandle *th = (JsTimerHandle *)calloc(1, sizeof(JsTimerHandle));
+    JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
     if (!th) return ItemNull;
 
     th->id = next_timer_id++;

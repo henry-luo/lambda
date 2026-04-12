@@ -13,7 +13,7 @@
 #include "../../lib/strbuf.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 

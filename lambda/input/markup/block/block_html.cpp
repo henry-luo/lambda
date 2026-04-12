@@ -13,7 +13,7 @@
  * Type 7: Complete open/close tag on single line - ends at blank line
  */
 #include "block_common.hpp"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include <cstring>
 #include <cctype>
 

@@ -13,7 +13,7 @@
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cmath>
 #include <cctype>
 
@@ -395,13 +395,13 @@ extern "C" Item py_builtin_repr(Item obj) {
         String* s = it2s(obj);
         // wrap in single quotes
         int buf_len = s->len + 3;
-        char* buf = (char*)malloc(buf_len);
+        char* buf = (char*)mem_alloc(buf_len, MEM_CAT_PY_RUNTIME);
         buf[0] = '\'';
         memcpy(buf + 1, s->chars, s->len);
         buf[s->len + 1] = '\'';
         buf[s->len + 2] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len + 2))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     return py_to_str(obj);
@@ -655,7 +655,7 @@ extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_
     // compute sort keys if key function provided
     Item* keys = NULL;
     if (has_key) {
-        keys = (Item*)malloc(result->length * sizeof(Item));
+        keys = (Item*)mem_alloc(result->length * sizeof(Item), MEM_CAT_PY_RUNTIME);
         for (int i = 0; i < result->length; i++) {
             Item arg = result->items[i];
             keys[i] = py_call_function(key_func, &arg, 1);
@@ -680,7 +680,7 @@ extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_
         if (has_key) keys[j + 1] = saved_key;
     }
 
-    if (keys) free(keys);
+    if (keys) mem_free(keys);
     return (Item){.array = result};
 }
 
@@ -698,7 +698,7 @@ extern "C" Item py_list_sort_ex(Item list_item, Item key_func, Item reverse_flag
 
     Item* keys = NULL;
     if (has_key) {
-        keys = (Item*)malloc(arr->length * sizeof(Item));
+        keys = (Item*)mem_alloc(arr->length * sizeof(Item), MEM_CAT_PY_RUNTIME);
         for (int i = 0; i < arr->length; i++) {
             Item arg = arr->items[i];
             keys[i] = py_call_function(key_func, &arg, 1);
@@ -722,7 +722,7 @@ extern "C" Item py_list_sort_ex(Item list_item, Item key_func, Item reverse_flag
         if (has_key) keys[j + 1] = saved_key;
     }
 
-    if (keys) free(keys);
+    if (keys) mem_free(keys);
     return ItemNull;
 }
 
@@ -830,20 +830,20 @@ extern "C" Item py_builtin_tuple(Item iterable) {
 // ============================================================================
 
 static Item py_str_upper(String* s) {
-    char* buf = (char*)malloc(s->len + 1);
+    char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
     for (int64_t i = 0; i < s->len; i++) buf[i] = toupper((uint8_t)s->chars[i]);
     buf[s->len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
 static Item py_str_lower(String* s) {
-    char* buf = (char*)malloc(s->len + 1);
+    char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
     for (int64_t i = 0; i < s->len; i++) buf[i] = tolower((uint8_t)s->chars[i]);
     buf[s->len] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -923,7 +923,7 @@ static Item py_str_join(String* s, Item* args, int argc) {
         if (i > 0) total += s->len;
     }
 
-    char* buf = (char*)malloc(total + 1);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_PY_RUNTIME);
     size_t pos = 0;
     for (int i = 0; i < arr->length; i++) {
         if (i > 0 && s->len > 0) {
@@ -940,7 +940,7 @@ static Item py_str_join(String* s, Item* args, int argc) {
     buf[pos] = '\0';
 
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -962,7 +962,7 @@ static Item py_str_replace(String* s, Item* args, int argc) {
     if (count == 0) return (Item){.item = s2it(s)};
 
     size_t new_len = s->len + (size_t)count * (new_str->len - old_str->len);
-    char* buf = (char*)malloc(new_len + 1);
+    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_PY_RUNTIME);
     size_t pos = 0;
     int64_t i = 0;
     while (i < s->len) {
@@ -978,7 +978,7 @@ static Item py_str_replace(String* s, Item* args, int argc) {
     buf[pos] = '\0';
 
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -1064,7 +1064,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
     if (strcmp(method->chars, "isdigit") == 0) return py_str_isdigit(s);
     if (strcmp(method->chars, "isalpha") == 0) return py_str_isalpha(s);
     if (strcmp(method->chars, "title") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
         bool next_upper = true;
         for (int64_t i = 0; i < s->len; i++) {
             if (isspace((uint8_t)s->chars[i]) || !isalpha((uint8_t)s->chars[i])) {
@@ -1079,17 +1079,17 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         }
         buf[s->len] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "capitalize") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) {
             buf[i] = (i == 0) ? toupper((uint8_t)s->chars[i]) : tolower((uint8_t)s->chars[i]);
         }
         buf[s->len] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "format") == 0) {
@@ -1344,7 +1344,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         return (Item){.item = b2it(has_cased)};
     }
     if (strcmp(method->chars, "swapcase") == 0) {
-        char* buf = (char*)malloc(s->len + 1);
+        char* buf = (char*)mem_alloc(s->len + 1, MEM_CAT_PY_RUNTIME);
         for (int64_t i = 0; i < s->len; i++) {
             if (islower((uint8_t)s->chars[i])) buf[i] = toupper((uint8_t)s->chars[i]);
             else if (isupper((uint8_t)s->chars[i])) buf[i] = tolower((uint8_t)s->chars[i]);
@@ -1352,7 +1352,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         }
         buf[s->len] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "center") == 0) {
@@ -1367,13 +1367,13 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         int64_t pad = width - s->len;
         int64_t left = pad / 2;
         int64_t right = pad - left;
-        char* buf = (char*)malloc(width + 1);
+        char* buf = (char*)mem_alloc(width + 1, MEM_CAT_PY_RUNTIME);
         for (int64_t i = 0; i < left; i++) buf[i] = fill;
         memcpy(buf + left, s->chars, s->len);
         for (int64_t i = 0; i < right; i++) buf[left + s->len + i] = fill;
         buf[width] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "ljust") == 0) {
@@ -1385,12 +1385,12 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
             String* fc = it2s(args[1]);
             if (fc && fc->len > 0) fill = fc->chars[0];
         }
-        char* buf = (char*)malloc(width + 1);
+        char* buf = (char*)mem_alloc(width + 1, MEM_CAT_PY_RUNTIME);
         memcpy(buf, s->chars, s->len);
         for (int64_t i = s->len; i < width; i++) buf[i] = fill;
         buf[width] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "rjust") == 0) {
@@ -1403,12 +1403,12 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
             if (fc && fc->len > 0) fill = fc->chars[0];
         }
         int64_t pad = width - s->len;
-        char* buf = (char*)malloc(width + 1);
+        char* buf = (char*)mem_alloc(width + 1, MEM_CAT_PY_RUNTIME);
         for (int64_t i = 0; i < pad; i++) buf[i] = fill;
         memcpy(buf + pad, s->chars, s->len);
         buf[width] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
     if (strcmp(method->chars, "zfill") == 0) {
@@ -1416,7 +1416,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         int64_t width = it2i(args[0]);
         if (width <= s->len) return (Item){.item = s2it(s)};
         int64_t pad = width - s->len;
-        char* buf = (char*)malloc(width + 1);
+        char* buf = (char*)mem_alloc(width + 1, MEM_CAT_PY_RUNTIME);
         int64_t start = 0;
         if (s->len > 0 && (s->chars[0] == '+' || s->chars[0] == '-')) {
             buf[0] = s->chars[0];
@@ -1429,7 +1429,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         }
         buf[width] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
 

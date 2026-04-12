@@ -11,7 +11,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Swagger UI HTML Template
@@ -83,8 +83,8 @@ int swagger_ui_serve(Server *server, const char *docs_path, const char *spec_url
     size_t html_len = prefix_len + strlen(spec_url) + suffix_len;
 
     // allocate state (leaked intentionally — lives for server lifetime)
-    SwaggerUIState *state = (SwaggerUIState*)calloc(1, sizeof(SwaggerUIState));
-    state->html = (char*)malloc(html_len + 1);
+    SwaggerUIState *state = (SwaggerUIState*)mem_calloc(1, sizeof(SwaggerUIState), MEM_CAT_SERVE);
+    state->html = (char*)mem_alloc(html_len + 1, MEM_CAT_SERVE);
 
     memcpy(state->html, SWAGGER_UI_TEMPLATE, prefix_len);
     memcpy(state->html + prefix_len, spec_url, strlen(spec_url));

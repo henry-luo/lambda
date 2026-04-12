@@ -8,7 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Context Lifecycle
@@ -18,7 +18,7 @@ OpenApiContext* openapi_create(Server *server, const OpenApiConfig *config,
                                EndpointRegistry *registry) {
     if (!server || !config || !registry) return NULL;
 
-    OpenApiContext* ctx = (OpenApiContext*)calloc(1, sizeof(OpenApiContext));
+    OpenApiContext* ctx = (OpenApiContext*)mem_calloc(1, sizeof(OpenApiContext), MEM_CAT_SERVE);
     if (!ctx) return NULL;
 
     ctx->server = server;
@@ -31,13 +31,13 @@ OpenApiContext* openapi_create(Server *server, const OpenApiConfig *config,
 
 void openapi_destroy(OpenApiContext *ctx) {
     if (!ctx) return;
-    free(ctx->cached_spec);
-    free(ctx);
+    mem_free(ctx->cached_spec);
+    mem_free(ctx);
 }
 
 void openapi_invalidate(OpenApiContext *ctx) {
     if (!ctx) return;
-    free(ctx->cached_spec);
+    mem_free(ctx->cached_spec);
     ctx->cached_spec = NULL;
 }
 
@@ -305,7 +305,7 @@ const char* openapi_generate_spec(OpenApiContext *ctx) {
 
     // cache result
     size_t len = buf->length;
-    ctx->cached_spec = (char*)malloc(len + 1);
+    ctx->cached_spec = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
     memcpy(ctx->cached_spec, buf->str, len + 1);
 
     strbuf_free(buf);

@@ -1,10 +1,10 @@
 #include "input.hpp"
-#include "../../lib/memtrack.h"
+#include "../../lib/mem.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include <string.h>
-#include <stdlib.h>
+
 #include <ctype.h>
 
 using namespace lambda;

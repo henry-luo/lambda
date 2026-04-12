@@ -1094,7 +1094,7 @@ static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* paren
     if (!parser) {
         log_error("Failed to create stream parser");
         if (decompressed_data) {
-            free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
+            mem_free(decompressed_data);  // from pdf_decompress_stream_with_params which uses mem_alloc
         }
         return;
     }
@@ -1123,7 +1123,7 @@ static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* paren
 
     // Free decompressed data if allocated
     if (decompressed_data) {
-        free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
+        mem_free(decompressed_data);  // from pdf_decompress_stream_with_params which uses mem_alloc
     }
 }
 

@@ -10,7 +10,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // SHA-256 constants
@@ -89,7 +89,7 @@ static void sha256_compute(const uint8_t* data, int offset, int length, uint8_t*
     uint32_t h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
 
     int padded_length = ((length + 9 + 63) / 64) * 64;
-    uint8_t* padded = (uint8_t*)calloc(padded_length, 1);
+    uint8_t* padded = (uint8_t*)mem_calloc(padded_length, 1, MEM_CAT_JS_RUNTIME);
     memcpy(padded, data + offset, length);
     padded[length] = 0x80;
 
@@ -129,7 +129,7 @@ static void sha256_compute(const uint8_t* data, int offset, int length, uint8_t*
         h0 += a; h1 += b; h2 += c; h3 += d;
         h4 += e; h5 += f; h6 += g; h7 += h;
     }
-    free(padded);
+    mem_free(padded);
 
     uint32_t hh[8] = { h0, h1, h2, h3, h4, h5, h6, h7 };
     for (int i = 0; i < 8; i++) {
@@ -157,7 +157,7 @@ static void sha512_compute(const uint8_t* data, int offset, int length, bool mod
     }
 
     int padded_length = ((length + 17 + 127) / 128) * 128;
-    uint8_t* padded = (uint8_t*)calloc(padded_length, 1);
+    uint8_t* padded = (uint8_t*)mem_calloc(padded_length, 1, MEM_CAT_JS_RUNTIME);
     memcpy(padded, data + offset, length);
     padded[length] = 0x80;
 
@@ -202,7 +202,7 @@ static void sha512_compute(const uint8_t* data, int offset, int length, bool mod
         h[0] += a; h[1] += b; h[2] += c; h[3] += d;
         h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
     }
-    free(padded);
+    mem_free(padded);
 
     int out_words = mode384 ? 6 : 8;
     for (int i = 0; i < out_words; i++) {

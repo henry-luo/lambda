@@ -23,7 +23,7 @@
 #include "../../lib/mempool.h"
 #include <cstring>
 #include <cctype>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Parser state

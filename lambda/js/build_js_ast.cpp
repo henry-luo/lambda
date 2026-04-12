@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // forward declarations
 static char js_decode_escape_char(char c);
@@ -188,7 +188,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             }
         }
         // Create null-terminated string, stripping numeric separators (_)
-        char* temp_str = (char*)malloc(source.length + 1);
+        char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
         if (temp_str) {
             size_t j = 0;
             for (size_t i = 0; i < source.length; i++) {
@@ -204,7 +204,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             } else {
                 literal->value.number_value = strtod(temp_str, &endptr);
             }
-            free(temp_str);
+            mem_free(temp_str);
         } else {
             literal->value.number_value = 0.0;
         }
@@ -216,7 +216,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             size_t content_len = source.length - 2;
             const char* src = source.str + 1;
             // Process escape sequences in-place
-            char* temp_str = (char*)malloc(content_len + 1);
+            char* temp_str = (char*)mem_alloc(content_len + 1, MEM_CAT_JS_RUNTIME);
             if (temp_str) {
                 size_t out = 0;
                 for (size_t i = 0; i < content_len; i++) {
@@ -306,7 +306,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                 }
                 temp_str[out] = '\0';
                 literal->value.string_value = name_pool_create_len(tp->name_pool, temp_str, out);
-                free(temp_str);
+                mem_free(temp_str);
             } else {
                 literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
             }
@@ -352,7 +352,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     }
 
     // Create a null-terminated string for the identifier
-    char* temp_str = (char*)malloc(source.length + 1);
+    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
     if (!temp_str) {
         log_error("Failed to allocate memory for identifier");
         return NULL;
@@ -416,7 +416,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     }
 
     identifier->name = name_pool_create_len(tp->name_pool, name_str, name_len);
-    free(temp_str);
+    mem_free(temp_str);
 
     if (!identifier->name) {
         log_error("Failed to create identifier name");
@@ -796,6 +796,11 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                 } else {
                     // Static getter/setter: store as __get_<name> or __set_<name> key
                     StrView accessor_name = js_node_source(tp, name_node);
+                    // Strip quotes from string literal keys (e.g., "test" → test)
+                    if (strcmp(name_type, "string") == 0 && accessor_name.length >= 2) {
+                        accessor_name.str++;
+                        accessor_name.length -= 2;
+                    }
                     char acc_key[256];
                     // Decode Unicode escapes in accessor names
                     char dec_acc[256];
@@ -1209,7 +1214,7 @@ JsAstNode* build_js_return_statement(JsTranspiler* tp, TSNode return_node) {
     if (child_count > 0) {
         TSNode arg_node = ts_node_named_child(return_node, 0);
         return_stmt->argument = build_js_expression(tp, arg_node);
-        return_stmt->base.type = return_stmt->argument->type;
+        return_stmt->base.type = return_stmt->argument ? return_stmt->argument->type : &TYPE_NULL;
     } else {
         return_stmt->base.type = &TYPE_NULL; // return undefined
     }

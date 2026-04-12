@@ -21,7 +21,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cctype>
@@ -1065,7 +1065,7 @@ extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match at each position
-    char* tmp = (char*)malloc(slen + 1);
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(tmp, str, slen + 1);
     for (size_t i = 0; i <= slen; i++) {
         // try longest match first at position i
@@ -1080,14 +1080,14 @@ extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
                 strbuf_append_str_n(sb, str + end, slen - end);
                 Item result = bash_make_string(sb->str, sb->length);
                 strbuf_free(sb);
-                free(tmp);
+                mem_free(tmp);
                 return result;
             }
             tmp[end] = saved;
             if (end == i) break; // avoid underflow
         }
     }
-    free(tmp);
+    mem_free(tmp);
     return val;
 }
 
@@ -1122,7 +1122,7 @@ extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match at each position
-    char* tmp = (char*)malloc(slen + 1);
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(tmp, str, slen + 1);
     StrBuf* sb = strbuf_new_cap(slen + 64);
     size_t i = 0;
@@ -1155,7 +1155,7 @@ extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
-    free(tmp);
+    mem_free(tmp);
     return result;
 }
 
@@ -1181,7 +1181,7 @@ extern "C" Item bash_expand_replace_prefix(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match first at position 0
-    char* tmp = (char*)malloc(slen + 1);
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(tmp, str, slen + 1);
     for (size_t end = slen; ; end--) {
         char saved = tmp[end];
@@ -1193,13 +1193,13 @@ extern "C" Item bash_expand_replace_prefix(Item val, Item pat, Item repl) {
             strbuf_append_str_n(sb, str + end, slen - end);
             Item result = bash_make_string(sb->str, sb->length);
             strbuf_free(sb);
-            free(tmp);
+            mem_free(tmp);
             return result;
         }
         tmp[end] = saved;
         if (end == 0) break;
     }
-    free(tmp);
+    mem_free(tmp);
     return val;
 }
 
@@ -1225,7 +1225,7 @@ extern "C" Item bash_expand_replace_suffix(Item val, Item pat, Item repl) {
     }
 
     // glob pattern: try longest match first starting from position 0
-    char* tmp = (char*)malloc(slen + 1);
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(tmp, str, slen + 1);
     for (size_t start = 0; start <= slen; start++) {
         if (bash_glob_match(tmp + start, pattern)) {
@@ -1234,11 +1234,11 @@ extern "C" Item bash_expand_replace_suffix(Item val, Item pat, Item repl) {
             strbuf_append_str_n(sb, replacement, rlen);
             Item result = bash_make_string(sb->str, sb->length);
             strbuf_free(sb);
-            free(tmp);
+            mem_free(tmp);
             return result;
         }
     }
-    free(tmp);
+    mem_free(tmp);
     return val;
 }
 
@@ -2628,8 +2628,8 @@ extern "C" void bash_set_positional_from_array(Item arr) {
     }
     // grow buffer if needed
     if (count > bash_set_pos_buf_cap) {
-        free(bash_set_pos_buf);
-        bash_set_pos_buf = (Item*)malloc(count * sizeof(Item));
+        mem_free(bash_set_pos_buf);
+        bash_set_pos_buf = (Item*)mem_alloc(count * sizeof(Item), MEM_CAT_BASH_RUNTIME);
         bash_set_pos_buf_cap = count;
     }
     for (int i = 0; i < count; i++) {
@@ -3039,7 +3039,7 @@ extern "C" Item bash_exec_cmd_with_array(Item cmd_name_item, Item arr) {
         List* list = (List*)(uintptr_t)arr.item;
         argc = list->length;
         if (argc > 0) {
-            argv = (Item*)malloc(argc * sizeof(Item));
+            argv = (Item*)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME);
             for (int i = 0; i < argc; i++) {
                 argv[i] = list->items[i];
             }
@@ -3088,15 +3088,15 @@ extern "C" Item bash_exec_cmd_with_array(Item cmd_name_item, Item arr) {
     // external exec expects cmd name + args in a single argv
     {
         int ext_argc = argc + 1;
-        Item* ext_argv = (Item*)malloc(ext_argc * sizeof(Item));
+        Item* ext_argv = (Item*)mem_alloc(ext_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME);
         ext_argv[0] = cmd_name_item;
         for (int i = 0; i < argc; i++) ext_argv[i + 1] = argv[i];
         result = bash_exec_external(ext_argv, ext_argc);
-        free(ext_argv);
+        mem_free(ext_argv);
     }
 
 done:
-    if (argv) free(argv);
+    if (argv) mem_free(argv);
     return result;
 }
 
@@ -3112,7 +3112,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     }
 
     // convert Item argv to char* argv
-    const char** c_argv = (const char**)calloc(argc + 1, sizeof(char*));
+    const char** c_argv = (const char**)mem_calloc(argc + 1, sizeof(char*), MEM_CAT_BASH_RUNTIME);
     if (!c_argv) {
         bash_last_exit_code = 127;
         return (Item){.item = i2it(127)};
@@ -3155,7 +3155,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (!found) {
             log_debug("bash: %s: command not found", cmd_name);
             bash_err_not_found(cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
         }
@@ -3164,7 +3164,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (access(cmd_name, X_OK) != 0) {
             log_debug("bash: %s: No such file or directory", cmd_name);
             bash_err_no_such_file("", cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
         }
@@ -3178,7 +3178,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     if (need_capture) {
         if (pipe(stdout_pipe) != 0) {
             log_error("bash: pipe failed for command '%s'", cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 1;
             return (Item){.item = i2it(1)};
         }
@@ -3191,7 +3191,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (pipe(stdin_pipe) != 0) {
             log_error("bash: stdin pipe failed for command '%s'", cmd_name);
             if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 1;
             return (Item){.item = i2it(1)};
         }
@@ -3228,7 +3228,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
         if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
         if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = 127;
         return (Item){.item = i2it(127)};
     }
@@ -3276,7 +3276,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         }
 
         strbuf_free(buf);
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = exit_code;
         return (Item){.item = i2it(exit_code)};
     } else {
@@ -3291,7 +3291,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
             exit_code = 128;
         }
 
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = exit_code;
         return (Item){.item = i2it(exit_code)};
     }
@@ -3526,7 +3526,7 @@ extern "C" void bash_runtime_cleanup(void) {
     static const int os_signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
     for (int i = 0; i < BASH_TRAP_NUM; i++) {
         if (bash_trap_handlers[i]) {
-            free(bash_trap_handlers[i]);
+            mem_free(bash_trap_handlers[i]);
             bash_trap_handlers[i] = NULL;
         }
         bash_trap_fired[i] = 0;
@@ -4599,7 +4599,7 @@ extern "C" void bash_apply_pending_args(void) {
     int start = pending_skip_arg0 ? 1 : 0;
     int count = pending_argc - start;
     if (count <= 0) { pending_argv = NULL; return; }
-    Item* params = (Item*)calloc(count, sizeof(Item));
+    Item* params = (Item*)mem_calloc(count, sizeof(Item), MEM_CAT_BASH_RUNTIME);
     for (int i = 0; i < count; i++) {
         String* s = heap_create_name(pending_argv[start + i], (int)strlen(pending_argv[start + i]));
         params[i] = (Item){.item = s2it(s)};
@@ -5079,7 +5079,7 @@ extern "C" void bash_register_rt_func_with_source(const char* name, BashRtFuncPt
     entry.name_len = len;
     entry.ptr = ptr;
     if (source && source_len > 0) {
-        entry.source_text = (char*)malloc(source_len + 1);
+        entry.source_text = (char*)mem_alloc(source_len + 1, MEM_CAT_BASH_RUNTIME);
         memcpy(entry.source_text, source, source_len);
         entry.source_text[source_len] = '\0';
         entry.source_len = source_len;
@@ -5122,7 +5122,7 @@ extern "C" void bash_print_all_functions(void) {
     // collect all function entries that have source text
     size_t count = hashmap_count(bash_rt_func_table);
     if (count == 0) return;
-    const BashRtFuncEntry** entries = (const BashRtFuncEntry**)malloc(count * sizeof(BashRtFuncEntry*));
+    const BashRtFuncEntry** entries = (const BashRtFuncEntry**)mem_alloc(count * sizeof(BashRtFuncEntry*), MEM_CAT_BASH_RUNTIME);
     size_t n = 0;
     size_t iter = 0;
     void* item;
@@ -5146,7 +5146,7 @@ extern "C" void bash_print_all_functions(void) {
         bash_raw_write(entries[i]->source_text, entries[i]->source_len);
         bash_raw_write("\n", 1);
     }
-    free(entries);
+    mem_free(entries);
 }
 
 extern "C" void bash_declare_print_func(Item name_item) {
@@ -5320,7 +5320,7 @@ extern "C" void bash_builtin_set_dump(void) {
     size_t count = hashmap_count(merged);
     if (count == 0) { hashmap_free(merged); return; }
 
-    BashSetEntry* entries = (BashSetEntry*)calloc(count, sizeof(BashSetEntry));
+    BashSetEntry* entries = (BashSetEntry*)mem_calloc(count, sizeof(BashSetEntry), MEM_CAT_BASH_RUNTIME);
     size_t idx = 0;
     {
         size_t iter = 0;
@@ -5399,7 +5399,7 @@ extern "C" void bash_builtin_set_dump(void) {
         bash_raw_write(buf, pos);
     }
 
-    free(entries);
+    mem_free(entries);
     hashmap_free(merged);
 }
 
@@ -5780,7 +5780,7 @@ extern "C" void bash_trap_set(Item handler, Item signal_name) {
 
     // free existing handler
     if (bash_trap_handlers[idx]) {
-        free(bash_trap_handlers[idx]);
+        mem_free(bash_trap_handlers[idx]);
         bash_trap_handlers[idx] = NULL;
     }
 
@@ -5801,7 +5801,7 @@ extern "C" void bash_trap_set(Item handler, Item signal_name) {
     }
 
     // store handler code (null-terminated copy)
-    bash_trap_handlers[idx] = (char*)malloc(h->len + 1);
+    bash_trap_handlers[idx] = (char*)mem_alloc(h->len + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(bash_trap_handlers[idx], h->chars, h->len);
     bash_trap_handlers[idx][h->len] = '\0';
 
@@ -5825,7 +5825,7 @@ extern "C" void bash_trap_run_exit(void) {
     if (!bash_trap_handlers[BASH_TRAP_IDX_EXIT]) return;
     if (bash_trap_handlers[BASH_TRAP_IDX_EXIT][0] == '\0') {
         // ignore (empty handler)
-        free(bash_trap_handlers[BASH_TRAP_IDX_EXIT]);
+        mem_free(bash_trap_handlers[BASH_TRAP_IDX_EXIT]);
         bash_trap_handlers[BASH_TRAP_IDX_EXIT] = NULL;
         return;
     }
@@ -5836,7 +5836,7 @@ extern "C" void bash_trap_run_exit(void) {
     String* code_str = heap_create_name(code, (int)strlen(code));
     Item code_item = {.item = s2it(code_str)};
     bash_eval_string(code_item);
-    free(code);
+    mem_free(code);
 }
 
 extern "C" Item bash_run_debug_trap(void) {

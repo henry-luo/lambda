@@ -4,7 +4,7 @@
 #include "../../lib/log.h"
 #include "../../lib/arena.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 #include <cerrno>

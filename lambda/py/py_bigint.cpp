@@ -17,7 +17,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cerrno>

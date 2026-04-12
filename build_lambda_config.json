@@ -1662,7 +1662,8 @@
                             "uv",
                             "mbedtls",
                             "mbedx509",
-                            "mbedcrypto"
+                            "mbedcrypto",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lambda/serve/serve_types.cpp",
@@ -1684,6 +1685,8 @@
                             "lambda/serve/tls_handler.cpp",
                             "lambda/serve/worker_pool.cpp",
                             "lambda/serve/language_backend.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
                             "lib/log.c"
                         ],
                         "binary": "test_serve_gtest.exe",
@@ -1698,7 +1701,8 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "uv"
+                            "uv",
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lambda/serve/serve_types.cpp",
@@ -1708,6 +1712,8 @@
                             "lambda/serve/http_request.cpp",
                             "lambda/serve/http_response.cpp",
                             "lambda/serve/schema_validator.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
                             "lib/log.c"
                         ],
                         "binary": "test_serve_phase2_gtest.exe",
@@ -2276,6 +2282,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/str.c",
                             "lib/log.c"
                         ],
@@ -2299,6 +2307,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/string.c",
                             "lib/str.c",
                             "lib/hashmap.c",

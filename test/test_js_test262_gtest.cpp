@@ -125,12 +125,12 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
 
     // === ES2022 features ===
     // "class-fields-public",                      // SUPPORTED
-    "class-fields-private",                       // Private instance fields
-    "class-fields-private-in",                    // #x in obj
-    "class-methods-private",                      // Private methods
+    // "class-fields-private",                    // SUPPORTED
+    // "class-fields-private-in",                  // SUPPORTED
+    // "class-methods-private",                   // SUPPORTED
     // "class-static-fields-public",               // SUPPORTED
-    "class-static-fields-private",                // Static private fields
-    "class-static-methods-private",               // Static private methods
+    // "class-static-fields-private",             // SUPPORTED
+    // "class-static-methods-private",            // SUPPORTED
     // "class-static-block",                      // SUPPORTED
     "top-level-await",                            // Module-level await
     "regexp-match-indices",                       // /d flag, .indices

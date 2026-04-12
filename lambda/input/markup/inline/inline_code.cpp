@@ -9,7 +9,6 @@
  * Extracted from input-markup.cpp parse_code_span() (lines 2082-2140)
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 
 namespace lambda {
@@ -108,7 +107,7 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
 
     // Extract code content (no further inline parsing for code)
     size_t content_len = end - start;
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, start, content_len);
         content[content_len] = '\0';
@@ -156,12 +155,12 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
         // Create content string (use trimmed if applicable)
         String* code_text;
         if (trimmed != content || trimmed_len != normalized_len) {
-            char* final_content = (char*)malloc(trimmed_len + 1);
+            char* final_content = (char*)mem_alloc(trimmed_len + 1, MEM_CAT_INPUT_MARKUP);
             if (final_content) {
                 strncpy(final_content, trimmed, trimmed_len);
                 final_content[trimmed_len] = '\0';
                 code_text = create_string(parser, final_content);
-                free(final_content);
+                mem_free(final_content);
             } else {
                 code_text = create_string(parser, content);
             }
@@ -175,7 +174,7 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
             increment_element_content_length(code);
         }
 
-        free(content);
+        mem_free(content);
     }
 
     *text = end + backticks;

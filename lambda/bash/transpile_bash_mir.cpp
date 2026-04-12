@@ -23,7 +23,7 @@
 #include "../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 
 // external MIR functions
@@ -728,7 +728,7 @@ static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_na
     } else if (argc > 0) {
         MIR_append_insn(mt->ctx, mt->current_func_item,
             MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                         MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(argc * sizeof(Item)))));
+                         MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
         int i = 0;
         BashAstNode* arg = cmd->args;
         while (arg && i < argc) {
@@ -2397,7 +2397,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         } else {
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(argc * sizeof(Item)))));
+                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
 
             int i = 0;
             BashAstNode* arg = cmd->args;
@@ -2462,7 +2462,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             int total_argc = cmd->arg_count;
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(total_argc * sizeof(Item)))));
+                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(total_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < total_argc) {
@@ -4633,7 +4633,7 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
             } else {
                 strbuf_append_str_n(sb, body_src, body_len);
             }
-            entry.source_text = strdup(sb->str);
+            entry.source_text = mem_strdup(sb->str, MEM_CAT_BASH_RUNTIME);
             entry.source_len = (int)sb->length;
             strbuf_free(sb);
         }
@@ -4949,7 +4949,7 @@ extern "C" Item bash_source_file(Item filename) {
 
     if (!bash_source_runtime) {
         log_error("bash: source: no runtime context");
-        free(source_text);
+        free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -4958,7 +4958,7 @@ extern "C" Item bash_source_file(Item filename) {
     BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
     if (!tp) {
         log_error("bash: source: failed to create transpiler");
-        free(source_text);
+        free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5000,7 +5000,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5013,7 +5013,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5025,11 +5025,11 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
-    BashMirTranspiler* mt = (BashMirTranspiler*)malloc(sizeof(BashMirTranspiler));
+    BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
@@ -5131,13 +5131,13 @@ extern "C" Item bash_source_file(Item filename) {
     hashmap_free(mt->vars);
     hashmap_free(mt->import_cache);
     hashmap_free(mt->user_funcs);
-    free(mt);
+    mem_free(mt);
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);
     if (preproc_buf) strbuf_free(preproc_buf);
     if (dd_buf) strbuf_free(dd_buf);
-    free(source_text);
+    free(source_text); // from read_text_file (lib)
 
     return result;
 }
@@ -5163,7 +5163,7 @@ extern "C" Item bash_eval_string(Item code) {
     }
 
     // make a null-terminated copy of the code
-    char* source_text = (char*)malloc(s->len + 1);
+    char* source_text = (char*)mem_alloc(s->len + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(source_text, s->chars, s->len);
     source_text[s->len] = '\0';
 
@@ -5172,7 +5172,7 @@ extern "C" Item bash_eval_string(Item code) {
     BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
     if (!tp) {
         log_error("bash: eval: failed to create transpiler");
-        free(source_text);
+        mem_free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
@@ -5215,7 +5215,7 @@ extern "C" Item bash_eval_string(Item code) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        mem_free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
@@ -5267,7 +5267,7 @@ extern "C" Item bash_eval_string(Item code) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        mem_free(source_text);
         bash_set_exit_code(2);
         return (Item){.item = i2it(2)};
     }
@@ -5280,7 +5280,7 @@ extern "C" Item bash_eval_string(Item code) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        mem_free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
@@ -5293,12 +5293,12 @@ extern "C" Item bash_eval_string(Item code) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text);
+        mem_free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
 
-    BashMirTranspiler* mt = (BashMirTranspiler*)malloc(sizeof(BashMirTranspiler));
+    BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
@@ -5394,13 +5394,13 @@ extern "C" Item bash_eval_string(Item code) {
     hashmap_free(mt->vars);
     hashmap_free(mt->import_cache);
     hashmap_free(mt->user_funcs);
-    free(mt);
+    mem_free(mt);
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);
     if (preproc_buf) strbuf_free(preproc_buf);
     if (dd_buf) strbuf_free(dd_buf);
-    free(source_text);
+    mem_free(source_text);
 
     return result;
 }
@@ -6389,7 +6389,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     }
 
     // allocate MIR transpiler
-    BashMirTranspiler* mt = (BashMirTranspiler*)malloc(sizeof(BashMirTranspiler));
+    BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
@@ -6495,7 +6495,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     bash_runtime_cleanup();
     hashmap_free(mt->vars);
     hashmap_free(mt->import_cache);
-    free(mt);
+    mem_free(mt);
 
     MIR_finish(ctx);
 

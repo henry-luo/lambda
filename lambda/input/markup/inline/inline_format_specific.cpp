@@ -9,7 +9,6 @@
  * Extracted from input-markup.cpp RST/AsciiDoc inline functions
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 #include <cctype>
 
@@ -86,7 +85,7 @@ Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text) 
 
     // Extract content between markers
     size_t content_len = end - start;
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, start, content_len);
         content[content_len] = '\0';
@@ -96,7 +95,7 @@ Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text) 
             list_push((List*)code_elem, Item{.item = s2it(code_str)});
             increment_element_content_length(code_elem);
         }
-        free(content);
+        mem_free(content);
     }
 
     *text = end + 2; // Skip closing ``
@@ -144,7 +143,7 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
 
     // Extract reference text
     size_t ref_len = pos - ref_start;
-    char* ref_text = (char*)malloc(ref_len + 1);
+    char* ref_text = (char*)mem_alloc(ref_len + 1, MEM_CAT_INPUT_MARKUP);
     if (!ref_text) {
         (*text)++;
         return Item{.item = ITEM_ERROR};
@@ -156,7 +155,7 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
     // Create reference element (rendered as a link)
     Element* ref_elem = create_element(parser, "a");
     if (!ref_elem) {
-        free(ref_text);
+        mem_free(ref_text);
         (*text)++;
         return Item{.item = ITEM_ERROR};
     }
@@ -172,7 +171,7 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
         increment_element_content_length(ref_elem);
     }
 
-    free(ref_text);
+    mem_free(ref_text);
     (*text)++; // Skip _
     return Item{.item = (uint64_t)ref_elem};
 }
@@ -245,16 +244,16 @@ Item parse_rst_inline_link(MarkupParser* parser, const char** text) {
     }
 
     // Add href attribute
-    char* url = (char*)malloc(url_len + 1);
+    char* url = (char*)mem_alloc(url_len + 1, MEM_CAT_INPUT_MARKUP);
     if (url) {
         strncpy(url, url_start, url_len);
         url[url_len] = '\0';
         add_attribute_to_element(parser, link_elem, "href", url);
-        free(url);
+        mem_free(url);
     }
 
     // Add link text
-    char* link_text = (char*)malloc(text_len + 1);
+    char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
     if (link_text) {
         strncpy(link_text, start, text_len);
         link_text[text_len] = '\0';
@@ -263,7 +262,7 @@ Item parse_rst_inline_link(MarkupParser* parser, const char** text) {
             list_push((List*)link_elem, Item{.item = s2it(text_str)});
             increment_element_content_length(link_elem);
         }
-        free(link_text);
+        mem_free(link_text);
     }
 
     *text = close_backtick + 2; // Skip `_
@@ -318,7 +317,7 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    char* ref_name = (char*)malloc(ref_len + 1);
+    char* ref_name = (char*)mem_alloc(ref_len + 1, MEM_CAT_INPUT_MARKUP);
     if (!ref_name) {
         return Item{.item = ITEM_ERROR};
     }
@@ -348,7 +347,7 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
     // Create anchor element
     Element* link_elem = create_element(parser, "a");
     if (!link_elem) {
-        free(ref_name);
+        mem_free(ref_name);
         return Item{.item = ITEM_ERROR};
     }
 
@@ -363,7 +362,7 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
         increment_element_content_length(link_elem);
     }
 
-    free(ref_name);
+    mem_free(ref_name);
     *text = close_backtick + 2; // Skip `_
     return Item{.item = (uint64_t)link_elem};
 }
@@ -533,7 +532,7 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
 
     // For code/verbatim, don't parse inner content
     if (marker == '=' || marker == '~') {
-        char* content = (char*)malloc(content_len + 1);
+        char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
         if (content) {
             memcpy(content, content_start, content_len);
             content[content_len] = '\0';
@@ -542,11 +541,11 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
                 list_push((List*)elem, Item{.item = s2it(content_str)});
                 increment_element_content_length(elem);
             }
-            free(content);
+            mem_free(content);
         }
     } else {
         // For emphasis (italic, strikethrough), parse inner content recursively
-        char* content = (char*)malloc(content_len + 1);
+        char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
         if (content) {
             memcpy(content, content_start, content_len);
             content[content_len] = '\0';
@@ -556,7 +555,7 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
                 list_push((List*)elem, inner);
                 increment_element_content_length(elem);
             }
-            free(content);
+            mem_free(content);
         }
     }
 
@@ -631,17 +630,17 @@ Item parse_org_link(MarkupParser* parser, const char** text) {
     }
 
     // Add href attribute
-    char* url = (char*)malloc(url_len + 1);
+    char* url = (char*)mem_alloc(url_len + 1, MEM_CAT_INPUT_MARKUP);
     if (url) {
         memcpy(url, url_start, url_len);
         url[url_len] = '\0';
         add_attribute_to_element(parser, link, "href", url);
-        free(url);
+        mem_free(url);
     }
 
     // Add link text
     size_t text_len = text_end - text_start;
-    char* link_text = (char*)malloc(text_len + 1);
+    char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
     if (link_text) {
         memcpy(link_text, text_start, text_len);
         link_text[text_len] = '\0';
@@ -652,7 +651,7 @@ Item parse_org_link(MarkupParser* parser, const char** text) {
             list_push((List*)link, inner);
             increment_element_content_length(link);
         }
-        free(link_text);
+        mem_free(link_text);
     }
 
     *text = pos;
@@ -740,7 +739,7 @@ Item parse_man_font_escape(MarkupParser* parser, const char** text) {
     }
 
     // Extract and add content
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         memcpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -758,7 +757,7 @@ Item parse_man_font_escape(MarkupParser* parser, const char** text) {
                 increment_element_content_length(elem);
             }
         }
-        free(content);
+        mem_free(content);
     }
 
     // Skip past closing marker if present
@@ -829,18 +828,18 @@ Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
 
     // Add href attribute
     size_t url_len = url_end - url_start;
-    char* url = (char*)malloc(url_len + 1);
+    char* url = (char*)mem_alloc(url_len + 1, MEM_CAT_INPUT_MARKUP);
     if (url) {
         memcpy(url, url_start, url_len);
         url[url_len] = '\0';
         add_attribute_to_element(parser, anchor, "href", url);
-        free(url);
+        mem_free(url);
     }
 
     // Add link text
     size_t text_len = text_end - text_start;
     if (text_len > 0) {
-        char* link_text = (char*)malloc(text_len + 1);
+        char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
         if (link_text) {
             memcpy(link_text, text_start, text_len);
             link_text[text_len] = '\0';
@@ -851,7 +850,7 @@ Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
                 list_push((List*)anchor, inner);
                 increment_element_content_length(anchor);
             }
-            free(link_text);
+            mem_free(link_text);
         }
     }
 
@@ -912,18 +911,18 @@ Item parse_asciidoc_image(MarkupParser* parser, const char** text) {
 
     // Add src attribute
     size_t src_len = src_end - src_start;
-    char* src = (char*)malloc(src_len + 1);
+    char* src = (char*)mem_alloc(src_len + 1, MEM_CAT_INPUT_MARKUP);
     if (src) {
         memcpy(src, src_start, src_len);
         src[src_len] = '\0';
         add_attribute_to_element(parser, img, "src", src);
-        free(src);
+        mem_free(src);
     }
 
     // Parse attributes - first attribute is alt text, rest are key=value pairs
     size_t attr_len = attr_end - attr_start;
     if (attr_len > 0) {
-        char* attrs = (char*)malloc(attr_len + 1);
+        char* attrs = (char*)mem_alloc(attr_len + 1, MEM_CAT_INPUT_MARKUP);
         if (attrs) {
             memcpy(attrs, attr_start, attr_len);
             attrs[attr_len] = '\0';
@@ -937,7 +936,7 @@ Item parse_asciidoc_image(MarkupParser* parser, const char** text) {
             } else {
                 add_attribute_to_element(parser, img, "alt", attrs);
             }
-            free(attrs);
+            mem_free(attrs);
         }
     }
 
@@ -1006,19 +1005,19 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
 
     // Add href attribute with # prefix for internal link
     size_t anchor_len = anchor_end - anchor_start;
-    char* href = (char*)malloc(anchor_len + 2);  // +2 for # and \0
+    char* href = (char*)mem_alloc(anchor_len + 2, MEM_CAT_INPUT_MARKUP);  // +2 for # and \0
     if (href) {
         href[0] = '#';
         memcpy(href + 1, anchor_start, anchor_len);
         href[anchor_len + 1] = '\0';
         add_attribute_to_element(parser, anchor, "href", href);
-        free(href);
+        mem_free(href);
     }
 
     // Add display text (use anchor ID if no explicit text)
     if (display_text_start && display_text_end) {
         size_t text_len = display_text_end - display_text_start;
-        char* link_text = (char*)malloc(text_len + 1);
+        char* link_text = (char*)mem_alloc(text_len + 1, MEM_CAT_INPUT_MARKUP);
         if (link_text) {
             memcpy(link_text, display_text_start, text_len);
             link_text[text_len] = '\0';
@@ -1028,11 +1027,11 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
                 list_push((List*)anchor, inner);
                 increment_element_content_length(anchor);
             }
-            free(link_text);
+            mem_free(link_text);
         }
     } else {
         // Use anchor ID as text
-        char* anchor_text = (char*)malloc(anchor_len + 1);
+        char* anchor_text = (char*)mem_alloc(anchor_len + 1, MEM_CAT_INPUT_MARKUP);
         if (anchor_text) {
             memcpy(anchor_text, anchor_start, anchor_len);
             anchor_text[anchor_len] = '\0';
@@ -1042,7 +1041,7 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
                 list_push((List*)anchor, Item{.item = s2it(text_str)});
                 increment_element_content_length(anchor);
             }
-            free(anchor_text);
+            mem_free(anchor_text);
         }
     }
 

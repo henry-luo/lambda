@@ -98,6 +98,9 @@ compile_commands.json
 *.backup
 temp/
 
+# Garbage created by AI agents
+_
+
 # Logs
 *.log
 log/

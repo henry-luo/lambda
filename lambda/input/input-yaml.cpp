@@ -2,7 +2,7 @@
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "../mark_builder.hpp"
-#include "../../lib/memtrack.h"
+#include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 
@@ -319,11 +319,11 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 
     char buf[256];
     if (slen >= sizeof(buf)) {
-        char* tmp = (char*)malloc(slen + 1);
+        char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_INPUT_YAML);
         memcpy(tmp, start, slen);
         tmp[slen] = '\0';
         Item result = p->ctx->builder.createStringItem(tmp);
-        free(tmp);
+        mem_free(tmp);
         return result;
     }
     memcpy(buf, start, slen);

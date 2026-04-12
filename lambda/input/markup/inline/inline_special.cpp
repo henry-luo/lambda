@@ -13,7 +13,6 @@
  * Extracted from input-markup.cpp various parse functions
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 #include <cctype>
 
@@ -194,7 +193,7 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
     }
 
     // Parse inner content (may contain bold, italic, etc.)
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         memcpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -204,7 +203,7 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
             list_push((List*)del_elem, inner);
             increment_element_content_length(del_elem);
         }
-        free(content);
+        mem_free(content);
     }
 
     *text = pos + delim_len; // Skip closing delimiter
@@ -247,7 +246,7 @@ Item parse_superscript(MarkupParser* parser, const char** text) {
     }
 
     // Create content string
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -258,7 +257,7 @@ Item parse_superscript(MarkupParser* parser, const char** text) {
             list_push((List*)sup_elem, text_item);
             increment_element_content_length(sup_elem);
         }
-        free(content);
+        mem_free(content);
     }
 
     *text = pos + 1; // Skip closing ^
@@ -299,7 +298,7 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
 
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -310,7 +309,7 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
             list_push((List*)sub_elem, text_item);
             increment_element_content_length(sub_elem);
         }
-        free(content);
+        mem_free(content);
     }
 
     *text = pos + 1;
@@ -345,7 +344,7 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
 
     // Extract shortcode name
     size_t name_len = pos - name_start;
-    char* shortcode_name = (char*)malloc(name_len + 1);
+    char* shortcode_name = (char*)mem_alloc(name_len + 1, MEM_CAT_INPUT_MARKUP);
     if (!shortcode_name) {
         return Item{.item = ITEM_ERROR};
     }
@@ -353,9 +352,9 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     shortcode_name[name_len] = '\0';
 
     // Build full shortcode with colons for lookup
-    char* full_shortcode = (char*)malloc(name_len + 3);
+    char* full_shortcode = (char*)mem_alloc(name_len + 3, MEM_CAT_INPUT_MARKUP);
     if (!full_shortcode) {
-        free(shortcode_name);
+        mem_free(shortcode_name);
         return Item{.item = ITEM_ERROR};
     }
     full_shortcode[0] = ':';
@@ -372,17 +371,17 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
         }
     }
 
-    free(full_shortcode);
+    mem_free(full_shortcode);
 
     if (!emoji_char) {
         // Unknown emoji shortcode
-        free(shortcode_name);
+        mem_free(shortcode_name);
         return Item{.item = ITEM_UNDEFINED};
     }
 
     // Create Symbol with the shortcode name
     Symbol* symbol_str = create_symbol(parser, shortcode_name);
-    free(shortcode_name);
+    mem_free(shortcode_name);
 
     if (!symbol_str) {
         return Item{.item = ITEM_ERROR};
@@ -424,12 +423,12 @@ Item parse_footnote_reference(MarkupParser* parser, const char** text) {
 
     // Extract and add ID
     size_t id_len = pos - id_start;
-    char* id = (char*)malloc(id_len + 1);
+    char* id = (char*)mem_alloc(id_len + 1, MEM_CAT_INPUT_MARKUP);
     if (id) {
         strncpy(id, id_start, id_len);
         id[id_len] = '\0';
         add_attribute_to_element(parser, ref, "ref", id);
-        free(id);
+        mem_free(id);
     }
 
     *text = pos + 1; // Skip closing ]
@@ -468,12 +467,12 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 
     // Extract citation key
     size_t key_len = pos - key_start;
-    char* key = (char*)malloc(key_len + 1);
+    char* key = (char*)mem_alloc(key_len + 1, MEM_CAT_INPUT_MARKUP);
     if (key) {
         strncpy(key, key_start, key_len);
         key[key_len] = '\0';
         add_attribute_to_element(parser, citation, "key", key);
-        free(key);
+        mem_free(key);
     }
 
     // Check for additional citation info (page numbers, etc.)
@@ -486,12 +485,12 @@ Item parse_citation(MarkupParser* parser, const char** text) {
 
         if (pos > info_start) {
             size_t info_len = pos - info_start;
-            char* info = (char*)malloc(info_len + 1);
+            char* info = (char*)mem_alloc(info_len + 1, MEM_CAT_INPUT_MARKUP);
             if (info) {
                 strncpy(info, info_start, info_len);
                 info[info_len] = '\0';
                 add_attribute_to_element(parser, citation, "info", info);
-                free(info);
+                mem_free(info);
             }
         }
     }
