@@ -255,6 +255,18 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
         // Recreate surface with correct output dimensions
         ui_context_create_surface(&ui_context, output_width, output_height);
+
+        // Extend root element's overflow clip to match the auto-sized content area.
+        // Without this, the root html element's overflow-y:auto clips rendering at
+        // the original viewport height, hiding everything below it in the static output.
+        View* root_view = doc->view_tree->root;
+        if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* root_block = (ViewBlock*)root_view;
+            if (root_block->scroller && root_block->scroller->has_clip) {
+                if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
+                if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
+            }
+        }
     }
 
     // Render the document

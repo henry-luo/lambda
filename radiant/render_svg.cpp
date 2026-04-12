@@ -1331,6 +1331,112 @@ static void svg_cb_end_transform(void* vctx) {
     }
 }
 
+static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, float abs_y,
+                                  FontBox* font, Color color) {
+    if (!marker || !marker->is_element()) return;
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+
+    DomElement* elem = (DomElement*)marker;
+    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    if (!marker_prop) return;
+
+    float x = abs_x + marker->x;
+    float y = abs_y + marker->y;
+    float width = marker_prop->width;
+    float bullet_size = marker_prop->bullet_size;
+    CssEnum marker_type = marker_prop->marker_type;
+
+    char color_str[32];
+    svg_color_to_string(color, color_str);
+
+    float font_size = font->style && font->style->font_size > 0 ? font->style->font_size : 16;
+    float baseline_y = y + (font->style && font->style->ascender > 0 ? font->style->ascender : font_size * 0.8f);
+    float center_y = baseline_y - font_size * 0.35f;
+
+    switch (marker_type) {
+        case CSS_VALUE_DISC: {
+            float cx = x + width - bullet_size - 4.0f;
+            float radius = bullet_size / 2.0f;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"%s\" />\n",
+                cx, center_y, radius, color_str);
+            break;
+        }
+        case CSS_VALUE_CIRCLE: {
+            float cx = x + width - bullet_size - 4.0f;
+            float radius = bullet_size / 2.0f;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"none\" stroke=\"%s\" stroke-width=\"1\" />\n",
+                cx, center_y, radius, color_str);
+            break;
+        }
+        case CSS_VALUE_SQUARE: {
+            float sx = x + width - bullet_size - 4.0f;
+            float sy = center_y - bullet_size / 2;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" />\n",
+                sx, sy, bullet_size, bullet_size, color_str);
+            break;
+        }
+        case CSS_VALUE_DISCLOSURE_CLOSED: {
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"%s\" />\n",
+                cx, center_y - tri_size / 2.0f,
+                cx + tri_size, center_y,
+                cx, center_y + tri_size / 2.0f,
+                color_str);
+            break;
+        }
+        case CSS_VALUE_DISCLOSURE_OPEN: {
+            float tri_size = bullet_size * 1.6f;
+            float cx = x + width - tri_size - 4.0f;
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"%s\" />\n",
+                cx - tri_size / 2.0f, center_y - tri_size / 2.0f,
+                cx + tri_size / 2.0f, center_y - tri_size / 2.0f,
+                cx, center_y + tri_size / 2.0f,
+                color_str);
+            break;
+        }
+        default: {
+            // text markers (decimal, roman, alpha, etc.)
+            if (marker_prop->text_content && *marker_prop->text_content) {
+                // escape XML entities
+                const char* src = marker_prop->text_content;
+                StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);
+                while (*src) {
+                    switch (*src) {
+                        case '<': strbuf_append_str(escaped, "&lt;"); break;
+                        case '>': strbuf_append_str(escaped, "&gt;"); break;
+                        case '&': strbuf_append_str(escaped, "&amp;"); break;
+                        default: strbuf_append_char(escaped, *src); break;
+                    }
+                    src++;
+                }
+                const char* family = font->font_handle
+                    ? font_handle_get_family_name(font->font_handle) : "Arial";
+                // right-align text in marker box
+                float text_x = x + width;
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" "
+                    "fill=\"%s\" text-anchor=\"end\">%s</text>\n",
+                    text_x, baseline_y, family, font_size, color_str,
+                    escaped->str);
+                strbuf_free(escaped);
+            }
+            break;
+        }
+    }
+}
+
 static void svg_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     // render_column_rules_svg reads ctx->block.{x,y} + block->{x,y}
@@ -1355,6 +1461,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.begin_transform       = svg_cb_begin_transform;
     b.end_transform         = svg_cb_end_transform;
     b.render_column_rules   = svg_cb_render_column_rules;
+    b.render_marker         = svg_cb_render_marker;
     b.on_font_change        = NULL;
     return b;
 }
