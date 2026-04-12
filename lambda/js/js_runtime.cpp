@@ -602,8 +602,11 @@ extern "C" Item js_build_arguments_object() {
     for (int i = 0; i < argc; i++) {
         js_array_push(arr, args ? args[i] : ItemNull);
     }
-    // Set .length explicitly (js_array_new + push should handle this, but be safe)
-    // Also set callee to undefined (strict mode compatible)
+    // Mark as Arguments object via Symbol.toStringTag on companion map
+    Item companion = js_new_object();
+    arr.array->extra = (int64_t)(uintptr_t)companion.map;
+    js_property_set(companion, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
+                    (Item){.item = s2it(heap_create_name("Arguments", 9))});
     return arr;
 }
 
@@ -2048,6 +2051,8 @@ enum JsBuiltinId {
     JS_BUILTIN_STR_LOCALE_COMPARE,
     JS_BUILTIN_STR_REPLACE_ALL,
     JS_BUILTIN_STR_MATCH_ALL,
+    JS_BUILTIN_STR_IS_WELL_FORMED,
+    JS_BUILTIN_STR_TO_WELL_FORMED,
     // Object static methods (v18k: accessible as first-class values)
     JS_BUILTIN_OBJECT_DEFINE_PROPERTY,
     JS_BUILTIN_OBJECT_DEFINE_PROPERTIES,
@@ -2071,6 +2076,8 @@ enum JsBuiltinId {
     JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF,
     JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF,
     JS_BUILTIN_OBJECT_HAS_OWN,
+    JS_BUILTIN_OBJECT_GROUP_BY,
+    JS_BUILTIN_MAP_GROUP_BY,
     // Array static methods
     JS_BUILTIN_ARRAY_IS_ARRAY,
     JS_BUILTIN_ARRAY_FROM,
@@ -4613,6 +4620,7 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
             {"getPrototypeOf", 14, JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF, 1},
             {"setPrototypeOf", 14, JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF, 2},
             {"hasOwn", 6, JS_BUILTIN_OBJECT_HAS_OWN, 2},
+            {"groupBy", 7, JS_BUILTIN_OBJECT_GROUP_BY, 2},
             {NULL, 0, 0, 0}
         };
         for (int i = 0; methods[i].name; i++) {
@@ -4680,6 +4688,11 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
         if (prop_len == 3 && strncmp(prop_name, "UTC", 3) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_DATE_UTC, "UTC", 7);
     }
+    // Map static methods
+    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) {
+        if (prop_len == 7 && strncmp(prop_name, "groupBy", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_MAP_GROUP_BY, "groupBy", 2);
+    }
     // Handle .prototype on any constructor — delegate to the constructor's property access
     if (prop_len == 9 && strncmp(prop_name, "prototype", 9) == 0) {
         Item ctor_name_item = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
@@ -4711,7 +4724,7 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
         {"isExtensible",12}, {"is",2}, {"getPrototypeOf",14}, {"setPrototypeOf",14},
         {"defineProperty",14}, {"defineProperties",16}, {"getOwnPropertyDescriptor",24},
         {"getOwnPropertyDescriptors",25}, {"getOwnPropertyNames",19},
-        {"getOwnPropertySymbols",21}, {"hasOwn",6}, {NULL,0}
+        {"getOwnPropertySymbols",21}, {"hasOwn",6}, {"groupBy",7}, {NULL,0}
     };
     static const method_entry array_methods[] = {
         {"isArray",7}, {"from",4}, {"of",2}, {NULL,0}
@@ -4729,6 +4742,9 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
         {"isFinite",8}, {"isNaN",5}, {"isInteger",9}, {"isSafeInteger",13},
         {"parseInt",8}, {"parseFloat",10}, {NULL,0}
     };
+    static const method_entry map_methods[] = {
+        {"groupBy",7}, {NULL,0}
+    };
 
     const method_entry* table = NULL;
     if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) table = object_methods;
@@ -4737,6 +4753,7 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) table = date_methods;
     else if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) table = promise_methods;
     else if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) table = number_methods;
+    else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) table = map_methods;
     if (!table) return;
 
     for (int i = 0; table[i].name; i++) {
@@ -4864,6 +4881,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
             {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
             {"trimLeft", 8, JS_BUILTIN_STR_TRIM_START, 0},
             {"trimRight", 9, JS_BUILTIN_STR_TRIM_END, 0},
+            {"isWellFormed", 12, JS_BUILTIN_STR_IS_WELL_FORMED, 0},
+            {"toWellFormed", 12, JS_BUILTIN_STR_TO_WELL_FORMED, 0},
             {NULL, 0, 0, 0}
         };
         for (int i = 0; str_methods[i].name; i++) {
@@ -4920,7 +4939,7 @@ extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
         "match", "matchAll", "search", "startsWith", "endsWith",
         "repeat", "padStart", "padEnd", "toString", "valueOf",
         "codePointAt", "normalize", "concat", "at", "localeCompare",
-        "trimLeft", "trimRight", "constructor", NULL
+        "trimLeft", "trimRight", "isWellFormed", "toWellFormed", "constructor", NULL
     };
     // Number.prototype methods
     static const char* num_methods[] = {
@@ -5202,6 +5221,8 @@ extern "C" Item js_object_is_sealed(Item obj);
 extern "C" Item js_object_prevent_extensions(Item obj);
 extern "C" Item js_object_is_extensible(Item obj);
 extern "C" Item js_object_is(Item left, Item right);
+extern "C" Item js_object_group_by(Item items, Item callback);
+extern "C" Item js_map_group_by(Item items, Item callback);
 extern "C" Item js_get_prototype_of(Item object);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_array_is_array(Item value);
@@ -5814,7 +5835,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_STR_LAST_INDEX_OF:
     case JS_BUILTIN_STR_LOCALE_COMPARE:
     case JS_BUILTIN_STR_REPLACE_ALL:
-    case JS_BUILTIN_STR_MATCH_ALL: {
+    case JS_BUILTIN_STR_MATCH_ALL:
+    case JS_BUILTIN_STR_IS_WELL_FORMED:
+    case JS_BUILTIN_STR_TO_WELL_FORMED: {
         static const char* str_method_names[] = {
             [JS_BUILTIN_STR_CHAR_AT - JS_BUILTIN_STR_CHAR_AT] = "charAt",
             [JS_BUILTIN_STR_CHAR_CODE_AT - JS_BUILTIN_STR_CHAR_AT] = "charCodeAt",
@@ -5846,6 +5869,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             [JS_BUILTIN_STR_LOCALE_COMPARE - JS_BUILTIN_STR_CHAR_AT] = "localeCompare",
             [JS_BUILTIN_STR_REPLACE_ALL - JS_BUILTIN_STR_CHAR_AT] = "replaceAll",
             [JS_BUILTIN_STR_MATCH_ALL - JS_BUILTIN_STR_CHAR_AT] = "matchAll",
+            [JS_BUILTIN_STR_IS_WELL_FORMED - JS_BUILTIN_STR_CHAR_AT] = "isWellFormed",
+            [JS_BUILTIN_STR_TO_WELL_FORMED - JS_BUILTIN_STR_CHAR_AT] = "toWellFormed",
         };
         int idx = builtin_id - JS_BUILTIN_STR_CHAR_AT;
         const char* name = str_method_names[idx];
@@ -6064,6 +6089,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_object_is(arg0, arg1);
     case JS_BUILTIN_OBJECT_HAS_OWN:
         return js_has_own_property(arg0, arg1);
+    case JS_BUILTIN_OBJECT_GROUP_BY:
+        return js_object_group_by(arg0, arg1);
+    case JS_BUILTIN_MAP_GROUP_BY:
+        return js_map_group_by(arg0, arg1);
     // Array static methods
     case JS_BUILTIN_ARRAY_IS_ARRAY:
         return js_array_is_array(arg0);
@@ -9601,6 +9630,118 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
         return str;
+    }
+
+    // isWellFormed() — returns false if string contains lone surrogates
+    if (method->len == 12 && strncmp(method->chars, "isWellFormed", 12) == 0) {
+        String* s = it2s(str);
+        if (!s || s->len == 0) return (Item){.item = b2it(true)};
+        int i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            if (lead < 0x80) { i++; continue; }
+            else if (lead < 0xC0) { i++; continue; } // continuation byte
+            else if (lead < 0xE0) { i += 2; continue; }
+            else if (lead < 0xF0) {
+                // 3-byte: check for surrogates (0xED 0xA0-0xBF xx)
+                if (lead == 0xED && i + 1 < (int)s->len) {
+                    unsigned char second = (unsigned char)s->chars[i + 1];
+                    if (second >= 0xA0 && second <= 0xAF) {
+                        // high surrogate — check if followed by low surrogate
+                        int next = i + 3;
+                        if (next + 2 <= (int)s->len &&
+                            (unsigned char)s->chars[next] == 0xED) {
+                            unsigned char ns = (unsigned char)s->chars[next + 1];
+                            if (ns >= 0xB0 && ns <= 0xBF) {
+                                i += 6; // matched pair, skip both
+                                continue;
+                            }
+                        }
+                        return (Item){.item = b2it(false)}; // lone high surrogate
+                    } else if (second >= 0xB0 && second <= 0xBF) {
+                        return (Item){.item = b2it(false)}; // lone low surrogate
+                    }
+                }
+                i += 3;
+                continue;
+            }
+            else { i += 4; continue; }
+        }
+        return (Item){.item = b2it(true)};
+    }
+
+    // toWellFormed() — replaces lone surrogates with U+FFFD
+    if (method->len == 12 && strncmp(method->chars, "toWellFormed", 12) == 0) {
+        String* s = it2s(str);
+        if (!s || s->len == 0) return str;
+        // check if any lone surrogates exist first (fast path)
+        bool has_lone = false;
+        int i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            if (lead < 0xE0) { i += (lead < 0x80) ? 1 : (lead < 0xC0) ? 1 : 2; continue; }
+            if (lead < 0xF0) {
+                if (lead == 0xED && i + 1 < (int)s->len) {
+                    unsigned char second = (unsigned char)s->chars[i + 1];
+                    if (second >= 0xA0 && second <= 0xAF) {
+                        int next = i + 3;
+                        if (next + 2 <= (int)s->len &&
+                            (unsigned char)s->chars[next] == 0xED) {
+                            unsigned char ns = (unsigned char)s->chars[next + 1];
+                            if (ns >= 0xB0 && ns <= 0xBF) { i += 6; continue; }
+                        }
+                        has_lone = true; break;
+                    } else if (second >= 0xB0 && second <= 0xBF) {
+                        has_lone = true; break;
+                    }
+                }
+                i += 3; continue;
+            }
+            i += 4; continue;
+        }
+        if (!has_lone) return str;
+        // rebuild with replacements
+        StrBuf* sb = strbuf_new_cap(s->len + 16);
+        i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            if (lead < 0xE0) {
+                int skip = (lead < 0x80) ? 1 : (lead < 0xC0) ? 1 : 2;
+                strbuf_append_str_n(sb, s->chars + i, skip);
+                i += skip; continue;
+            }
+            if (lead < 0xF0) {
+                if (lead == 0xED && i + 1 < (int)s->len) {
+                    unsigned char second = (unsigned char)s->chars[i + 1];
+                    if (second >= 0xA0 && second <= 0xAF) {
+                        int next = i + 3;
+                        if (next + 2 <= (int)s->len &&
+                            (unsigned char)s->chars[next] == 0xED) {
+                            unsigned char ns = (unsigned char)s->chars[next + 1];
+                            if (ns >= 0xB0 && ns <= 0xBF) {
+                                strbuf_append_str_n(sb, s->chars + i, 6);
+                                i += 6; continue;
+                            }
+                        }
+                        // lone high surrogate → U+FFFD (EF BF BD)
+                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
+                        i += 3; continue;
+                    } else if (second >= 0xB0 && second <= 0xBF) {
+                        // lone low surrogate → U+FFFD
+                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
+                        i += 3; continue;
+                    }
+                }
+                strbuf_append_str_n(sb, s->chars + i, 3);
+                i += 3; continue;
+            }
+            int skip = 4;
+            strbuf_append_str_n(sb, s->chars + i, skip);
+            i += skip; continue;
+        }
+        String* result = heap_create_name(sb->str, sb->length);
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
     }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
