@@ -21,16 +21,24 @@ import sys
 # ---------------------------------------------------------------------------
 
 EXTREME_LENGTHS = [
-    '0', '0px', '0.001px', '1px', '10px', '50px', '100px', '200px', '500px',
-    '-1px', '-10px', '-50px', '-9999px',
-    '99999px', '1e5px',
-    'auto',
-    '0%', '1%', '50%', '100%', '200%', '-50%',
-    'min-content', 'max-content', 'fit-content',
+    '0', '0px', '0.001px', '0.0001px', '1px', '10px', '50px', '100px', '200px', '500px',
+    '-1px', '-10px', '-50px', '-100px', '-9999px', '-99999px',
+    '99999px', '999999px', '1e5px', '1e7px', '1e10px',
+    'auto', 'inherit', 'initial', 'unset',
+    '0%', '0.001%', '1%', '50%', '100%', '150%', '200%', '999%', '-50%', '-100%', '-999%',
+    'min-content', 'max-content', 'fit-content', 'fit-content(50%)',
     'calc(100% - 1px)', 'calc(100% + 100px)', 'calc(100% - 99999px)',
-    'calc(50% + 50px)', 'calc(0 / 1)',
-    '1em', '2em', '10em', '100em',
-    '1vw', '50vw', '100vw',
+    'calc(50% + 50px)', 'calc(0 / 1)', 'calc(100% * 2)',
+    'calc(100vw - 100%)', 'calc(1px + 1em + 1%)',
+    'calc(100% - 100% + 0.001px)', 'calc(999999px - 999998px)',
+    'calc(100% / 3)', 'calc(100% / 7)', 'calc(100% / 0.001)',
+    'min(100px, 50%)', 'max(0px, 100%)', 'clamp(0px, 50%, 100px)',
+    '1em', '2em', '10em', '100em', '0.01em',
+    '1rem', '100rem',
+    '1vw', '50vw', '100vw', '200vw',
+    '1vh', '50vh', '100vh',
+    '1vmin', '1vmax',
+    '1ch', '1ex',
 ]
 
 DISPLAY_VALUES = [
@@ -84,8 +92,16 @@ GRID_TEMPLATE_VALUES = [
     'repeat(2, 1fr)', 'repeat(3, 100px)', 'repeat(auto-fill, 100px)',
     'repeat(auto-fit, minmax(100px, 1fr))',
     'minmax(0, 1fr)', 'minmax(auto, auto)', 'minmax(100px, 200px)',
+    'minmax(0, 0)', 'minmax(min-content, max-content)',
+    'minmax(0, 99999px)', 'minmax(99999px, 0)',
     '1fr 2fr', '100px 1fr 100px', 'repeat(5, 1fr)',
     '50px repeat(3, 1fr) 50px',
+    'repeat(20, 1fr)', 'repeat(100, 50px)', 'repeat(999, 1fr)',
+    'repeat(auto-fill, minmax(0, 1fr))', 'repeat(auto-fill, minmax(1px, 1fr))',
+    'repeat(auto-fit, minmax(0, 1fr))',
+    '0fr 1fr 0fr', '0.001fr 999fr',
+    'fit-content(100px) 1fr fit-content(200px)',
+    'subgrid',
 ]
 
 TAGS_BLOCK = ['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'p', 'h1', 'h2', 'h3']
@@ -97,15 +113,25 @@ TEXT_SAMPLES = [
     'A',
     '',
     'Thisisaverylongwordwithnobreakopportunities',
+    'Thisisaverylongwordwithnobreakopportunitiesthisisaverylongwordwithnobreakopportunitiesthisisaverylongwordwithnobreakopportunities',
     'Short',
     '你好世界混合Latin文字',
-    'مرحبا',
-    'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+    '你好' * 200,
+    'مرحبا بالعالم',
+    'שלום עולם',
+    'مرحبا Hello مرحبا World مرحبا',  # bidi mixed
+    'Lorem ipsum dolor sit amet, consectetur adipiscing elit. ' * 20,
     'a b c d e f g h i j k l m n o p q r s t u v w x y z',
-    '🎉🎊🎈🎁',
+    '🎉🎊🎈🎁' * 50,
     ' ',
-    '\t\n',
+    '   \t\t\n\n   ',
+    '\n' * 50,
     '&amp; &lt; &gt; &quot;',
+    '<script>alert(1)</script>',  # should be escaped by parser
+    'a\u200Bb\u200Bc\u200Bd',  # zero-width spaces
+    'a\u00ADb\u00ADc',  # soft hyphens
+    'a' * 10000,  # 10K single char
+    ' '.join(['word'] * 5000),  # 5K words
 ]
 
 # ---------------------------------------------------------------------------
@@ -658,6 +684,421 @@ def gen_list_stress():
     return wrap_html(body)
 
 
+def gen_flex_in_grid():
+    """Generate flex containers inside grid cells and vice versa."""
+    grid_props = {
+        'display': 'grid',
+        'grid-template-columns': rv(GRID_TEMPLATE_VALUES),
+        'grid-template-rows': rv(GRID_TEMPLATE_VALUES),
+        'width': rand_length(),
+        'height': rand_length(),
+    }
+    if maybe(0.5): grid_props['gap'] = rv(['0', '5px', '20px'])
+
+    children = []
+    for _ in range(random.randint(3, 12)):
+        cp = css_props_block()
+        cp['display'] = rv(['flex', 'inline-flex'])
+        cp['flex-direction'] = rv(FLEX_DIRECTION)
+        cp['flex-wrap'] = rv(FLEX_WRAP)
+        if maybe(0.5): cp['align-items'] = rv(ALIGN_VALUES)
+        if maybe(0.5): cp['justify-content'] = rv(JUSTIFY_VALUES)
+        if maybe(0.3): cp['grid-column'] = f'span {random.randint(1, 4)}'
+        if maybe(0.3): cp['grid-row'] = f'span {random.randint(1, 3)}'
+
+        inner = []
+        for _ in range(random.randint(1, 8)):
+            ip = css_props_block()
+            ip['flex'] = rv(['0 1 auto', '1 0 0', '1 1 0%', '0 0 auto', '9999 0 0',
+                              '0.001 9999 auto', '1 1 100%', '0 0 0'])
+            if maybe(0.2): ip['position'] = rv(POSITION_VALUES)
+            if maybe(0.2): ip['min-width'] = rand_length()
+            if maybe(0.2): ip['max-width'] = rand_length()
+            # nested grid inside flex inside grid
+            if maybe(0.1):
+                ip['display'] = 'grid'
+                ip['grid-template-columns'] = rv(GRID_TEMPLATE_VALUES)
+                inner_inner = ''.join(make_element('div', css_props_block(), rv(TEXT_SAMPLES))
+                                      for _ in range(random.randint(1, 4)))
+                inner.append(make_element('div', ip, inner_inner))
+            else:
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+
+        children.append(make_element('div', cp, '\n'.join(inner)))
+
+    body = make_element('div', grid_props, '\n'.join(children))
+    return wrap_html(body)
+
+
+def gen_table_in_flex():
+    """Generate tables inside flex containers with conflicting sizing."""
+    flex_props = {
+        'display': 'flex',
+        'flex-wrap': rv(FLEX_WRAP),
+        'width': rand_length(),
+        'align-items': rv(ALIGN_VALUES),
+    }
+
+    children = []
+    for _ in range(random.randint(2, 6)):
+        cp = css_props_block()
+        cp['flex'] = rv(['0 1 auto', '1 0 0', '1 1 auto', '0 0 auto', '9999 1 0'])
+
+        # table as flex child
+        table_props = {}
+        table_props['border-collapse'] = rv(['collapse', 'separate'])
+        table_props['table-layout'] = rv(['auto', 'fixed'])
+        if maybe(0.5): table_props['width'] = rand_length()
+
+        rows = []
+        for _ in range(random.randint(1, 5)):
+            cells = []
+            for _ in range(random.randint(1, 6)):
+                cell_p = css_props_block()
+                attrs = ''
+                if maybe(0.3):
+                    attrs += f' colspan="{random.choice([0, 2, 3, 5, 99])}"'
+                if maybe(0.3):
+                    attrs += f' rowspan="{random.choice([0, 2, 3, 5, 99])}"'
+                cells.append(make_element('td', cell_p, rv(TEXT_SAMPLES), attrs))
+            rows.append(make_element('tr', {}, ''.join(cells)))
+
+        table = make_element('table', table_props, ''.join(rows))
+        children.append(make_element('div', cp, table))
+
+    body = make_element('div', flex_props, '\n'.join(children))
+    return wrap_html(body)
+
+
+def gen_contradiction():
+    """Generate CSS with contradictory constraints that stress resolution."""
+    children = []
+
+    for _ in range(random.randint(3, 10)):
+        props = {}
+        contradiction = random.choice([
+            'size', 'flex_basis', 'position', 'display',
+            'overflow', 'float_flex', 'margins', 'grid_sizing',
+        ])
+
+        if contradiction == 'size':
+            props['width'] = rv(['100px', '200px', '500px'])
+            props['min-width'] = rv(['300px', '500px', '999px', '99999px'])
+            props['max-width'] = rv(['0', '10px', '50px', '1px'])
+            props['height'] = rv(['100px', '200px'])
+            props['min-height'] = rv(['500px', '999px'])
+            props['max-height'] = rv(['0', '10px', '1px'])
+
+        elif contradiction == 'flex_basis':
+            props['display'] = 'flex'
+            inner = []
+            for _ in range(random.randint(2, 6)):
+                ip = {}
+                ip['flex-basis'] = rv(['200%', '99999px', '-100px'])
+                ip['flex-grow'] = rv(['0', '9999'])
+                ip['flex-shrink'] = rv(['0', '0.001'])
+                ip['min-width'] = rv(['99999px', '500px'])
+                ip['max-width'] = rv(['0', '1px'])
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+            children.append(make_element('div', props, '\n'.join(inner)))
+            continue
+
+        elif contradiction == 'position':
+            props['display'] = rv(['inline', 'inline-block'])
+            inner_p = {'position': 'absolute', 'top': '0', 'left': '0',
+                      'width': '99999px', 'height': '99999px'}
+            children.append(make_element('span', props,
+                make_element('div', inner_p, rv(TEXT_SAMPLES))))
+            continue
+
+        elif contradiction == 'display':
+            props['display'] = 'flex'
+            inner = []
+            for _ in range(random.randint(2, 5)):
+                ip = {'display': rv(['table-cell', 'table-row', 'table-column',
+                                     'table-caption', 'list-item', 'inline'])}
+                ip.update(css_props_block())
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+            children.append(make_element('div', props, '\n'.join(inner)))
+            continue
+
+        elif contradiction == 'overflow':
+            props['display'] = 'inline'
+            props['overflow'] = rv(['scroll', 'auto', 'hidden'])
+            props['width'] = '100px'
+            props['height'] = '100px'
+
+        elif contradiction == 'float_flex':
+            props['display'] = 'flex'
+            inner = []
+            for _ in range(random.randint(2, 5)):
+                ip = {'float': rv(['left', 'right']), 'clear': rv(CLEAR_VALUES)}
+                ip.update(css_props_block())
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+            children.append(make_element('div', props, '\n'.join(inner)))
+            continue
+
+        elif contradiction == 'margins':
+            props['display'] = 'flex'
+            props['justify-content'] = rv(JUSTIFY_VALUES)
+            props['align-items'] = rv(ALIGN_VALUES)
+            inner = []
+            for _ in range(random.randint(2, 5)):
+                ip = {'margin': 'auto', 'margin-left': 'auto', 'margin-right': 'auto',
+                      'margin-top': 'auto', 'margin-bottom': 'auto',
+                      'align-self': rv(ALIGN_VALUES)}
+                ip['width'] = rand_length()
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+            children.append(make_element('div', props, '\n'.join(inner)))
+            continue
+
+        elif contradiction == 'grid_sizing':
+            props['display'] = 'grid'
+            props['grid-template-columns'] = rv(['50px 50px', '1fr', 'repeat(3, 30px)'])
+            props['width'] = '100px'
+            inner = []
+            for _ in range(random.randint(2, 8)):
+                ip = css_props_block()
+                ip['min-width'] = rv(['99999px', '500px', '200%'])
+                ip['grid-column'] = f'span {random.randint(1, 5)}'
+                inner.append(make_element('div', ip, rv(TEXT_SAMPLES)))
+            children.append(make_element('div', props, '\n'.join(inner)))
+            continue
+
+        children.append(make_element('div', props, rv(TEXT_SAMPLES)))
+
+    body = '\n'.join(children)
+    return wrap_html(body)
+
+
+def gen_recursive_layout():
+    """Generate deeply recursive layout mode nesting: flex->grid->table->flex->..."""
+    depth = random.randint(4, 12)
+    modes = ['flex', 'grid', 'table', 'block', 'inline-block']
+    content = rv(TEXT_SAMPLES)
+
+    for i in range(depth):
+        mode = rv(modes)
+        props = css_props_block()
+
+        if mode == 'flex':
+            props['display'] = 'flex'
+            props['flex-direction'] = rv(FLEX_DIRECTION)
+            props['flex-wrap'] = rv(FLEX_WRAP)
+            if maybe(0.5): props['align-items'] = rv(ALIGN_VALUES)
+            siblings = []
+            for _ in range(random.randint(1, 4)):
+                sp = {'flex': rv(['1', '0 1 auto', '1 0 0', '0 0 auto', '9999 0 0'])}
+                sp.update(css_props_block())
+                if maybe(0.3): sp['position'] = rv(POSITION_VALUES)
+                siblings.append(make_element('div', sp, rv(TEXT_SAMPLES)))
+            idx = random.randint(0, len(siblings) - 1)
+            siblings[idx] = make_element('div',
+                {'flex': rv(['1', '0 1 auto', '1 0 0'])}, content)
+            content = '\n'.join(siblings)
+
+        elif mode == 'grid':
+            props['display'] = 'grid'
+            props['grid-template-columns'] = rv(GRID_TEMPLATE_VALUES)
+            if maybe(0.5): props['gap'] = rv(['0', '5px', '10px'])
+            siblings = [make_element('div', css_props_block(), rv(TEXT_SAMPLES))
+                       for _ in range(random.randint(1, 4))]
+            siblings.append(make_element('div', {}, content))
+            random.shuffle(siblings)
+            content = '\n'.join(siblings)
+
+        elif mode == 'table':
+            cell = make_element('td', css_props_block(), content)
+            extra_cells = ''.join(make_element('td', css_props_block(), rv(TEXT_SAMPLES))
+                                  for _ in range(random.randint(0, 3)))
+            row = make_element('tr', {}, cell + extra_cells)
+            extra_rows = ''.join(
+                make_element('tr', {},
+                    ''.join(make_element('td', {}, rv(TEXT_SAMPLES))
+                            for _ in range(random.randint(1, 4))))
+                for _ in range(random.randint(0, 3)))
+            props['border-collapse'] = rv(['collapse', 'separate'])
+            if maybe(0.3): props['table-layout'] = rv(['auto', 'fixed'])
+            content = make_element('table', props, row + extra_rows)
+            continue
+
+        elif mode == 'inline-block':
+            props['display'] = 'inline-block'
+
+        else:
+            props['display'] = 'block'
+
+        content = make_element('div', props, content)
+
+    container = {'width': rv(['400px', '800px', '1200px', '50%', 'auto']),
+                 'position': 'relative'}
+    body = make_element('div', container, content)
+    return wrap_html(body)
+
+
+def gen_float_clear_chain():
+    """Generate complex float + clear interaction chains."""
+    children = []
+    for i in range(random.randint(10, 40)):
+        props = css_props_block()
+        kind = random.choice(['float-l', 'float-r', 'clear', 'bfc', 'normal',
+                               'abs', 'float-zero', 'inline-float'])
+
+        if kind == 'float-l':
+            props['float'] = 'left'
+            props['width'] = rv(['50px', '100px', '200px', '33%', '50%', '0', '99999px'])
+            props['height'] = rv(['20px', '50px', '100px', '0', '99999px'])
+        elif kind == 'float-r':
+            props['float'] = 'right'
+            props['width'] = rv(['50px', '100px', '200px', '33%', '50%'])
+            props['height'] = rv(['20px', '50px', '100px'])
+        elif kind == 'clear':
+            props['clear'] = rv(['left', 'right', 'both'])
+            if maybe(0.3): props['float'] = rv(['left', 'right'])
+        elif kind == 'bfc':
+            props['overflow'] = rv(['hidden', 'auto', 'scroll'])
+            props['width'] = rand_length()
+        elif kind == 'abs':
+            props['position'] = 'absolute'
+            props['top'] = rand_length()
+            props['left'] = rand_length()
+            props['width'] = rand_length()
+        elif kind == 'float-zero':
+            props['float'] = rv(['left', 'right'])
+            props['width'] = rv(['0', '0px', '0.001px'])
+            props['height'] = rv(['0', '0px', '100px'])
+        elif kind == 'inline-float':
+            props['float'] = rv(['left', 'right'])
+            props['display'] = rv(['inline', 'inline-block'])
+
+        children.append(make_element('div', props, rv(TEXT_SAMPLES)))
+
+    container = {'width': rv(['400px', '800px', '1200px']), 'position': 'relative'}
+    body = make_element('div', container, '\n'.join(children))
+    return wrap_html(body)
+
+
+def gen_aspect_ratio_stress():
+    """Generate elements with aspect-ratio and conflicting size constraints."""
+    children = []
+    for _ in range(random.randint(3, 12)):
+        props = css_props_block()
+        props['aspect-ratio'] = rv(['1', '1/1', '16/9', '4/3', '0.5', '2',
+                                     '1/0', '0/1', '99999/1', '1/99999',
+                                     'auto', 'auto 16/9', '16/9 auto'])
+        if maybe(0.7): props['width'] = rand_length()
+        if maybe(0.5): props['height'] = rand_length()
+        if maybe(0.3): props['min-width'] = rand_length()
+        if maybe(0.3): props['min-height'] = rand_length()
+        if maybe(0.3): props['max-width'] = rand_length()
+        if maybe(0.3): props['max-height'] = rand_length()
+        if maybe(0.2): props['position'] = rv(POSITION_VALUES)
+        if maybe(0.2): props['display'] = rv(DISPLAY_VALUES)
+        children.append(make_element('div', props, rv(TEXT_SAMPLES)))
+
+    flex_props = {'display': 'flex', 'flex-wrap': rv(FLEX_WRAP), 'width': '800px'}
+    body = make_element('div', flex_props, '\n'.join(children))
+    return wrap_html(body)
+
+
+def gen_writing_mode_stress():
+    """Generate content with mixed writing modes and directions."""
+    children = []
+    wm_values = ['horizontal-tb', 'vertical-rl', 'vertical-lr']
+    dir_values = ['ltr', 'rtl']
+
+    for _ in range(random.randint(3, 10)):
+        props = css_props_block()
+        props['writing-mode'] = rv(wm_values)
+        props['direction'] = rv(dir_values)
+        if maybe(0.3): props['text-orientation'] = rv(['mixed', 'upright', 'sideways'])
+        if maybe(0.3): props['display'] = rv(DISPLAY_VALUES)
+
+        inner_props = css_props_block()
+        inner_props['writing-mode'] = rv(wm_values)
+        inner_props['direction'] = rv(dir_values)
+
+        inner = make_element('div', inner_props,
+            rv(TEXT_SAMPLES) + make_element('span', {}, rv(TEXT_SAMPLES)))
+        children.append(make_element('div', props, inner))
+
+    body = '\n'.join(children)
+    return wrap_html(body)
+
+
+def gen_transform_stress():
+    """Generate transformed elements that interact with layout."""
+    transforms = [
+        'none', 'translate(0, 0)', 'translate(99999px, 99999px)',
+        'translate(-99999px, -99999px)', 'translate(50%, 50%)',
+        'scale(0)', 'scale(-1)', 'scale(0.001)', 'scale(9999)',
+        'rotate(0deg)', 'rotate(90deg)', 'rotate(360deg)',
+        'skew(45deg)', 'matrix(1,0,0,1,0,0)',
+        'translate3d(0,0,0)', 'perspective(100px)',
+    ]
+
+    children = []
+    for _ in range(random.randint(3, 10)):
+        props = css_props_block()
+        props['transform'] = rv(transforms)
+        if maybe(0.3): props['transform-origin'] = rv(['center', '0 0', '100% 100%',
+                                                        'top left', '-50px -50px'])
+        if maybe(0.3): props['position'] = rv(POSITION_VALUES)
+        if maybe(0.3): props['display'] = rv(DISPLAY_VALUES)
+        if maybe(0.2): props['overflow'] = rv(OVERFLOW_VALUES)
+        if maybe(0.2): props['will-change'] = 'transform'
+
+        if maybe(0.3):
+            inner_p = {'position': 'absolute', 'top': rand_length(),
+                      'left': rand_length(), 'width': rand_length()}
+            inner = make_element('div', inner_p, rv(TEXT_SAMPLES))
+            children.append(make_element('div', props, inner + rv(TEXT_SAMPLES)))
+        else:
+            children.append(make_element('div', props, rv(TEXT_SAMPLES)))
+
+    container = {'position': 'relative', 'width': '800px', 'height': '600px'}
+    body = make_element('div', container, '\n'.join(children))
+    return wrap_html(body)
+
+
+def gen_multi_column():
+    """Generate multi-column layout stress tests."""
+    props = css_props_block()
+    props['column-count'] = str(random.choice([1, 2, 3, 5, 10, 100, 9999]))
+    if maybe(0.5): props['column-width'] = rv(['0', '1px', '50px', '100px', '99999px', 'auto'])
+    if maybe(0.5): props['column-gap'] = rv(['0', '1px', '10px', '50px', '99999px', 'normal'])
+    if maybe(0.3): props['column-rule'] = rand_border()
+    if maybe(0.3): props['column-fill'] = rv(['auto', 'balance'])
+
+    parts = []
+    for _ in range(random.randint(3, 15)):
+        cp = css_props_block()
+        if maybe(0.2): cp['break-inside'] = rv(['auto', 'avoid'])
+        if maybe(0.2): cp['break-before'] = rv(['auto', 'column', 'avoid'])
+        if maybe(0.2): cp['break-after'] = rv(['auto', 'column', 'avoid'])
+        if maybe(0.2): cp['column-span'] = rv(['none', 'all'])
+        if maybe(0.1): cp['float'] = rv(FLOAT_VALUES)
+        if maybe(0.1): cp['position'] = rv(POSITION_VALUES)
+        parts.append(make_element('div', cp, rv(TEXT_SAMPLES)))
+
+    body = make_element('div', props, '\n'.join(parts))
+    return wrap_html(body)
+
+
+def gen_css_var_stress():
+    """Generate HTML using CSS custom properties in stress patterns."""
+    css = '''\n:root {\n    --w: ''' + rand_length() + ''';\n    --h: ''' + rand_length() + ''';\n    --m: ''' + rand_margin() + ''';\n    --d: ''' + rv(DISPLAY_VALUES) + ''';\n    --flex: ''' + rv(['1', '0 1 auto', '0 0 0', '9999 0 0']) + ''';\n    --cols: ''' + rv(GRID_TEMPLATE_VALUES) + ''';\n}\n.a { display: var(--d); width: var(--w); height: var(--h); margin: var(--m); }\n.b { display: flex; }\n.b > * { flex: var(--flex); width: var(--w); }\n.c { display: grid; grid-template-columns: var(--cols); }\n'''
+
+    children = []
+    for cls in ['a', 'b', 'c']:
+        inner = ''.join(make_element('div', {'class': cls},
+            rv(TEXT_SAMPLES)) for _ in range(random.randint(2, 6)))
+        children.append(f'<div class="{cls}">{inner}</div>')
+
+    body = '\n'.join(children)
+    return wrap_html(body, extra_css=css)
+
+
 # ---------------------------------------------------------------------------
 # Generator registry
 # ---------------------------------------------------------------------------
@@ -677,6 +1118,16 @@ GENERATORS = {
     'mixed': gen_mixed_context,
     'replaced': gen_replaced_elements,
     'list': gen_list_stress,
+    'flex_grid': gen_flex_in_grid,
+    'table_flex': gen_table_in_flex,
+    'contradict': gen_contradiction,
+    'recursive': gen_recursive_layout,
+    'float_chain': gen_float_clear_chain,
+    'aspect': gen_aspect_ratio_stress,
+    'writing': gen_writing_mode_stress,
+    'transform': gen_transform_stress,
+    'multicol': gen_multi_column,
+    'cssvar': gen_css_var_stress,
 }
 
 ALL_MODES = list(GENERATORS.keys())

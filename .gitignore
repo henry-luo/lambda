@@ -138,6 +138,8 @@ test/wpt
 test/js262
 test/pdf/output
 test/fuzzy/crashes/
+test/fuzzy-radiant/results/crashes/
+test/fuzzy-radiant/results/timeouts/
 
 test/event/
 test/events/

@@ -332,6 +332,12 @@ typedef struct LayoutContext {
 
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+
+    // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
+    int depth;
+
+    // Total node count guard against pathological layouts (fuzzer-found timeouts)
+    int node_count;
 } LayoutContext;
 
 // ============================================================================

@@ -16,6 +16,13 @@ extern "C" {
 void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ScratchArena* sa) {
     if (!grid_layout || !container) return;
 
+    // guard against zero-track grids — items cannot be positioned (fuzzer-found)
+    if (grid_layout->computed_row_count <= 0 || grid_layout->computed_column_count <= 0) {
+        log_debug("position_grid_items: zero rows(%d) or cols(%d), skipping",
+                  grid_layout->computed_row_count, grid_layout->computed_column_count);
+        return;
+    }
+
     log_debug(" Positioning grid items - container: %.0fx%.0f at (%.0f,%.0f)\n",
            container->width, container->height, container->x, container->y);
     log_debug(" Grid content dimensions: %dx%d\n",

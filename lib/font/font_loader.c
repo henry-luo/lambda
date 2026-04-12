@@ -254,7 +254,7 @@ static void file_data_free(void* item) {
     FontFileDataEntry* e = (FontFileDataEntry*)item;
     if (e) {
         if (e->data) { free(e->data); e->data = NULL; }
-        if (e->path) { free(e->path); e->path = NULL; }
+        if (e->path) { mem_free(e->path); e->path = NULL; }
     }
 }
 
@@ -295,7 +295,7 @@ static void file_data_cache_insert(FontContext* ctx, const char* path,
         // replaced an existing entry — free old data (but NOT our new entry's data).
         // hashmap_set returns a copy of the replaced entry.
         if (old->data != data) { free(old->data); }
-        if (old->path != dup_path) { free(old->path); }
+        if (old->path != dup_path) { mem_free(old->path); }
     }
 }
 

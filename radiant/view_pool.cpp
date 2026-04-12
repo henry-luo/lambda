@@ -2000,6 +2000,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 // JSON generation for text nodes
 void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
+    if (!rect) return;  // guard against null text rect (fuzzer-found)
 
     NEXT_RECT:
     bool is_last_char_space = false;

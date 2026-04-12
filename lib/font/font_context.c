@@ -514,11 +514,11 @@ void font_handle_release(FontHandle* handle) {
                         handle->ctx->file_data_cache, &search);
                     if (removed) {
                         free(removed->data);
-                        free(removed->path);
+                        mem_free(removed->path);
                     }
                 }
             }
-            free(handle->file_data_path);
+            mem_free(handle->file_data_path);
             handle->file_data_path = NULL;
             // memory_buffer points into cached file_data — don't free separately
         } else {
