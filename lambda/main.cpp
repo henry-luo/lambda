@@ -1148,6 +1148,24 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            // Set up process.argv C-level storage (actual Lambda array built lazily)
+            {
+                static const char* js_argv_store[64];
+                static int js_argc_store = 0;
+                js_argc_store = 0;
+                js_argv_store[js_argc_store++] = argv[0]; // lambda.exe
+                js_argv_store[js_argc_store++] = js_file; // script path
+                // Pass remaining non-option arguments
+                for (int i = 2; i < argc && js_argc_store < 64; i++) {
+                    if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "--mir-interp") == 0) continue;
+                    if (argv[i] == js_file) continue; // already added
+                    if (argv[i][0] == '-') continue;
+                    js_argv_store[js_argc_store++] = argv[i];
+                }
+                js_store_process_argv(js_argc_store, js_argv_store);
+            }
+
             Item result = transpile_js_to_mir(&runtime, js_source, js_file);
 
             // JS mode: no REPL printing of last expression value

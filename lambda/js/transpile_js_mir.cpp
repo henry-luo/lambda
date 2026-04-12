@@ -5008,6 +5008,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     if (id->name->len == 8 && strncmp(id->name->chars, "document", 8) == 0) {
         return jm_call_0(mt, "js_get_document_object_value", MIR_T_I64);
     }
+    if (id->name->len == 7 && strncmp(id->name->chars, "process", 7) == 0) {
+        return jm_call_0(mt, "js_get_process_object_value", MIR_T_I64);
+    }
 
     // v48: Global builtin functions as values (parseInt, parseFloat, isNaN, etc.)
     {
