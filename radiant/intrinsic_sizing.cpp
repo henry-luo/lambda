@@ -1008,6 +1008,39 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    // UA font defaults: elements like <b>, <strong>, <i>, <em>, <code>, <th> have
+    // font properties from the UA stylesheet that affect text width measurement.
+    // Use TEMPORARY font props (not element->font) to avoid corrupting the DOM node's
+    // font state, which would prevent proper CSS inheritance during the real layout pass.
+    // Note: we check !font_changed (not !specified_style) because every DOM element has
+    // a specified_style from creation, but it may be empty (no CSS rules matched).
+    // The !font_changed guard ensures we only apply UA defaults when neither resolved
+    // font nor CSS styles provided font properties.
+    if (!font_changed && !element->font && lycon->ui_context && lycon->font.style) {
+        uintptr_t tag = element->tag();
+        FontProp* ua_font = nullptr;
+        if (tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) {
+            ua_font = alloc_font_prop(lycon);
+            ua_font->font_weight = CSS_VALUE_BOLD;
+            ua_font->font_weight_numeric = 700;
+        } else if (tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
+                   tag == HTM_TAG_DFN || tag == HTM_TAG_VAR) {
+            ua_font = alloc_font_prop(lycon);
+            ua_font->font_style = CSS_VALUE_ITALIC;
+        } else if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP ||
+                   tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
+                   tag == HTM_TAG_XMP) {
+            ua_font = alloc_font_prop(lycon);
+            ua_font->family = (char*)"monospace";
+        }
+        if (ua_font) {
+            if (!ua_font->family) ua_font->family = lycon->font.style->family;
+            if (ua_font->font_size <= 0) ua_font->font_size = lycon->font.style->font_size;
+            setup_font(lycon->ui_context, &lycon->font, ua_font);
+            font_changed = true;
+        }
+    }
+
     // Resolve CSS styles for this element if not already resolved
     // This is needed during intrinsic measurement to get correct display property
     if (!element->styles_resolved && element->specified_style) {
@@ -1457,6 +1490,36 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float border_spacing = 0;
             if (element->tb) {
                 border_spacing = element->tb->border_spacing_h;
+            } else {
+                // Table metadata not yet created during intrinsic measurement.
+                // Read border-spacing from CSS or use UA defaults.
+                bool found_css = false;
+                if (element->specified_style) {
+                    CssDeclaration* bs_decl = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_BORDER_SPACING);
+                    if (bs_decl && bs_decl->value) {
+                        const CssValue* bsv = bs_decl->value;
+                        if (bsv->type == CSS_VALUE_TYPE_LENGTH) {
+                            border_spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, bsv);
+                            found_css = true;
+                        } else if (bsv->type == CSS_VALUE_TYPE_LIST && bsv->data.list.count >= 2) {
+                            border_spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, bsv->data.list.values[0]);
+                            found_css = true;
+                        } else if (bsv->type == CSS_VALUE_TYPE_NUMBER) {
+                            border_spacing = (float)bsv->data.number.value;
+                            found_css = true;
+                        }
+                    }
+                }
+                if (!found_css && element->tag() == HTM_TAG_TABLE) {
+                    // HTML UA default: 2px border-spacing for <table>
+                    border_spacing = 2.0f;
+                    // Check cellspacing attribute override
+                    const char* cs = element->get_attribute("cellspacing");
+                    if (cs) {
+                        border_spacing = (float)str_to_double_default(cs, strlen(cs), 0.0);
+                    }
+                }
             }
 
             // CSS Tables §4.1: Table intrinsic width = sum of per-column
@@ -1513,6 +1576,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (n > num_columns) num_columns = n;
             });
 
+            // Determine cell padding and border from HTML attributes (when cells
+            // haven't been style-resolved yet). WHATWG 15.3.8: td, th default 1px padding.
+            // Table[border] → cells get 1px border. Table[cellpadding] overrides padding.
+            float cell_padding_h = 0;
+            float cell_border_h = 0;
+            {
+                // Check cellpadding from parent table
+                const char* cp = element->get_attribute("cellpadding");
+                if (cp) {
+                    cell_padding_h = 2.0f * (float)str_to_double_default(cp, strlen(cp), 0.0);
+                } else {
+                    cell_padding_h = 2.0f;  // UA default: 1px each side
+                }
+                // Check if parent table has border attribute → cells get 1px border
+                const char* tbl_border = element->get_attribute("border");
+                if (tbl_border) {
+                    float bv = (float)str_to_double_default(tbl_border, strlen(tbl_border), 0.0);
+                    if (bv > 0) cell_border_h = 2.0f;  // 1px each side
+                }
+            }
+
             // Allocate per-column min/max arrays on the stack
             float* col_min = (float*)alloca(num_columns * sizeof(float));
             float* col_max = (float*)alloca(num_columns * sizeof(float));
@@ -1533,8 +1617,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (!is_cell) continue;
                     if (col >= num_columns) break;
                     IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                    float cmin = ceilf(cell_sizes.min_content);
-                    float cmax = ceilf(cell_sizes.max_content);
+                    // Add cell padding+border if not already included in bound.
+                    // When bound is not resolved yet, check if CSS explicitly sets
+                    // padding (e.g., "td { padding: 0 }"). If so, don't add UA
+                    // fallback. If CSS doesn't set padding, apply HTML/UA defaults
+                    // (1px padding + 1px border if parent table has border attr).
+                    float extra = 0;
+                    if (!cell_view->bound) {
+                        bool css_sets_padding = false;
+                        if (cell_elem->specified_style) {
+                            css_sets_padding =
+                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
+                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
+                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                        }
+                        if (!css_sets_padding) {
+                            extra = cell_padding_h + cell_border_h;
+                        }
+                    }
+                    float cmin = ceilf(cell_sizes.min_content + extra);
+                    float cmax = ceilf(cell_sizes.max_content + extra);
                     if (cmin > col_min[col]) col_min[col] = cmin;
                     if (cmax > col_max[col]) col_max[col] = cmax;
                     col++;
@@ -1547,9 +1649,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 table_min += col_min[i];
                 table_max += col_max[i];
             }
-            if (num_columns > 1) {
-                table_min += border_spacing * (num_columns - 1);
-                table_max += border_spacing * (num_columns - 1);
+            // CSS 2.1 §17.5.2.1: In the separated borders model, border-spacing
+            // applies between each pair of adjacent columns AND on the left/right
+            // edges of the table. Total horizontal spacing = (N + 1) * h-spacing.
+            if (num_columns > 0) {
+                table_min += border_spacing * (num_columns + 1);
+                table_max += border_spacing * (num_columns + 1);
             }
             sizes.min_content = max(sizes.min_content, table_min);
             sizes.max_content = max(sizes.max_content, table_max);
@@ -1584,6 +1689,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (bdr_left == 0 && bdr_right == 0) {
                 float css_bw = get_border_width_from_css(lycon, element);
                 if (css_bw > 0) { bdr_left = css_bw; bdr_right = css_bw; }
+            }
+            // Fallback: read border from HTML border attribute if still not found
+            // WHATWG 15.3.10: table[border] → border-width = N pixels
+            if (bdr_left == 0 && bdr_right == 0 && element->tag() == HTM_TAG_TABLE) {
+                const char* border_attr = element->get_attribute("border");
+                if (border_attr) {
+                    float bw = (float)str_to_double_default(border_attr, strlen(border_attr), 0.0);
+                    if (bw > 0) { bdr_left = bw; bdr_right = bw; }
+                }
             }
 
             // Only use table-specific result if we actually found table rows/cells.
