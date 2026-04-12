@@ -408,7 +408,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
+	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart \
 	    test-ui-automation test-reactive-ui test-redex-baseline
 
 # Help target - shows available commands
@@ -1473,6 +1473,21 @@ test-fuzzy-extended: build
 	@chmod +x test/fuzzy/test_fuzzy.sh
 	@./test/fuzzy/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
+
+# Radiant Layout Engine Fuzzy Testing
+# Generates adversarial HTML/CSS and tests layout robustness
+
+# Quick radiant fuzz (2 minutes)
+fuzz-radiant-quick: build
+	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
+	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=120
+
+# Full radiant fuzz (default 5 minutes, override with duration=N)
+fuzz-radiant: build
+	@echo "Running Radiant layout fuzzy tests..."
+	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
 
 test-integration:
 	@echo "Running integration tests..."
