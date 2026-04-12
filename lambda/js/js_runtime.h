@@ -461,6 +461,13 @@ Item js_constructor_create_object_shaped(Item callee, const char** prop_names, c
 Item js_get_shaped_slot(Item object, int64_t slot);
 void js_set_shaped_slot(Item object, int64_t slot, Item value);
 
+// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
+// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
+double js_get_slot_f(Item object, int64_t byte_offset);
+int64_t js_get_slot_i(Item object, int64_t byte_offset);
+void js_set_slot_f(Item object, int64_t byte_offset, double value);
+void js_set_slot_i(Item object, int64_t byte_offset, int64_t value);
+
 // =============================================================================
 // v12: Language extensions
 // =============================================================================
