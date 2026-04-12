@@ -2698,6 +2698,7 @@ int main(int argc, char *argv[]) {
         memset(&preamble, 0, sizeof(preamble));
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
+        int batch_crash_count = 0;
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
 
         char line[4096];
@@ -2906,12 +2907,25 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
             fflush(stdout);
 
+            // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
+            // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).
+            // After too many crashes, exit the batch to prevent OOM.
+            // Also exit if RSS exceeds the limit (from cumulative leaks).
+            static const size_t RSS_LIMIT = 512UL * 1024 * 1024; // 512 MB
+            static const int MAX_CRASH_COUNT = 3;
+
             if (hot_reload) {
                 // Restore context (longjmp on timeout/crash may leave it dangling)
                 context = &batch_context;
 
                 if (result == 124 || result >= 128) {
-                    // Timeout or crash — longjmp may have left heap in inconsistent state.
+                    // Crash or timeout recovery: reset heap and continue, but
+                    // track crash count to cap memory leaks from longjmp.
+                    batch_crash_count++;
+                    if (batch_crash_count >= MAX_CRASH_COUNT || rss_after > RSS_LIMIT) {
+                        // Too many crashes or RSS too high — exit batch.
+                        break;
+                    }
                     js_batch_reset();
                     heap_destroy();
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
@@ -2923,8 +2937,7 @@ int main(int argc, char *argv[]) {
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
 
-                    // Crash destroyed heap — preamble function objects are gone.
-                    // Recompile preamble from saved source so subsequent tests still have harness.
+                    // Heap destroyed — recompile preamble for subsequent tests.
                     if (has_preamble) {
                         preamble_state_destroy(&preamble);
                         has_preamble = false;
@@ -2937,6 +2950,9 @@ int main(int argc, char *argv[]) {
                             preamble_var_checkpoint = preamble.module_var_count;
                         }
                     }
+                } else if (rss_after > RSS_LIMIT) {
+                    // Normal test but RSS too high — exit to prevent OOM.
+                    break;
                 } else if (has_preamble) {
                     js_batch_reset_to(preamble_var_checkpoint);
                 } else {

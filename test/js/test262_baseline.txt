@@ -1,9 +1,9 @@
 # test262 baseline: tests that PASS (auto-updated)
-# Commit: 48d95024e
+# Commit: 262176731
 # Scope: ES2020 (skip ES2021+ features)
-# Total passing: 21701
-# Total tests: 38352  Skipped: 6705  Batched: 31647  Passed: 21701  Failed: 9946
-# Runtime: 374.5s total (prep 0.1s + exec 374.2s)
+# Total passing: 21703
+# Total tests: 38352  Skipped: 6705  Batched: 31647  Passed: 21703  Failed: 9944
+# Runtime: 385.0s total (prep 0.1s + exec 384.8s)
 built_ins_ArrayBuffer_init_zero_js
 built_ins_ArrayBuffer_isView_arg_has_no_viewedarraybuffer_js
 built_ins_ArrayBuffer_isView_arg_is_arraybuffer_js
@@ -2595,6 +2595,7 @@ built_ins_Error_prototype_constructor_prop_desc_js
 built_ins_Error_prototype_message_prop_desc_js
 built_ins_Error_prototype_name_prop_desc_js
 built_ins_Error_prototype_toString_15_11_4_4_8_2_js
+built_ins_Error_prototype_toString_15_11_4_4_9_1_js
 built_ins_Error_prototype_toString_S15_11_4_4_A2_js
 built_ins_Error_prototype_toString_length_js
 built_ins_Error_prototype_toString_name_js
@@ -15071,6 +15072,7 @@ language_expressions_object_method_definition_gen_yield_as_label_identifier_esca
 language_expressions_object_method_definition_gen_yield_as_label_identifier_js
 language_expressions_object_method_definition_gen_yield_identifier_spread_strict_js
 language_expressions_object_method_definition_gen_yield_identifier_strict_js
+language_expressions_object_method_definition_generator_invoke_ctor_js
 language_expressions_object_method_definition_generator_invoke_fn_no_strict_js
 language_expressions_object_method_definition_generator_invoke_fn_strict_js
 language_expressions_object_method_definition_generator_length_dflt_js
