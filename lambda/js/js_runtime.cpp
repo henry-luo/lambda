@@ -349,6 +349,11 @@ extern "C" void js_batch_reset() {
     // deep reset: generators, promises, async contexts, pending calls
     extern void js_deep_batch_reset();
     js_deep_batch_reset();
+    // reset constructor prototypes and globalThis — tests may mutate built-in
+    // prototypes (Object.prototype, Error.prototype, etc.) which persist on
+    // cached constructor objects.  Reset prototype fields to force lazy re-creation.
+    extern void js_reset_constructor_prototypes(void);
+    js_reset_constructor_prototypes();
     // reset module namespace caches (pool-allocated function wrappers become dangling)
     js_child_process_reset();
     js_fs_reset();
@@ -403,6 +408,11 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // deep reset: generators, promises, async contexts, pending calls
     extern void js_deep_batch_reset();
     js_deep_batch_reset();
+    // reset constructor prototypes and globalThis — tests may mutate built-in
+    // prototypes (Object.prototype, Error.prototype, etc.) which persist on
+    // cached constructor objects.  Reset prototype fields to force lazy re-creation.
+    extern void js_reset_constructor_prototypes(void);
+    js_reset_constructor_prototypes();
 }
 
 extern "C" Item js_new_error(Item message) {

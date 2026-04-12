@@ -443,6 +443,7 @@ int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
+void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
 
