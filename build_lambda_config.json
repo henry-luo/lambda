@@ -2952,6 +2952,18 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_fuzzy_crash_gtest.cpp",
+                        "name": "Fuzzy Crash Tests",
+                        "dependencies": [],
+                        "binary": "test_fuzzy_crash_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🔀"
                     }
                 ],
                 "type": "extended",

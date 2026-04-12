@@ -193,8 +193,10 @@ Item js_get_reflect_object_value(void);
 
 Item js_process_stdout_write(Item str_item);
 Item js_process_hrtime_bigint(void);
+void js_store_process_argv(int argc, const char** argv);
 void js_set_process_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
+Item js_get_process_object_value(void);
 
 // =============================================================================
 // v5: Global Functions
@@ -458,6 +460,13 @@ Item js_constructor_create_object_shaped(Item callee, const char** prop_names, c
 // js_set_shaped_slot: writes with correct unboxing, updates ShapeEntry type.
 Item js_get_shaped_slot(Item object, int64_t slot);
 void js_set_shaped_slot(Item object, int64_t slot, Item value);
+
+// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
+// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
+double js_get_slot_f(Item object, int64_t byte_offset);
+int64_t js_get_slot_i(Item object, int64_t byte_offset);
+void js_set_slot_f(Item object, int64_t byte_offset, double value);
+void js_set_slot_i(Item object, int64_t byte_offset, int64_t value);
 
 // =============================================================================
 // v12: Language extensions

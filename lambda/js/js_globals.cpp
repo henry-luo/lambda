@@ -449,8 +449,10 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     return ItemNull;
 }
 
-// Process argv storage
+// Process argv storage — C-level copy (safe before heap init)
 static Item js_process_argv_items = {.item = ITEM_NULL};
+static const char** js_process_argv_raw = NULL;
+static int js_process_argc_raw = 0;
 
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
@@ -742,8 +744,14 @@ extern "C" Item js_date_parse(Item str_item) {
     return (Item){.item = d2it(fp)};
 }
 
+extern "C" void js_store_process_argv(int argc, const char** argv) {
+    // Store C-level copy — no heap allocation (safe before runtime context is ready)
+    js_process_argc_raw = argc;
+    js_process_argv_raw = argv;
+}
+
 extern "C" void js_set_process_argv(int argc, const char** argv) {
-    // Build a Lambda array from the argv
+    // Build a Lambda array from the argv (requires heap to be active)
     Array* arr = array();
     for (int i = 0; i < argc; i++) {
         array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
@@ -752,7 +760,30 @@ extern "C" void js_set_process_argv(int argc, const char** argv) {
 }
 
 extern "C" Item js_get_process_argv(void) {
+    // Lazy build: if raw argv was stored but Lambda array not yet built, build it now
+    if (js_process_argv_items.item == ITEM_NULL && js_process_argc_raw > 0) {
+        js_set_process_argv(js_process_argc_raw, js_process_argv_raw);
+    }
+    // Return an empty array if process.argv was never set (prevents null subscript crash)
+    if (js_process_argv_items.item == ITEM_NULL) {
+        Array* arr = array();
+        js_process_argv_items = array_end(arr);
+    }
     return js_process_argv_items;
+}
+
+// process object (lazy-initialized for `var p = process` standalone usage)
+static Item js_process_object = {.item = ITEM_NULL};
+
+extern "C" Item js_get_process_object_value(void) {
+    if (js_process_object.item == ITEM_NULL) {
+        js_process_object = js_object_create(ItemNull);
+        heap_register_gc_root(&js_process_object.item);
+        // Set argv
+        Item argv_key = (Item){.item = s2it(heap_create_name("argv", 4))};
+        js_property_set(js_process_object, argv_key, js_get_process_argv());
+    }
+    return js_process_object;
 }
 
 // =============================================================================
@@ -6373,8 +6404,11 @@ extern "C" void js_globals_batch_reset() {
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
     js_ctor_cache_reset();
-    // reset process.argv cache
+    // reset process.argv cache and process object
     js_process_argv_items = (Item){.item = ITEM_NULL};
+    js_process_object = (Item){.item = ITEM_NULL};
+    js_process_argc_raw = 0;
+    js_process_argv_raw = NULL;
 }
 
 // forward declaration for populating globalThis with constructors

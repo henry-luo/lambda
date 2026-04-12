@@ -142,6 +142,7 @@ struct JsFuncCollected {
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
+    TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
 };
 
 // Class method info for transpiler
@@ -2297,6 +2298,9 @@ static MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t ar
 // A5 forward declaration
 static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
 
+// Forward declaration — defined at line ~3786, needed by jm_get_effective_type and jm_transpile_as_native
+static int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int prop_len);
+
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
 // LMD_TYPE_ANY → unknown (must use boxed path)
@@ -2522,6 +2526,36 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                     if (se->name && se->name->str && se->name->length == prop->name->len &&
                         memcmp(se->name->str, prop->name->chars, prop->name->len) == 0) {
                         if (se->type) return se->type->type_id;
+                    }
+                }
+            }
+
+            // P1: Constructor field type lookup — if the object variable was created via
+            // `new ClassName(...)` and the property is a known constructor field, return
+            // the field type detected from the constructor init expression.
+            // Also handles `this.prop` in class methods via mt->current_class.
+            if (mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
+                JsClassEntry* ce = nullptr;
+                // Check for `this` in class method context
+                if (mt->current_class &&
+                    obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
+                    ce = mt->current_class;
+                }
+                // Check for named variable with class_entry
+                if (!ce) {
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+                    JsMirVarEntry* var = jm_find_var(mt, vname);
+                    if (var && var->class_entry) ce = var->class_entry;
+                }
+                if (ce && ce->constructor && ce->constructor->fc) {
+                    int p1_slot = jm_ctor_prop_slot(ce->constructor->fc,
+                        prop->name->chars, (int)prop->name->len);
+                    if (p1_slot >= 0) {
+                        TypeId ft = ce->constructor->fc->ctor_prop_types[p1_slot];
+                        if (ft == LMD_TYPE_INT || ft == LMD_TYPE_FLOAT)
+                            return ft;
                     }
                 }
             }
@@ -2830,6 +2864,65 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     // P9: MEMBER_EXPRESSION — typed array element access returns native directly
     if (expr && expr->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* mem = (JsMemberNode*)expr;
+
+        // P1: Shaped class property access — emit native-returning slot functions.
+        // When `body.x` is used in arithmetic and we know `x` is a float field,
+        // call js_get_slot_f(obj, byte_offset) → native double, no boxing.
+        // Also handles `this.prop` in class methods via mt->current_class.
+        if (!mem->computed && !mem->optional &&
+            mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* p1_obj = (JsIdentifierNode*)mem->object;
+            JsIdentifierNode* p1_prop = (JsIdentifierNode*)mem->property;
+            JsClassEntry* p1_ce = nullptr;
+            // Check for `this` in class method context
+            if (mt->current_class &&
+                p1_obj->name->len == 4 && strncmp(p1_obj->name->chars, "this", 4) == 0) {
+                p1_ce = mt->current_class;
+            }
+            // Check for named variable with class_entry
+            if (!p1_ce) {
+                char p1_vname[132];
+                snprintf(p1_vname, sizeof(p1_vname), "_js_%.*s", (int)p1_obj->name->len, p1_obj->name->chars);
+                JsMirVarEntry* p1_var = jm_find_var(mt, p1_vname);
+                if (p1_var && p1_var->class_entry) p1_ce = p1_var->class_entry;
+            }
+            if (p1_ce && p1_ce->constructor && p1_ce->constructor->fc) {
+                JsFuncCollected* p1_fc = p1_ce->constructor->fc;
+                int p1_slot = jm_ctor_prop_slot(p1_fc,
+                    p1_prop->name->chars, (int)p1_prop->name->len);
+                if (p1_slot >= 0) {
+                    TypeId field_type = p1_fc->ctor_prop_types[p1_slot];
+                    int64_t byte_offset = (int64_t)p1_slot * (int64_t)sizeof(void*);
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                    if (field_type == LMD_TYPE_FLOAT) {
+                        MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                        log_debug("P1: native float load %.*s.%.*s → offset %d",
+                                  (int)p1_obj->name->len, p1_obj->name->chars,
+                                  (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                        if (target_type == LMD_TYPE_FLOAT)
+                            return native_f;
+                        else
+                            return jm_emit_double_to_int(mt, native_f);
+                    }
+                    if (field_type == LMD_TYPE_INT) {
+                        MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                        log_debug("P1: native int load %.*s.%.*s → offset %d",
+                                  (int)p1_obj->name->len, p1_obj->name->chars,
+                                  (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                        if (target_type == LMD_TYPE_INT)
+                            return native_i;
+                        else
+                            return jm_ensure_native_float(mt, native_i, LMD_TYPE_INT);
+                    }
+                }
+            }
+        }
+
         if (mem->computed) {
             JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
             if (ta_var) {
@@ -3773,6 +3866,50 @@ static int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int p
     return -1;
 }
 
+// P1: Detect field type from constructor init expression (this.x = expr).
+// Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING for literals,
+// or LMD_TYPE_NULL (unknown) for complex expressions.
+// For binary arithmetic, returns FLOAT since JS numbers are all IEEE-754 doubles.
+static TypeId jm_detect_ctor_field_type(JsAstNode* rhs) {
+    if (!rhs) return LMD_TYPE_NULL;
+    if (rhs->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* lit = (JsLiteralNode*)rhs;
+        switch (lit->literal_type) {
+        case JS_LITERAL_NUMBER:
+            if (lit->has_decimal) return LMD_TYPE_FLOAT;
+            return LMD_TYPE_INT;
+        case JS_LITERAL_BOOLEAN: return LMD_TYPE_BOOL;
+        case JS_LITERAL_STRING: return LMD_TYPE_STRING;
+        case JS_LITERAL_NULL: return LMD_TYPE_NULL;
+        default: return LMD_TYPE_NULL;
+        }
+    }
+    // Unary minus on number literal: -0.0 → FLOAT, -1 → INT
+    if (rhs->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+        JsUnaryNode* un = (JsUnaryNode*)rhs;
+        if ((un->op == JS_OP_MINUS || un->op == JS_OP_SUB) && un->operand) {
+            TypeId inner = jm_detect_ctor_field_type(un->operand);
+            if (inner == LMD_TYPE_INT || inner == LMD_TYPE_FLOAT) return inner;
+        }
+    }
+    // Binary arithmetic (+, -, *, /, %) → FLOAT.
+    // In JS, all arithmetic produces IEEE-754 doubles. If the expression involves
+    // arithmetic, the result slot will hold a float. This catches patterns like
+    // `this.vx = vx * DAYS_PER_YER` in nbody.
+    if (rhs->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)rhs;
+        switch (bin->op) {
+        case JS_OP_ADD: case JS_OP_SUB: case JS_OP_MUL:
+        case JS_OP_DIV: case JS_OP_MOD:
+            return LMD_TYPE_FLOAT;
+        default: break;
+        }
+    }
+    // new TypedArray() → treat as array (not typed for native access)
+    // Complex expressions (new Foo(), function calls, etc.) → unknown
+    return LMD_TYPE_NULL;
+}
+
 // A5: Scan constructor body for this.property = expr assignment patterns.
 // Records property names in order so we can pre-build the object shape.
 static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
@@ -3799,6 +3936,8 @@ static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                                 fc->ctor_prop_lens[fc->ctor_prop_count] = (int)prop->name->len;
                                 // detect typed array type from RHS
                                 fc->ctor_prop_ta_types[fc->ctor_prop_count] = jm_detect_typed_array_new(asgn->right);
+                                // P1: detect field type from init expression
+                                fc->ctor_prop_types[fc->ctor_prop_count] = jm_detect_ctor_field_type(asgn->right);
                                 fc->ctor_prop_count++;
                             }
                         }
@@ -5007,6 +5146,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     }
     if (id->name->len == 8 && strncmp(id->name->chars, "document", 8) == 0) {
         return jm_call_0(mt, "js_get_document_object_value", MIR_T_I64);
+    }
+    if (id->name->len == 7 && strncmp(id->name->chars, "process", 7) == 0) {
+        return jm_call_0(mt, "js_get_process_object_value", MIR_T_I64);
     }
 
     // v48: Global builtin functions as values (parseInt, parseFloat, isNaN, etc.)
@@ -6800,6 +6942,35 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 int p3_slot = jm_ctor_prop_slot(mt->current_fc, prop_id->name->chars, (int)prop_id->name->len);
                 if (p3_slot >= 0) {
                     MIR_reg_t this_reg = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    int64_t byte_offset = (int64_t)p3_slot * (int64_t)sizeof(void*);
+                    TypeId field_type = mt->current_fc->ctor_prop_types[p3_slot];
+                    TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+
+                    // P1: Native typed slot write — bypass boxing when field & RHS types match
+                    if (field_type == LMD_TYPE_FLOAT &&
+                        (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT)) {
+                        MIR_reg_t native_f = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
+                        jm_call_void_3(mt, "js_set_slot_f",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
+                            MIR_T_D,  MIR_new_reg_op(mt->ctx, native_f));
+                        log_debug("P1: native float store this.%.*s → offset %d",
+                                  (int)prop_id->name->len, prop_id->name->chars, (int)byte_offset);
+                        // Return boxed value for expression result (rare: `let x = this.y = 1.0`)
+                        return jm_transpile_box_item(mt, asgn->right);
+                    }
+                    if (field_type == LMD_TYPE_INT && rhs_type == LMD_TYPE_INT) {
+                        MIR_reg_t native_i = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
+                        jm_call_void_3(mt, "js_set_slot_i",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, native_i));
+                        log_debug("P1: native int store this.%.*s → offset %d",
+                                  (int)prop_id->name->len, prop_id->name->chars, (int)byte_offset);
+                        return jm_transpile_box_item(mt, asgn->right);
+                    }
+
+                    // Fallback: boxed slot write
                     MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
                     jm_call_void_3(mt, "js_set_shaped_slot",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
@@ -10749,23 +10920,33 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* p4_obj = (JsIdentifierNode*)mem->object;
         JsIdentifierNode* p4_prop = (JsIdentifierNode*)mem->property;
-        char p4_vname[132];
-        snprintf(p4_vname, sizeof(p4_vname), "_js_%.*s", (int)p4_obj->name->len, p4_obj->name->chars);
-        JsMirVarEntry* p4_var = jm_find_var(mt, p4_vname);
-        if (p4_var && p4_var->class_entry) {
-            JsClassEntry* p4_ce = p4_var->class_entry;
-            if (p4_ce->constructor && p4_ce->constructor->fc) {
-                int p4_slot = jm_ctor_prop_slot(p4_ce->constructor->fc,
-                    p4_prop->name->chars, (int)p4_prop->name->len);
-                if (p4_slot >= 0) {
-                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
-                    log_debug("P4: shaped load %.*s.%.*s → slot %d",
-                              (int)p4_obj->name->len, p4_obj->name->chars,
-                              (int)p4_prop->name->len, p4_prop->name->chars, p4_slot);
-                    return jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
-                }
+
+        // P1: Check for `this.prop` in class methods — use current_class for field lookup
+        JsClassEntry* p1_ce = nullptr;
+        if (mt->current_class &&
+            p4_obj->name->len == 4 && strncmp(p4_obj->name->chars, "this", 4) == 0) {
+            p1_ce = mt->current_class;
+        }
+
+        // P4: Check for named variable with class_entry (e.g., `let node = new Node()`)
+        if (!p1_ce) {
+            char p4_vname[132];
+            snprintf(p4_vname, sizeof(p4_vname), "_js_%.*s", (int)p4_obj->name->len, p4_obj->name->chars);
+            JsMirVarEntry* p4_var = jm_find_var(mt, p4_vname);
+            if (p4_var && p4_var->class_entry) p1_ce = p4_var->class_entry;
+        }
+
+        if (p1_ce && p1_ce->constructor && p1_ce->constructor->fc) {
+            int p4_slot = jm_ctor_prop_slot(p1_ce->constructor->fc,
+                p4_prop->name->chars, (int)p4_prop->name->len);
+            if (p4_slot >= 0) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                log_debug("P4: shaped load %.*s.%.*s → slot %d",
+                          (int)p4_obj->name->len, p4_obj->name->chars,
+                          (int)p4_prop->name->len, p4_prop->name->chars, p4_slot);
+                return jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
             }
         }
     }

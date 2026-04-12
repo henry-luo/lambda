@@ -8,6 +8,7 @@
 #include <gif_lib.h>
 #include "log.h"
 #include "str.h"
+#include "memtrack.h"
 
 // Helper function to determine image format from file extension
 typedef enum {

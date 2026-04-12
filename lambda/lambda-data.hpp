@@ -216,6 +216,10 @@ typedef struct TypeMap : Type {
     // A1: Inline property hash table for O(1) lookup
     ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
     uint8_t field_count;  // number of fields in hash table (0 = not populated)
+    // P1: Slot-indexed array for O(1) shaped property access (used by js_get_slot_fast/js_set_slot_fast).
+    // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
+    ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
+    int slot_count;             // number of slot_entries (0 = not populated)
 } TypeMap;
 
 // A1: FNV-1a hash for property name lookup

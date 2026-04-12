@@ -1871,7 +1871,10 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
 }
 
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
-    assert(text_length > 0);
+    if (text_length <= 0) {
+        log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
+        return;
+    }
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;

@@ -1021,6 +1021,7 @@ test-radiant-baseline: build-test
 	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
 	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
+	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
 	pretext_passed=0; pretext_failed=0; pretext_skipped=0; pretext_status="⏭️  SKIP"; \
 	any_failed=0; \
@@ -1094,6 +1095,19 @@ test-radiant-baseline: build-test
 	fi; \
 	\
 	echo ""; \
+	echo "📦 Fuzzy Crash Tests:"; \
+	if [ -f "test/test_fuzzy_crash_gtest.exe" ]; then \
+		output=$$(./test/test_fuzzy_crash_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|fuzzy files tested" | tail -5; \
+		fuzzy_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		fuzzy_passed=$${fuzzy_passed:-0}; fuzzy_failed=$${fuzzy_failed:-0}; \
+		if [ "$$fuzzy_failed" = "0" ] || [ -z "$$fuzzy_failed" ]; then fuzzy_status="✅ PASS"; fuzzy_failed=0; else fuzzy_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_fuzzy_crash_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
 	echo "📦 Pretext Corpus Baseline:"; \
 	output=$$(node test/layout/test_radiant_layout.js -c pretext 2>&1) || true; \
 	echo "$$output" | tail -10; \
@@ -1105,8 +1119,8 @@ test-radiant-baseline: build-test
 	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
 	else pretext_status="✅ PASS"; fi; \
 	\
-	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + pretext_passed)); \
-	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + pretext_failed)); \
+	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
 	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1121,6 +1135,7 @@ test-radiant-baseline: build-test
 	echo "   ├── Page Snapshot       $$snapshot_status"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
 	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed)"; \
 	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
