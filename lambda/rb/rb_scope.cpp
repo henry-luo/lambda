@@ -4,6 +4,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arena.h"
 #include "../tree-sitter-ruby/bindings/c/tree_sitter/tree-sitter-ruby.h"
 #include <cstring>
 #include <cstdarg>
@@ -15,8 +16,7 @@
 // ============================================================================
 
 RbScope* rb_scope_create(RbTranspiler* tp, RbScopeType scope_type, RbScope* parent) {
-    RbScope* scope = (RbScope*)pool_alloc(tp->ast_pool, sizeof(RbScope));
-    memset(scope, 0, sizeof(RbScope));
+    RbScope* scope = (RbScope*)arena_calloc(tp->ast_arena, sizeof(RbScope));
     scope->scope_type = scope_type;
     scope->parent = parent;
     scope->method = NULL;
@@ -93,8 +93,7 @@ void rb_scope_define(RbTranspiler* tp, String* name, RbAstNode* node, RbVarKind 
     }
 
     // create new name entry
-    NameEntry* new_entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
-    memset(new_entry, 0, sizeof(NameEntry));
+    NameEntry* new_entry = (NameEntry*)arena_calloc(tp->ast_arena, sizeof(NameEntry));
     new_entry->name = name;
     new_entry->node = (AstNode*)node;
     new_entry->next = NULL;
@@ -163,6 +162,7 @@ RbTranspiler* rb_transpiler_create(Runtime* runtime) {
 
     // initialize memory pools
     tp->ast_pool = pool_create();
+    tp->ast_arena = arena_create_default(tp->ast_pool);
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
@@ -196,6 +196,9 @@ void rb_transpiler_destroy(RbTranspiler* tp) {
     // from ast_pool, so pool_destroy would unmap its memory.
     if (tp->name_pool) {
         name_pool_release(tp->name_pool);
+    }
+    if (tp->ast_arena) {
+        arena_destroy(tp->ast_arena);
     }
     if (tp->ast_pool) {
         pool_destroy(tp->ast_pool);

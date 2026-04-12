@@ -41,7 +41,8 @@ typedef struct PyScope {
 // Python transpiler context
 typedef struct PyTranspiler {
     // core transpiler components
-    Pool* ast_pool;                 // AST memory pool
+    Pool* ast_pool;                 // AST backing pool (for arena chunks)
+    Arena* ast_arena;               // AST bump allocator (O(1) alloc, bulk free)
     NamePool* name_pool;            // string interning pool
     StrBuf* code_buf;               // code generation buffer
     const char* source;             // Python source code

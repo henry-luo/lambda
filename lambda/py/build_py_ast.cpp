@@ -1,6 +1,7 @@
 #include "py_transpiler.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/arena.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -35,10 +36,9 @@ PyAstNode* build_py_slice(PyTranspiler* tp, TSNode slice_node);
 PyAstNode* build_py_decorated_definition(PyTranspiler* tp, TSNode dec_node);
 PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node);
 
-// Allocate a Python AST node from the pool
+// Allocate a Python AST node from the arena
 PyAstNode* alloc_py_ast_node(PyTranspiler* tp, PyAstNodeType node_type, TSNode node, size_t size) {
-    PyAstNode* ast_node = (PyAstNode*)pool_alloc(tp->ast_pool, size);
-    memset(ast_node, 0, size);
+    PyAstNode* ast_node = (PyAstNode*)arena_calloc(tp->ast_arena, size);
     ast_node->node_type = node_type;
     ast_node->node = node;
     return ast_node;
@@ -525,8 +525,8 @@ PyAstNode* build_py_comparison(PyTranspiler* tp, TSNode comp_node) {
     cmp->op_count = num_ops;
 
     if (num_ops > 0) {
-        cmp->ops = (PyOperator*)pool_alloc(tp->ast_pool, sizeof(PyOperator) * num_ops);
-        cmp->comparators = (PyAstNode**)pool_alloc(tp->ast_pool, sizeof(PyAstNode*) * num_ops);
+        cmp->ops = (PyOperator*)arena_alloc(tp->ast_arena, sizeof(PyOperator) * num_ops);
+        cmp->comparators = (PyAstNode**)arena_alloc(tp->ast_arena, sizeof(PyAstNode*) * num_ops);
 
         // build comparator expressions
         for (int i = 0; i < num_ops; i++) {
@@ -1467,7 +1467,7 @@ static PyAstNode* build_py_global_nonlocal(PyTranspiler* tp, TSNode gn_node, PyA
     gn->name_count = child_count;
 
     if (child_count > 0) {
-        gn->names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * child_count);
+        gn->names = (String**)arena_alloc(tp->ast_arena, sizeof(String*) * child_count);
 
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_named_child(gn_node, i);

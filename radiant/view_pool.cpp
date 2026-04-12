@@ -342,11 +342,13 @@ void view_pool_init(ViewTree* tree) {
         log_error("Failed to initialize view pool");
     }
     else {
+        tree->arena = arena_create_default(tree->pool);
         log_debug("view pool initialized");
     }
 }
 
 void view_pool_destroy(ViewTree* tree) {
+    if (tree->arena) { arena_destroy(tree->arena); tree->arena = NULL; }
     if (tree->pool) pool_destroy(tree->pool);
     tree->pool = NULL;
 }

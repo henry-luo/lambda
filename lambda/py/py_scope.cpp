@@ -3,6 +3,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arena.h"
 #include "../tree-sitter-python/bindings/c/tree_sitter/tree-sitter-python.h"
 #include <cstring>
 #include <cstdarg>
@@ -12,8 +13,7 @@
 // scope management functions
 
 PyScope* py_scope_create(PyTranspiler* tp, PyScopeType scope_type, PyScope* parent) {
-    PyScope* scope = (PyScope*)pool_alloc(tp->ast_pool, sizeof(PyScope));
-    memset(scope, 0, sizeof(PyScope));
+    PyScope* scope = (PyScope*)arena_calloc(tp->ast_arena, sizeof(PyScope));
 
     scope->scope_type = scope_type;
     scope->parent = parent;
@@ -112,7 +112,7 @@ void py_scope_define(PyTranspiler* tp, String* name, PyAstNode* node, PyVarKind 
     }
 
     // create new name entry
-    NameEntry* new_entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
+    NameEntry* new_entry = (NameEntry*)arena_calloc(tp->ast_arena, sizeof(NameEntry));
     new_entry->name = name;
     new_entry->node = (AstNode*)node;
     new_entry->next = NULL;
@@ -178,6 +178,7 @@ PyTranspiler* py_transpiler_create(Runtime* runtime) {
 
     // initialize memory pools
     tp->ast_pool = pool_create();
+    tp->ast_arena = arena_create_default(tp->ast_pool);
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
@@ -211,6 +212,9 @@ void py_transpiler_destroy(PyTranspiler* tp) {
     // from ast_pool, so pool_destroy would unmap its memory.
     if (tp->name_pool) {
         name_pool_release(tp->name_pool);
+    }
+    if (tp->ast_arena) {
+        arena_destroy(tp->ast_arena);
     }
     if (tp->ast_pool) {
         pool_destroy(tp->ast_pool);
