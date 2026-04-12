@@ -143,6 +143,7 @@ test/pdf/output
 test/fuzzy/crashes/
 test/fuzzy-radiant/results/crashes/
 test/fuzzy-radiant/results/timeouts/
+test/fuzzy-radiant/regression/
 
 test/event/
 test/events/

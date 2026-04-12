@@ -2741,11 +2741,23 @@ DomElement* element_dom_map_lookup(HashMap* map, Element* elem) {
     return found ? found->dom_elem : nullptr;
 }
 
+static const int MAX_DOM_BUILD_DEPTH = 512;
+static thread_local int g_dom_build_depth = 0;
+
+struct DomBuildDepthGuard {
+    DomBuildDepthGuard() { g_dom_build_depth++; }
+    ~DomBuildDepthGuard() { g_dom_build_depth--; }
+};
+
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;
     }
+    if (g_dom_build_depth > MAX_DOM_BUILD_DEPTH) {
+        return nullptr;
+    }
+    DomBuildDepthGuard depth_guard;
 
     // Get element type and tag name
     TypeElmt* type = (TypeElmt*)elem->type;

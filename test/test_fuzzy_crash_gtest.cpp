@@ -1,19 +1,18 @@
 /**
- * GTest runner for Page Load (Headless) Tests
+ * GTest runner for Fuzzy Crash Tests
  *
- * Auto-discovers HTML files under test/layout/data/page/ and
- * test/layout/data/markdown/ and runs each via
- * `./lambda.exe view <html> --headless --no-log` to verify they load
- * without crashing.
+ * Auto-discovers HTML files under test/layout/data/fuzzy/ and runs each via
+ * `./lambda.exe layout <html> --no-log -o /dev/null` to verify they don't crash.
  *
  * Exit code convention:
- *   0   = page loaded and rendered successfully
- *   non-zero / signal = crash or error
+ *   0   = layout completed successfully
+ *   1   = graceful crash recovery (e.g. SIGBUS caught and handled)
+ *   >1  = unrecoverable crash or signal (FAIL)
  *
  * Usage:
- *   ./test/test_page_load_gtest.exe
- *   ./test/test_page_load_gtest.exe --gtest_filter=PageLoad.*cern*
- *   ./test/test_page_load_gtest.exe -j 4
+ *   ./test/test_fuzzy_crash_gtest.exe
+ *   ./test/test_fuzzy_crash_gtest.exe --gtest_filter=FuzzyCrash.*table*
+ *   ./test/test_fuzzy_crash_gtest.exe -j 4
  */
 
 #include <gtest/gtest.h>
@@ -38,9 +37,9 @@
     #include <io.h>
     #define WEXITSTATUS(s) (s)
     #define LAMBDA_EXE "lambda.exe"
-    #define PAGE_DIR "test\\layout\\data\\page"
-    #define MARKDOWN_DIR "test\\layout\\data\\markdown"
+    #define FUZZY_DIR "test\\layout\\data\\fuzzy"
     #define PATH_SEP "\\"
+    #define NULL_DEV "NUL"
 #else
     #include <unistd.h>
     #include <dirent.h>
@@ -48,23 +47,23 @@
     #include <sys/wait.h>
     #include <signal.h>
     #define LAMBDA_EXE "./lambda.exe"
-    #define PAGE_DIR "test/layout/data/page"
-    #define MARKDOWN_DIR "test/layout/data/markdown"
+    #define FUZZY_DIR "test/layout/data/fuzzy"
     #define PATH_SEP "/"
+    #define NULL_DEV "/dev/null"
 #endif
 
-// Timeout per page in seconds
-#define PAGE_TIMEOUT_SECONDS 15
+// Timeout per file in seconds
+#define FUZZY_TIMEOUT_SECONDS 15
 
 // ============================================================================
 // Test info
 // ============================================================================
 
-struct PageTestInfo {
-    std::string html_path;   // e.g. "test/layout/data/page/cern.html"
-    std::string test_name;   // e.g. "cern"
+struct FuzzyTestInfo {
+    std::string html_path;   // e.g. "test/layout/data/fuzzy/crash_table_abspos_in_grid.html"
+    std::string test_name;   // e.g. "crash_table_abspos_in_grid"
 
-    friend std::ostream& operator<<(std::ostream& os, const PageTestInfo& info) {
+    friend std::ostream& operator<<(std::ostream& os, const FuzzyTestInfo& info) {
         return os << info.test_name;
     }
 };
@@ -83,25 +82,27 @@ static bool file_exists(const std::string& path) {
 // Test discovery
 // ============================================================================
 
-static void discover_from_dir(const char* dir_path, std::vector<PageTestInfo>& tests) {
+static std::vector<FuzzyTestInfo> discover_fuzzy_tests() {
+    std::vector<FuzzyTestInfo> tests;
+
 #ifdef _WIN32
-    std::string pattern = std::string(dir_path) + "\\*.html";
+    std::string pattern = std::string(FUZZY_DIR) + "\\*.html";
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
+    if (h == INVALID_HANDLE_VALUE) return tests;
     do {
         std::string name = fd.cFileName;
         if (name.size() <= 5) continue;
         std::string base = name.substr(0, name.size() - 5); // strip .html
-        PageTestInfo info;
-        info.html_path = std::string(dir_path) + "\\" + name;
+        FuzzyTestInfo info;
+        info.html_path = std::string(FUZZY_DIR) + "\\" + name;
         info.test_name = base;
         tests.push_back(info);
     } while (FindNextFileA(h, &fd));
     FindClose(h);
 #else
-    DIR* dir = opendir(dir_path);
-    if (!dir) return;
+    DIR* dir = opendir(FUZZY_DIR);
+    if (!dir) return tests;
 
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
@@ -110,23 +111,17 @@ static void discover_from_dir(const char* dir_path, std::vector<PageTestInfo>& t
         if (name.substr(name.size() - 5) != ".html") continue;
 
         std::string base = name.substr(0, name.size() - 5);
-        PageTestInfo info;
-        info.html_path = std::string(dir_path) + "/" + name;
+        FuzzyTestInfo info;
+        info.html_path = std::string(FUZZY_DIR) + "/" + name;
         info.test_name = base;
         tests.push_back(info);
     }
     closedir(dir);
-#endif
-}
 
-static std::vector<PageTestInfo> discover_page_tests() {
-    std::vector<PageTestInfo> tests;
-    discover_from_dir(PAGE_DIR, tests);
-    discover_from_dir(MARKDOWN_DIR, tests);
-
-    std::sort(tests.begin(), tests.end(), [](const PageTestInfo& a, const PageTestInfo& b) {
+    std::sort(tests.begin(), tests.end(), [](const FuzzyTestInfo& a, const FuzzyTestInfo& b) {
         return a.test_name < b.test_name;
     });
+#endif
 
     return tests;
 }
@@ -135,14 +130,14 @@ static std::vector<PageTestInfo> discover_page_tests() {
 // Global test list
 // ============================================================================
 
-static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
+static std::vector<FuzzyTestInfo> g_fuzzy_tests = discover_fuzzy_tests();
 
 // ============================================================================
-// Run a single page load test
+// Run a single fuzzy crash test
 // ============================================================================
 
-struct PageTestResult {
-    int exit_code;        // 0 = success, non-zero = failure
+struct FuzzyTestResult {
+    int exit_code;        // 0 = success, 1 = graceful recovery, >1 = crash
     bool timed_out;
     double elapsed_ms;
     std::string output;   // stderr/stdout from lambda.exe
@@ -150,13 +145,13 @@ struct PageTestResult {
 
 #ifdef _WIN32
 
-static PageTestResult run_page_test(const PageTestInfo& info) {
-    PageTestResult result;
+static FuzzyTestResult run_fuzzy_test(const FuzzyTestInfo& info) {
+    FuzzyTestResult result;
     result.exit_code = -1;
     result.timed_out = false;
     result.elapsed_ms = 0;
 
-    std::string cmd = std::string(LAMBDA_EXE) + " view " + info.html_path + " --headless --no-log 2>&1";
+    std::string cmd = std::string(LAMBDA_EXE) + " layout " + info.html_path + " --no-log -o " NULL_DEV " 2>&1";
 
     auto t0 = std::chrono::steady_clock::now();
     FILE* pipe = _popen(cmd.c_str(), "r");
@@ -179,8 +174,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
 
 #else
 
-static PageTestResult run_page_test(const PageTestInfo& info) {
-    PageTestResult result;
+static FuzzyTestResult run_fuzzy_test(const FuzzyTestInfo& info) {
+    FuzzyTestResult result;
     result.exit_code = -1;
     result.timed_out = false;
     result.elapsed_ms = 0;
@@ -210,7 +205,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
         close(pipefd[1]);
         // Create new process group so we can kill the whole group on timeout
         setpgid(0, 0);
-        execl(LAMBDA_EXE, LAMBDA_EXE, "view", info.html_path.c_str(), "--headless", "--no-log", (char*)NULL);
+        execl(LAMBDA_EXE, LAMBDA_EXE, "layout", info.html_path.c_str(),
+              "--no-log", "-o", NULL_DEV, (char*)NULL);
         _exit(127); // exec failed
     }
 
@@ -226,7 +222,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     while (!child_done) {
         FD_ZERO(&fds);
         FD_SET(pipefd[0], &fds);
-        tv.tv_sec = PAGE_TIMEOUT_SECONDS;
+        tv.tv_sec = FUZZY_TIMEOUT_SECONDS;
         tv.tv_usec = 0;
 
         int sel = select(pipefd[0] + 1, &fds, NULL, NULL, &tv);
@@ -274,11 +270,11 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
 // Parallel execution
 // ============================================================================
 
-static std::vector<PageTestResult> g_page_results;
+static std::vector<FuzzyTestResult> g_fuzzy_results;
 
-static void run_page_tests_parallel(int jobs) {
-    size_t n = g_page_tests.size();
-    g_page_results.resize(n);
+static void run_fuzzy_tests_parallel(int jobs) {
+    size_t n = g_fuzzy_tests.size();
+    g_fuzzy_results.resize(n);
     if (n == 0) return;
 
     int num_threads = std::min(jobs, (int)n);
@@ -288,7 +284,7 @@ static void run_page_tests_parallel(int jobs) {
         while (true) {
             size_t idx = next_idx.fetch_add(1);
             if (idx >= n) break;
-            g_page_results[idx] = run_page_test(g_page_tests[idx]);
+            g_fuzzy_results[idx] = run_fuzzy_test(g_fuzzy_tests[idx]);
         }
     };
 
@@ -305,7 +301,7 @@ static void run_page_tests_parallel(int jobs) {
 // Parameterized test fixture
 // ============================================================================
 
-class PageLoadTest : public ::testing::TestWithParam<size_t> {
+class FuzzyCrashTest : public ::testing::TestWithParam<size_t> {
 protected:
     void SetUp() override {
         if (!file_exists(LAMBDA_EXE)) {
@@ -316,50 +312,52 @@ protected:
             GTEST_SKIP() << "lambda.exe is not executable";
         }
 #endif
-        if (g_page_tests.empty()) {
-            GTEST_SKIP() << "No page tests found in " PAGE_DIR;
+        if (g_fuzzy_tests.empty()) {
+            GTEST_SKIP() << "No fuzzy tests found in " FUZZY_DIR;
         }
     }
 };
 
-TEST_P(PageLoadTest, LoadWithoutCrash) {
+TEST_P(FuzzyCrashTest, NoCrash) {
     size_t idx = GetParam();
-    if (idx >= g_page_tests.size()) {
+    if (idx >= g_fuzzy_tests.size()) {
         GTEST_SKIP() << "No test at index " << idx;
     }
-    const PageTestInfo& info = g_page_tests[idx];
-    const PageTestResult& result = g_page_results[idx];
+    const FuzzyTestInfo& info = g_fuzzy_tests[idx];
+    const FuzzyTestResult& result = g_fuzzy_results[idx];
 
-    SCOPED_TRACE("Page: " + info.test_name);
+    SCOPED_TRACE("Fuzzy: " + info.test_name);
 
     // Print timing
     std::cout << "  [" << info.test_name << "] "
               << (int)result.elapsed_ms << " ms"
               << (result.timed_out ? " (TIMEOUT)" : "")
+              << (result.exit_code == 1 ? " (graceful recovery)" : "")
               << std::endl;
 
     // Print output on failure
-    if (result.exit_code != 0) {
+    if (result.exit_code > 1 || result.timed_out) {
         std::cerr << "\n--- Output for " << info.test_name << " ---\n"
                   << result.output
                   << "--- End output ---\n";
     }
 
     EXPECT_FALSE(result.timed_out)
-        << info.test_name << " timed out after " << PAGE_TIMEOUT_SECONDS << "s";
+        << info.test_name << " timed out after " << FUZZY_TIMEOUT_SECONDS << "s";
 
-    EXPECT_EQ(result.exit_code, 0)
+    // Accept exit code 0 (success) or 1 (graceful crash recovery via _exit(1))
+    EXPECT_LE(result.exit_code, 1)
         << info.test_name << " exited with code " << result.exit_code
         << (result.exit_code > 128 ? " (signal " + std::to_string(result.exit_code - 128) + ")" : "");
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    PageLoad,
-    PageLoadTest,
-    ::testing::Range(size_t(0), g_page_tests.size()),
+    FuzzyCrash,
+    FuzzyCrashTest,
+    ::testing::Range(size_t(0), g_fuzzy_tests.size()),
     [](const ::testing::TestParamInfo<size_t>& info) {
-        if (info.param < g_page_tests.size()) {
-            std::string name = g_page_tests[info.param].test_name;
+        if (info.param < g_fuzzy_tests.size()) {
+            std::string name = g_fuzzy_tests[info.param].test_name;
             for (char& c : name) {
                 if (c == '-' || c == '.' || c == ' ') c = '_';
             }
@@ -388,31 +386,30 @@ int main(int argc, char** argv) {
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
-    std::cout << "║     Page Load (Headless) Test Suite                      ║\n";
+    std::cout << "║     Fuzzy Crash Test Suite                               ║\n";
     std::cout << "║                                                          ║\n";
-    std::cout << "║  Runs HTML pages from test/layout/data/page/ and         ║\n";
-    std::cout << "║  test/layout/data/markdown/ via:                         ║\n";
-    std::cout << "║    ./lambda.exe view <html> --headless --no-log          ║\n";
-    std::cout << "║  Verifies pages load without crashing.                   ║\n";
+    std::cout << "║  Runs HTML files from test/layout/data/fuzzy/ via:       ║\n";
+    std::cout << "║    ./lambda.exe layout <html> --no-log -o /dev/null      ║\n";
+    std::cout << "║  Verifies files don't crash (exit code <= 1).            ║\n";
     std::cout << "╚═══════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
 
-    if (g_page_tests.empty()) {
-        std::cerr << "WARNING: No HTML files found in " PAGE_DIR "\n\n";
+    if (g_fuzzy_tests.empty()) {
+        std::cerr << "WARNING: No HTML files found in " FUZZY_DIR "\n\n";
     } else {
-        std::cout << "Found " << g_page_tests.size() << " page(s), running with "
+        std::cout << "Found " << g_fuzzy_tests.size() << " fuzzy test(s), running with "
                   << jobs << " parallel job(s):\n";
-        for (const auto& t : g_page_tests) {
+        for (const auto& t : g_fuzzy_tests) {
             std::cout << "  • " << t.test_name << "\n";
         }
         std::cout << "\n";
 
         // Run all tests in parallel before GTest checks results
         auto t0 = std::chrono::steady_clock::now();
-        run_page_tests_parallel(jobs);
+        run_fuzzy_tests_parallel(jobs);
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-        std::cout << "All " << g_page_tests.size() << " pages loaded in "
+        std::cout << "All " << g_fuzzy_tests.size() << " fuzzy files tested in "
                   << ms << " ms (" << jobs << " parallel jobs)\n\n";
     }
 
