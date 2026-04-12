@@ -365,6 +365,170 @@ TEST_F(MemtrackTest, VerifyGuardsDetectsCorruption) {
 // Main function
 // ============================================================================
 
+// Test fixture for STATS mode tests
+class MemtrackStatsTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        memtrack_init(MEMTRACK_MODE_STATS);
+    }
+    void TearDown() override {
+        memtrack_shutdown();
+    }
+};
+
+// ============================================================================
+// STATS mode: size tracking on free
+// ============================================================================
+
+TEST_F(MemtrackStatsTest, StatsModeTracksBytesOnFree) {
+    void* p1 = mem_alloc(100, MEM_CAT_TEMP);
+    void* p2 = mem_alloc(200, MEM_CAT_PARSER);
+    ASSERT_NE(p1, nullptr);
+    ASSERT_NE(p2, nullptr);
+
+    MemtrackStats stats;
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 300);
+    EXPECT_EQ(stats.current_count, 2);
+
+    mem_free(p1);
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 200);
+    EXPECT_EQ(stats.current_count, 1);
+
+    mem_free(p2);
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 0);
+    EXPECT_EQ(stats.current_count, 0);
+}
+
+TEST_F(MemtrackStatsTest, StatsModeTracksCategoryBytesOnFree) {
+    void* p1 = mem_alloc(64, MEM_CAT_LAYOUT);
+    void* p2 = mem_alloc(128, MEM_CAT_LAYOUT);
+    void* p3 = mem_alloc(256, MEM_CAT_RENDER);
+
+    mem_free(p1);
+
+    MemtrackCategoryStats layout_stats, render_stats;
+    memtrack_get_category_stats(MEM_CAT_LAYOUT, &layout_stats);
+    memtrack_get_category_stats(MEM_CAT_RENDER, &render_stats);
+
+    EXPECT_EQ(layout_stats.current_bytes, 128);
+    EXPECT_EQ(layout_stats.current_count, 1);
+    EXPECT_EQ(render_stats.current_bytes, 256);
+    EXPECT_EQ(render_stats.current_count, 1);
+
+    mem_free(p2);
+    mem_free(p3);
+}
+
+TEST_F(MemtrackStatsTest, StatsModeReallocUpdatesBytesCorrectly) {
+    char* buf = (char*)mem_alloc(50, MEM_CAT_TEMP);
+    ASSERT_NE(buf, nullptr);
+    memcpy(buf, "hello", 5);
+
+    MemtrackStats stats;
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 50);
+
+    // grow
+    buf = (char*)mem_realloc(buf, 200, MEM_CAT_TEMP);
+    ASSERT_NE(buf, nullptr);
+    EXPECT_EQ(memcmp(buf, "hello", 5), 0);
+
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 200);
+    EXPECT_EQ(stats.current_count, 1);
+
+    mem_free(buf);
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_bytes, 0);
+    EXPECT_EQ(stats.current_count, 0);
+}
+
+TEST_F(MemtrackStatsTest, StatsModeShutdownReturnsLeakCount) {
+    mem_alloc(100, MEM_CAT_TEMP);
+    mem_alloc(200, MEM_CAT_PARSER);
+    // intentionally not freed
+
+    // Shutdown and check return value
+    size_t leaks = memtrack_shutdown();
+    EXPECT_EQ(leaks, 2);
+
+    // Re-init for TearDown
+    memtrack_init(MEMTRACK_MODE_STATS);
+}
+
+// ============================================================================
+// Pool/Arena lifecycle counters
+// ============================================================================
+
+TEST_F(MemtrackStatsTest, PoolLifecycleTracking) {
+    EXPECT_EQ(memtrack_get_pool_count(), 0);
+
+    Pool* pool = memtrack_pool_create(MEM_CAT_TEMP);
+    ASSERT_NE(pool, nullptr);
+    EXPECT_EQ(memtrack_get_pool_count(), 1);
+
+    Pool* pool2 = memtrack_pool_create(MEM_CAT_LAYOUT);
+    ASSERT_NE(pool2, nullptr);
+    EXPECT_EQ(memtrack_get_pool_count(), 2);
+
+    memtrack_pool_destroy(pool);
+    EXPECT_EQ(memtrack_get_pool_count(), 1);
+
+    memtrack_pool_destroy(pool2);
+    EXPECT_EQ(memtrack_get_pool_count(), 0);
+}
+
+TEST_F(MemtrackStatsTest, ArenaLifecycleTracking) {
+    Pool* pool = memtrack_pool_create(MEM_CAT_TEMP);
+    ASSERT_NE(pool, nullptr);
+
+    EXPECT_EQ(memtrack_get_arena_count(), 0);
+
+    Arena* arena = memtrack_arena_create(pool, MEM_CAT_LAYOUT);
+    ASSERT_NE(arena, nullptr);
+    EXPECT_EQ(memtrack_get_arena_count(), 1);
+
+    // Allocations via tracked arena work
+    void* ptr = memtrack_arena_alloc(arena, 128);
+    EXPECT_NE(ptr, nullptr);
+
+    memtrack_arena_destroy(arena);
+    EXPECT_EQ(memtrack_get_arena_count(), 0);
+
+    memtrack_pool_destroy(pool);
+    EXPECT_EQ(memtrack_get_pool_count(), 0);
+}
+
+// ============================================================================
+// New categories exist
+// ============================================================================
+
+TEST_F(MemtrackStatsTest, NewCategoriesWork) {
+    void* p1 = mem_alloc(32, MEM_CAT_JS_RUNTIME);
+    void* p2 = mem_alloc(64, MEM_CAT_PY_RUNTIME);
+    void* p3 = mem_alloc(16, MEM_CAT_NETWORK);
+    void* p4 = mem_alloc(48, MEM_CAT_SERVE);
+    void* p5 = mem_alloc(24, MEM_CAT_SYSTEM);
+
+    MemtrackCategoryStats js_stats;
+    memtrack_get_category_stats(MEM_CAT_JS_RUNTIME, &js_stats);
+    EXPECT_EQ(js_stats.current_bytes, 32);
+
+    mem_free(p1);
+    mem_free(p2);
+    mem_free(p3);
+    mem_free(p4);
+    mem_free(p5);
+
+    MemtrackStats stats;
+    memtrack_get_stats(&stats);
+    EXPECT_EQ(stats.current_count, 0);
+    EXPECT_EQ(stats.current_bytes, 0);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

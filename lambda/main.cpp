@@ -956,7 +956,7 @@ int main(int argc, char *argv[]) {
         mode = MEMTRACK_MODE_OFF;
     }
     memtrack_init(mode);
-    atexit(memtrack_shutdown);  // Ensure shutdown is called on exit
+    atexit([]{ memtrack_shutdown(); });  // Ensure shutdown is called on exit
     run_assertions();
     log_debug("Assertions completed");
 

@@ -93,6 +93,19 @@ typedef enum MemCategory {
     MEM_CAT_CACHE_LAYOUT,  // Layout cache
     MEM_CAT_CACHE_OTHER,
 
+    // Script engine runtimes
+    MEM_CAT_JS_RUNTIME,    // JavaScript runtime (transpiler, builtins, state)
+    MEM_CAT_PY_RUNTIME,    // Python runtime
+    MEM_CAT_RB_RUNTIME,    // Ruby runtime
+    MEM_CAT_BASH_RUNTIME,  // Bash runtime
+
+    // Network/serve
+    MEM_CAT_NETWORK,       // Network downloads, cache, HTTP
+    MEM_CAT_SERVE,         // HTTP server, ASGI, REST
+
+    // System
+    MEM_CAT_SYSTEM,        // Main runtime, module registry, sysinfo
+
     // Temporary allocations
     MEM_CAT_TEMP,          // Short-lived temporaries
 
@@ -178,8 +191,9 @@ bool memtrack_init(MemtrackMode mode);
 
 /**
  * Shutdown the tracker, reports leaks if in debug mode
+ * @return Number of leaked allocations (0 = clean shutdown)
  */
-void memtrack_shutdown(void);
+size_t memtrack_shutdown(void);
 
 /**
  * Get current tracking mode
@@ -544,6 +558,16 @@ void* memtrack_arena_alloc(Arena* arena, size_t size);
  * Destroy tracked arena
  */
 void memtrack_arena_destroy(Arena* arena);
+
+/**
+ * Get current live pool count (should be 0 at shutdown)
+ */
+int32_t memtrack_get_pool_count(void);
+
+/**
+ * Get current live arena count (should be 0 at shutdown)
+ */
+int32_t memtrack_get_arena_count(void);
 
 #ifdef __cplusplus
 }
