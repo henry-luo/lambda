@@ -12,7 +12,7 @@
  */
 #include "block_common.hpp"
 #include <cctype>
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 
 namespace lambda {
 namespace markup {
@@ -159,7 +159,7 @@ label_done:
 
     // Copy the label content before we potentially reuse the stringbuf for title
     // (since title parsing also uses parser->sb)
-    char* label_copy = strdup(label_buf->str->chars);
+    char* label_copy = mem_strdup(label_buf->str->chars, MEM_CAT_INPUT_MARKUP);
     size_t label_len = label_buf->length;
 
     // Skip optional whitespace (space, tab)
@@ -174,14 +174,14 @@ label_done:
         // Check if URL is on next line
         size_t next_line_idx = parser->current_line + lines_consumed + 1;
         if (next_line_idx >= parser->line_count) {
-            free(label_copy);
+            mem_free(label_copy);
             return false;  // no more lines
         }
         const char* next_line = parser->lines[next_line_idx];
         const char* np = next_line;
         while (*np == ' ' || *np == '\t') np++;
         if (*np == '\0' || *np == '\n' || *np == '\r') {
-            free(label_copy);
+            mem_free(label_copy);
             return false;  // next line is blank, no URL
         }
         // URL is on next line
@@ -206,7 +206,7 @@ label_done:
                 p++;
             }
         }
-        if (*p != '>') { free(label_copy); return false; }
+        if (*p != '>') { mem_free(label_copy); return false; }
         url_end = p;
         p++;
     } else {
@@ -231,7 +231,7 @@ label_done:
 
     // Empty URL is only invalid for bare URLs, not angle-bracketed ones
     if (url_start == url_end && !was_angle_bracketed) {
-        free(label_copy);
+        mem_free(label_copy);
         return false; // empty bare URL
     }
 
@@ -273,7 +273,7 @@ label_done:
     // CommonMark: Title must be separated from URL by whitespace
     if ((*p == '"' || *p == '\'' || *p == '(') && !had_whitespace_before_title) {
         // No whitespace between URL and potential title - this is NOT a valid definition
-        free(label_copy);
+        mem_free(label_copy);
         return false;
     }
 
@@ -354,7 +354,7 @@ label_done:
                     lines_consumed = saved_lines_consumed;
                     goto add_without_title;
                 }
-                free(label_copy);
+                mem_free(label_copy);
                 return false;
             }
 
@@ -371,7 +371,7 @@ label_done:
             // Advance past consumed lines
             parser->current_line += lines_consumed;
 
-            free(label_copy);
+            mem_free(label_copy);
             return true;
         } else {
             // Title was started but not properly closed
@@ -383,7 +383,7 @@ label_done:
                 lines_consumed = saved_lines_consumed;
                 goto add_without_title;
             }
-            free(label_copy);
+            mem_free(label_copy);
             return false;
         }
     }
@@ -394,7 +394,7 @@ add_without_title:
     while (*p == ' ' || *p == '\t') p++;
     if (*p != '\0' && *p != '\n' && *p != '\r') {
         // Extra content after URL - not a valid definition
-        free(label_copy);
+        mem_free(label_copy);
         return false;
     }
 
@@ -413,7 +413,7 @@ add_without_title:
     }
 
     // Clean up
-    free(label_copy);
+    mem_free(label_copy);
 
     // Return true to indicate this was a valid link definition (syntax-wise)
     // even if it was a duplicate and not added to the collection

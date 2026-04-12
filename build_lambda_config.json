@@ -2276,6 +2276,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/str.c",
                             "lib/log.c"
                         ],
@@ -2299,6 +2301,8 @@
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
+                            "lib/memtrack.c",
+                            "lib/arena.c",
                             "lib/string.c",
                             "lib/str.c",
                             "lib/hashmap.c",

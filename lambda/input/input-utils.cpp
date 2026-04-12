@@ -8,7 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include <ctype.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <string.h>
 
 // ── Unicode Utilities ──────────────────────────────────────────────
@@ -220,7 +220,7 @@ char* input_trim_whitespace(const char* str) {
     // find start
     while (isspace(*str)) str++;
 
-    if (*str == '\0') return strdup("");
+    if (*str == '\0') return mem_strdup("", MEM_CAT_INPUT_OTHER);
 
     // find end
     const char* end = str + strlen(str) - 1;
@@ -228,7 +228,7 @@ char* input_trim_whitespace(const char* str) {
 
     // create trimmed copy
     int len = end - str + 1;
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
     strncpy(result, str, len);
     result[len] = '\0';
 
@@ -257,7 +257,7 @@ char** input_split_lines(const char* text, int* line_count) {
     }
 
     // allocate array
-    char** lines = (char**)malloc(*line_count * sizeof(char*));
+    char** lines = (char**)mem_alloc(*line_count * sizeof(char*), MEM_CAT_INPUT_OTHER);
 
     // split into lines
     int line_index = 0;
@@ -267,7 +267,7 @@ char** input_split_lines(const char* text, int* line_count) {
     while (*ptr && line_index < *line_count) {
         if (*ptr == '\n') {
             int len = ptr - line_start;
-            lines[line_index] = (char*)malloc(len + 1);
+            lines[line_index] = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
             strncpy(lines[line_index], line_start, len);
             lines[line_index][len] = '\0';
             line_index++;
@@ -279,7 +279,7 @@ char** input_split_lines(const char* text, int* line_count) {
     // handle last line if it doesn't end with newline
     if (line_index < *line_count && line_start < ptr) {
         int len = ptr - line_start;
-        lines[line_index] = (char*)malloc(len + 1);
+        lines[line_index] = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER);
         strncpy(lines[line_index], line_start, len);
         lines[line_index][len] = '\0';
         line_index++;
@@ -294,7 +294,7 @@ char** input_split_lines(const char* text, int* line_count) {
 void input_free_lines(char** lines, int line_count) {
     if (!lines) return;
     for (int i = 0; i < line_count; i++) {
-        free(lines[i]);
+        mem_free(lines[i]);
     }
-    free(lines);
+    mem_free(lines);
 }

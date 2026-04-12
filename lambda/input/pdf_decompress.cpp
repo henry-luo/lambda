@@ -1,5 +1,5 @@
 #include "pdf_decompress.h"
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <string.h>
 #include <zlib.h>
 #include "lib/log.h"
@@ -29,7 +29,7 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
 
     // initial buffer size estimate (typically 2-10x compression ratio)
     size_t buffer_size = compressed_len * 4;
-    char* output = (char*)malloc(buffer_size);
+    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
     if (!output) {
         return NULL;
     }
@@ -52,7 +52,7 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
             // try auto-detect
             ret = inflateInit2(&stream, 15 + 32);
             if (ret != Z_OK) {
-                free(output);
+                mem_free(output);
                 return NULL;
             }
         }
@@ -67,10 +67,10 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
     while (ret == Z_BUF_ERROR || (ret == Z_OK && stream.avail_out == 0)) {
         size_t old_size = buffer_size;
         buffer_size *= 2;
-        char* new_output = (char*)realloc(output, buffer_size);
+        char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
         if (!new_output) {
             inflateEnd(&stream);
-            free(output);
+            mem_free(output);
             return NULL;
         }
         output = new_output;
@@ -97,7 +97,7 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
             inflateEnd(&stream);
 
             // shrink buffer to actual size
-            char* final_output = (char*)realloc(output, *out_len + 1);
+            char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
             if (final_output) {
                 final_output[*out_len] = '\0';
                 return final_output;
@@ -107,7 +107,7 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
         }
 
         inflateEnd(&stream);
-        free(output);
+        mem_free(output);
         return NULL;
     }
 
@@ -115,7 +115,7 @@ char* flate_decode(const char* compressed_data, size_t compressed_len, size_t* o
     inflateEnd(&stream);
 
     // shrink buffer to actual size
-    char* final_output = (char*)realloc(output, *out_len + 1);
+    char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
     if (final_output) {
         final_output[*out_len] = '\0'; // null terminate for convenience
         return final_output;
@@ -144,7 +144,7 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
 
     // allocate output buffer
     size_t buffer_size = compressed_len * 4;
-    char* output = (char*)malloc(buffer_size);
+    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
     if (!output) {
         return NULL;
     }
@@ -232,9 +232,9 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
         // ensure output buffer has space
         if (output_pos + current_len > buffer_size) {
             buffer_size = (output_pos + current_len) * 2;
-            char* new_output = (char*)realloc(output, buffer_size);
+            char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
             if (!new_output) {
-                free(output);
+                mem_free(output);
                 return NULL;
             }
             output = new_output;
@@ -264,7 +264,7 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
     *out_len = output_pos;
     
     // shrink buffer
-    char* final_output = (char*)realloc(output, output_pos + 1);
+    char* final_output = (char*)mem_realloc(output, output_pos + 1, MEM_CAT_INPUT_PDF);
     if (final_output) {
         final_output[output_pos] = '\0';
         return final_output;
@@ -283,7 +283,7 @@ char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_l
 
     // Allocate output buffer (worst case: 4 bytes per 5 input chars)
     size_t buffer_size = (encoded_len * 4) / 5 + 4;
-    char* output = (char*)malloc(buffer_size);
+    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
     if (!output) {
         return NULL;
     }
@@ -320,7 +320,7 @@ char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_l
         // Handle 'z' (represents 4 zero bytes)
         if (c == 'z') {
             if (count != 0) {
-                free(output);
+                mem_free(output);
                 return NULL; // 'z' can only appear at group start
             }
             *out++ = 0;
@@ -332,7 +332,7 @@ char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_l
 
         // Decode base-85 character
         if (c < '!' || c > 'u') {
-            free(output);
+            mem_free(output);
             return NULL; // Invalid character
         }
 
@@ -365,7 +365,7 @@ char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_l
     *out_len = out - output;
 
     // Shrink buffer to actual size
-    char* final_output = (char*)realloc(output, *out_len + 1);
+    char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
     if (final_output) {
         final_output[*out_len] = '\0';
         return final_output;
@@ -386,7 +386,7 @@ char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_
 
     // output is half the size of input (2 hex chars = 1 byte)
     size_t buffer_size = (encoded_len + 1) / 2;
-    char* output = (char*)malloc(buffer_size + 1);
+    char* output = (char*)mem_alloc(buffer_size + 1, MEM_CAT_INPUT_PDF);
     if (!output) {
         return NULL;
     }
@@ -450,7 +450,7 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
 
     // estimate output size (could be larger or smaller)
     size_t buffer_size = encoded_len * 2;
-    char* output = (char*)malloc(buffer_size);
+    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
     if (!output) {
         return NULL;
     }
@@ -474,9 +474,9 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
             // ensure buffer space
             if (out_pos + copy_count > buffer_size) {
                 buffer_size = (out_pos + copy_count) * 2;
-                char* new_output = (char*)realloc(output, buffer_size);
+                char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
                 if (!new_output) {
-                    free(output);
+                    mem_free(output);
                     return NULL;
                 }
                 output = new_output;
@@ -496,9 +496,9 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
             // ensure buffer space
             if (out_pos + repeat_count > buffer_size) {
                 buffer_size = (out_pos + repeat_count) * 2;
-                char* new_output = (char*)realloc(output, buffer_size);
+                char* new_output = (char*)mem_realloc(output, buffer_size, MEM_CAT_INPUT_PDF);
                 if (!new_output) {
-                    free(output);
+                    mem_free(output);
                     return NULL;
                 }
                 output = new_output;
@@ -513,7 +513,7 @@ char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out
     *out_len = out_pos;
     
     // shrink buffer
-    char* final_output = (char*)realloc(output, out_pos + 1);
+    char* final_output = (char*)mem_realloc(output, out_pos + 1, MEM_CAT_INPUT_PDF);
     if (final_output) {
         final_output[out_pos] = '\0';
         return final_output;
@@ -555,7 +555,7 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
     
     // no predictor
     if (predictor <= 1) {
-        char* output = (char*)malloc(data_len + 1);
+        char* output = (char*)mem_alloc(data_len + 1, MEM_CAT_INPUT_PDF);
         if (!output) return NULL;
         memcpy(output, data, data_len);
         output[data_len] = '\0';
@@ -575,13 +575,13 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
     size_t num_rows = data_len / input_row_bytes;
     
     size_t output_size = num_rows * row_bytes;
-    char* output = (char*)malloc(output_size + 1);
+    char* output = (char*)mem_alloc(output_size + 1, MEM_CAT_INPUT_PDF);
     if (!output) return NULL;
     
     // previous row buffer (for Up and Paeth predictors)
-    uint8_t* prev_row = (uint8_t*)calloc(row_bytes, 1);
+    uint8_t* prev_row = (uint8_t*)mem_calloc(row_bytes, 1, MEM_CAT_INPUT_PDF);
     if (!prev_row) {
-        free(output);
+        mem_free(output);
         return NULL;
     }
     
@@ -629,7 +629,7 @@ char* apply_predictor(const char* data, size_t data_len, size_t* out_len,
         }
     }
     
-    free(prev_row);
+    mem_free(prev_row);
     
     *out_len = output_size;
     output[output_size] = '\0';
@@ -652,7 +652,7 @@ char* flate_decode_with_predictor(const char* compressed_data, size_t compressed
     if (params && params->predictor > 1) {
         size_t final_len = 0;
         char* final_data = apply_predictor(decompressed, decompressed_len, &final_len, params);
-        free(decompressed);
+        mem_free(decompressed);
         if (!final_data) {
             return NULL;
         }
@@ -681,7 +681,7 @@ char* lzw_decode_with_predictor(const char* compressed_data, size_t compressed_l
     if (params && params->predictor > 1) {
         size_t final_len = 0;
         char* final_data = apply_predictor(decompressed, decompressed_len, &final_len, params);
-        free(decompressed);
+        mem_free(decompressed);
         if (!final_data) {
             return NULL;
         }
@@ -748,7 +748,7 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             decoded_data = runlength_decode(current_data, current_len, &decoded_len);
         } else if (strcmp(filter, "DCTDecode") == 0 || strcmp(filter, "DCT") == 0) {
             // DCT is JPEG - pass through unchanged (decoded by image handler)
-            decoded_data = (char*)malloc(current_len + 1);
+            decoded_data = (char*)mem_alloc(current_len + 1, MEM_CAT_INPUT_PDF);
             if (decoded_data) {
                 memcpy(decoded_data, current_data, current_len);
                 decoded_data[current_len] = '\0';
@@ -757,7 +757,7 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             log_debug("DCTDecode (JPEG) - passing through %zu bytes", decoded_len);
         } else if (strcmp(filter, "JPXDecode") == 0 || strcmp(filter, "JPX") == 0) {
             // JPX is JPEG2000 - pass through unchanged (decoded by image handler)
-            decoded_data = (char*)malloc(current_len + 1);
+            decoded_data = (char*)mem_alloc(current_len + 1, MEM_CAT_INPUT_PDF);
             if (decoded_data) {
                 memcpy(decoded_data, current_data, current_len);
                 decoded_data[current_len] = '\0';
@@ -768,7 +768,7 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             // unsupported filter
             log_error("Unsupported PDF filter: %s", filter);
             if (need_free) {
-                free(current_data);
+                mem_free(current_data);
             }
             return NULL;
         }
@@ -777,14 +777,14 @@ char* pdf_decompress_stream_with_params(const char* data, size_t data_len,
             // failed to decode
             log_error("Failed to decode with filter: %s", filter);
             if (need_free) {
-                free(current_data);
+                mem_free(current_data);
             }
             return NULL;
         }
 
         // free previous intermediate result
         if (need_free) {
-            free(current_data);
+            mem_free(current_data);
         }
 
         current_data = decoded_data;

@@ -1,4 +1,4 @@
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstring>
 #include <ctime>
 #ifdef _WIN32
@@ -53,7 +53,7 @@ static SysInfoManager* g_sysinfo_manager = nullptr;
 
 // Initialize the system information manager
 SysInfoManager* sysinfo_manager_create(void) {
-    SysInfoManager* manager = (SysInfoManager*)malloc(sizeof(SysInfoManager));
+    SysInfoManager* manager = (SysInfoManager*)mem_alloc(sizeof(SysInfoManager), MEM_CAT_INPUT_OTHER);
     if (!manager) {
         return nullptr;
     }
@@ -63,7 +63,7 @@ SysInfoManager* sysinfo_manager_create(void) {
     // Initialize cache
     manager->cached_results = hashmap_new(sizeof(SysInfoCacheEntry), 32, 0, 0, NULL, NULL, NULL, NULL);
     if (!manager->cached_results) {
-        free(manager);
+        mem_free(manager);
         return nullptr;
     }
 
@@ -88,7 +88,7 @@ void sysinfo_manager_destroy(SysInfoManager* manager) {
     // Clean up LRU cache entries - simplified for Phase 1
     // Memory cleanup handled by pool destruction
 
-    free(manager);
+    mem_free(manager);
     log_info("System information manager destroyed");
 }
 
@@ -302,7 +302,7 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
     const char* slash1 = strchr(path, '/');
     if (!slash1) {
         // Only category provided
-        *category = strdup(path);
+        *category = mem_strdup(path, MEM_CAT_INPUT_OTHER);
         *subcategory = nullptr;
         *item = nullptr;
         return true;
@@ -310,7 +310,7 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
 
     // Extract category (before first slash)
     size_t cat_len = slash1 - path;
-    *category = (char*)malloc(cat_len + 1);
+    *category = (char*)mem_alloc(cat_len + 1, MEM_CAT_INPUT_OTHER);
     strncpy(*category, path, cat_len);
     (*category)[cat_len] = '\0';
 
@@ -318,19 +318,19 @@ static bool parse_sys_url(const char* url, char** category, char** subcategory, 
     const char* slash2 = strchr(slash1 + 1, '/');
     if (!slash2) {
         // Category and subcategory provided (e.g., "system/info")
-        *subcategory = strdup(slash1 + 1);
+        *subcategory = mem_strdup(slash1 + 1, MEM_CAT_INPUT_OTHER);
         *item = nullptr;
         return true;
     }
 
     // Extract subcategory (between first and second slash)
     size_t subcat_len = slash2 - (slash1 + 1);
-    *subcategory = (char*)malloc(subcat_len + 1);
+    *subcategory = (char*)mem_alloc(subcat_len + 1, MEM_CAT_INPUT_OTHER);
     strncpy(*subcategory, slash1 + 1, subcat_len);
     (*subcategory)[subcat_len] = '\0';
 
     // Extract item (after second slash)
-    *item = strdup(slash2 + 1);
+    *item = mem_strdup(slash2 + 1, MEM_CAT_INPUT_OTHER);
 
     return true;
 }
@@ -370,23 +370,23 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
         const char* path_part = url->pathname->chars[0] == '/' ? url->pathname->chars + 1 : url->pathname->chars;
         size_t path_part_len = strlen(path_part);
 
-        full_path = (char*)malloc(host_len + 1 + path_part_len + 1);
+        full_path = (char*)mem_alloc(host_len + 1 + path_part_len + 1, MEM_CAT_INPUT_OTHER);
         str_copy(full_path, host_len + 1 + path_part_len + 1, url->host->chars, host_len);
         size_t full_path_len = host_len;
         full_path_len = str_cat(full_path, full_path_len, host_len + 1 + path_part_len + 1, "/", 1);
         full_path_len = str_cat(full_path, full_path_len, host_len + 1 + path_part_len + 1, path_part, path_part_len);
 
     } else {
-        full_path = strdup(url->pathname->chars);
+        full_path = mem_strdup(url->pathname->chars, MEM_CAT_INPUT_OTHER);
     }
 
     if (!parse_sys_url(full_path, &category, &subcategory, &item)) {
         log_error("Failed to parse sys:// URL: %s", full_path);
-        free(full_path);
+        mem_free(full_path);
         return nullptr;
     }
 
-    free(full_path);
+    mem_free(full_path);
 
     // Debug logging
     log_info("Parsed sys:// URL - category: %s, subcategory: %s, item: %s",
@@ -397,9 +397,9 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     // Currently only support system/info
     if (strcmp(category, "system") != 0 || strcmp(subcategory, "info") != 0) {
         log_error("Unsupported sys:// URL: %s/%s", category, subcategory);
-        free(category);
-        free(subcategory);
-        free(item);
+        mem_free(category);
+        mem_free(subcategory);
+        mem_free(item);
         return nullptr;
     }
 
@@ -407,9 +407,9 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     Input* input = InputManager::create_input(url);
     if (!input) {
         log_error("Failed to create Input object");
-        free(category);
-        free(subcategory);
-        free(item);
+        mem_free(category);
+        mem_free(subcategory);
+        mem_free(item);
         return nullptr;
     }
 
@@ -421,18 +421,18 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     Element* system_elem = create_system_info_element(manager, input);
     if (!system_elem) {
         log_error("Failed to create system information element");
-        free(category);
-        free(subcategory);
-        free(item);
+        mem_free(category);
+        mem_free(subcategory);
+        mem_free(item);
         return nullptr;
     }
 
     input->root = {.item = (uint64_t)system_elem};
 
     // Cleanup
-    free(category);
-    free(subcategory);
-    free(item);
+    mem_free(category);
+    mem_free(subcategory);
+    mem_free(item);
 
     log_info("Successfully created sys:// input for %s", url->pathname->chars);
     return input;

@@ -9,7 +9,6 @@
  * Extracted from input-markup.cpp parse_image() (lines 2226-2290)
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 
 namespace lambda {
@@ -43,7 +42,7 @@ static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
  * Caller must free the result.
  */
 static char* extract_alt_text(const char* start, size_t len) {
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)mem_alloc(len + 1, MEM_CAT_INPUT_MARKUP);
     if (!result) return nullptr;
 
     char* out = result;
@@ -310,12 +309,12 @@ Item parse_image(MarkupParser* parser, const char** text) {
         // Add src attribute
         if (src_end > src_start) {
             size_t src_len = src_end - src_start;
-            char* src = (char*)malloc(src_len + 1);
+            char* src = (char*)mem_alloc(src_len + 1, MEM_CAT_INPUT_MARKUP);
             if (src) {
                 strncpy(src, src_start, src_len);
                 src[src_len] = '\0';
                 add_attribute_to_element(parser, img, "src", src);
-                free(src);
+                mem_free(src);
             }
         }
 
@@ -325,19 +324,19 @@ Item parse_image(MarkupParser* parser, const char** text) {
             char* alt = extract_alt_text(alt_start, alt_len);
             if (alt) {
                 add_attribute_to_element(parser, img, "alt", alt);
-                free(alt);
+                mem_free(alt);
             }
         }
 
         // Add title attribute if present
         if (title_start && title_end && title_end > title_start) {
             size_t title_len = title_end - title_start;
-            char* title = (char*)malloc(title_len + 1);
+            char* title = (char*)mem_alloc(title_len + 1, MEM_CAT_INPUT_MARKUP);
             if (title) {
                 strncpy(title, title_start, title_len);
                 title[title_len] = '\0';
                 add_attribute_to_element(parser, img, "title", title);
-                free(title);
+                mem_free(title);
             }
         }
 
@@ -405,7 +404,7 @@ Item parse_image(MarkupParser* parser, const char** text) {
         char* alt = extract_alt_text(alt_start, alt_len);
         if (alt) {
             add_attribute_to_element(parser, img, "alt", alt);
-            free(alt);
+            mem_free(alt);
         }
     }
 

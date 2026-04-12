@@ -4,7 +4,7 @@
 
 #include "input.hpp"
 #include <stdint.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <string.h>
 #include <time.h>
 #include "../../lib/file.h"
@@ -33,9 +33,9 @@ typedef struct FileCacheManager {
 
 // Create file cache manager
 FileCacheManager* file_cache_manager_create(const char* cache_dir, size_t max_size, int max_entries) {
-    FileCacheManager* mgr = (FileCacheManager*)calloc(1, sizeof(FileCacheManager));
+    FileCacheManager* mgr = (FileCacheManager*)mem_calloc(1, sizeof(FileCacheManager), MEM_CAT_INPUT_OTHER);
     if (cache_dir) {
-        mgr->cache_directory = strdup(cache_dir);
+        mgr->cache_directory = mem_strdup(cache_dir, MEM_CAT_INPUT_OTHER);
     }
     mgr->max_cache_size = max_size;
     mgr->max_entries = max_entries;
@@ -48,9 +48,9 @@ FileCacheManager* file_cache_manager_create(const char* cache_dir, size_t max_si
 // Destroy file cache manager
 void file_cache_manager_destroy(FileCacheManager* mgr) {
     if (!mgr) return;
-    if (mgr->cache_directory) free(mgr->cache_directory);
+    if (mgr->cache_directory) mem_free(mgr->cache_directory);
     // TODO: free all entries and hashmap
-    free(mgr);
+    mem_free(mgr);
 }
 
 // Lookup/add/evict

@@ -4,7 +4,7 @@
 
 #include "input.hpp"
 #include <stdint.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <string.h>
 #include <time.h>
 
@@ -33,7 +33,7 @@ typedef struct InputCacheManager {
 
 // Create cache manager
 InputCacheManager* cache_manager_create(size_t max_mem, int max_entries) {
-    InputCacheManager* mgr = (InputCacheManager*)calloc(1, sizeof(InputCacheManager));
+    InputCacheManager* mgr = (InputCacheManager*)mem_calloc(1, sizeof(InputCacheManager), MEM_CAT_INPUT_OTHER);
     mgr->max_memory_size = max_mem;
     mgr->max_entries = max_entries;
     mgr->entry_count = 0;
@@ -47,7 +47,7 @@ InputCacheManager* cache_manager_create(size_t max_mem, int max_entries) {
 void cache_manager_destroy(InputCacheManager* mgr) {
     if (!mgr) return;
     // TODO: free all entries and hashmap
-    free(mgr);
+    mem_free(mgr);
 }
 
 // Lookup/add/evict
