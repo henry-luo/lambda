@@ -11,6 +11,7 @@
  */
 
 #include "font_internal.h"
+#include "../memtrack.h"
 
 #include <stdio.h>
 
@@ -273,7 +274,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
             handle = font_load_face_internal(ctx, platform_path, 0,
                                               style->size_px, physical_size,
                                               style->weight, style->slant);
-            free(platform_path);
+            mem_free(platform_path);
             if (handle) {
                 log_info("font_resolve: platform fallback for '%s'", style->family);
                 font_cache_insert(ctx, key, handle);

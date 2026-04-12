@@ -6107,7 +6107,7 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6135,7 +6135,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6147,7 +6147,7 @@ extern "C" Item js_encodeURI(Item str_item) {
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded); // from url_encode_* in lib/url.c - raw malloc;
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -6171,7 +6171,7 @@ extern "C" Item js_decodeURI(Item str_item) {
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded); // from url_decode_* in lib/url.c - raw malloc;
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 

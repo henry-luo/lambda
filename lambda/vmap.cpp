@@ -3,6 +3,7 @@
 // Uses lib/hashmap.h (Robin Hood open-addressed hash table) as the backing store.
 
 #include "lambda.hpp"
+#include "../lib/memtrack.h"
 #include "lambda-data.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
@@ -93,7 +94,7 @@ static int vmap_compare_item(const void* a, const void* b, void* udata) {
 // ============================================================================
 
 static HashMapData* hashmap_data_new() {
-    HashMapData* hd = (HashMapData*)calloc(1, sizeof(HashMapData));
+    HashMapData* hd = (HashMapData*)mem_calloc(1, sizeof(HashMapData), MEM_CAT_EVAL);
     hd->table = hashmap_new(sizeof(HashMapEntry), 8, 0, 0,
                             vmap_hash_item, vmap_compare_item, NULL, NULL);
     hd->key_order = arraylist_new(8);
@@ -109,11 +110,11 @@ static void hashmap_data_free(HashMapData* hd) {
     // free heap-allocated numeric value storage
     if (hd->num_values) {
         for (int i = 0; i < hd->num_values->length; i++) {
-            free(hd->num_values->data[i]);
+            mem_free(hd->num_values->data[i]);
         }
         arraylist_free(hd->num_values);
     }
-    free(hd);
+    mem_free(hd);
 }
 
 // Stabilize numeric values: float/int64/datetime use tagged pointers into nursery memory.
@@ -121,19 +122,19 @@ static void hashmap_data_free(HashMapData* hd) {
 static Item stabilize_value(HashMapData* hd, Item value) {
     TypeId vtype = get_type_id(value);
     if (vtype == LMD_TYPE_FLOAT) {
-        double* dval = (double*)malloc(sizeof(double));
+        double* dval = (double*)mem_alloc(sizeof(double), MEM_CAT_EVAL);
         *dval = value.get_double();
         value = {.item = d2it(dval)};
         if (!hd->num_values) hd->num_values = arraylist_new(4);
         arraylist_append(hd->num_values, (void*)dval);
     } else if (vtype == LMD_TYPE_INT64) {
-        int64_t* ival = (int64_t*)malloc(sizeof(int64_t));
+        int64_t* ival = (int64_t*)mem_alloc(sizeof(int64_t), MEM_CAT_EVAL);
         *ival = value.get_int64();
         value = {.item = l2it(ival)};
         if (!hd->num_values) hd->num_values = arraylist_new(4);
         arraylist_append(hd->num_values, (void*)ival);
     } else if (vtype == LMD_TYPE_DTIME) {
-        DateTime* dtval = (DateTime*)malloc(sizeof(DateTime));
+        DateTime* dtval = (DateTime*)mem_alloc(sizeof(DateTime), MEM_CAT_EVAL);
         *dtval = value.get_datetime();
         value = {.item = k2it(dtval)};
         if (!hd->num_values) hd->num_values = arraylist_new(4);

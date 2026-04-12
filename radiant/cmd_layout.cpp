@@ -837,11 +837,11 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         size_t css_len = strlen(css_content);
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (!css_pool_copy) {
-            free(css_content);
+            mem_free(css_content);
             continue;
         }
         str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-        free(css_content);
+        mem_free(css_content);
 
         CssStylesheet* imported = css_parse_stylesheet(engine, css_pool_copy, import_path);
         if (imported && imported->rule_count > 0) {
@@ -915,7 +915,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                             if (local_path) {
                                 strncpy(css_path, local_path, sizeof(css_path) - 1);
                                 css_path[sizeof(css_path) - 1] = '\0';
-                                free(local_path);
+                                mem_free(local_path);
                             } else {
                                 strncpy(css_path, href, sizeof(css_path) - 1);
                                 css_path[sizeof(css_path) - 1] = '\0';
@@ -969,7 +969,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                 char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
                 if (css_pool_copy) {
                     str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-                    free(css_content);
+                    mem_free(css_content);
 
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
                     if (stylesheet && stylesheet->rule_count > 0) {
@@ -987,7 +987,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                         log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
                     }
                 } else {
-                    free(css_content);
+                    mem_free(css_content);
                     log_error("[CSS] Failed to allocate memory for CSS content");
                 }
             } else {
@@ -1821,7 +1821,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         html_content = read_text_file(html_filepath);
         if (!html_content) {
             log_error("Failed to read HTML file: %s", html_filepath);
-            free(html_filepath);
+            mem_free(html_filepath);
             return nullptr;
         }
         html_content_owned = true;
@@ -1859,17 +1859,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
     mem_free(type_str);
-    if (html_content_owned) free(html_content);  // only free what we allocated
+    if (html_content_owned) mem_free(html_content);  // only free what we allocated
 
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
-        free(html_filepath);
+        mem_free(html_filepath);
         return nullptr;
     }
-    free(html_filepath);
+    mem_free(html_filepath);
     html_filepath = nullptr;
 
     // [debug] write html tree to 'html_tree.txt' — disabled; enable locally for inspection
@@ -1953,7 +1953,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
             if (css_pool_copy) {
                 str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-                free(css_content);
+                mem_free(css_content);
                 external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (external_stylesheet) {
                     const char* formatted_css = css_stylesheet_to_string_styled(
@@ -1967,7 +1967,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
                     log_warn("Failed to parse CSS file: %s", css_filename);
                 }
             } else {
-                free(css_content);
+                mem_free(css_content);
             }
         } else {
             log_warn("Failed to load CSS file: %s", css_filename);
@@ -2214,13 +2214,13 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
     Input* input = InputManager::create_input(pdf_url);
     if (!input) {
         log_error("Failed to create Input structure");
-        free(pdf_content);
+        mem_free(pdf_content);
         return nullptr;
     }
 
     // Parse PDF content with explicit size
     parse_pdf(input, pdf_content, pdf_size);
-    free(pdf_content);  // Done with raw content
+    mem_free(pdf_content);  // Done with raw content
 
     // Check if parsing succeeded
     if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
@@ -2613,7 +2613,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     char* escaped_content = (char*)mem_alloc(escaped_len + 1, MEM_CAT_LAYOUT);
     if (!escaped_content) {
         log_error("Failed to allocate escaped content buffer");
-        free(text_content);  // from read_text_file, uses stdlib
+        mem_free(text_content);  // from read_text_file, uses stdlib
         return nullptr;
     }
 
@@ -2635,7 +2635,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         }
     }
     escaped_content[j] = '\0';
-    free(text_content);  // from read_text_file, uses stdlib
+    mem_free(text_content);  // from read_text_file, uses stdlib
 
     auto step2_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 2 - Escape HTML: %.1fms",
@@ -2818,7 +2818,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Parse markdown to Lambda Element tree
     Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
-    free(markdown_content);  // from read_text_file, uses stdlib
+    mem_free(markdown_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse markdown file: %s", markdown_filepath);
@@ -2994,7 +2994,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
         // Free math_list entries
         for (int i = 0; i < math_list->length; i++) {
-            free(math_list->data[i]);
+            mem_free(math_list->data[i]);
         }
         arraylist_free(math_list);
 
@@ -3043,7 +3043,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
             str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            free(css_content);
+            mem_free(css_content);
             markdown_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (markdown_stylesheet) {
                 log_debug("[Lambda Markdown] Loaded markdown stylesheet with %zu rules",
@@ -3052,13 +3052,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 log_warn("Failed to parse markdown.css");
             }
         } else {
-            free(css_content);
+            mem_free(css_content);
         }
     } else {
         log_warn("Failed to load markdown.css file: %s", css_filename);
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
-    free(css_filename);
+    mem_free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -3075,17 +3075,17 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             char* math_css_pool = (char*)pool_alloc(pool, math_css_len + 1);
             if (math_css_pool) {
                 str_copy(math_css_pool, math_css_len + 1, math_css_content, math_css_len);
-                free(math_css_content);
+                mem_free(math_css_content);
                 math_stylesheet = css_parse_stylesheet(css_engine, math_css_pool, math_css_filename);
                 if (math_stylesheet) {
                     log_debug("[Lambda Markdown] Loaded math stylesheet with %zu rules",
                               math_stylesheet->rule_count);
                 }
             } else {
-                free(math_css_content);
+                mem_free(math_css_content);
             }
         }
-        free(math_css_filename);
+        mem_free(math_css_filename);
 
         char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
         char* katex_css_content = read_text_file(katex_css_filename);
@@ -3094,17 +3094,17 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             char* katex_css_pool = (char*)pool_alloc(pool, katex_css_len + 1);
             if (katex_css_pool) {
                 str_copy(katex_css_pool, katex_css_len + 1, katex_css_content, katex_css_len);
-                free(katex_css_content);
+                mem_free(katex_css_content);
                 katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool, katex_css_filename);
                 if (katex_stylesheet) {
                     log_debug("[Lambda Markdown] Loaded KaTeX font stylesheet with %zu rules",
                               katex_stylesheet->rule_count);
                 }
             } else {
-                free(katex_css_content);
+                mem_free(katex_css_content);
             }
         }
-        free(katex_css_filename);
+        mem_free(katex_css_filename);
     }
 
     // Step 5: Apply CSS cascade to DOM tree
@@ -3192,7 +3192,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Parse wiki to Lambda Element tree
     Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
-    free(wiki_content);  // from read_text_file, uses stdlib
+    mem_free(wiki_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse wiki file: %s", wiki_filepath);
@@ -3265,7 +3265,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
             str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            free(css_content);
+            mem_free(css_content);
             wiki_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (wiki_stylesheet) {
                 log_debug("[Lambda Wiki] Loaded wiki stylesheet with %zu rules",
@@ -3274,13 +3274,13 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
                 log_warn("Failed to parse wiki.css");
             }
         } else {
-            free(css_content);
+            mem_free(css_content);
         }
     } else {
         log_warn("Failed to load wiki.css file: %s", css_filename);
         log_warn("Continuing without stylesheet - wiki will use browser defaults");
     }
-    free(css_filename);
+    mem_free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -3435,7 +3435,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
             str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-            free(css_content);
+            mem_free(css_content);
             latex_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (latex_stylesheet) {
                 log_debug("[Lambda LaTeX] Loaded LaTeX stylesheet with %zu rules",
@@ -3444,12 +3444,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
                 log_warn("Failed to parse latex.css");
             }
         } else {
-            free(css_content);
+            mem_free(css_content);
         }
     } else {
         log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
     }
-    free(css_filename);
+    mem_free(css_filename);
 
     // Load KaTeX font stylesheet for math rendering (@font-face declarations for KaTeX_Size1-4 etc.)
     char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
@@ -3460,17 +3460,17 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         char* katex_css_pool_copy = (char*)pool_alloc(pool, katex_css_len + 1);
         if (katex_css_pool_copy) {
             str_copy(katex_css_pool_copy, katex_css_len + 1, katex_css_content, katex_css_len);
-            free(katex_css_content);
+            mem_free(katex_css_content);
             katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool_copy, katex_css_filename);
             if (katex_stylesheet) {
                 log_debug("[Lambda LaTeX] Loaded KaTeX font stylesheet with %zu rules",
                         katex_stylesheet->rule_count);
             }
         } else {
-            free(katex_css_content);
+            mem_free(katex_css_content);
         }
     }
-    free(katex_css_filename);
+    mem_free(katex_css_filename);
 
     // Step 6: Extract and parse any inline <style> elements from HTML
     log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");
@@ -3572,12 +3572,12 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     Input* xml_input = Input::create(pool, xml_url);
     if (!xml_input) {
         log_error("[Lambda XML] Failed to create Input for XML");
-        free(xml_content);
+        mem_free(xml_content);
         return nullptr;
     }
     xml_input->ui_mode = true;
     parse_xml(xml_input, xml_content);
-    free(xml_content);  // from read_text_file, uses stdlib
+    mem_free(xml_content);  // from read_text_file, uses stdlib
 
     if (!xml_input->root.item || xml_input->root.item == ITEM_ERROR) {
         log_error("[Lambda XML] Failed to parse XML");
@@ -3651,10 +3651,10 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
                      xml_input->xml_stylesheet_href, css_len);
         } else {
             log_error("[Lambda XML] Failed to parse CSS stylesheet");
-            free(css_content);
+            mem_free(css_content);
             return nullptr;
         }
-        free(css_content);
+        mem_free(css_content);
     } else {
         log_error("[Lambda XML] Failed to read CSS file: %s", xml_input->xml_stylesheet_href);
         return nullptr;
@@ -4057,7 +4057,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
             if (css_pool_copy) {
                 str_copy(css_pool_copy, css_len + 1, css_content, css_len);
-                free(css_content);
+                mem_free(css_content);
                 script_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (script_stylesheet) {
                     log_debug("[Lambda Script] Loaded script stylesheet with %zu rules",
@@ -4066,12 +4066,12 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                     log_warn("[Lambda Script] Failed to parse script.css");
                 }
             } else {
-                free(css_content);
+                mem_free(css_content);
             }
         } else {
             log_debug("[Lambda Script] No script.css file found, using browser defaults");
         }
-        free(css_filename);
+        mem_free(css_filename);
     } else {
         // For complete HTML documents, extract inline <style> elements
         log_debug("[Lambda Script] Skipping script.css for complete HTML document");

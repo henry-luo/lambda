@@ -19,6 +19,7 @@
 #include "lambda-data.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
 #include "../lib/file.h"
@@ -71,7 +72,7 @@ static Url* get_cwd_url(void) {
         }
     }
 
-    free(cwd_buf);
+    mem_free(cwd_buf);
 
     // Ensure trailing slash for directory
     if (url_buf->length > 0 && url_buf->str[url_buf->length - 1] != '/') {
@@ -177,7 +178,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
     Item it; it.item = item;
     TypeId type_id = item_type_id(it);
 
-    Target* target = (Target*)calloc(1, sizeof(Target));
+    Target* target = (Target*)mem_calloc(1, sizeof(Target), MEM_CAT_SYSTEM);
     if (!target) {
         log_error("item_to_target: failed to allocate Target");
         return NULL;
@@ -190,7 +191,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             Symbol* sym = (Symbol*)(item & 0x00FFFFFFFFFFFFFFULL);
             if (!sym || !sym->chars) {
                 log_error("item_to_target: symbol is null");
-                free(target);
+                mem_free(target);
                 return NULL;
             }
             url_str = sym->chars;
@@ -198,7 +199,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             String* str = (String*)(item & 0x00FFFFFFFFFFFFFFULL);
             if (!str || !str->chars) {
                 log_error("item_to_target: string is null");
-                free(target);
+                mem_free(target);
                 return NULL;
             }
             url_str = str->chars;
@@ -242,7 +243,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
 
         if (!url) {
             log_error("item_to_target: failed to parse URL '%s'", url_str);
-            free(target);
+            mem_free(target);
             return NULL;
         }
 
@@ -259,7 +260,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         Path* path = (Path*)(uint64_t)item;
         if (!path) {
             log_error("item_to_target: path is null");
-            free(target);
+            mem_free(target);
             return NULL;
         }
 
@@ -273,7 +274,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
     }
     else {
         log_error("item_to_target: unsupported type %d (expected string, symbol, or path)", type_id);
-        free(target);
+        mem_free(target);
         return NULL;
     }
 }
@@ -509,7 +510,7 @@ void target_free(Target* target) {
     }
     // Don't free Path - it may be shared/managed elsewhere
 
-    free(target);
+    mem_free(target);
 }
 
 /**

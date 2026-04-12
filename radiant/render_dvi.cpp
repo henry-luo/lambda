@@ -85,7 +85,7 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
     Arena* arena = arena_create_default(pool);
     if (!arena) {
         log_error("Failed to create arena for TeX typesetting");
-        free(latex_content);
+        mem_free(latex_content);
         pool_destroy(pool);
         return 1;
     }
@@ -102,7 +102,7 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
     tex::TexDocumentModel* doc_model = tex::doc_model_from_string(
         latex_content, latex_len, arena, fonts
     );
-    free(latex_content);
+    mem_free(latex_content);
 
     if (!doc_model || !doc_model->root) {
         log_error("Failed to parse LaTeX document: %s", latex_filepath);

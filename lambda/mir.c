@@ -1,5 +1,6 @@
  #include <stdio.h>
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 #include <string.h>
 #include <stdarg.h>  // for va_list
 #include <math.h>
@@ -417,17 +418,17 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
     struct hashmap* name_map = (struct hashmap*)func_name_map;
 
     // Create list to hold debug info entries
-    DebugInfoList* debug_list = (DebugInfoList*)malloc(sizeof(DebugInfoList));
+    DebugInfoList* debug_list = (DebugInfoList*)mem_alloc(sizeof(DebugInfoList), MEM_CAT_EVAL);
     if (!debug_list) {
         log_error("build_debug_info_table: failed to allocate debug_list");
         return NULL;
     }
     debug_list->capacity = 64;
     debug_list->length = 0;
-    debug_list->items = (FuncDebugInfo**)malloc(sizeof(FuncDebugInfo*) * debug_list->capacity);
+    debug_list->items = (FuncDebugInfo**)mem_alloc(sizeof(FuncDebugInfo*) * debug_list->capacity, MEM_CAT_EVAL);
     if (!debug_list->items) {
         log_error("build_debug_info_table: failed to allocate debug_list items");
-        free(debug_list);
+        mem_free(debug_list);
         return NULL;
     }
 
@@ -439,7 +440,7 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
              item != NULL;
              item = DLIST_NEXT(MIR_item_t, item)) {
             if (item->item_type == MIR_func_item && item->addr != NULL) {
-                FuncDebugInfo* info = (FuncDebugInfo*)calloc(1, sizeof(FuncDebugInfo));
+                FuncDebugInfo* info = (FuncDebugInfo*)mem_calloc(1, sizeof(FuncDebugInfo), MEM_CAT_EVAL);
                 if (!info) continue;
 
                 // Use machine_code if available, otherwise addr
@@ -468,9 +469,9 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
                 // grow list if needed
                 if (debug_list->length >= debug_list->capacity) {
                     size_t new_cap = debug_list->capacity * 2;
-                    FuncDebugInfo** new_items = (FuncDebugInfo**)realloc(debug_list->items, sizeof(FuncDebugInfo*) * new_cap);
+                    FuncDebugInfo** new_items = (FuncDebugInfo**)mem_realloc(debug_list->items, sizeof(FuncDebugInfo*) * new_cap, MEM_CAT_EVAL);
                     if (!new_items) {
-                        free(info);
+                        mem_free(info);
                         continue;
                     }
                     debug_list->items = new_items;
@@ -486,8 +487,8 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
 
     if (debug_list->length == 0) {
         log_debug("build_debug_info_table: no functions found");
-        free(debug_list->items);
-        free(debug_list);
+        mem_free(debug_list->items);
+        mem_free(debug_list);
         return NULL;
     }
 

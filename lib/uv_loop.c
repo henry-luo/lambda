@@ -4,6 +4,7 @@
  */
 
 #include "uv_loop.h"
+#include "memtrack.h"
 #include "log.h"
 #include <stdlib.h>
 
@@ -26,7 +27,7 @@ uv_loop_t* lambda_uv_loop(void) {
 int lambda_uv_init(void) {
     if (g_loop) return 0; // already initialized
 
-    g_loop = (uv_loop_t *)malloc(sizeof(uv_loop_t));
+    g_loop = (uv_loop_t *)mem_alloc(sizeof(uv_loop_t), MEM_CAT_TEMP);
     if (!g_loop) {
         log_error("uv_loop: failed to allocate loop");
         return -1;
@@ -35,7 +36,7 @@ int lambda_uv_init(void) {
     int r = uv_loop_init(g_loop);
     if (r != 0) {
         log_error("uv_loop: uv_loop_init failed: %s", uv_strerror(r));
-        free(g_loop);
+        mem_free(g_loop);
         g_loop = NULL;
         return r;
     }
@@ -79,7 +80,7 @@ void lambda_uv_cleanup(void) {
     uv_run(g_loop, UV_RUN_DEFAULT);
 
     uv_loop_close(g_loop);
-    free(g_loop);
+    mem_free(g_loop);
     g_loop = NULL;
     g_microtask_drain = NULL;
 

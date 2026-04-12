@@ -4949,7 +4949,7 @@ extern "C" Item bash_source_file(Item filename) {
 
     if (!bash_source_runtime) {
         log_error("bash: source: no runtime context");
-        free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -4958,7 +4958,7 @@ extern "C" Item bash_source_file(Item filename) {
     BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
     if (!tp) {
         log_error("bash: source: failed to create transpiler");
-        free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5000,7 +5000,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5013,7 +5013,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5025,7 +5025,7 @@ extern "C" Item bash_source_file(Item filename) {
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
-        free(source_text); // from read_text_file (lib)
+        mem_free(source_text); // from read_text_file (lib)
         return (Item){.item = i2it(1)};
     }
 
@@ -5137,7 +5137,7 @@ extern "C" Item bash_source_file(Item filename) {
     bash_transpiler_destroy(tp);
     if (preproc_buf) strbuf_free(preproc_buf);
     if (dd_buf) strbuf_free(dd_buf);
-    free(source_text); // from read_text_file (lib)
+    mem_free(source_text); // from read_text_file (lib)
 
     return result;
 }

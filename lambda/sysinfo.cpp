@@ -15,6 +15,7 @@
 #include "input/input.hpp"
 #include "mark_builder.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
@@ -123,7 +124,7 @@ extern "C" void sysinfo_init(void) {
     if (g_cache && g_cache->initialized) return;
 
     if (!g_cache) {
-        g_cache = (SysinfoCache*)calloc(1, sizeof(SysinfoCache));
+        g_cache = (SysinfoCache*)mem_calloc(1, sizeof(SysinfoCache), MEM_CAT_SYSTEM);
     }
     if (g_cache) {
         // Create a dedicated Input for sysinfo using eval context's pool
@@ -142,7 +143,7 @@ extern "C" void sysinfo_init(void) {
 extern "C" void sysinfo_shutdown(void) {
     if (g_cache) {
         // Input will be freed when pool is destroyed
-        free(g_cache);
+        mem_free(g_cache);
         g_cache = nullptr;
         log_info("sysinfo_shutdown: complete");
     }
@@ -710,7 +711,7 @@ static Item resolve_proc(const char** segments, int count) {
         char* cwd = file_getcwd();
         if (cwd) {
             self.put("cwd", cwd);
-            free(cwd);
+            mem_free(cwd);
         }
 
         proc.put("self", self.final());
@@ -731,7 +732,7 @@ static Item resolve_proc(const char** segments, int count) {
             char* cwd = file_getcwd();
             if (cwd) {
                 self.put("cwd", cwd);
-                free(cwd);
+                mem_free(cwd);
             }
 
             return self.final();
@@ -750,7 +751,7 @@ static Item resolve_proc(const char** segments, int count) {
                 if (cwd) {
                     MarkBuilder builder(input);
                     Item result = builder.createStringItem(cwd);
-                    free(cwd);
+                    mem_free(cwd);
                     return result;
                 }
                 return ItemNull;

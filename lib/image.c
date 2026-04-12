@@ -1,4 +1,5 @@
 #include "image.h"
+#include "memtrack.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,7 +124,7 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
 
     // Allocate memory for image data
     *channels = 4; // Always return RGBA
-    unsigned char* image_data = malloc(*width * *height * 4);
+    unsigned char* image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for PNG image data");
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -132,7 +133,7 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     }
 
     // Read the image data
-    png_bytep* row_pointers = malloc(sizeof(png_bytep) * *height);
+    png_bytep* row_pointers = mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
     for (int y = 0; y < *height; y++) {
         row_pointers[y] = image_data + y * *width * 4;
     }
@@ -141,7 +142,7 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     png_read_end(png_ptr, NULL);
 
     // Clean up
-    free(row_pointers);
+    mem_free(row_pointers);
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
 
@@ -162,7 +163,7 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     long file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
-    unsigned char* jpeg_buffer = malloc(file_size);
+    unsigned char* jpeg_buffer = mem_alloc(file_size, MEM_CAT_IMAGE);
     if (!jpeg_buffer) {
         log_error("Failed to allocate memory for JPEG file buffer");
         fclose(fp);
@@ -171,7 +172,7 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
 
     if (fread(jpeg_buffer, 1, file_size, fp) != (size_t)file_size) {
         log_error("Failed to read JPEG file: %s", filename);
-        free(jpeg_buffer);
+        mem_free(jpeg_buffer);
         fclose(fp);
         return NULL;
     }
@@ -181,7 +182,7 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     tjhandle tj_instance = tjInitDecompress();
     if (!tj_instance) {
         log_error("Failed to initialize TurboJPEG decompressor: %s", tjGetErrorStr());
-        free(jpeg_buffer);
+        mem_free(jpeg_buffer);
         return NULL;
     }
 
@@ -190,7 +191,7 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     if (tjDecompressHeader3(tj_instance, jpeg_buffer, file_size, &jpeg_width, &jpeg_height, &jpeg_subsamp, &jpeg_colorspace) < 0) {
         log_error("Failed to read JPEG header: %s", tjGetErrorStr());
         tjDestroy(tj_instance);
-        free(jpeg_buffer);
+        mem_free(jpeg_buffer);
         return NULL;
     }
 
@@ -199,26 +200,26 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     *channels = 4; // Always return RGBA
 
     // Allocate memory for decompressed image
-    unsigned char* image_data = malloc(*width * *height * 4);
+    unsigned char* image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for JPEG image data");
         tjDestroy(tj_instance);
-        free(jpeg_buffer);
+        mem_free(jpeg_buffer);
         return NULL;
     }
 
     // Decompress JPEG to RGBA
     if (tjDecompress2(tj_instance, jpeg_buffer, file_size, image_data, *width, 0, *height, TJPF_RGBA, TJFLAG_FASTDCT) < 0) {
         log_error("Failed to decompress JPEG: %s", tjGetErrorStr());
-        free(image_data);
+        mem_free(image_data);
         tjDestroy(tj_instance);
-        free(jpeg_buffer);
+        mem_free(jpeg_buffer);
         return NULL;
     }
 
     // Clean up
     tjDestroy(tj_instance);
-    free(jpeg_buffer);
+    mem_free(jpeg_buffer);
 
     return image_data;
 }
@@ -246,7 +247,7 @@ static unsigned char* load_gif(const char* filename, int* width, int* height, in
     *channels = 4; // Always return RGBA
 
     // Allocate memory for RGBA image
-    unsigned char* image_data = calloc(*width * *height * 4, 1);
+    unsigned char* image_data = mem_calloc(*width * *height * 4, 1, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for GIF image data");
         DGifCloseFile(gif, &error_code);
@@ -262,7 +263,7 @@ static unsigned char* load_gif(const char* filename, int* width, int* height, in
         ColorMapObject* color_map = desc->ColorMap ? desc->ColorMap : gif->SColorMap;
         if (!color_map) {
             log_error("No color map found in GIF file: %s", filename);
-            free(image_data);
+            mem_free(image_data);
             DGifCloseFile(gif, &error_code);
             return NULL;
         }
@@ -411,7 +412,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     *channels = 4;
 
     // Allocate memory for image
-    unsigned char* image_data = (unsigned char*)malloc(*width * *height * 4);
+    unsigned char* image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("Failed to allocate memory for PNG image");
@@ -419,7 +420,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     }
 
     // Create row pointers
-    png_bytep* row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * *height);
+    png_bytep* row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
     for (int y = 0; y < *height; y++) {
         row_pointers[y] = image_data + y * (*width) * 4;
     }
@@ -427,7 +428,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     // Read image data
     png_read_image(png_ptr, row_pointers);
 
-    free(row_pointers);
+    mem_free(row_pointers);
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 
     return image_data;
@@ -455,7 +456,7 @@ static unsigned char* load_jpeg_from_memory(const unsigned char* data, size_t le
     *channels = 4; // Always return RGBA
 
     // Allocate memory for decompressed image
-    unsigned char* image_data = (unsigned char*)malloc(*width * *height * 4);
+    unsigned char* image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for JPEG image data");
         tjDestroy(tj_instance);
@@ -465,7 +466,7 @@ static unsigned char* load_jpeg_from_memory(const unsigned char* data, size_t le
     // Decompress JPEG to RGBA
     if (tjDecompress2(tj_instance, data, length, image_data, *width, 0, *height, TJPF_RGBA, TJFLAG_FASTDCT) < 0) {
         log_error("Failed to decompress JPEG: %s", tjGetErrorStr());
-        free(image_data);
+        mem_free(image_data);
         tjDestroy(tj_instance);
         return NULL;
     }
@@ -529,6 +530,6 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
 // Free image data returned by image_load
 void image_free(unsigned char* data) {
     if (data) {
-        free(data);
+        mem_free(data);
     }
 }

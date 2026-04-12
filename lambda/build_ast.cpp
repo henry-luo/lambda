@@ -7,6 +7,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lib/arraylist.h"
 #include <errno.h>
@@ -2117,7 +2118,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                         }
                         if (hex_end && hex_end > hex_start) {
                             int hex_len = hex_end - hex_start;
-                            char* hex_str = (char*)malloc(hex_len + 1);
+                            char* hex_str = (char*)mem_alloc(hex_len + 1, MEM_CAT_AST);
                             memcpy(hex_str, hex_start, hex_len);
                             hex_str[hex_len] = '\0';
                             char* endptr;
@@ -2147,7 +2148,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                                 stringbuf_append_char(str_buf, 'u');
                                 i++;
                             }
-                            free(hex_str);
+                            mem_free(hex_str);
                         } else {
                             log_error("Malformed Unicode escape sequence");
                             stringbuf_append_char(str_buf, '\\');
@@ -2314,7 +2315,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
-        free(num_str);
+        mem_free(num_str);
         return &TYPE_ERROR;
     }
 
@@ -2322,7 +2323,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     arraylist_append(tp->const_list, item_type->decimal);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
-    free(num_str);
+    mem_free(num_str);
     return (Type*)item_type;
 }
 
@@ -2350,7 +2351,7 @@ static int parse_sized_int_suffix(const char* str, int len, NumSizedType* out_nu
 // Build AST type for sized integer literal (e.g., 42i8, 255u16, 100i64)
 Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     StrView source = ts_node_source(tp, node);
-    char* num_str = (char*)malloc(source.length + 1);
+    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
     memcpy(num_str, source.str, source.length);
     num_str[source.length] = '\0';
 
@@ -2358,14 +2359,14 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
     int suffix_len = parse_sized_int_suffix(num_str, source.length, &num_type);
     if (suffix_len < 0) {
         log_error("Invalid sized integer suffix: %s", num_str);
-        free(num_str);
+        mem_free(num_str);
         return &TYPE_ERROR;
     }
     num_str[source.length - suffix_len] = '\0';  // strip suffix
 
     char* endptr;
     int64_t value = strtoll(num_str, &endptr, 10);
-    free(num_str);
+    mem_free(num_str);
 
     // i64 suffix → use existing INT64 type
     if (num_type == 0xFF) {
@@ -2413,7 +2414,7 @@ Type* build_lit_sized_integer(Transpiler* tp, TSNode node) {
 // Build AST type for sized float literal (e.g., 3.14f32, 0.5f16)
 Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
     StrView source = ts_node_source(tp, node);
-    char* num_str = (char*)malloc(source.length + 1);
+    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
     memcpy(num_str, source.str, source.length);
     num_str[source.length] = '\0';
 
@@ -2431,7 +2432,7 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
             // f64 → use existing FLOAT type
             num_str[source.length - 3] = '\0';
             double dval = strtod(num_str, NULL);
-            free(num_str);
+            mem_free(num_str);
             TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
             item_type->double_val = dval;
             double* heap_val = (double*)pool_alloc(tp->pool, sizeof(double));
@@ -2445,7 +2446,7 @@ Type* build_lit_sized_float(Transpiler* tp, TSNode node) {
 
     num_str[source.length - suffix_len] = '\0';
     double dval = strtod(num_str, NULL);
-    free(num_str);
+    mem_free(num_str);
 
     TypeNumSized* item_type = (TypeNumSized*)alloc_type(tp->pool, LMD_TYPE_NUM_SIZED, sizeof(TypeNumSized));
     item_type->num_type = num_type;
@@ -2604,14 +2605,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
         StrView source = ts_node_source(tp, child);
         // Create a null-terminated string for strtoll
-        char* num_str = (char*)malloc(source.length + 1);
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
 
         char* endptr;
         errno = 0;
         int64_t value = strtoll(num_str, &endptr, 10);
-        free(num_str);
+        mem_free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
         // Check if the value fits in 56-bit signed integer range
@@ -7373,13 +7374,13 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         StrView source = ts_node_source(tp, expr_node);
 
         // Create a null-terminated string for strtoll
-        char* num_str = (char*)malloc(source.length + 1);
+        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
 
         char* endptr;
         int64_t value = strtoll(num_str, &endptr, 10);
-        free(num_str);
+        mem_free(num_str);
 
         log_debug("SYM_INT: parsed value %lld, checking range", value);
         // Check if the value fits in 56-bit signed integer range

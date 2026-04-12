@@ -5,6 +5,7 @@
 #include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 
 // Maximum number of batch updates supported
 #define MAX_BATCH_UPDATES 64
@@ -119,7 +120,7 @@ EditVersion* MarkEditor::create_version(Item root, const char* description) {
 
     version->root = root;
     version->version_number = next_version_num_++;
-    version->description = description ? strdup(description) : nullptr;
+    version->description = description ? mem_strdup(description, MEM_CAT_SYSTEM) : nullptr;
     version->prev = nullptr;
     version->next = nullptr;
 
@@ -134,7 +135,7 @@ void MarkEditor::free_version_chain(EditVersion* version) {
     while (current) {
         EditVersion* next = current->next;
         if (current->description) {
-            free((void*)current->description);
+            mem_free((void*)current->description);
         }
         pool_free(pool_, current);
         current = next;

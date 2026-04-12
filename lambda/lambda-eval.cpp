@@ -2,6 +2,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/str.h"
 #include "utf_string.h"
@@ -371,7 +372,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     result->chars[normalized_len] = '\0';
 
     // Free the utf8proc allocated buffer
-    free(normalized);
+    mem_free(normalized);
     return (Item){.item = s2it(result)};
 }
 
@@ -3482,14 +3483,14 @@ Item fn_lower(Item str_item) {
     if (str_type == LMD_TYPE_SYMBOL) {
         // create new lowercase symbol - use stack buffer for small strings, malloc for large
         char stack_buf[256];
-        char* lower_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)malloc(len + 1);
+        char* lower_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         for (uint32_t i = 0; i < len; i++) {
             char c = chars[i];
             lower_chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
         }
         lower_chars[len] = '\0';
         Symbol* sym = heap_create_symbol(lower_chars, len);
-        if (lower_chars != stack_buf) free(lower_chars);
+        if (lower_chars != stack_buf) mem_free(lower_chars);
         return {.item = y2it(sym)};
     }
 
@@ -3538,14 +3539,14 @@ Item fn_upper(Item str_item) {
     if (str_type == LMD_TYPE_SYMBOL) {
         // create new uppercase symbol - use stack buffer for small strings, malloc for large
         char stack_buf[256];
-        char* upper_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)malloc(len + 1);
+        char* upper_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         for (uint32_t i = 0; i < len; i++) {
             char c = chars[i];
             upper_chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
         }
         upper_chars[len] = '\0';
         Symbol* sym = heap_create_symbol(upper_chars, len);
-        if (upper_chars != stack_buf) free(upper_chars);
+        if (upper_chars != stack_buf) mem_free(upper_chars);
         return {.item = y2it(sym)};
     }
 

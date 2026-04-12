@@ -2,6 +2,7 @@
 // Part of Lambda Script URL parser
 
 #include <stdlib.h>
+#include "memtrack.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -18,7 +19,7 @@ String* url_create_string(const char* value) {
 
     size_t len = strlen(value);
     // Allocate space for String struct plus the string data
-    String* str = malloc(sizeof(String) + len + 1);
+    String* str = mem_alloc(sizeof(String) + len + 1, MEM_CAT_TEMP);
     if (!str) return NULL;
 
     str->len = len;
@@ -29,7 +30,7 @@ String* url_create_string(const char* value) {
 // String deallocation helper
 void url_free_string(String* str) {
     if (!str) return;
-    free(str);
+    mem_free(str);
 }
 
 // String cloning helper
@@ -40,7 +41,7 @@ String* url_string_clone(const String* str) {
 
 // Create new URL structure
 Url* url_create() {
-    Url* url = malloc(sizeof(Url));
+    Url* url = mem_alloc(sizeof(Url), MEM_CAT_TEMP);
     if (!url) return NULL;
 
     // Initialize all fields to NULL - they will be set during parsing
@@ -106,7 +107,7 @@ void url_destroy(Url* url) {
     url_free_string(url->search);
     url_free_string(url->hash);
 
-    free(url);
+    mem_free(url);
 }
 
 // URL scheme utilities
@@ -253,7 +254,7 @@ String* url_construct_href(const Url* url) {
     if (url->hash) total_size += url->hash->len;
 
     // Allocate buffer
-    String* result = malloc(sizeof(String) + total_size + 1);
+    String* result = mem_alloc(sizeof(String) + total_size + 1, MEM_CAT_TEMP);
     if (!result) return NULL;
 
     result->len = 0;
@@ -373,7 +374,7 @@ String* url_serialize_origin(const Url* url) {
     }
 
     // Allocate buffer
-    String* result = malloc(sizeof(String) + total_size + 1);
+    String* result = mem_alloc(sizeof(String) + total_size + 1, MEM_CAT_TEMP);
     if (!result) return NULL;
 
     result->len = 0;
@@ -427,7 +428,7 @@ String* url_serialize_scheme(const Url* url) {
     } else if (url->scheme != URL_SCHEME_UNKNOWN) {
         const char* scheme_str = url_scheme_to_string(url->scheme);
         size_t len = strlen(scheme_str);
-        String* result = malloc(sizeof(String) + len + 2); // +1 for ':' +1 for '\0'
+        String* result = mem_alloc(sizeof(String) + len + 2, MEM_CAT_TEMP); // +1 for ':' +1 for '\0'
         if (!result) return NULL;
 
         result->len = len + 1;
@@ -452,7 +453,7 @@ String* url_serialize_host(const Url* url) {
             // Include port if it's not the default for this scheme
             if (url->port_number != default_port) {
                 size_t total_len = url->hostname->len + 1 + url->port->len;
-                String* result = malloc(sizeof(String) + total_len + 1);
+                String* result = mem_alloc(sizeof(String) + total_len + 1, MEM_CAT_TEMP);
                 if (!result) return NULL;
 
                 result->len = total_len;
@@ -664,7 +665,7 @@ static char* url_decode(const char* str) {
     if (!str) return NULL;
 
     size_t len = strlen(str);
-    char* decoded = malloc(len + 1);  // decoded string will be same size or smaller
+    char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);  // decoded string will be same size or smaller
     if (!decoded) return NULL;
 
     size_t i = 0, j = 0;
@@ -722,9 +723,9 @@ char* url_to_local_path(const Url* url) {
     if (hostname && hostname[0] != '\0') {
         // UNC path: file://hostname/share/path -> \\hostname\share\path
         size_t result_len = 2 + strlen(hostname) + strlen(decoded_path) + 1;
-        char* result = malloc(result_len);
+        char* result = mem_alloc(result_len, MEM_CAT_TEMP);
         if (!result) {
-            free(decoded_path);
+            mem_free(decoded_path);
             return NULL;
         }
         snprintf(result, result_len, "\\\\%s%s", hostname, decoded_path);
@@ -734,7 +735,7 @@ char* url_to_local_path(const Url* url) {
             if (*p == '/') *p = '\\';
         }
 
-        free(decoded_path);
+        mem_free(decoded_path);
         return result;
     } else {
         // Local path: file:///C:/path -> C:\path
@@ -745,8 +746,8 @@ char* url_to_local_path(const Url* url) {
         }
 
         // Allocate new string and convert slashes
-        char* result = strdup(path);
-        free(decoded_path);
+        char* result = mem_strdup(path, MEM_CAT_TEMP);
+        mem_free(decoded_path);
 
         if (!result) return NULL;
 
@@ -764,7 +765,7 @@ char* url_to_local_path(const Url* url) {
     // For Unix, hostname should be empty or "localhost"
     if (hostname && hostname[0] != '\0' && strcmp(hostname, "localhost") != 0) {
         log_warn("Non-localhost hostname in file:// URL: %s", hostname);
-        free(decoded_path);
+        mem_free(decoded_path);
         return NULL;
     }
 
@@ -778,7 +779,7 @@ char* url_to_local_path(const Url* url) {
 char* url_encode_component(const char* str, size_t len) {
     if (!str) return NULL;
     static const char hex[] = "0123456789ABCDEF";
-    char* encoded = malloc(len * 3 + 1);
+    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
     if (!encoded) return NULL;
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
@@ -803,7 +804,7 @@ char* url_encode_component(const char* str, size_t len) {
 char* url_encode_uri(const char* str, size_t len) {
     if (!str) return NULL;
     static const char hex[] = "0123456789ABCDEF";
-    char* encoded = malloc(len * 3 + 1);
+    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
     if (!encoded) return NULL;
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
@@ -832,17 +833,17 @@ char* url_encode_uri(const char* str, size_t len) {
 // Does NOT decode escape sequences for reserved URI characters.
 char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
     if (!str) return NULL;
-    char* decoded = malloc(len + 1);
+    char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!decoded) return NULL;
     // reserved chars that decodeURI must NOT decode
     static const char reserved[] = "#$&+,/:;=?@";
     size_t i = 0, j = 0;
     while (i < len) {
         if (str[i] == '%') {
-            if (i + 2 >= len) { free(decoded); return NULL; }
+            if (i + 2 >= len) { mem_free(decoded); return NULL; }
             int high = url_hex_to_int(str[i + 1]);
             int low  = url_hex_to_int(str[i + 2]);
-            if (high < 0 || low < 0) { free(decoded); return NULL; }
+            if (high < 0 || low < 0) { mem_free(decoded); return NULL; }
             unsigned char lead = (unsigned char)((high << 4) | low);
             // check if this is a reserved char — if so, keep encoded
             int is_reserved = 0;
@@ -864,15 +865,15 @@ char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
                 if ((lead & 0xE0) == 0xC0) expected = 1;
                 else if ((lead & 0xF0) == 0xE0) expected = 2;
                 else if ((lead & 0xF8) == 0xF0) expected = 3;
-                else { free(decoded); return NULL; }
+                else { mem_free(decoded); return NULL; }
                 for (int k = 0; k < expected; k++) {
-                    if (i >= len || str[i] != '%') { free(decoded); return NULL; }
-                    if (i + 2 >= len) { free(decoded); return NULL; }
+                    if (i >= len || str[i] != '%') { mem_free(decoded); return NULL; }
+                    if (i + 2 >= len) { mem_free(decoded); return NULL; }
                     int h2 = url_hex_to_int(str[i + 1]);
                     int l2 = url_hex_to_int(str[i + 2]);
-                    if (h2 < 0 || l2 < 0) { free(decoded); return NULL; }
+                    if (h2 < 0 || l2 < 0) { mem_free(decoded); return NULL; }
                     unsigned char cont = (unsigned char)((h2 << 4) | l2);
-                    if ((cont & 0xC0) != 0x80) { free(decoded); return NULL; }
+                    if ((cont & 0xC0) != 0x80) { mem_free(decoded); return NULL; }
                     decoded[j++] = (char)cont;
                     i += 3;
                 }
@@ -880,13 +881,13 @@ char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
                 unsigned int cp = 0;
                 if (expected == 1) {
                     cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x80) { free(decoded); return NULL; }
+                    if (cp < 0x80) { mem_free(decoded); return NULL; }
                 } else if (expected == 2) {
                     cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { free(decoded); return NULL; }
+                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { mem_free(decoded); return NULL; }
                 } else if (expected == 3) {
                     cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x10000 || cp > 0x10FFFF) { free(decoded); return NULL; }
+                    if (cp < 0x10000 || cp > 0x10FFFF) { mem_free(decoded); return NULL; }
                 }
             }
             continue;
@@ -901,15 +902,15 @@ char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
 // Percent-decode a string: %XX -> byte.
 char* url_decode_component(const char* str, size_t len, size_t* out_len) {
     if (!str) return NULL;
-    char* decoded = malloc(len + 1);
+    char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!decoded) return NULL;
     size_t i = 0, j = 0;
     while (i < len) {
         if (str[i] == '%') {
-            if (i + 2 >= len) { free(decoded); return NULL; }
+            if (i + 2 >= len) { mem_free(decoded); return NULL; }
             int high = url_hex_to_int(str[i + 1]);
             int low  = url_hex_to_int(str[i + 2]);
-            if (high < 0 || low < 0) { free(decoded); return NULL; }
+            if (high < 0 || low < 0) { mem_free(decoded); return NULL; }
             unsigned char lead = (unsigned char)((high << 4) | low);
             decoded[j++] = (char)lead;
             i += 3;
@@ -919,15 +920,15 @@ char* url_decode_component(const char* str, size_t len, size_t* out_len) {
                 if ((lead & 0xE0) == 0xC0) expected = 1;
                 else if ((lead & 0xF0) == 0xE0) expected = 2;
                 else if ((lead & 0xF8) == 0xF0) expected = 3;
-                else { free(decoded); return NULL; }
+                else { mem_free(decoded); return NULL; }
                 for (int k = 0; k < expected; k++) {
-                    if (i >= len || str[i] != '%') { free(decoded); return NULL; }
-                    if (i + 2 >= len) { free(decoded); return NULL; }
+                    if (i >= len || str[i] != '%') { mem_free(decoded); return NULL; }
+                    if (i + 2 >= len) { mem_free(decoded); return NULL; }
                     int h2 = url_hex_to_int(str[i + 1]);
                     int l2 = url_hex_to_int(str[i + 2]);
-                    if (h2 < 0 || l2 < 0) { free(decoded); return NULL; }
+                    if (h2 < 0 || l2 < 0) { mem_free(decoded); return NULL; }
                     unsigned char cont = (unsigned char)((h2 << 4) | l2);
-                    if ((cont & 0xC0) != 0x80) { free(decoded); return NULL; }
+                    if ((cont & 0xC0) != 0x80) { mem_free(decoded); return NULL; }
                     decoded[j++] = (char)cont;
                     i += 3;
                 }
@@ -935,13 +936,13 @@ char* url_decode_component(const char* str, size_t len, size_t* out_len) {
                 unsigned int cp = 0;
                 if (expected == 1) {
                     cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x80) { free(decoded); return NULL; }
+                    if (cp < 0x80) { mem_free(decoded); return NULL; }
                 } else if (expected == 2) {
                     cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { free(decoded); return NULL; }
+                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { mem_free(decoded); return NULL; }
                 } else if (expected == 3) {
                     cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
-                    if (cp < 0x10000 || cp > 0x10FFFF) { free(decoded); return NULL; }
+                    if (cp < 0x10000 || cp > 0x10FFFF) { mem_free(decoded); return NULL; }
                 }
             }
             continue;

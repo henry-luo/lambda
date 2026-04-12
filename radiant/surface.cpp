@@ -98,7 +98,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
             surface->format = IMAGE_FORMAT_SVG;
             surface->pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
-            free(decoded);
+            mem_free(decoded);
             if (!surface->pic) {
                 mem_free(surface);
                 return NULL;
@@ -110,7 +110,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         } else {
             int width, height, channels;
             unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
-            free(decoded);
+            mem_free(decoded);
             if (!data) {
                 log_error("[BG-IMAGE] Failed to decode data URI image");
                 return NULL;
@@ -172,7 +172,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
         log_debug("Image loaded from cache: %s", file_path);
-        free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
+        mem_free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
         url_destroy(abs_url);
         return entry->image;
     }
@@ -205,7 +205,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path);
             mem_free(surface);
-            if (downloaded_data) free(downloaded_data);
+            if (downloaded_data) mem_free(downloaded_data);
             return NULL;
         }
         float svg_w, svg_h;
@@ -213,14 +213,14 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         surface->width = svg_w;
         surface->height = svg_h;
         log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
-        if (downloaded_data) free(downloaded_data);
+        if (downloaded_data) mem_free(downloaded_data);
     }
     else {
         int width, height, channels;
         unsigned char *data;
         if (is_http && downloaded_data) {
             data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
-            free(downloaded_data);
+            mem_free(downloaded_data);
         } else {
             data = image_load(file_path, &width, &height, &channels, 4);
         }
@@ -252,7 +252,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
-    free((char*)entry->path);  // always malloc-owned: strdup for HTTP paths, url_to_local_path for local paths
+    mem_free((char*)entry->path);  // always mem_alloc-owned: mem_strdup for HTTP paths, url_to_local_path for local paths
     if (entry->image->url) url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;

@@ -8,6 +8,7 @@
 #endif
 
 #include "shell.h"
+#include "memtrack.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -71,15 +72,15 @@ static bool win_create_pipe(WinPipe* p) {
 static char* win_read_pipe(HANDLE pipe, size_t* out_len) {
     size_t cap = 4096;
     size_t len = 0;
-    char* buf = (char*)malloc(cap);
+    char* buf = (char*)mem_alloc(cap, MEM_CAT_TEMP);
     if (!buf) return NULL;
 
     for (;;) {
         DWORD n = 0;
         if (len + 1024 > cap) {
             cap *= 2;
-            char* nb = (char*)realloc(buf, cap);
-            if (!nb) { free(buf); return NULL; }
+            char* nb = (char*)mem_realloc(buf, cap, MEM_CAT_TEMP);
+            if (!nb) { mem_free(buf); return NULL; }
             buf = nb;
         }
         BOOL ok = ReadFile(pipe, buf + len, (DWORD)(cap - len - 1), &n, NULL);
@@ -96,14 +97,14 @@ static char* win_read_pipe(HANDLE pipe, size_t* out_len) {
 static char* posix_read_fd(int fd, size_t* out_len) {
     size_t cap = 4096;
     size_t len = 0;
-    char* buf = (char*)malloc(cap);
+    char* buf = (char*)mem_alloc(cap, MEM_CAT_TEMP);
     if (!buf) return NULL;
 
     for (;;) {
         if (len + 1024 > cap) {
             cap *= 2;
-            char* nb = (char*)realloc(buf, cap);
-            if (!nb) { free(buf); return NULL; }
+            char* nb = (char*)mem_realloc(buf, cap, MEM_CAT_TEMP);
+            if (!nb) { mem_free(buf); return NULL; }
             buf = nb;
         }
         ssize_t n = read(fd, buf + len, cap - len - 1);
@@ -151,7 +152,7 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     for (int i = 0; args && args[i]; i++) {
         cmdlen += strlen(args[i]) + 3; // quotes + space
     }
-    char* cmdline = (char*)malloc(cmdlen + 1);
+    char* cmdline = (char*)mem_alloc(cmdlen + 1, MEM_CAT_TEMP);
     if (!cmdline) {
         log_error("shell: malloc failed for cmdline");
         return result;
@@ -168,12 +169,12 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
     bool merge = opts && opts->merge_stderr;
 
-    if (!win_create_pipe(&stdout_pipe)) { free(cmdline); return result; }
+    if (!win_create_pipe(&stdout_pipe)) { mem_free(cmdline); return result; }
     if (!merge) {
         if (!win_create_pipe(&stderr_pipe)) {
             CloseHandle(stdout_pipe.read);
             CloseHandle(stdout_pipe.write);
-            free(cmdline);
+            mem_free(cmdline);
             return result;
         }
     }
@@ -205,7 +206,7 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         log_error("shell: CreateProcess failed: %lu", GetLastError());
         CloseHandle(stdout_pipe.read);
         if (!merge) CloseHandle(stderr_pipe.read);
-        free(cmdline);
+        mem_free(cmdline);
         return result;
     }
 
@@ -234,7 +235,7 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     if (!merge) CloseHandle(stderr_pipe.read);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    free(cmdline);
+    mem_free(cmdline);
     return result;
 }
 
@@ -442,7 +443,7 @@ ShellProcess* shell_spawn(const char* program, const char** args,
                            const ShellOptions* opts) {
     if (!program || !args) return NULL;
 
-    ShellProcess* proc = (ShellProcess*)calloc(1, sizeof(ShellProcess));
+    ShellProcess* proc = (ShellProcess*)mem_calloc(1, sizeof(ShellProcess), MEM_CAT_TEMP);
     if (!proc) return NULL;
 
     bool merge = opts && opts->merge_stderr;
@@ -451,8 +452,8 @@ ShellProcess* shell_spawn(const char* program, const char** args,
     // build command line
     size_t cmdlen = 0;
     for (int i = 0; args[i]; i++) cmdlen += strlen(args[i]) + 3;
-    char* cmdline = (char*)malloc(cmdlen + 1);
-    if (!cmdline) { free(proc); return NULL; }
+    char* cmdline = (char*)mem_alloc(cmdlen + 1, MEM_CAT_TEMP);
+    if (!cmdline) { mem_free(proc); return NULL; }
     cmdline[0] = '\0';
     for (int i = 0; args[i]; i++) {
         if (i > 0) strcat(cmdline, " ");
@@ -462,10 +463,10 @@ ShellProcess* shell_spawn(const char* program, const char** args,
     }
 
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
-    if (!win_create_pipe(&stdout_pipe)) { free(cmdline); free(proc); return NULL; }
+    if (!win_create_pipe(&stdout_pipe)) { mem_free(cmdline); mem_free(proc); return NULL; }
     if (!merge && !win_create_pipe(&stderr_pipe)) {
         CloseHandle(stdout_pipe.read); CloseHandle(stdout_pipe.write);
-        free(cmdline); free(proc); return NULL;
+        mem_free(cmdline); mem_free(proc); return NULL;
     }
     SetHandleInformation(stdout_pipe.read, HANDLE_FLAG_INHERIT, 0);
     if (!merge) SetHandleInformation(stderr_pipe.read, HANDLE_FLAG_INHERIT, 0);
@@ -484,13 +485,13 @@ ShellProcess* shell_spawn(const char* program, const char** args,
     BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, cwd, &si, &pi);
     CloseHandle(stdout_pipe.write);
     if (!merge) CloseHandle(stderr_pipe.write);
-    free(cmdline);
+    mem_free(cmdline);
 
     if (!ok) {
         log_error("shell_spawn: CreateProcess failed: %lu", GetLastError());
         CloseHandle(stdout_pipe.read);
         if (!merge) CloseHandle(stderr_pipe.read);
-        free(proc);
+        mem_free(proc);
         return NULL;
     }
 
@@ -551,7 +552,7 @@ void shell_process_free(ShellProcess* proc) {
     CloseHandle(proc->stdout_read);
     if (!proc->merge_stderr && proc->stderr_read != INVALID_HANDLE_VALUE)
         CloseHandle(proc->stderr_read);
-    free(proc);
+    mem_free(proc);
 }
 
 #else // POSIX
@@ -560,7 +561,7 @@ ShellProcess* shell_spawn(const char* program, const char** args,
                            const ShellOptions* opts) {
     if (!program || !args) return NULL;
 
-    ShellProcess* proc = (ShellProcess*)calloc(1, sizeof(ShellProcess));
+    ShellProcess* proc = (ShellProcess*)mem_calloc(1, sizeof(ShellProcess), MEM_CAT_TEMP);
     if (!proc) return NULL;
 
     bool merge = opts && opts->merge_stderr;
@@ -571,13 +572,13 @@ ShellProcess* shell_spawn(const char* program, const char** args,
 
     if (pipe(stdout_pipe) < 0) {
         log_error("shell_spawn: pipe() failed: %s", strerror(errno));
-        free(proc);
+        mem_free(proc);
         return NULL;
     }
     if (!merge && pipe(stderr_pipe) < 0) {
         log_error("shell_spawn: pipe() failed: %s", strerror(errno));
         close(stdout_pipe[0]); close(stdout_pipe[1]);
-        free(proc);
+        mem_free(proc);
         return NULL;
     }
 
@@ -617,7 +618,7 @@ ShellProcess* shell_spawn(const char* program, const char** args,
         log_error("shell_spawn: posix_spawnp failed for '%s': %s", program, strerror(err));
         close(stdout_pipe[0]);
         if (!merge) close(stderr_pipe[0]);
-        free(proc);
+        mem_free(proc);
         return NULL;
     }
 
@@ -702,7 +703,7 @@ void shell_process_free(ShellProcess* proc) {
     if (!proc) return;
     if (proc->stdout_fd >= 0) close(proc->stdout_fd);
     if (proc->stderr_fd >= 0) close(proc->stderr_fd);
-    free(proc);
+    mem_free(proc);
 }
 
 #endif // _WIN32
@@ -753,7 +754,7 @@ char* shell_which(const char* program) {
     ) {
         struct stat st;
         if (stat(program, &st) == 0 && (st.st_mode & S_IXUSR)) {
-            return strdup(program);
+            return mem_strdup(program, MEM_CAT_TEMP);
         }
         return NULL;
     }
@@ -761,7 +762,7 @@ char* shell_which(const char* program) {
     const char* path_env = getenv("PATH");
     if (!path_env) return NULL;
 
-    char* path_copy = strdup(path_env);
+    char* path_copy = mem_strdup(path_env, MEM_CAT_TEMP);
     if (!path_copy) return NULL;
 
 #ifdef _WIN32
@@ -778,7 +779,7 @@ char* shell_which(const char* program) {
     while (dir) {
         for (int i = 0; exts[i]; i++) {
             size_t need = strlen(dir) + 1 + strlen(program) + strlen(exts[i]) + 1;
-            char* full = (char*)malloc(need);
+            char* full = (char*)mem_alloc(need, MEM_CAT_TEMP);
             if (!full) continue;
             snprintf(full, need, "%s/%s%s", dir, program, exts[i]);
 
@@ -788,15 +789,15 @@ char* shell_which(const char* program) {
                 && (st.st_mode & S_IXUSR)
 #endif
             ) {
-                free(path_copy);
+                mem_free(path_copy);
                 return full;
             }
-            free(full);
+            mem_free(full);
         }
         dir = strtok_r(NULL, sep, &saveptr);
     }
 
-    free(path_copy);
+    mem_free(path_copy);
     return NULL;
 }
 
@@ -805,7 +806,7 @@ char* shell_which(const char* program) {
 // ---------------------------------------------------------------------------
 
 char* shell_quote_arg(const char* arg) {
-    if (!arg) return strdup("''");
+    if (!arg) return mem_strdup("''", MEM_CAT_TEMP);
 
     // check if quoting is needed
     bool needs_quoting = false;
@@ -818,7 +819,7 @@ char* shell_quote_arg(const char* arg) {
         }
     }
     if (!needs_quoting && *arg != '\0') {
-        return strdup(arg);
+        return mem_strdup(arg, MEM_CAT_TEMP);
     }
 
     // count single quotes in input
@@ -831,7 +832,7 @@ char* shell_quote_arg(const char* arg) {
     // 'arg' with \' for each embedded single quote
     // each ' becomes: '\''  (end quote, escaped quote, start quote)
     size_t out_len = 2 + len + sq_count * 3 + 1;
-    char* out = (char*)malloc(out_len);
+    char* out = (char*)mem_alloc(out_len, MEM_CAT_TEMP);
     if (!out) return NULL;
 
     char* w = out;
@@ -857,8 +858,8 @@ char* shell_quote_arg(const char* arg) {
 
 void shell_result_free(ShellResult* result) {
     if (!result) return;
-    free(result->stdout_buf);
-    free(result->stderr_buf);
+    mem_free(result->stdout_buf);
+    mem_free(result->stderr_buf);
     result->stdout_buf = NULL;
     result->stderr_buf = NULL;
     result->stdout_len = 0;
@@ -880,7 +881,7 @@ const char* shell_get_home_dir(void) {
 #else
     const char* home = getenv("HOME");
 #endif
-    if (home) s_cached_home = strdup(home);
+    if (home) s_cached_home = mem_strdup(home, MEM_CAT_TEMP);
     return s_cached_home;
 }
 
@@ -892,12 +893,12 @@ const char* shell_get_temp_dir(void) {
     if (len > 0 && len < sizeof(buf)) {
         // remove trailing backslash
         if (buf[len - 1] == '\\') buf[len - 1] = '\0';
-        s_cached_temp = strdup(buf);
+        s_cached_temp = mem_strdup(buf, MEM_CAT_TEMP);
     }
 #else
     const char* tmp = getenv("TMPDIR");
     if (!tmp) tmp = "/tmp";
-    s_cached_temp = strdup(tmp);
+    s_cached_temp = mem_strdup(tmp, MEM_CAT_TEMP);
 #endif
     return s_cached_temp;
 }
@@ -907,13 +908,13 @@ char* shell_get_hostname(void) {
 #ifdef _WIN32
     DWORD size = sizeof(buf);
     if (GetComputerNameA(buf, &size)) {
-        return strdup(buf);
+        return mem_strdup(buf, MEM_CAT_TEMP);
     }
 #else
     if (gethostname(buf, sizeof(buf)) == 0) {
         buf[sizeof(buf) - 1] = '\0';
-        return strdup(buf);
+        return mem_strdup(buf, MEM_CAT_TEMP);
     }
 #endif
-    return strdup("localhost");
+    return mem_strdup("localhost", MEM_CAT_TEMP);
 }

@@ -194,7 +194,7 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
     if (FT_Get_MM_Var(face, &mm) != 0 || !mm) return;
 
     // read current design coordinates
-    FT_Fixed* coords = (FT_Fixed*)malloc(mm->num_axis * sizeof(FT_Fixed));
+    FT_Fixed* coords = (FT_Fixed*)mem_alloc(mm->num_axis * sizeof(FT_Fixed), MEM_CAT_FONT);
     if (!coords) { FT_Done_MM_Var(library, mm); return; }
 
     FT_Get_Var_Design_Coordinates(face, mm->num_axis, coords);
@@ -227,7 +227,7 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
         FT_Set_Var_Design_Coordinates(face, mm->num_axis, coords);
     }
 
-    free(coords);
+    mem_free(coords);
     FT_Done_MM_Var(library, mm);
 }
 #endif // !__APPLE__
@@ -253,8 +253,8 @@ static int file_data_compare(const void* a, const void* b, void* udata) {
 static void file_data_free(void* item) {
     FontFileDataEntry* e = (FontFileDataEntry*)item;
     if (e) {
-        if (e->data) { free(e->data); e->data = NULL; }
-        if (e->path) { free(e->path); e->path = NULL; }
+        if (e->data) { mem_free(e->data); e->data = NULL; }
+        if (e->path) { mem_free(e->path); e->path = NULL; }
     }
 }
 
@@ -288,14 +288,14 @@ static void file_data_cache_insert(FontContext* ctx, const char* path,
                                     uint8_t* data, size_t len) {
     struct hashmap* cache = ensure_file_data_cache(ctx);
     if (!cache) return;
-    char* dup_path = strdup(path);  // raw strdup: freed by file_data_free/raw free
+    char* dup_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by file_data_free/raw free
     FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len, .ref_count = 1};
     FontFileDataEntry* old = (FontFileDataEntry*)hashmap_set(cache, &entry);
     if (old) {
         // replaced an existing entry — free old data (but NOT our new entry's data).
         // hashmap_set returns a copy of the replaced entry.
-        if (old->data != data) { free(old->data); }
-        if (old->path != dup_path) { free(old->path); }
+        if (old->data != data) { mem_free(old->data); }
+        if (old->path != dup_path) { mem_free(old->path); }
     }
 }
 
@@ -365,7 +365,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                                 size_px, physical_size, weight, slant);
 #endif
             if (handle) {
-                handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
+                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
             }
@@ -383,12 +383,12 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         fseek(fp, 0, SEEK_SET);
         if (file_size_long <= 0) { fclose(fp); return NULL; }
         size_t file_size = (size_t)file_size_long;
-        uint8_t* file_data = (uint8_t*)malloc(file_size);
+        uint8_t* file_data = (uint8_t*)mem_alloc(file_size, MEM_CAT_FONT);
         if (!file_data) { fclose(fp); return NULL; }
         size_t read_count = fread(file_data, 1, file_size, fp);
         fclose(fp);
         if (read_count != file_size) {
-            free(file_data);
+            mem_free(file_data);
             log_error("font_loader: failed to read '%s'", path);
             return NULL;
         }
@@ -397,7 +397,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         size_t sfnt_len = 0;
         bool ok = font_decompress_if_needed(NULL, file_data, file_size,
                                              format, &sfnt_data, &sfnt_len);
-        free(file_data);
+        mem_free(file_data);
 
         if (!ok) {
             log_error("font_loader: decompression failed for '%s'", path);
@@ -425,7 +425,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                             size_px, physical_size, weight, slant);
 #endif
         if (handle) {
-            handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
+            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);
         }
@@ -455,7 +455,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                                 size_px, physical_size, weight, slant);
 #endif
             if (handle) {
-                handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
+                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
                 log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
                          path, handle->family_name ? handle->family_name : "?", physical_size);
             }
@@ -472,7 +472,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         fseek(fp, 0, SEEK_SET);
         if (ttf_size_long <= 0) { fclose(fp); return NULL; }
         size_t ttf_size = (size_t)ttf_size_long;
-        uint8_t* ttf_buf = (uint8_t*)malloc(ttf_size);
+        uint8_t* ttf_buf = (uint8_t*)mem_alloc(ttf_size, MEM_CAT_FONT);
         if (!ttf_buf) { fclose(fp); return NULL; }
         size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
         fclose(fp);
@@ -503,7 +503,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                             size_px, physical_size, weight, slant);
 #endif
         if (handle) {
-            handle->file_data_path = strdup(path);  // raw strdup: freed by raw free
+            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
             log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
                      path, handle->family_name ? handle->family_name : "?", physical_size);
         }
@@ -540,10 +540,10 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
 
     // copy data to a malloc buffer that outlives the face
     // (caller's data may be temporary, e.g. from base64 decode)
-    uint8_t* buf = (uint8_t*)malloc(sfnt_len);
+    uint8_t* buf = (uint8_t*)mem_alloc(sfnt_len, MEM_CAT_FONT);
     if (!buf) {
         log_error("font_loader: malloc failed for %zu bytes", sfnt_len);
-        if (sfnt_data != data) free((void*)sfnt_data); // free decompressed data
+        if (sfnt_data != data) mem_free((void*)sfnt_data); // free decompressed data
         return NULL;
     }
     if (sfnt_data == (const uint8_t*)buf) {
@@ -551,7 +551,7 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
     } else {
         memcpy(buf, sfnt_data, sfnt_len);
         // free decompressed buffer if we allocated one
-        if (sfnt_data != data) free((void*)sfnt_data);
+        if (sfnt_data != data) mem_free((void*)sfnt_data);
     }
 
 #ifdef __APPLE__

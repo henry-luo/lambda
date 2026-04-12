@@ -1161,7 +1161,7 @@ extern "C" Item rb_file_read(Item path) {
     if (!content) return (Item){.item = ITEM_NULL};
     size_t len = strlen(content);
     Item result = (Item){.item = s2it(heap_create_name(content, len))};
-    free(content); // from read_text_file (lib)
+    mem_free(content); // from read_text_file (lib)
     return result;
 }
 

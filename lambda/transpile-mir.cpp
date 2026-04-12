@@ -6,6 +6,7 @@
 #include "template_registry.h"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
 #include "../lib/gc/gc_heap.h"
@@ -9620,7 +9621,7 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     mt->current_func = wrapper_func;
 
     // Free strdup copies
-    for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
+    for (int i = 0; i < param_count; i++) mem_free(param_name_copies[i]);
 
     // Unbox each param to match native function's expected types
     MIR_op_t call_args[16];
@@ -9899,7 +9900,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_func = func;
 
     // Free our strdup copies (MIR made its own)
-    for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
+    for (int i = 0; i < param_count; i++) mem_free(param_name_copies[i]);
 
     // Set up consts_reg from per-module BSS _mod_consts_ptr so that cross-module
     // function calls always use this module's own const_list (not context->consts).
@@ -10924,7 +10925,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->current_func_item = func_item;
     mt->current_func = func;
-    free(param_name_copy);
+    mem_free(param_name_copy);
 
     // load runtime context from _lambda_rt
     MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
@@ -11094,8 +11095,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->current_func_item = func_item;
     mt->current_func = func;
-    free(param_name_copy);
-    free(event_name_copy);
+    mem_free(param_name_copy);
+    mem_free(event_name_copy);
 
     // load runtime context from _lambda_rt
     MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
