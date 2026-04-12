@@ -2748,6 +2748,30 @@ class PremakeGenerator:
             ''
         ])
 
+        # Memtrack poison enforcement: force-include lib/mem.h and define MEMTRACK_POISON_RAW_ALLOC
+        # for lambda/ and radiant/ source files (not lib/ — which implements the allocator itself)
+        if self.config.get('memtrack_poison', False):
+            poison_dirs = self.config.get('memtrack_poison_dirs', ['lambda', 'radiant'])
+            exempt_files = self.config.get('memtrack_poison_exempt', [])
+            for pdir in poison_dirs:
+                self.premake_content.extend([
+                    f'    -- Memtrack poison enforcement for {pdir}/',
+                    f'    filter "files:{pdir}/**"',
+                    '        buildoptions { "-include lib/mem.h", "-DMEMTRACK_POISON_RAW_ALLOC" }',
+                    '    ',
+                ])
+            # Exempt specific files (e.g., WASM build, tree-sitter bindings)
+            for exempt in exempt_files:
+                self.premake_content.extend([
+                    f'    filter "files:{exempt}"',
+                    '        buildoptions { "-UMEMTRACK_POISON_RAW_ALLOC" }',
+                    '    ',
+                ])
+            self.premake_content.extend([
+                '    filter {}',
+                '    ',
+            ])
+
         # AddressSanitizer for main lambda.exe (opt-in via enable_sanitizer_main)
         if self.config.get('enable_sanitizer_main', False):
             platforms_config = self.config.get('platforms', {})

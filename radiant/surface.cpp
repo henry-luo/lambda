@@ -152,7 +152,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
         // strdup to take ownership: entry->path must always be a malloc'd string
         // (url_get_href returns a pointer into the Url struct, not a separate allocation)
-        file_path = strdup(url_str);
+        file_path = mem_strdup(url_str, MEM_CAT_RENDER);
     } else {
         file_path = url_to_local_path(abs_url);
         if (!file_path) {

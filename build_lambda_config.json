@@ -5,6 +5,11 @@
     "compiler": "clang",
     "output": "lambda.exe",
     "enable_sanitizer_main": false,
+    "memtrack_poison": false,
+    "memtrack_poison_dirs": ["lambda", "radiant"],
+    "memtrack_poison_exempt": [
+        "lambda/lambda-wasm-main.c"
+    ],
     "source_dirs": [
         "lib",
         "lib/gc",

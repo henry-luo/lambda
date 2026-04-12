@@ -780,7 +780,7 @@ static void discover_imports_recursive(
                             memcpy(n->directory, dep_path, dir_len);
                             n->directory[dir_len] = '\0';
                         } else {
-                            n->directory = strdup("./");
+                            n->directory = mem_strdup("./", MEM_CAT_SYSTEM);
                         }
 
                         PathIndexEntry entry = { .path = n->path, .index = dep_idx };
@@ -864,14 +864,14 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
         memcpy(main_dir, main_path, dir_len);
         main_dir[dir_len] = '\0';
     } else {
-        main_dir = strdup("./");
+        main_dir = mem_strdup("./", MEM_CAT_SYSTEM);
     }
 
     // initialize graph with main script as sentinel node (index 0, not compiled here)
     int capacity = 32;
     int count = 1;
     ImportGraphNode* nodes = (ImportGraphNode*)mem_calloc(capacity, sizeof(ImportGraphNode), MEM_CAT_SYSTEM);
-    nodes[0].path = strdup(main_path);
+    nodes[0].path = mem_strdup(main_path, MEM_CAT_SYSTEM);
     nodes[0].source = (char*)main_source;
     nodes[0].directory = main_dir;
     nodes[0].depth = -1;
@@ -1026,7 +1026,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (!source) {
 #ifdef _WIN32
         char resolved[_MAX_PATH];
-        canonical_path = _fullpath(resolved, script_path, _MAX_PATH) ? strdup(resolved) : NULL;
+        canonical_path = _fullpath(resolved, script_path, _MAX_PATH) ? mem_strdup(resolved, MEM_CAT_SYSTEM) : NULL;
 #else
         canonical_path = realpath(script_path, NULL);
 #endif
@@ -1062,7 +1062,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     }
     // script not found — create stub and register immediately to prevent duplicates
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
-    new_script->reference = strdup(lookup_path);
+    new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
@@ -1072,7 +1072,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // strdup when source is provided externally (e.g. REPL) so the script owns its copy
     // and runtime_cleanup can safely free it without a double-free
-    const char* script_source = source ? strdup(source) : read_text_file(lookup_path);
+    const char* script_source = source ? mem_strdup(source, MEM_CAT_SYSTEM) : read_text_file(lookup_path);
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
         new_script->is_loading = false;
@@ -1089,7 +1089,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #endif
     if (!is_import && runtime->import_base_dir) {
         // use caller-specified import base directory for main script
-        new_script->directory = strdup(runtime->import_base_dir);
+        new_script->directory = mem_strdup(runtime->import_base_dir, MEM_CAT_SYSTEM);
     } else if (last_slash) {
         int dir_len = (int)(last_slash - lookup_path + 1);
         char* dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
@@ -1097,7 +1097,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         dir[dir_len] = '\0';
         new_script->directory = dir;
     } else {
-        new_script->directory = strdup("./");
+        new_script->directory = mem_strdup("./", MEM_CAT_SYSTEM);
     }
     log_debug("script directory: %s", new_script->directory);
     if (canonical_path) mem_free(canonical_path);
