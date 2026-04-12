@@ -2789,18 +2789,6 @@
                         "icon": "🟨"
                     },
                     {
-                        "source": "test/test_js_test262_gtest.cpp",
-                        "name": "test262 Compliance Tests",
-                        "category": "extended",
-                        "disabled": false,
-                        "dependencies": [],
-                        "binary": "test_js_test262_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "icon": "📋"
-                    },
-                    {
                         "source": "test/test_wpt_css_syntax_gtest.cpp",
                         "name": "WPT CSS Syntax Tests",
                         "category": "extended",
@@ -3036,6 +3024,19 @@
                         ],
                         "requires_jube_exe": true,
                         "icon": "🔍"
+                    },
+                    {
+                        "source": "test/test_js_test262_gtest.cpp",
+                        "name": "test262 Compliance Tests",
+                        "category": "extended",
+                        "disabled": false,
+                        "dependencies": [],
+                        "binary": "test_js_test262_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📋"
                     }
                 ],
                 "type": "jube",
