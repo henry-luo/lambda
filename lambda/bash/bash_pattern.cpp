@@ -110,6 +110,23 @@ static int posix_class_match(char c, const char* name, int name_len) {
 }
 
 // ---------------------------------------------------------------------------
+// Resolve a POSIX collating element name to a single character.
+// Single-char names map to themselves. Named symbols map to their chars.
+// Returns '\0' for unrecognized multi-char names.
+// ---------------------------------------------------------------------------
+static char resolve_collating_element(const char* name, int len) {
+    if (len == 1) return name[0];
+    if (len == 5 && memcmp(name, "space", 5) == 0)   return ' ';
+    if (len == 3 && memcmp(name, "tab", 3) == 0)      return '\t';
+    if (len == 7 && memcmp(name, "newline", 7) == 0)  return '\n';
+    if (len == 6 && memcmp(name, "hyphen", 6) == 0)   return '-';
+    if (len == 9 && memcmp(name, "backspace", 9) == 0) return '\b';
+    if (len == 6 && memcmp(name, "return", 6) == 0)   return '\r';
+    if (len == 6 && memcmp(name, "escape", 6) == 0)   return '\033';
+    return '\0';  // unrecognized: skip
+}
+
+// ---------------------------------------------------------------------------
 // Bracket expression matching: [...]
 // pi points to the '[' character in pat.
 // Sets *end_pi to one past the closing ']'.
@@ -159,13 +176,43 @@ static int match_bracket(char sc, const char* pat, int pi, int* end_pi, int flag
             }
         }
 
-        // POSIX collating symbol [.sym.] — treat as literal
+        // POSIX collating symbol [.sym.] — resolve to char, then handle range
         if (pat[i] == '[' && pat[i + 1] == '.') {
             const char* col_end = strstr(pat + i + 2, ".]");
             if (col_end) {
-                char col_char = pat[i + 2];
-                if (cfold(sc, flags) == cfold(col_char, flags)) matched = 1;
-                i = (int)(col_end - pat) + 2;
+                int name_len = (int)(col_end - (pat + i + 2));
+                char lo = resolve_collating_element(pat + i + 2, name_len);
+                i = (int)(col_end - pat) + 2;  // advance past [.sym.]
+
+                // check for range: [.a.]-x or [.a.]-[.z.]
+                if (lo != '\0' && pat[i] == '-' && pat[i + 1] && pat[i + 1] != ']') {
+                    i++;  // skip '-'
+                    char hi;
+                    if (pat[i] == '[' && pat[i + 1] == '.') {
+                        const char* hi_end = strstr(pat + i + 2, ".]");
+                        if (hi_end) {
+                            int hi_name_len = (int)(hi_end - (pat + i + 2));
+                            hi = resolve_collating_element(pat + i + 2, hi_name_len);
+                            i = (int)(hi_end - pat) + 2;
+                            if (hi == '\0') hi = lo;  // invalid hi: treat as lo-only
+                        } else {
+                            hi = pat[i++];
+                        }
+                    } else {
+                        hi = pat[i++];
+                    }
+                    char test_sc = cfold(sc, flags);
+                    char test_lo = cfold(lo, flags);
+                    char test_hi = cfold(hi, flags);
+                    if (test_lo <= test_hi) {
+                        if (test_sc >= test_lo && test_sc <= test_hi) matched = 1;
+                    } else {
+                        if (test_sc >= test_hi && test_sc <= test_lo) matched = 1;
+                    }
+                } else if (lo != '\0') {
+                    if (cfold(sc, flags) == cfold(lo, flags)) matched = 1;
+                }
+                // if lo == '\0' (unrecognized element) and no range: skip, no match
                 continue;
             }
         }

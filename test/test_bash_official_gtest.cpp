@@ -21,6 +21,7 @@
 #include <vector>
 #include <set>
 #include <algorithm>
+#include <sstream>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -54,6 +55,7 @@ struct BashOfficialTestInfo {
     std::string tests_path;     // e.g. "ref/bash/tests/arith.tests"
     std::string right_path;     // e.g. "ref/bash/tests/arith.right"
     std::string test_name;      // e.g. "arith"
+    bool filter_expect;         // true if run-script uses grep -v '^expect'
 
     friend std::ostream& operator<<(std::ostream& os, const BashOfficialTestInfo& info) {
         return os << info.test_name;
@@ -112,6 +114,90 @@ static void trim_trailing_whitespace(char* str) {
                        str[len - 1] == ' '  || str[len - 1] == '\t')) {
         str[--len] = '\0';
     }
+}
+
+// Normalize `declare -A name=([k1]="v1" [k2]="v2" )` lines by sorting
+// the key-value pairs alphabetically. Bash's hash table iteration order is
+// implementation-defined, so we canonicalize for comparison.
+static std::string normalize_assoc_arrays(const std::string& text) {
+    std::string result;
+    std::istringstream iss(text);
+    std::string line;
+    while (std::getline(iss, line)) {
+        // match: declare -<flags> name=(<pairs> )
+        // where flags contain 'A'
+        auto eq_pos = line.find("=(");
+        if (eq_pos != std::string::npos && line.size() > 2 &&
+            line.substr(0, 8) == "declare " && line.back() == ')') {
+            // check that flags contain 'A'
+            auto space2 = line.find(' ', 8);
+            std::string flags_part = line.substr(8, space2 - 8);
+            if (flags_part.find('A') != std::string::npos) {
+                std::string prefix = line.substr(0, eq_pos + 2); // "declare -A name=("
+                std::string pairs_str = line.substr(eq_pos + 2, line.size() - eq_pos - 3); // without trailing " )"
+                // parse [key]="value" pairs
+                std::vector<std::string> pairs;
+                size_t pos = 0;
+                while (pos < pairs_str.size()) {
+                    if (pairs_str[pos] == ' ') { pos++; continue; }
+                    if (pairs_str[pos] == '[') {
+                        size_t start = pos;
+                        // find matching ]="..."
+                        auto bracket_end = pairs_str.find("]=", pos);
+                        if (bracket_end == std::string::npos) break;
+                        size_t val_start = bracket_end + 2;
+                        if (val_start < pairs_str.size() && pairs_str[val_start] == '"') {
+                            size_t val_end = val_start + 1;
+                            while (val_end < pairs_str.size()) {
+                                if (pairs_str[val_end] == '\\' && val_end + 1 < pairs_str.size()) {
+                                    val_end += 2; continue;
+                                }
+                                if (pairs_str[val_end] == '"') { val_end++; break; }
+                                val_end++;
+                            }
+                            pairs.push_back(pairs_str.substr(start, val_end - start));
+                            pos = val_end;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                std::sort(pairs.begin(), pairs.end());
+                result += prefix;
+                for (size_t i = 0; i < pairs.size(); i++) {
+                    result += pairs[i];
+                    result += " ";
+                }
+                result += ")\n";
+                continue;
+            }
+        }
+        result += line + "\n";
+    }
+    // remove trailing newline added by last iteration
+    if (!result.empty() && result.back() == '\n') result.pop_back();
+    return result;
+}
+
+// Filter lines starting with 'expect' — matches the bash test suite's
+// `grep -v '^expect'` used by certain run-* scripts.
+static std::string filter_expect_lines(const std::string& output) {
+    std::string result;
+    result.reserve(output.size());
+    size_t pos = 0;
+    while (pos < output.size()) {
+        size_t eol = output.find('\n', pos);
+        if (eol == std::string::npos) eol = output.size();
+        bool skip = (eol - pos >= 6 && output.compare(pos, 6, "expect") == 0);
+        if (!skip) {
+            result.append(output, pos, eol - pos);
+            if (eol < output.size()) result += '\n';
+        }
+        pos = (eol < output.size()) ? eol + 1 : output.size();
+    }
+    return result;
 }
 
 // Filter out Lambda's internal log/banner lines from captured output.
@@ -215,6 +301,16 @@ static std::string make_test_name(const std::string& filename) {
 // Test Discovery
 //==============================================================================
 
+// Check if the official run-* script for a test uses `grep -v '^expect'`
+static bool run_script_filters_expect(const std::string& tests_dir, const std::string& base) {
+    std::string run_path = tests_dir + "/run-" + base;
+    char* contents = read_file_contents(run_path.c_str());
+    if (!contents) return false;
+    bool found = (strstr(contents, "grep -v") != nullptr && strstr(contents, "expect") != nullptr);
+    free(contents);
+    return found;
+}
+
 static std::vector<BashOfficialTestInfo> discover_bash_tests() {
     std::vector<BashOfficialTestInfo> tests;
 
@@ -239,6 +335,7 @@ static std::vector<BashOfficialTestInfo> discover_bash_tests() {
             info.tests_path = tests_path;
             info.right_path = right_path;
             info.test_name = make_test_name(fname);
+            info.filter_expect = run_script_filters_expect(tests_dir, base);
             tests.push_back(info);
         }
     } while (FindNextFileA(hFind, &fd));
@@ -266,6 +363,7 @@ static std::vector<BashOfficialTestInfo> discover_bash_tests() {
             info.tests_path = tests_path;
             info.right_path = right_path;
             info.test_name = make_test_name(fname);
+            info.filter_expect = run_script_filters_expect(tests_dir, base);
             tests.push_back(info);
         }
     }
@@ -455,6 +553,11 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
     // Filter out Lambda's internal log/banner lines
     std::string actual = filter_lambda_noise(raw_output);
 
+    // Filter 'expect' annotation lines if the official run-script does so
+    if (info.filter_expect) {
+        actual = filter_expect_lines(actual);
+    }
+
     // Read expected output
     char* expected = read_file_contents(info.right_path.c_str());
     ASSERT_NE(expected, nullptr)
@@ -465,11 +568,15 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
     trim_trailing_whitespace(actual_cstr);
     trim_trailing_whitespace(expected);
 
-    bool match = (strcmp(expected, actual_cstr) == 0);
+    // Normalize associative array key order for comparison
+    std::string norm_expected = normalize_assoc_arrays(expected);
+    std::string norm_actual = normalize_assoc_arrays(actual_cstr);
+
+    bool match = (norm_expected == norm_actual);
 
     if (is_baseline) {
         // Baseline test: MUST pass — failure is a regression
-        EXPECT_STREQ(expected, actual_cstr)
+        EXPECT_EQ(norm_expected, norm_actual)
             << "REGRESSION: " << info.test_name
             << " is in gnu_baseline.json but now fails!\n"
             << "Output mismatch for: " << info.tests_path;
@@ -479,7 +586,7 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
                info.test_name.c_str());
     } else {
         // Non-baseline test that fails — report as failure
-        EXPECT_STREQ(expected, actual_cstr)
+        EXPECT_EQ(norm_expected, norm_actual)
             << "FAIL: " << info.test_name
             << " output does not match expected.\n"
             << "Output mismatch for: " << info.tests_path;

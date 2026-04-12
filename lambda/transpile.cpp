@@ -3,6 +3,7 @@
 #include "re2_wrapper.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
+#include "../lib/memtrack.h"
 
 extern Type TYPE_ANY, TYPE_INT, TYPE_FLOAT, TYPE_BOOL;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
@@ -219,14 +220,14 @@ static void register_func_name(Transpiler* tp, AstFuncNode* fn_node) {
     // build MIR name (internal name like _outer36)
     StrBuf* mir_name_buf = strbuf_new_cap(64);
     write_fn_name(mir_name_buf, fn_node, NULL);
-    char* mir_name = strdup(mir_name_buf->str);
+    char* mir_name = mem_strdup(mir_name_buf->str, MEM_CAT_EVAL);
     strbuf_free(mir_name_buf);
 
     // use the function name
     const char* lambda_name = fn_node->name->chars;
 
     // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
-    char* entry[2] = { mir_name, strdup(lambda_name) };
+    char* entry[2] = { mir_name, mem_strdup(lambda_name, MEM_CAT_EVAL) };
     hashmap_set(tp->func_name_map, entry);
 
     log_debug("register_func_name: '%s' -> '%s'", mir_name, lambda_name);
@@ -242,7 +243,7 @@ static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node
     // build MIR name (internal name like _f317)
     StrBuf* mir_name_buf = strbuf_new_cap(64);
     write_fn_name(mir_name_buf, fn_node, NULL);
-    char* mir_name = strdup(mir_name_buf->str);
+    char* mir_name = mem_strdup(mir_name_buf->str, MEM_CAT_EVAL);
     strbuf_free(mir_name_buf);
 
     // determine Lambda name: prefer fn name, then current_assign_name, then <anonymous>
@@ -256,7 +257,7 @@ static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node
     }
 
     // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
-    char* entry[2] = { mir_name, strdup(lambda_name) };
+    char* entry[2] = { mir_name, mem_strdup(lambda_name, MEM_CAT_EVAL) };
     hashmap_set(tp->func_name_map, entry);
 
     log_debug("register_func_name_with_context: '%s' -> '%s'", mir_name, lambda_name);

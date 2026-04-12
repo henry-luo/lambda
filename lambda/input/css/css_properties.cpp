@@ -1,6 +1,6 @@
 #include "css_style.hpp"
 #include <string.h>
-#include <stdlib.h>
+#include "../../../lib/mem.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -635,7 +635,7 @@ bool css_property_system_init(Pool* pool) {
     // passed here belongs to the first file and is destroyed after that file's layout.
     // Using pool_calloc would leave g_property_database as a dangling pointer for all
     // subsequent files, causing heap corruption.
-    g_property_database = (CssProperty*)calloc(g_property_count, sizeof(CssProperty));
+    g_property_database = (CssProperty*)mem_calloc(g_property_count, sizeof(CssProperty), MEM_CAT_INPUT_CSS);
     if (!g_property_database) {
         return false;
     }
@@ -664,7 +664,7 @@ bool css_property_system_init(Pool* pool) {
 
 void css_property_system_cleanup(void) {
     // Free the malloc-allocated property database
-    free(g_property_database);
+    mem_free(g_property_database);
     g_system_initialized = false;
     g_property_database = NULL;
     g_property_count = 0;

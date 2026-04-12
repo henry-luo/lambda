@@ -29,11 +29,11 @@ console.log(m2.get(2));
 let m3 = new Map();
 m3.set("k1", "v1");
 m3.set("k2", "v2");
-let keys = m3.keys();
+let keys = Array.from(m3.keys());
 console.log(keys.length);
-let vals = m3.values();
+let vals = Array.from(m3.values());
 console.log(vals.length);
-let entries = m3.entries();
+let entries = Array.from(m3.entries());
 console.log(entries.length);
 console.log(entries[0].length);
 
@@ -74,7 +74,7 @@ console.log(s.size);
 let s2 = new Set();
 s2.add("a");
 s2.add("b");
-let sv = s2.values();
+let sv = Array.from(s2.values());
 console.log(sv.length);
 
 // Set forEach

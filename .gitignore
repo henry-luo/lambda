@@ -98,6 +98,9 @@ compile_commands.json
 *.backup
 temp/
 
+# Garbage created by AI agents
+_
+
 # Logs
 *.log
 log/
@@ -135,8 +138,12 @@ test/venv/
 test/layout
 test/render
 test/wpt
+test/js262
 test/pdf/output
 test/fuzzy/crashes/
+test/fuzzy-radiant/results/crashes/
+test/fuzzy-radiant/results/timeouts/
+test/fuzzy-radiant/regression/
 
 test/event/
 test/events/

@@ -8,6 +8,7 @@
 #include "layout_counters.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lib/scratch_arena.h"
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -81,6 +82,7 @@ typedef struct BlockContext {
     CssEnum text_align;         // Text alignment
     CssEnum text_align_last;    // text-align-last (CSS Text 3 §7.2): overrides text_align on last line
     CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
+    FontProp* block_container_font; // CSS Text 3 §4.2: block container's font for tab-size calculation
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
     float first_line_ascender;  // Baseline of first line (distance from border-box top, for flex baseline)
@@ -141,6 +143,40 @@ typedef struct BlockContext {
     Pool* pool;                 // Memory pool for float allocations
 } BlockContext;
 
+// Semantic break kind classification (CSS Text 3 §4–5 + UAX #14)
+// Used to track the type of the last recorded break opportunity in a line box.
+typedef enum BreakKind {
+    // Content (not a break character itself)
+    BRK_TEXT = 0,               // ordinary word/grapheme content
+
+    // Whitespace kinds (CSS Text 3 §4)
+    BRK_SPACE,                  // collapsible space (U+0020 in white-space: normal/nowrap/pre-line)
+    BRK_PRESERVED_SPACE,        // non-collapsible space (U+0020 in pre/pre-wrap/break-spaces)
+    BRK_TAB,                    // tab character (advance to next tab stop; CSS Text 3 §4.2)
+    BRK_HARD_BREAK,             // newline (\n in pre/pre-wrap/pre-line; CSS Text 3 §4.1)
+
+    // Non-breaking / glue (UAX #14 GL, WJ, ZWJ)
+    BRK_GLUE,                   // visible non-breaking: NBSP U+00A0, NNBSP U+202F
+    BRK_GLUE_ZW,                // zero-width non-breaking: WJ U+2060, ZWNBSP U+FEFF
+    BRK_ZWJ,                    // zero-width joiner U+200D (suppresses break, joins emoji sequences)
+
+    // Break opportunities (CSS Text 3 §5)
+    BRK_ZERO_WIDTH_BREAK,       // ZWSP U+200B (invisible, breakable)
+    BRK_SOFT_HYPHEN,            // SHY U+00AD (invisible unless broken, then visible '-')
+    BRK_HYPHEN,                 // explicit hyphen U+002D, U+2010 (break after, includes width)
+
+    // UAX #14 line break classes (CSS Text 3 §5.2)
+    BRK_CJK,                    // CJK ideograph (break after, unless word-break: keep-all)
+    BRK_OP,                     // opening punctuation — no break after (UAX #14 LB14)
+    BRK_CL,                     // closing punctuation — no break before (UAX #14 LB15/16)
+    BRK_NS,                     // non-starter — no break before when after CJK (UAX #14 LB20)
+    BRK_EX_IS_SY,               // EX/IS/SY — no break before (UAX #14 LB13)
+    BRK_CJ,                     // conditional Japanese starter (resolved to NS or ID per line-break mode)
+
+    // Ideographic space
+    BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
+} BreakKind;
+
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
     float effective_left;             // float-adjusted left bound
@@ -150,7 +186,7 @@ typedef struct Linebox {
     float max_descender;
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
-    bool last_space_is_hyphen;      // true if last_space is actually a hyphen (break after vs before)
+    BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
     View* start_view;
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -182,6 +218,9 @@ typedef struct Linebox {
                                     // used to trim text rects (U+3000 has visible glyph, not trimmed)
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
     float last_space_hanging_text_trim; // hanging_space_text_trim saved at the time last_space was recorded
+    float rtl_hanging_space;            // CSS Text 3 §4.1.3: hanging space width saved for RTL alignment adjust;
+                                        // in RTL, trailing space hangs past the inline-end (left edge), so
+                                        // after alignment, the last text rect's x must be shifted left by this
     bool wrap_opportunity_before_nowrap;  // CSS Text 3 §5: a wrappable break opportunity exists at the current
                                          // position (from collapsed inter-element whitespace in a wrappable
                                          // parent); allows nowrap content to break at this boundary
@@ -194,10 +233,15 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
+    bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
+    float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
+                                     // (used in second pass to expand line box if needed)
+    float trailing_letter_spacing;   // CSS Text 3 §8: letter-spacing after the last character on a line;
+                                     // trimmed at line breaks since letter-spacing is not applied at line ends
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
-        last_space_is_hyphen = false;  last_space_hanging_width = 0;
+        last_space_kind = BRK_TEXT;  last_space_hanging_width = 0;
     }
 } Linebox;
 
@@ -285,6 +329,15 @@ typedef struct LayoutContext {
 
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
     CounterContext* counter_context;
+
+    // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
+    ScratchArena scratch;
+
+    // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
+    int depth;
+
+    // Total node count guard against pathological layouts (fuzzer-found timeouts)
+    int node_count;
 } LayoutContext;
 
 // ============================================================================
@@ -559,11 +612,39 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struc
 uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
 
 /**
+ * Apply CSS text-transform with full Unicode case mapping (1-to-many expansion).
+ * Writes up to 3 codepoints to out[] and returns the count.
+ */
+int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
+    bool is_word_start, uint32_t* out);
+
+/**
  * Get text-transform property from a BlockProp.
  * @param blk BlockProp structure (can be NULL)
  * @return CSS text-transform value or CSS_VALUE_NONE
  */
 CssEnum get_text_transform_from_block(BlockProp* blk);
+
+// ============================================================================
+// CJK Justification Utilities (CSS Text 3 §7.3)
+// ============================================================================
+
+/**
+ * Check if a codepoint has UAX#14 line break class ID (Ideographic).
+ * Characters with ID class allow line breaks before and after them.
+ * Used for CJK inter-character justification and line-breaking.
+ */
+bool has_id_line_break_class(uint32_t cp);
+
+/**
+ * Count justification opportunities in a UTF-8 text segment.
+ * Counts word spaces AND CJK inter-character boundaries per CSS Text 3 §7.3.
+ * For CJK text, gaps between adjacent ID-class characters are opportunities.
+ * @param str UTF-8 text data
+ * @param len byte length of text segment
+ * @return number of justification opportunities (spaces + CJK inter-char gaps)
+ */
+int count_justify_opportunities(const char* str, int len);
 
 // ============================================================================
 // Size Constraint Utilities (§1.1)

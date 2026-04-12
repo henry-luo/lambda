@@ -48,6 +48,7 @@ private:
     ArrayList* type_list_;      // type registry
 
     bool auto_string_merge_;    // automatically merge consecutive strings
+    bool ui_mode_;              // true = allocate DomElement/DomText (for layout/render/view)
 
 public:
     /**
@@ -108,6 +109,18 @@ public:
      * Create String from StringBuf (takes ownership of content)
      */
     String* createStringFromBuf(StringBuf* sb);
+
+    /**
+     * Create a DomText+String fat allocation [DomText][String][chars...]
+     * Used in ui_mode for text content that becomes DomText layout nodes
+     * The returned String* is offset by sizeof(DomText) from the DomText header
+     */
+    String* createDomTextString(const char* str, size_t len);
+
+    /**
+     * Create DomText+String from StringBuf
+     */
+    String* createDomTextStringFromBuf(StringBuf* sb);
 
     /**
      * Get empty string singleton
@@ -217,6 +230,7 @@ public:
     Arena* arena() const { return arena_; }
     NamePool* namePool() const { return name_pool_; }
     ArrayList* typeList() const { return type_list_; }
+    bool ui_mode() const { return ui_mode_; }
     bool autoStringMerge() const { return auto_string_merge_; }
 
     // ============================================================================

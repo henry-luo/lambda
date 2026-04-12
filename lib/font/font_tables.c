@@ -94,7 +94,7 @@ FontTables* font_tables_open(const uint8_t* data, size_t data_len, void* pool_pt
                          scaler_type == FONT_TAG('t','r','u','e') ||
                          scaler_type == FONT_TAG('t','y','p','1'));
     if (!valid_scaler) {
-        log_error("font_tables_open: invalid scaler type 0x%08X", scaler_type);
+        log_debug("font_tables_open: unsupported scaler type 0x%08X", scaler_type);
         return NULL;
     }
 
@@ -937,4 +937,104 @@ NameTable* font_tables_get_name(FontTables* tables) {
 
     tables->name = n;
     return n;
+}
+
+// ============================================================================
+// Glyph bounding box from glyf table (via loca)
+// ============================================================================
+
+bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
+                                int16_t* out_x_min, int16_t* out_y_min,
+                                int16_t* out_x_max, int16_t* out_y_max) {
+    if (!tables) return false;
+
+    HeadTable* head = font_tables_get_head(tables);
+    MaxpTable* maxp = font_tables_get_maxp(tables);
+    if (!head || !maxp) return false;
+    if (glyph_id >= maxp->num_glyphs) return false;
+
+    uint32_t loca_len = 0, glyf_len = 0;
+    const uint8_t* loca = font_tables_find(tables, FONT_TAG('l','o','c','a'), &loca_len);
+    const uint8_t* glyf = font_tables_find(tables, FONT_TAG('g','l','y','f'), &glyf_len);
+    if (!loca || !glyf) return false; // CFF fonts have no glyf table
+
+    // read glyph offset from loca table
+    uint32_t offset, next_offset;
+    if (head->index_to_loc_format == 0) {
+        // short format: uint16 values, actual byte offset = value * 2
+        uint32_t idx = (uint32_t)glyph_id * 2;
+        if (idx + 4 > loca_len) return false;
+        offset      = (uint32_t)rd16(loca + idx) * 2;
+        next_offset = (uint32_t)rd16(loca + idx + 2) * 2;
+    } else {
+        // long format: uint32 byte offsets
+        uint32_t idx = (uint32_t)glyph_id * 4;
+        if (idx + 8 > loca_len) return false;
+        offset      = rd32(loca + idx);
+        next_offset = rd32(loca + idx + 4);
+    }
+
+    // empty glyph (e.g. space): offset == next_offset
+    if (offset == next_offset) return false;
+
+    // glyph header: numberOfContours(2) + xMin(2) + yMin(2) + xMax(2) + yMax(2) = 10 bytes
+    if (offset + 10 > glyf_len) return false;
+
+    const uint8_t* g = glyf + offset;
+    if (out_x_min) *out_x_min = rd16s(g + 2);
+    if (out_y_min) *out_y_min = rd16s(g + 4);
+    if (out_x_max) *out_x_max = rd16s(g + 6);
+    if (out_y_max) *out_y_max = rd16s(g + 8);
+    return true;
+}
+
+// ============================================================================
+// TTC (TrueType Collection) helpers
+// ============================================================================
+
+int font_tables_get_face_count(const uint8_t* data, size_t len) {
+    if (!data || len < 12) return 1;
+    uint32_t tag = rd32(data);
+    // TTC header: 'ttcf' tag, major_version(2), minor_version(2), numFonts(4)
+    if (tag == FONT_TAG('t','t','c','f')) {
+        uint32_t num_fonts = rd32(data + 8);
+        return (num_fonts > 0 && num_fonts < 10000) ? (int)num_fonts : 1;
+    }
+    return 1;
+}
+
+FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
+                                   int face_index, void* pool) {
+    if (!data || data_len < 12) return NULL;
+
+    uint32_t tag = rd32(data);
+    if (tag == FONT_TAG('t','t','c','f')) {
+        // TTC: header is 'ttcf' + version(4) + numFonts(4) + offsets[numFonts]
+        uint32_t num_fonts = rd32(data + 8);
+        if (face_index < 0 || (uint32_t)face_index >= num_fonts) {
+            log_error("font_tables_open_face: face_index %d out of range (num_fonts=%u)",
+                      face_index, num_fonts);
+            return NULL;
+        }
+        // offset array starts at byte 12, each offset is 4 bytes
+        size_t offset_pos = 12 + (size_t)face_index * 4;
+        if (offset_pos + 4 > data_len) return NULL;
+        uint32_t face_offset = rd32(data + offset_pos);
+        if (face_offset >= data_len) return NULL;
+        // open the font at the given offset within the TTC data.
+        // The face header (scaler type, table directory) is at data + face_offset,
+        // but table offsets in the directory are ABSOLUTE within the TTC file.
+        // So we parse the directory from the face offset, then reset data/data_len
+        // to the full TTC file so table lookups use absolute offsets correctly.
+        FontTables* tables = font_tables_open(data + face_offset,
+                                               data_len - face_offset, pool);
+        if (tables) {
+            tables->data = data;
+            tables->data_len = data_len;
+        }
+        return tables;
+    }
+
+    // non-TTC: ignore face_index, open directly
+    return font_tables_open(data, data_len, pool);
 }

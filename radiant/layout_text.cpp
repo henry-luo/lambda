@@ -54,36 +54,228 @@ static inline bool has_small_caps(LayoutContext* lycon) {
     return false;
 }
 
+// Unicode full case mapping table (SpecialCasing.txt)
+// Characters whose uppercase form expands to multiple codepoints.
+// CSS Text 3 §2.1: "the full case mappings for Unicode code points are used"
+struct FullCaseMapping { uint32_t from; uint32_t to[3]; uint8_t len; };
+
+static const FullCaseMapping g_uppercase_full[] = {
+    {0x00DF, {0x0053, 0x0053, 0x0000}, 2},  // ß → SS
+    {0x0149, {0x02BC, 0x004E, 0x0000}, 2},  // ŉ → ʼN
+    {0x01F0, {0x004A, 0x030C, 0x0000}, 2},  // ǰ → J̌
+    {0x0390, {0x0399, 0x0308, 0x0301}, 3},  // ΐ → Ϊ́
+    {0x03B0, {0x03A5, 0x0308, 0x0301}, 3},  // ΰ → Ϋ́
+    {0x0587, {0x0535, 0x0552, 0x0000}, 2},  // և → ԵՒ
+    {0x1E96, {0x0048, 0x0331, 0x0000}, 2},  // ẖ → H̱
+    {0x1E97, {0x0054, 0x0308, 0x0000}, 2},  // ẗ → T̈
+    {0x1E98, {0x0057, 0x030A, 0x0000}, 2},  // ẘ → W̊
+    {0x1E99, {0x0059, 0x030A, 0x0000}, 2},  // ẙ → Y̊
+    {0x1E9A, {0x0041, 0x02BE, 0x0000}, 2},  // ẚ → Aʾ
+    {0x1F50, {0x03A5, 0x0313, 0x0000}, 2},
+    {0x1F52, {0x03A5, 0x0313, 0x0300}, 3},
+    {0x1F54, {0x03A5, 0x0313, 0x0301}, 3},
+    {0x1F56, {0x03A5, 0x0313, 0x0342}, 3},
+    {0x1F80, {0x1F08, 0x0399, 0x0000}, 2},
+    {0x1F81, {0x1F09, 0x0399, 0x0000}, 2},
+    {0x1F82, {0x1F0A, 0x0399, 0x0000}, 2},
+    {0x1F83, {0x1F0B, 0x0399, 0x0000}, 2},
+    {0x1F84, {0x1F0C, 0x0399, 0x0000}, 2},
+    {0x1F85, {0x1F0D, 0x0399, 0x0000}, 2},
+    {0x1F86, {0x1F0E, 0x0399, 0x0000}, 2},
+    {0x1F87, {0x1F0F, 0x0399, 0x0000}, 2},
+    {0x1F88, {0x1F08, 0x0399, 0x0000}, 2},
+    {0x1F89, {0x1F09, 0x0399, 0x0000}, 2},
+    {0x1F8A, {0x1F0A, 0x0399, 0x0000}, 2},
+    {0x1F8B, {0x1F0B, 0x0399, 0x0000}, 2},
+    {0x1F8C, {0x1F0C, 0x0399, 0x0000}, 2},
+    {0x1F8D, {0x1F0D, 0x0399, 0x0000}, 2},
+    {0x1F8E, {0x1F0E, 0x0399, 0x0000}, 2},
+    {0x1F8F, {0x1F0F, 0x0399, 0x0000}, 2},
+    {0x1F90, {0x1F28, 0x0399, 0x0000}, 2},
+    {0x1F91, {0x1F29, 0x0399, 0x0000}, 2},
+    {0x1F92, {0x1F2A, 0x0399, 0x0000}, 2},
+    {0x1F93, {0x1F2B, 0x0399, 0x0000}, 2},
+    {0x1F94, {0x1F2C, 0x0399, 0x0000}, 2},
+    {0x1F95, {0x1F2D, 0x0399, 0x0000}, 2},
+    {0x1F96, {0x1F2E, 0x0399, 0x0000}, 2},
+    {0x1F97, {0x1F2F, 0x0399, 0x0000}, 2},
+    {0x1F98, {0x1F28, 0x0399, 0x0000}, 2},
+    {0x1F99, {0x1F29, 0x0399, 0x0000}, 2},
+    {0x1F9A, {0x1F2A, 0x0399, 0x0000}, 2},
+    {0x1F9B, {0x1F2B, 0x0399, 0x0000}, 2},
+    {0x1F9C, {0x1F2C, 0x0399, 0x0000}, 2},
+    {0x1F9D, {0x1F2D, 0x0399, 0x0000}, 2},
+    {0x1F9E, {0x1F2E, 0x0399, 0x0000}, 2},
+    {0x1F9F, {0x1F2F, 0x0399, 0x0000}, 2},
+    {0x1FA0, {0x1F68, 0x0399, 0x0000}, 2},
+    {0x1FA1, {0x1F69, 0x0399, 0x0000}, 2},
+    {0x1FA2, {0x1F6A, 0x0399, 0x0000}, 2},
+    {0x1FA3, {0x1F6B, 0x0399, 0x0000}, 2},
+    {0x1FA4, {0x1F6C, 0x0399, 0x0000}, 2},
+    {0x1FA5, {0x1F6D, 0x0399, 0x0000}, 2},
+    {0x1FA6, {0x1F6E, 0x0399, 0x0000}, 2},
+    {0x1FA7, {0x1F6F, 0x0399, 0x0000}, 2},
+    {0x1FA8, {0x1F68, 0x0399, 0x0000}, 2},
+    {0x1FA9, {0x1F69, 0x0399, 0x0000}, 2},
+    {0x1FAA, {0x1F6A, 0x0399, 0x0000}, 2},
+    {0x1FAB, {0x1F6B, 0x0399, 0x0000}, 2},
+    {0x1FAC, {0x1F6C, 0x0399, 0x0000}, 2},
+    {0x1FAD, {0x1F6D, 0x0399, 0x0000}, 2},
+    {0x1FAE, {0x1F6E, 0x0399, 0x0000}, 2},
+    {0x1FAF, {0x1F6F, 0x0399, 0x0000}, 2},
+    {0x1FB2, {0x1FBA, 0x0399, 0x0000}, 2},
+    {0x1FB3, {0x0391, 0x0399, 0x0000}, 2},
+    {0x1FB4, {0x0386, 0x0399, 0x0000}, 2},
+    {0x1FB6, {0x0391, 0x0342, 0x0000}, 2},
+    {0x1FB7, {0x0391, 0x0342, 0x0399}, 3},
+    {0x1FBC, {0x0391, 0x0399, 0x0000}, 2},
+    {0x1FC2, {0x1FCA, 0x0399, 0x0000}, 2},
+    {0x1FC3, {0x0397, 0x0399, 0x0000}, 2},
+    {0x1FC4, {0x0389, 0x0399, 0x0000}, 2},
+    {0x1FC6, {0x0397, 0x0342, 0x0000}, 2},
+    {0x1FC7, {0x0397, 0x0342, 0x0399}, 3},
+    {0x1FCC, {0x0397, 0x0399, 0x0000}, 2},
+    {0x1FD2, {0x0399, 0x0308, 0x0300}, 3},
+    {0x1FD3, {0x0399, 0x0308, 0x0301}, 3},
+    {0x1FD6, {0x0399, 0x0342, 0x0000}, 2},
+    {0x1FD7, {0x0399, 0x0308, 0x0342}, 3},
+    {0x1FE2, {0x03A5, 0x0308, 0x0300}, 3},
+    {0x1FE3, {0x03A5, 0x0308, 0x0301}, 3},
+    {0x1FE4, {0x03A1, 0x0313, 0x0000}, 2},
+    {0x1FE6, {0x03A5, 0x0342, 0x0000}, 2},
+    {0x1FE7, {0x03A5, 0x0308, 0x0342}, 3},
+    {0x1FF2, {0x1FFA, 0x0399, 0x0000}, 2},
+    {0x1FF3, {0x03A9, 0x0399, 0x0000}, 2},
+    {0x1FF4, {0x038F, 0x0399, 0x0000}, 2},
+    {0x1FF6, {0x03A9, 0x0342, 0x0000}, 2},
+    {0x1FF7, {0x03A9, 0x0342, 0x0399}, 3},
+    {0x1FFC, {0x03A9, 0x0399, 0x0000}, 2},
+    {0xFB00, {0x0046, 0x0046, 0x0000}, 2},  // ﬀ → FF
+    {0xFB01, {0x0046, 0x0049, 0x0000}, 2},  // ﬁ → FI
+    {0xFB02, {0x0046, 0x004C, 0x0000}, 2},  // ﬂ → FL
+    {0xFB03, {0x0046, 0x0046, 0x0049}, 3},  // ﬃ → FFI
+    {0xFB04, {0x0046, 0x0046, 0x004C}, 3},  // ﬄ → FFL
+    {0xFB05, {0x0053, 0x0054, 0x0000}, 2},  // ﬅ → ST
+    {0xFB06, {0x0053, 0x0054, 0x0000}, 2},  // ﬆ → ST
+    {0xFB13, {0x0544, 0x0546, 0x0000}, 2},  // ﬓ → ՄՆ
+    {0xFB14, {0x0544, 0x0535, 0x0000}, 2},  // ﬔ → ՄԵ
+    {0xFB15, {0x0544, 0x053B, 0x0000}, 2},  // ﬕ → ՄԻ
+    {0xFB16, {0x054E, 0x0546, 0x0000}, 2},  // ﬖ → ՎՆ
+    {0xFB17, {0x0544, 0x053D, 0x0000}, 2},  // ﬗ → ՄԽ
+};
+static const int g_uppercase_full_count = 102;
+
+// İ (U+0130) lowercases to i + combining dot above
+static const FullCaseMapping g_lowercase_full[] = {
+    {0x0130, {0x0069, 0x0307, 0x0000}, 2},
+};
+static const int g_lowercase_full_count = 1;
+
+// binary search lookup in full case mapping table (sorted by 'from')
+static const FullCaseMapping* lookup_full_case(const FullCaseMapping* table,
+    int count, uint32_t codepoint) {
+    int lo = 0, hi = count - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (table[mid].from == codepoint) return &table[mid];
+        if (table[mid].from < codepoint) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return nullptr;
+}
+
 /**
- * Apply CSS text-transform to a single Unicode codepoint.
- * Uses utf8proc for proper Unicode case mapping (handles Latin-1 supplement,
- * Latin Extended, and all other Unicode blocks per Unicode standard).
+ * Apply CSS text-transform with full Unicode case mapping support.
+ * CSS Text 3 §2.1: "the full case mappings for Unicode code points are used"
+ * This handles 1-to-many case expansions (e.g., ß → SS).
  * @param codepoint Input Unicode codepoint
- * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
- * @param is_word_start True if this is the first character of a word (for capitalize)
- * @return Transformed codepoint
+ * @param text_transform CSS text-transform value
+ * @param is_word_start True if first character of a word (for capitalize)
+ * @param out Output buffer for transformed codepoints (must hold at least 3)
+ * @return Number of codepoints written to out (1-3)
  */
-uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
-    if (text_transform == CSS_VALUE_UPPERCASE) {
-        if (codepoint < 128) {
-            return std::toupper(codepoint);
-        } else {
-            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
+    bool is_word_start, uint32_t* out) {
+    if (text_transform == CSS_VALUE_UPPERCASE || (text_transform == CSS_VALUE_CAPITALIZE && is_word_start)) {
+        // check full case mapping table for 1-to-many expansions
+        const FullCaseMapping* m = lookup_full_case(g_uppercase_full, g_uppercase_full_count, codepoint);
+        if (m) {
+            for (int i = 0; i < m->len; i++) out[i] = m->to[i];
+            return m->len;
         }
+        // simple 1-to-1 mapping
+        if (codepoint < 128) {
+            out[0] = std::toupper(codepoint);
+        } else {
+            out[0] = (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+        }
+        return 1;
     } else if (text_transform == CSS_VALUE_LOWERCASE) {
-        if (codepoint < 128) {
-            return std::tolower(codepoint);
-        } else {
-            return (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
+        // check full case mapping table for 1-to-many expansions
+        const FullCaseMapping* m = lookup_full_case(g_lowercase_full, g_lowercase_full_count, codepoint);
+        if (m) {
+            for (int i = 0; i < m->len; i++) out[i] = m->to[i];
+            return m->len;
         }
-    } else if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
         if (codepoint < 128) {
-            return std::toupper(codepoint);
+            out[0] = std::tolower(codepoint);
         } else {
-            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+            out[0] = (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
+        }
+        return 1;
+    } else if (text_transform == CSS_VALUE_FULL_SIZE_KANA) {
+        // CSS Text 3 §2.1: Convert small Kana to their normal (full-size) equivalents
+        // always 1-to-1
+        switch (codepoint) {
+        // Hiragana small → normal
+        case 0x3041: out[0] = 0x3042; return 1;
+        case 0x3043: out[0] = 0x3044; return 1;
+        case 0x3045: out[0] = 0x3046; return 1;
+        case 0x3047: out[0] = 0x3048; return 1;
+        case 0x3049: out[0] = 0x304A; return 1;
+        case 0x3063: out[0] = 0x3064; return 1;
+        case 0x3083: out[0] = 0x3084; return 1;
+        case 0x3085: out[0] = 0x3086; return 1;
+        case 0x3087: out[0] = 0x3088; return 1;
+        case 0x308E: out[0] = 0x308F; return 1;
+        case 0x3095: out[0] = 0x304B; return 1;
+        case 0x3096: out[0] = 0x3051; return 1;
+        // Katakana small → normal
+        case 0x30A1: out[0] = 0x30A2; return 1;
+        case 0x30A3: out[0] = 0x30A4; return 1;
+        case 0x30A5: out[0] = 0x30A6; return 1;
+        case 0x30A7: out[0] = 0x30A8; return 1;
+        case 0x30A9: out[0] = 0x30AA; return 1;
+        case 0x30C3: out[0] = 0x30C4; return 1;
+        case 0x30E3: out[0] = 0x30E4; return 1;
+        case 0x30E5: out[0] = 0x30E6; return 1;
+        case 0x30E7: out[0] = 0x30E8; return 1;
+        case 0x30EE: out[0] = 0x30EF; return 1;
+        case 0x30F5: out[0] = 0x30AB; return 1;
+        case 0x30F6: out[0] = 0x30B1; return 1;
+        // Half-width Katakana small → normal
+        case 0xFF67: out[0] = 0xFF71; return 1;
+        case 0xFF68: out[0] = 0xFF72; return 1;
+        case 0xFF69: out[0] = 0xFF73; return 1;
+        case 0xFF6A: out[0] = 0xFF74; return 1;
+        case 0xFF6B: out[0] = 0xFF75; return 1;
+        case 0xFF6C: out[0] = 0xFF94; return 1;
+        case 0xFF6D: out[0] = 0xFF95; return 1;
+        case 0xFF6E: out[0] = 0xFF96; return 1;
+        case 0xFF6F: out[0] = 0xFF82; return 1;
         }
     }
-    return codepoint;
+    out[0] = codepoint;
+    return 1;
+}
+
+/**
+ * Backward-compatible wrapper: returns only the first codepoint of the full mapping.
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
+    uint32_t out[3];
+    apply_text_transform_full(codepoint, text_transform, is_word_start, out);
+    return out[0];
 }
 
 /**
@@ -96,6 +288,46 @@ CssEnum get_text_transform_from_block(BlockProp* blk) {
         return blk->text_transform;
     }
     return CSS_VALUE_NONE;
+}
+
+/**
+ * Count justification opportunities in a UTF-8 text segment.
+ * CSS Text 3 §7.3: For auto justification, distribute extra space at:
+ *   1. Word separators (U+0020 SPACE)
+ *   2. Between adjacent CJK ID-class characters (inter-character gaps)
+ * @param str UTF-8 text data
+ * @param len byte length of text segment
+ * @return number of justification opportunities
+ */
+int count_justify_opportunities(const char* str, int len) {
+    if (!str || len <= 0) return 0;
+
+    int count = 0;
+    const char* end = str + len;
+    bool prev_was_id = false;
+
+    while (str < end) {
+        uint32_t cp;
+        int bytes = str_utf8_decode(str, (size_t)(end - str), &cp);
+        if (bytes <= 0) { str++; prev_was_id = false; continue; }
+
+        if (cp == ' ') {
+            count++;
+            prev_was_id = false;
+        } else if (has_id_line_break_class(cp)) {
+            // CJK inter-character gap: opportunity between two adjacent ID-class chars
+            if (prev_was_id) {
+                count++;
+            }
+            prev_was_id = true;
+        } else {
+            prev_was_id = false;
+        }
+
+        str += bytes;
+    }
+
+    return count;
 }
 
 /**
@@ -178,9 +410,8 @@ static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
 // ============================================================================
 
 /**
- * Check if a codepoint is a CJK character that allows line breaks.
- * CJK text can break between any two characters.
- * Covers: Chinese (Hanzi), Japanese (Kanji/Hiragana/Katakana), Korean (Hangul)
+ * Check if a codepoint is a CJK character (Han/Kana/Hangul).
+ * Used for CJK-specific font metrics tracking (line-height blending).
  */
 static inline bool is_cjk_character(uint32_t codepoint) {
     return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
@@ -191,7 +422,111 @@ static inline bool is_cjk_character(uint32_t codepoint) {
            (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
            (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
            (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
-           (codepoint >= 0xAC00 && codepoint <= 0xD7AF);    // Hangul Syllables
+           (codepoint >= 0xAC00 && codepoint <= 0xD7AF) ||  // Hangul Syllables
+           (codepoint >= 0xFF65 && codepoint <= 0xFF9F);    // Halfwidth Katakana
+}
+
+/**
+ * Check if a codepoint has UAX#14 line break class ID (Ideographic).
+ * Characters with ID class allow line breaks before and after them
+ * under normal wrapping (CSS Text 3 §5.2, UAX #14).
+ * Covers: CJK ideographs, Kana, Hangul, emoji, Yi, CJK symbols/radicals,
+ * CJK compatibility ideographs, and other ID-class characters.
+ */
+bool has_id_line_break_class(uint32_t cp) {
+    // CJK Unified Ideographs and Extensions
+    if (cp >= 0x3400 && cp <= 0x9FFF) return true;   // Extension A + main block
+    if (cp >= 0xF900 && cp <= 0xFAFF) return true;   // CJK Compatibility Ideographs
+    if (cp >= 0x20000 && cp <= 0x2CEAF) return true;  // Extensions B/C/D/E
+    if (cp >= 0x2CEB0 && cp <= 0x2EBE0) return true;  // Extension F
+    if (cp >= 0x2EBF0 && cp <= 0x2F7FF) return true;  // Extension I + nearby
+    if (cp >= 0x2F800 && cp <= 0x2FA1F) return true;  // CJK Compat Ideographs Supplement
+    if (cp >= 0x30000 && cp <= 0x3FFFD) return true;  // Extensions G/H + Plane 3
+
+    // Kana and Hangul
+    if (cp >= 0x3040 && cp <= 0x30FF) return true;   // Hiragana + Katakana
+    if (cp >= 0x31F0 && cp <= 0x31FF) return true;   // Katakana Phonetic Extensions
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return true;   // Hangul Syllables
+    if (cp >= 0xFF65 && cp <= 0xFF9F) return true;   // Halfwidth Katakana
+    if (cp >= 0x1B000 && cp <= 0x1B2FF) return true;  // Kana Supplement + Extended-A + B
+
+    // CJK Symbols, Radicals, and related
+    if (cp >= 0x2E80 && cp <= 0x2FFF) return true;   // CJK Radicals + Kangxi + IDC
+    if (cp >= 0x3003 && cp <= 0x3007) return true;   // Ditto mark, JIS, Closing, Number Zero
+    if (cp >= 0x3012 && cp <= 0x3013) return true;   // Postal Mark, Geta Mark
+    if (cp >= 0x3020 && cp <= 0x303F) return true;   // Postal Mark Face through IDHFS
+    if (cp >= 0x3200 && cp <= 0x33FF) return true;   // Enclosed CJK + CJK Compatibility
+    if (cp >= 0x3105 && cp <= 0x312F) return true;   // Bopomofo
+    if (cp >= 0x3131 && cp <= 0x318E) return true;   // Hangul Compatibility Jamo
+    if (cp >= 0x3190 && cp <= 0x31EF) return true;   // Kanbun + Bopomofo Ext + CJK Strokes
+
+    // Yi syllables and radicals
+    if (cp >= 0xA000 && cp <= 0xA4CF) return true;   // Yi Syllables + Yi Radicals
+
+    // Halfwidth/Fullwidth forms with ID class
+    if (cp >= 0xFE30 && cp <= 0xFE6F) return true;   // CJK Compatibility Forms + Small Forms
+    if (cp >= 0xFF01 && cp <= 0xFF60) return true;   // Fullwidth ASCII variants
+    if (cp >= 0xFFA0 && cp <= 0xFFDC) return true;   // Halfwidth Hangul
+
+    // Tangut
+    if (cp >= 0x17000 && cp <= 0x18DF2) return true;  // Tangut Ideographs + Components
+
+    // Nushu
+    if (cp >= 0x1B170 && cp <= 0x1B2FB) return true;  // Nushu Characters
+
+    // Emoji and symbols with UAX#14 ID class
+    // Supplementary Symbols and Pictographs (Plane 1) — nearly all have ID class
+    if (cp >= 0x1F000 && cp <= 0x1FAFF) return true;  // Mahjong..Symbols Extended-A
+    if (cp >= 0x1FC00 && cp <= 0x1FFFD) return true;  // Reserved (default ID)
+
+    // BMP emoji with ID class (scattered in Misc Symbols / Dingbats)
+    if (cp == 0x231A || cp == 0x231B) return true;   // Watch, Hourglass
+    if (cp >= 0x23E9 && cp <= 0x23F3) return true;   // Media controls, timers
+    if (cp >= 0x23F8 && cp <= 0x23FA) return true;   // Pause, stop, record
+    if (cp == 0x2614 || cp == 0x2615) return true;   // Umbrella, Hot Beverage
+    if (cp == 0x2648) return true;                     // Aries (start of zodiac)
+    if (cp >= 0x2648 && cp <= 0x2653) return true;   // Zodiac symbols
+    if (cp == 0x267F) return true;                     // Wheelchair
+    if (cp >= 0x2693 && cp <= 0x2694) return true;   // Anchor, Swords
+    if (cp == 0x26A1) return true;                     // High Voltage
+    if (cp >= 0x26AA && cp <= 0x26AB) return true;   // Medium circles
+    if (cp >= 0x26BD && cp <= 0x26C8) return true;   // Soccer..Thunder Cloud
+    if (cp >= 0x26CE && cp <= 0x26D4) return true;   // Ophiuchus..No Entry
+    if (cp >= 0x26D5 && cp <= 0x26EA) return true;   // Various symbols..Church
+    if (cp >= 0x26F0 && cp <= 0x26F5) return true;   // Mountain..Sailboat
+    if (cp >= 0x26F7 && cp <= 0x26FA) return true;   // Skier..Tent
+    if (cp == 0x26FD) return true;                     // Fuel Pump
+    if (cp == 0x2702) return true;                     // Scissors
+    if (cp == 0x2705) return true;                     // Check Mark
+    if (cp >= 0x2708 && cp <= 0x270D) return true;   // Airplane..Writing Hand
+    if (cp == 0x270F) return true;                     // Pencil
+    if (cp == 0x2712) return true;                     // Black Nib
+    if (cp == 0x2714) return true;                     // Heavy Check Mark
+    if (cp == 0x2716) return true;                     // Heavy Multiplication X
+    if (cp == 0x271D) return true;                     // Latin Cross
+    if (cp == 0x2721) return true;                     // Star of David
+    if (cp == 0x2728) return true;                     // Sparkles
+    if (cp >= 0x2733 && cp <= 0x2734) return true;   // Asterisk, Star
+    if (cp == 0x2744) return true;                     // Snowflake
+    if (cp == 0x2747) return true;                     // Sparkle
+    if (cp == 0x274C) return true;                     // Cross Mark
+    if (cp == 0x274E) return true;                     // Cross Mark squared
+    if (cp >= 0x2753 && cp <= 0x2755) return true;   // Question marks, Exclamation
+    if (cp == 0x2757) return true;                     // Heavy Exclamation
+    if (cp >= 0x2763 && cp <= 0x2764) return true;   // Heart Exclamation, Heavy Heart
+    if (cp >= 0x2795 && cp <= 0x2797) return true;   // Plus, Minus, Division
+    if (cp == 0x27A1) return true;                     // Rightwards Arrow
+    if (cp == 0x27B0) return true;                     // Curly Loop
+    if (cp == 0x27BF) return true;                     // Double Curly Loop
+    if (cp >= 0x2934 && cp <= 0x2935) return true;   // Arrow up-right, down-right
+    if (cp >= 0x2B05 && cp <= 0x2B07) return true;   // Leftwards/Upwards/Downwards Arrow
+    if (cp >= 0x2B1B && cp <= 0x2B1C) return true;   // Black/White Large Square
+    if (cp == 0x2B50) return true;                     // White Medium Star
+    if (cp == 0x2B55) return true;                     // Heavy Large Circle
+    if (cp == 0x3297) return true;                     // Circled Ideograph Congratulation
+    if (cp == 0x3299) return true;                     // Circled Ideograph Secret
+
+    return false;
 }
 
 // ============================================================================
@@ -281,8 +616,31 @@ static inline bool is_line_break_cl(uint32_t cp) {
 }
 
 /**
+ * UAX #14: CJ (Conditional Japanese Starter) class characters.
+ * Resolved to NS in strict/normal mode, to ID in loose mode.
+ * CSS Text 3 §6.2: line-break: loose treats these as breakable (ID class).
+ */
+static inline bool is_line_break_cj(uint32_t cp) {
+    // Small hiragana: ぁぃぅぇぉっゃゅょゎゕゖ
+    if (cp == 0x3041 || cp == 0x3043 || cp == 0x3045 || cp == 0x3047 || cp == 0x3049) return true;
+    if (cp == 0x3063 || cp == 0x3083 || cp == 0x3085 || cp == 0x3087 || cp == 0x308E) return true;
+    if (cp == 0x3095 || cp == 0x3096) return true;
+    // Small katakana: ァィゥェォッャュョヮヵヶ
+    if (cp == 0x30A1 || cp == 0x30A3 || cp == 0x30A5 || cp == 0x30A7 || cp == 0x30A9) return true;
+    if (cp == 0x30C3 || cp == 0x30E3 || cp == 0x30E5 || cp == 0x30E7 || cp == 0x30EE) return true;
+    if (cp == 0x30F5 || cp == 0x30F6) return true;
+    // Prolonged sound mark: ー
+    if (cp == 0x30FC) return true;
+    // Halfwidth small katakana: ｧｨｩｪｫｬｭｮｯｰ
+    if (cp >= 0xFF67 && cp <= 0xFF70) return true;
+    return false;
+}
+
+/**
  * Check if a codepoint has NS (Non-Starter) line-break class.
  * CSS Text 3 §5.2: No break before NS characters when preceded by CJK.
+ * Note: CJ class characters (small kana, prolonged sound mark) are also
+ * non-starters in strict/normal mode — use is_line_break_cj() separately.
  */
 static inline bool is_line_break_ns(uint32_t cp) {
     // Thai
@@ -302,6 +660,14 @@ static inline bool is_line_break_ns(uint32_t cp) {
     // Halfwidth forms
     if (cp == 0xFF65 || cp == 0xFF9E || cp == 0xFF9F) return true;
     return false;
+}
+
+/**
+ * Check if a codepoint is a fullwidth exclamation/question mark.
+ * CSS Text 3 §6.2: line-break: loose allows breaks before these in CJK context.
+ */
+static inline bool is_fullwidth_ex(uint32_t cp) {
+    return cp == 0xFF01 || cp == 0xFF1F;  // ！ ？
 }
 
 /**
@@ -331,6 +697,45 @@ static inline bool is_line_break_ex_is_sy(uint32_t cp) {
     // SY class: break symbols
     if (cp == 0x002F) return true;                    // /
     return false;
+}
+
+
+/**
+ * Classify a codepoint into a semantic break kind (CSS Text 3 §4–5 + UAX #14).
+ * Called early in the layout loop so each codepoint is classified once.
+ * The collapse_spaces / collapse_newlines flags come from the white-space property.
+ */
+static BreakKind classify_break(uint32_t cp, bool collapse_spaces, bool collapse_newlines) {
+    // whitespace (CSS Text 3 §4)
+    if (cp == 0x0020) return collapse_spaces ? BRK_SPACE : BRK_PRESERVED_SPACE;
+    if (cp == '\t')   return collapse_spaces ? BRK_SPACE : BRK_TAB;
+    if (cp == '\n' || cp == '\r') return collapse_newlines ? BRK_SPACE : BRK_HARD_BREAK;
+
+    // non-breaking glue
+    if (cp == 0x00A0 || cp == 0x202F) return BRK_GLUE;         // visible NBSP / NNBSP
+    if (cp == 0x2060 || cp == 0xFEFF) return BRK_GLUE_ZW;      // zero-width WJ / ZWNBSP
+    if (cp == 0x200D) return BRK_ZWJ;                           // zero-width joiner
+
+    // break opportunities
+    if (cp == 0x200B) return BRK_ZERO_WIDTH_BREAK;              // ZWSP
+    if (cp == 0x00AD) return BRK_SOFT_HYPHEN;                   // SHY
+    if (cp == 0x002D || cp == 0x2010) return BRK_HYPHEN;        // hyphen-minus / hyphen
+    if (cp == 0x2013 || cp == 0x2014) return BRK_HYPHEN;        // en-dash / em-dash
+
+    // ideographic space
+    if (cp == 0x3000) return BRK_IDEOGRAPHIC_SPACE;
+
+    // UAX#14 ID class (CJK, emoji, Yi, etc.) — break-after unless keep-all
+    if (has_id_line_break_class(cp)) return BRK_CJK;
+
+    // UAX #14 line break classes
+    if (is_line_break_op(cp)) return BRK_OP;
+    if (is_line_break_cl(cp)) return BRK_CL;
+    if (is_line_break_cj(cp)) return BRK_CJ;
+    if (is_line_break_ns(cp)) return BRK_NS;
+    if (is_line_break_ex_is_sy(cp)) return BRK_EX_IS_SY;
+
+    return BRK_TEXT;
 }
 
 
@@ -446,14 +851,18 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
     // and have zero advance in composed sequences (handled by font shaping)
     if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return -1.0f;
 
+    // Variation Selectors: VS1-VS16 (U+FE00-U+FE0F) and VS17-VS256 (U+E0100-U+E01EF)
+    // are default-ignorable characters with zero advance width
+    if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return -1.0f;
+    if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return -1.0f;
+
     switch (codepoint) {
         // Zero-width characters (return negative to distinguish from "use font width")
         case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
         case 0x200C: return -1.0f;  // Zero Width Non-Joiner (ZWNJ)
         case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
+        case 0x00AD: return -1.0f;  // Soft Hyphen (SHY) - invisible unless line breaks here
         case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
-        case 0xFE0E: return -1.0f;  // Variation Selector 15 (text presentation)
-        case 0xFE0F: return -1.0f;  // Variation Selector 16 (emoji presentation)
         case 0x20E3: return -1.0f;  // Combining Enclosing Keycap
 
         // Unicode spaces with defined widths
@@ -470,6 +879,29 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
         // so we return 0 to use the font's glyph width
         default: return 0.0f;
     }
+}
+
+/**
+ * CSS Text 3 §4.1.2: Check if a codepoint has East Asian Width Fullwidth (F) or Wide (W).
+ * Used for segment break transformation rules: segment breaks between two
+ * East Asian F/W characters (neither Hangul) are removed instead of becoming spaces.
+ * utf8proc_charwidth returns 2 for F and W characters, 1 for all others.
+ */
+static inline bool is_east_asian_fw(uint32_t cp) {
+    return utf8proc_charwidth(cp) == 2;
+}
+
+/**
+ * CSS Text 3 §4.1.2: Check if a codepoint is Hangul.
+ * Segment break removal between East Asian Wide characters does not apply
+ * when either side is Hangul.
+ */
+static inline bool is_hangul(uint32_t cp) {
+    return (cp >= 0x1100 && cp <= 0x11FF) ||   // Hangul Jamo
+           (cp >= 0x3130 && cp <= 0x318F) ||   // Hangul Compatibility Jamo
+           (cp >= 0xA960 && cp <= 0xA97F) ||   // Hangul Jamo Extended-A
+           (cp >= 0xAC00 && cp <= 0xD7AF) ||   // Hangul Syllables
+           (cp >= 0xD7B0 && cp <= 0xD7FF);     // Hangul Jamo Extended-B
 }
 
 /**
@@ -785,7 +1217,7 @@ void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_is_hyphen = false;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_kind = BRK_TEXT;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
@@ -798,10 +1230,13 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
+    lycon->line.has_cjk_text = false;
+    lycon->line.max_top_bottom_height = 0;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
+    lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
     // These are the correct "parent" for top-level inline content.
     // span_vertical_align will override with actual parent span font when recursing.
@@ -817,6 +1252,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.committed_trailing_space = 0;
     lycon->line.hanging_space_width = 0;
     lycon->line.hanging_space_text_trim = 0;
+    lycon->line.rtl_hanging_space = 0;
     lycon->line.last_space_hanging_width = 0;
     lycon->line.last_space_hanging_text_trim = 0;
     lycon->line.wrap_opportunity_before_nowrap = false;
@@ -951,11 +1387,25 @@ void line_break(LayoutContext* lycon) {
                 lycon->line.last_text_rect->hanging_trim = hang_trim;
             }
         }
+        // CSS Text 3 §4.1.3: In RTL, trailing whitespace hangs past the inline-end
+        // (left edge). Save the hanging width so line_align() can shift the last text
+        // rect's x position leftward after alignment.
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            lycon->line.rtl_hanging_space = lycon->line.hanging_space_width;
+        }
         lycon->line.advance_x -= lycon->line.hanging_space_width;
         lycon->line.hanging_space_width = 0;
         lycon->line.hanging_space_text_trim = 0;
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
+    // CSS Text 3 §8: Letter-spacing must not be applied at the end of a line.
+    // Subtract the trailing letter-spacing from advance_x (line width) for
+    // alignment purposes (center, right, justify). Do NOT subtract before
+    // max_width, as browsers include trailing letter-spacing in intrinsic sizing.
+    if (lycon->line.trailing_letter_spacing != 0) {
+        lycon->line.advance_x -= lycon->line.trailing_letter_spacing;
+        lycon->line.trailing_letter_spacing = 0;
+    }
 
     // CSS Inline §5.2.1: When trailing whitespace is "collapsed away" at the end of a line,
     // it should not contribute to line height. If the last text rect was entirely trailing
@@ -1014,6 +1464,15 @@ void line_break(LayoutContext* lycon) {
 
     // horizontal text alignment
     line_align(lycon);
+
+    // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
+    // In RTL, trailing whitespace hangs past the inline-end (left edge).
+    // After alignment positions visible content, shift the last text rect's x
+    // leftward so the rect includes the hanging trailing space.
+    if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
+        lycon->line.last_text_rect->x -= lycon->line.rtl_hanging_space;
+        lycon->line.rtl_hanging_space = 0;
+    }
 
     // advance to next line
     // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
@@ -1095,6 +1554,19 @@ void line_break(LayoutContext* lycon) {
         used_line_height = css_line_height;
     }
 
+    // Chrome blends system CJK font metrics for lines containing CJK characters.
+    // When the primary font's normal line-height is smaller than the CJK system
+    // font's line-height (e.g., Ahem@16px→16 vs PingFang SC@16px→22), Chrome uses
+    // the larger value to prevent CJK glyphs from overlapping between lines.
+    if (lycon->line.has_cjk_text && lycon->block.line_height_is_normal) {
+        float cjk_lh = get_cjk_system_line_height(lycon->line.parent_font_size);
+        if (cjk_lh > used_line_height) {
+            log_debug("CJK line-height blending: %.1f → %.1f (CJK system font)",
+                      used_line_height, cjk_lh);
+            used_line_height = cjk_lh;
+        }
+    }
+
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // Inline elements whose content all collapsed (e.g., <em> </em>) get 0×0 from
     // compute_span_bounding_box. However, when the line has visible content, the
@@ -1114,6 +1586,13 @@ void line_break(LayoutContext* lycon) {
             if (!next || ((DomNode*)v)->parent != line_parent) break;
             v = (View*)next;
         }
+    }
+
+    // CSS 2.1 §10.8.1 second pass: expand line box for vertical-align:top/bottom elements.
+    // These elements don't participate in baseline-relative height calculation (first pass).
+    // If any top/bottom-aligned element is taller than the first-pass line box, expand it.
+    if (lycon->line.max_top_bottom_height > used_line_height) {
+        used_line_height = lycon->line.max_top_bottom_height;
     }
 
     lycon->block.advance_y += used_line_height;
@@ -1168,13 +1647,20 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
             if (bytes > 0) char_bytes = bytes;
         }
 
-        // CJK characters are individual break opportunities — first "word" is one character
-        if (is_cjk_character(codepoint)) {
+        // ID-class characters are individual break opportunities — first "word" is one character
+        if (has_id_line_break_class(codepoint)) {
             if (width == 0.0f) {
                 // The first char is CJK — measure just this one character
-                codepoint = apply_text_transform(codepoint, text_transform, word_start);
+                uint32_t tt_out[3];
+                int tt_count = apply_text_transform_full(codepoint, text_transform, word_start, tt_out);
+                codepoint = tt_out[0];
                 GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
                 width += (ginfo.id != 0) ? ginfo.advance_x : lycon->font.current_font_size;
+                // Add advance for extra codepoints from full case mapping
+                for (int tti = 1; tti < tt_count; tti++) {
+                    GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+                    if (eg.id != 0) width += eg.advance_x;
+                }
             }
             break;
         }
@@ -1183,7 +1669,16 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         // U+00AD soft hyphen is a break opportunity
         if (codepoint == 0x00AD) break;
 
-        codepoint = apply_text_transform(codepoint, text_transform, word_start);
+        {
+        uint32_t tt_out[3];
+        int tt_count = apply_text_transform_full(codepoint, text_transform, word_start, tt_out);
+        codepoint = tt_out[0];
+        // Add advance widths for extra codepoints from full case mapping
+        for (int tti = 1; tti < tt_count; tti++) {
+            GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+            if (eg.id != 0) width += eg.advance_x + lycon->font.style->letter_spacing;
+        }
+        }
         bool is_small_caps_lower = false;
         if (has_small_caps(lycon)) {
             uint32_t original = codepoint;
@@ -1238,7 +1733,16 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is hangable — treat as space
         // for lookahead purposes so it doesn't predict false overflow.
         if (codepoint == 0x3000) return RDT_LINE_NOT_FILLED;
-        codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        {
+        uint32_t tt_out[3];
+        int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+        codepoint = tt_out[0];
+        // Add advance widths for extra codepoints from full case mapping
+        for (int tti = 1; tti < tt_count; tti++) {
+            GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+            if (eg.id != 0) text_width += eg.advance_x + lycon->font.style->letter_spacing;
+        }
+        }
         // CSS font-variant: small-caps — convert lowercase to uppercase
         // Track whether we scaled a lowercase char for size reduction
         bool is_small_caps_lower = false;
@@ -1267,7 +1771,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
             text_width += unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
-            // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
+            // get glyph advance via font module (returns CSS pixels)
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
             if (ginfo.id == 0) {
                 // glyph not in primary font — estimate width as 1em for lookahead
@@ -1285,7 +1789,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        if (lycon->line.advance_x + text_width > line_right) { // line filled up
+        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
+        // Subtract the trailing letter-spacing in the overflow check.
+        if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right) { // line filled up
             // CSS Text 3 §5.2: If a break opportunity (hyphen, soft hyphen, ZWSP,
             // CJK) existed before the overflow, the text can be split during actual
             // layout at that break point.  Don't signal LINE_FILLED — let the text
@@ -1365,7 +1871,10 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
 }
 
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
-    assert(text_length > 0);
+    if (text_length <= 0) {
+        log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
+        return;
+    }
     rect->length = text_length;
     rect->width = text_width;
     lycon->line.advance_x += text_width;
@@ -1530,14 +2039,22 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // Get overflow-wrap property for emergency word breaking
     // line-break: anywhere also implies overflow-wrap: anywhere behavior
+    // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum overflow_wrap = get_overflow_wrap(lycon);
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD || overflow_wrap == CSS_VALUE_ANYWHERE
-                       || line_break_val == CSS_VALUE_ANYWHERE);
+                       || line_break_val == CSS_VALUE_ANYWHERE
+                       || word_break == CSS_VALUE_BREAK_WORD);
 
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops
+
+    // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
+    // transformation. When a collapsible segment break occurs between two East Asian
+    // Wide characters (neither Hangul), the break is removed instead of becoming a space.
+    // Also tracks ZWSP (U+200B) which triggers removal of adjacent segment breaks.
+    uint32_t last_processed_cp = 0;
 
     log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
               white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
@@ -1545,7 +2062,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
     // A leading space constitutes a soft wrap opportunity, enabling the first-word-fit
     // check at LAYOUT_TEXT to wrap to the next line if the first word doesn't fit.
-    bool had_leading_space = is_space(*str);
+    // Preserved newlines (pre, pre-wrap) are forced breaks, not soft wrap opportunities —
+    // the newline handler in the main loop will perform the line break, so exclude them
+    // to avoid a double line break (one from the first-word check, one from the handler).
+    bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
 
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
@@ -1577,12 +2097,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     // Check if we're already past the line end before starting new text
     // This can happen after an inline-block that's wider than the container
+    // CSS Text 3 §5.2: Only wrap at allowed break points (soft wrap opportunities).
+    // Empty inline elements (e.g., <span></span>) do NOT introduce break
+    // opportunities. Require a valid wrap point: a previous space/ZWSP, a
+    // collapsed-whitespace wrap opportunity, a leading space in this text,
+    // or word-break: break-all (every character boundary is a break point).
     {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         // Only break if we're strictly past the end, not just at the end
         // Being exactly at the end is fine - whitespace might be collapsed
-        if (wrap_lines && lycon->line.advance_x > line_right && !lycon->line.is_line_start) {
+        if (wrap_lines && lycon->line.advance_x > line_right && !lycon->line.is_line_start
+            && (lycon->line.last_space || lycon->line.wrap_opportunity_before_nowrap
+                || had_leading_space || break_all)) {
             log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
                       lycon->line.advance_x, line_right);
             line_break(lycon);
@@ -1748,24 +2275,42 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Tab characters with preserved whitespace: use tab-size * space_width
             // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
             if (codepoint == '\t' && !collapse_spaces) {
-                // CSS Text 3 §4.2: tab-size <number> = multiple of space advance width
-                // including associated letter-spacing and word-spacing
+                // CSS Text 3 §4.2: tab-size <number> — tab stops occur at points
+                // that are multiples of (tab-size × space advance) from the block's
+                // starting content edge. If tab-size is 0, the tab is not rendered.
+                // The space advance is computed using the block container's font,
+                // not the inline element's font (CSS Text 3 §4.2: "the advance
+                // width of the space character as rendered by the block's font").
                 int ts = 8;
                 ViewElement* ancestor = lycon->view->parent_view();
                 while (ancestor) {
                     if (ancestor->is_element()) {
                         DomElement* elem = static_cast<DomElement*>(ancestor);
-                        if (elem->blk && elem->blk->tab_size > 0) {
+                        if (elem->blk && elem->blk->tab_size >= 0) {
                             ts = elem->blk->tab_size;
                             break;
                         }
                     }
                     ancestor = ancestor->parent_view();
                 }
-                float space_advance = lycon->font.style->space_width
-                    + lycon->font.style->word_spacing
-                    + lycon->font.style->letter_spacing;
-                wd = space_advance * ts;
+                // Use block container's font for space advance (set during block layout setup)
+                FontProp* block_font = lycon->block.block_container_font;
+                if (!block_font) block_font = lycon->font.style;
+                if (ts == 0) {
+                    wd = 0;
+                } else {
+                    float space_advance = block_font->space_width
+                        + block_font->word_spacing
+                        + block_font->letter_spacing;
+                    float tab_period = space_advance * ts;
+                    // Current position from block's starting content edge
+                    float current_x = rect->x + rect->width;
+                    // CSS Text 3 §4.2: if the distance to the next tab stop is less
+                    // than 0.5ch, the next tab stop after that is used instead.
+                    float half_ch = block_font->space_width * 0.5f;
+                    float next_tab = tab_period * ceilf((current_x + half_ch) / tab_period);
+                    wd = next_tab - current_x;
+                }
             } else {
                 // Regular space: apply word-spacing and letter-spacing once
                 wd += lycon->font.style->word_spacing;
@@ -1784,7 +2329,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else { next_ch = str + 1; }
 
             // Apply text-transform before loading glyph
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
             // CSS font-variant: small-caps — convert lowercase to uppercase
             bool is_small_caps_lower = false;
             if (has_small_caps(lycon)) {
@@ -1806,9 +2353,23 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // so that: (a) last_space < next_ch (H5) is TRUE when overflow is checked,
                     // and (b) str = last_space + 1 correctly resumes at the next character.
                     str = next_ch;
+                    last_processed_cp = 0x200B;  // CSS Text 3 §4.1.2: track ZWSP for segment break rules
                     lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
-                    lycon->line.last_space_is_hyphen = false;
+                    lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
+                    lycon->line.is_line_start = false;
+                    lycon->line.has_space = false;
+                    lycon->line.trailing_space_width = 0;
+                    continue;
+                }
+                // CSS Text 3 §5.2: U+00AD SOFT HYPHEN is a line-break opportunity.
+                // It is invisible (zero width) unless the line breaks here, in which
+                // case a visible hyphen '-' is rendered at the end of the line.
+                if (codepoint == 0x00AD && wrap_lines) {
+                    str = next_ch;
+                    lycon->line.last_space = str - 1;
+                    lycon->line.last_space_pos = rect->width;
+                    lycon->line.last_space_kind = BRK_SOFT_HYPHEN;
                     lycon->line.is_line_start = false;
                     lycon->line.has_space = false;
                     lycon->line.trailing_space_width = 0;
@@ -1826,7 +2387,23 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 wd = unicode_space_em * lycon->font.current_font_size * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
+                // Peek ahead for VS16 (U+FE0F) — forces emoji/color presentation
+                bool emoji_presentation = false;
+                if (next_ch) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)next_ch, (size_t)(text_end - next_ch), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) {
+                        emoji_presentation = true;
+                    }
+                }
+                // For layout metrics, use the regular font path even for Emoji_Presentation=Yes
+                // codepoints (without explicit VS16). The regular fallback chain gives metrics
+                // consistent with browser layout. The raster renderer (render.cpp) separately
+                // forces emoji font for color output. VS16-preceded codepoints still use
+                // emoji font since the author explicitly requested emoji presentation.
+                LoadedGlyph* glyph = emoji_presentation
+                    ? font_load_glyph_emoji(lycon->font.font_handle, &_sd, codepoint, false)
+                    : font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -1877,10 +2454,33 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                                                   glyph->font_normal_line_height);
                     }
                 }
+                // Track CJK characters for line-height blending with system CJK font metrics
+                if (is_cjk_character(codepoint)) {
+                    lycon->line.has_cjk_text = true;
+                }
             }
             // CSS 2.1 §16.4: letter-spacing is added after every character
             // Browsers include trailing letter-spacing in text node width
             wd += lycon->font.style->letter_spacing;
+            // CSS Text 3 §8: Track trailing letter-spacing for trimming at line ends.
+            // letter-spacing must not be applied at the start or end of a line.
+            lycon->line.trailing_letter_spacing = lycon->font.style->letter_spacing;
+
+            // Full case mapping expansion: add advance widths for extra codepoints
+            // (e.g., ß → S,S — the second S needs its own advance width + letter-spacing)
+            if (tt_count > 1) {
+                FontStyleDesc _sd_extra = font_style_desc_from_prop(lycon->font.style);
+                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                for (int ti = 1; ti < tt_count; ti++) {
+                    uint32_t extra_cp = tt_out[ti];
+                    if (extra_cp == 0) continue;
+                    LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd_extra, extra_cp, false);
+                    float extra_wd = extra_glyph ? (extra_glyph->advance_x / pixel_ratio) : 0;
+                    if (is_small_caps_lower) extra_wd *= 0.7f;
+                    extra_wd += lycon->font.style->letter_spacing;
+                    wd += extra_wd;
+                }
+            }
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
@@ -1901,11 +2501,32 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
             *str == '\n' || *str == '\r' ? '^' : *str, rect->x, rect->width, wd, lycon->line.right);
         prev_is_zwj_base = is_zwj_composition_base(codepoint);
+        // CSS Text 3 §4.1.2: track last non-whitespace codepoint for segment break transformation
+        if (!is_space(codepoint)) last_processed_cp = codepoint;
+        // UAX #14 B2: Em-dash (U+2014) allows break before and after.
+        // Record break-before BEFORE adding width so the overflow check can use it.
+        // Note: en-dash (U+2013, class BA) only allows break after, not before.
+        if (codepoint == 0x2014 && wrap_lines && !lycon->line.is_line_start) {
+            lycon->line.last_space = (uint8_t*)str - 1;       // byte before the dash
+            lycon->line.last_space_pos = rect->width;          // width before the dash
+            lycon->line.last_space_kind = BRK_HYPHEN;
+        }
         rect->width += wd;
+        // CSS Text 3 §4.1.3: Pre-wrap trailing spaces "hang" and don't count for
+        // overflow. But once a non-space character follows the spaces, they are no
+        // longer trailing — reset hanging_space_width so the overflow check below
+        // uses the full content width (space + non-space) for wrapping decisions.
+        if (!is_space(*str) && codepoint != 0x3000 && lycon->line.hanging_space_width > 0) {
+            lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
+        }
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        if (wrap_lines && rect->x + rect->width > line_right) { // line filled up and wrapping enabled
+        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
+        // Subtract the trailing letter-spacing when checking overflow, since the
+        // last character's letter-spacing would be trimmed at line break time.
+        if (wrap_lines && rect->x + rect->width - lycon->line.trailing_letter_spacing > line_right) { // line filled up and wrapping enabled
             log_debug("line filled up");
             if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.
@@ -1937,16 +2558,41 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             else if (is_space(*str)) { // break at the current space (collapsible or break-spaces)
                 log_debug("break on space");
-                // CSS Text 3 §3: For break-spaces, "a soft wrap opportunity exists
-                // before and after every preserved white space character." When the
-                // space overflows and there's content before it, break BEFORE the
-                // space so it starts the next line with its full width preserved.
+                // CSS Text 3 §3: For break-spaces, "a line breaking opportunity exists
+                // after every preserved white space character." When a space overflows:
+                // - If a prior break opportunity exists, rewind to it.
+                // - If break-word/break-all is active, break BEFORE the space (the
+                //   overflow-wrap property adds break opportunities at character
+                //   boundaries, so the word/space boundary is a valid break point).
+                // - Otherwise (pure break-spaces), the space stays on the current
+                //   line and we break after it (may cause overflow).
                 if (white_space == CSS_VALUE_BREAK_SPACES && rect->width - wd > 0.01f) {
-                    rect->width -= wd;  // remove the space from current line
-                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
-                    line_break(lycon);
-                    log_debug("break-spaces: break before space");
-                    goto LAYOUT_TEXT;  // space will be first char on new line
+                    if (lycon->line.last_space
+                        && text_start <= lycon->line.last_space
+                        && lycon->line.last_space < str) {
+                        // Prior break exists — rewind to it
+                        log_debug("break-spaces: rewind to prior space break");
+                        str = lycon->line.last_space + 1;
+                        float output_width = lycon->line.last_space_pos;
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                        line_break(lycon);  goto LAYOUT_TEXT;
+                    } else if (break_word || break_all) {
+                        // break-word/break-all active — break before space (old behavior)
+                        log_debug("break-spaces + break-word: break before space");
+                        rect->width -= wd;
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                        line_break(lycon);
+                        goto LAYOUT_TEXT;
+                    } else {
+                        // Pure break-spaces: space must stay on this line (CSS Text 3 §3)
+                        str++;  // advance past the space
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                        lycon->line.trailing_space_width = 0;
+                        line_break(lycon);
+                        log_debug("break-spaces: break after overflowing space (no prior break)");
+                        if (*str) { goto LAYOUT_TEXT; }
+                        else return;
+                    }
                 }
                 // skip spaces according to white-space mode
                 if (collapse_spaces) {
@@ -1994,32 +2640,79 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // Output full width including hanging spaces — visual rect preserves
                     // hanging width. line_break() adjusts advance_x to exclude it.
                     float output_width = lycon->line.last_space_pos;
-                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                    int text_len = str - text_start - rect->start_index;
+                    // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes from output,
+                    // add visible hyphen width, and mark rect for hyphen rendering.
+                    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+                        text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
+                        GlyphInfo hglyph = font_get_glyph(lycon->font.font_handle, '-');
+                        float hyphen_width = (hglyph.id != 0) ? hglyph.advance_x : lycon->font.current_font_size * 0.3f;
+                        output_width += hyphen_width;
+                    }
+                    output_text(lycon, text_view, rect, text_len, output_width);
+                    if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+                        rect->has_trailing_hyphen = true;
+                    }
+                    // CSS 2.1 §16.6.1: When wrapping at a collapsible space, the
+                    // trailing space must be trimmed from the line box width.
+                    // trailing_space_width was reset when subsequent non-space chars
+                    // were processed (before the overflow triggered the rewind).
+                    // Restore it so line_break() can trim the trailing space.
+                    // CSS Text 3 §8: Include word-spacing and letter-spacing that were
+                    // part of the space's total width, since trailing space trimming
+                    // should remove the entire space contribution (glyph + spacing).
+                    if (lycon->line.last_space_kind == BRK_SPACE && collapse_spaces) {
+                        GlyphInfo sp_glyph = font_get_glyph(lycon->font.font_handle, ' ');
+                        lycon->line.trailing_space_width = sp_glyph.advance_x
+                            + lycon->font.style->word_spacing
+                            + lycon->font.style->letter_spacing;
+                    }
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text
-                    // CSS Text 3 §5.2: When overflow-wrap: break-word is active and
-                    // the last soft-wrap opportunity (space) is in a previous text node,
-                    // perform an emergency mid-word break at the overflow point rather
-                    // than moving the entire text to a new line.  This creates a
-                    // multi-line inline box (e.g. <code>) matching browser behavior,
-                    // where characters that fit on the current line stay there and the
-                    // remainder continues on the next line.
+                    // CSS Text 3 §5.2: overflow-wrap: break-word with last_space in
+                    // a previous text node. First check if the word would fit on a fresh
+                    // line. If so, rewind to the text start and move it to the next line
+                    // (the space in the previous node serves as the natural wrap point).
+                    // Only do an emergency mid-word break when the word itself is wider
+                    // than the full line (i.e., it would overflow even on a fresh line).
                     if (break_word && !lycon->line.is_line_start) {
-                        log_debug("break-word: mid-word break (last_space outside text)");
-                        rect->width -= wd;  // undo the char that overflowed
-                        int text_len = str - text_start - rect->start_index;
-                        if (text_len > 0) {
-                            output_text(lycon, text_view, rect, text_len, rect->width);
-                        } else {
-                            // first char already overflows: unlink the empty rect
-                            if (text_view->rect == rect) {
-                                text_view->rect = nullptr;
+                        float full_line_width = lycon->line.right - lycon->line.left;
+                        // rect->width includes chars measured so far (including overflow char).
+                        // The total word width is at least rect->width - wd (chars that fit)
+                        // plus the remaining unmeasured chars. Use rect->width - wd as a
+                        // lower bound: if even that exceeds a full line, mid-word break.
+                        // If it fits, the whole word likely fits — move to next line.
+                        if (rect->width - wd > full_line_width) {
+                            // Word is wider than a full line: emergency mid-word break
+                            log_debug("break-word: mid-word break (word wider than line)");
+                            rect->width -= wd;  // undo the char that overflowed
+                            int text_len = str - text_start - rect->start_index;
+                            if (text_len > 0) {
+                                output_text(lycon, text_view, rect, text_len, rect->width);
                             } else {
-                                TextRect* prev = text_view->rect;
-                                while (prev && prev->next != rect) prev = prev->next;
-                                if (prev) prev->next = nullptr;
+                                // first char already overflows: unlink the empty rect
+                                if (text_view->rect == rect) {
+                                    text_view->rect = nullptr;
+                                } else {
+                                    TextRect* prev = text_view->rect;
+                                    while (prev && prev->next != rect) prev = prev->next;
+                                    if (prev) prev->next = nullptr;
+                                }
                             }
+                            line_break(lycon);
+                            goto LAYOUT_TEXT;
+                        }
+                        // Word fits on a fresh line: rewind to text start and wrap
+                        log_debug("break-word: rewinding text to next line (word fits on fresh line)");
+                        str = text_start + rect->start_index;  // rewind to text start
+                        // Unlink the partially-measured rect
+                        if (text_view->rect == rect) {
+                            text_view->rect = nullptr;
+                        } else {
+                            TextRect* prev = text_view->rect;
+                            while (prev && prev->next != rect) prev = prev->next;
+                            if (prev) prev->next = nullptr;
                         }
                         line_break(lycon);
                         goto LAYOUT_TEXT;
@@ -2114,8 +2807,44 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         if (is_space(*str)) {
             if (collapse_spaces) {
+                // CSS Text 3 §4.1.2: Track whether whitespace contains a segment break (newline)
+                bool has_segment_break = (codepoint == '\n' || codepoint == '\r');
                 // Collapse multiple spaces into one, respecting newline preservation
-                do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+                do {
+                    str++;
+                    if ((*str == '\n' || *str == '\r') && collapse_newlines) has_segment_break = true;
+                } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+
+                // CSS Text 3 §4.1.2: Segment Break Transformation Rules
+                // After collapsing whitespace, if the sequence contained a segment break,
+                // check whether the break should be removed entirely:
+                //   Rule 1: If adjacent to ZWSP (U+200B), remove the segment break.
+                //   Rule 2: If both the character before and after are East Asian Width
+                //           Fullwidth/Wide (not Hangul), remove the segment break.
+                //           NOTE: Rule 2 is deferred — browser references do not implement it.
+                // Otherwise the segment break becomes a space (already added as wd).
+                if (has_segment_break && collapse_newlines) {
+                    bool remove_break = false;
+                    // check character before the segment break
+                    bool prev_is_zwsp = (last_processed_cp == 0x200B);
+                    // check character after: peek at next non-whitespace
+                    bool next_is_zwsp = false;
+                    if (*str) {
+                        if (str[0] == 0xE2 && str[1] == 0x80 && str[2] == 0x8B) {
+                            next_is_zwsp = true;
+                        }
+                    }
+                    // Rule 1: adjacent to ZWSP
+                    if (prev_is_zwsp || next_is_zwsp) {
+                        remove_break = true;
+                    }
+                    if (remove_break) {
+                        rect->width -= wd;  // undo the space width
+                        log_debug("segment break removed between U+%04X and U+%04X (CSS Text 3 §4.1.2)",
+                                  last_processed_cp, next_is_zwsp ? 0x200BU : 0U);
+                        continue;  // skip break opportunity recording
+                    }
+                }
             } else {
                 // Preserve spaces - just advance one character
                 str++;
@@ -2125,7 +2854,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.is_line_start = false;
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
-            lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
+            lycon->line.last_space_kind = BRK_SPACE;
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces.
             // A preserved space (white-space: pre/pre-wrap) must NOT cause a
             // subsequent collapsible space in a different element to be collapsed.
@@ -2163,7 +2892,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             str = next_ch;
             lycon->line.last_space = str - 1;
             lycon->line.last_space_pos = rect->width;
-            lycon->line.last_space_is_hyphen = false;
+            lycon->line.last_space_kind = BRK_IDEOGRAPHIC_SPACE;
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces
             if (collapse_spaces) {
                 lycon->line.has_space = true;
@@ -2177,20 +2906,67 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
             lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
         }
-        else if (*str == '-') {
-            // Hyphens are break opportunities (CSS allows breaking after hyphens)
-            // Track this as a potential break point, but include the hyphen in the current line
+        else if (is_other_space_separator(codepoint) && codepoint != 0x3000
+                 && codepoint != 0x00A0 && codepoint != 0x202F) {
+            // UAX #14: Other space separators (Unicode Zs category) have line break
+            // class BA (Break After). These are NOT CSS "white space" — they are
+            // content characters that happen to provide break opportunities.
+            // Unlike U+0020 (regular space), they are not collapsed, not trimmed,
+            // and not hung at end of line. They always render at their natural width.
+            // Includes: U+1680 OGHAM SPACE MARK, U+2000-U+200A (EN QUAD through
+            // HAIR SPACE), U+205F MEDIUM MATHEMATICAL SPACE.
             str = next_ch;
-            lycon->line.last_space = str - 1;  // position of the hyphen
-            lycon->line.last_space_pos = rect->width;  // width including the hyphen
-            lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
+            lycon->line.last_space = str - 1;
+            lycon->line.last_space_pos = rect->width;
+            lycon->line.last_space_kind = BRK_HYPHEN;  // BA class: break-after, width included
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
             lycon->line.hanging_space_text_trim = 0;
         }
-        else if (((break_all && is_typographic_letter_unit(codepoint)) || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+        else if (codepoint == 0x002D || codepoint == 0x2010 || codepoint == 0x2013 || codepoint == 0x2014) {
+            // Hyphens and dashes are break opportunities (CSS Text 3 §5.2, UAX #14)
+            //   U+002D hyphen-minus, U+2010 hyphen: break after (UAX #14 class HY)
+            //   U+2013 en-dash: break after (UAX #14 class BA)
+            //   U+2014 em-dash: break before and after (UAX #14 class B2)
+            // Track this as a potential break point, but include the dash in the current line
+            str = next_ch;
+            lycon->line.last_space = str - 1;  // last byte of the dash
+            lycon->line.last_space_pos = rect->width;  // width including the dash
+            lycon->line.last_space_kind = BRK_HYPHEN;
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
+        }
+        else if (codepoint == 0x003F && wrap_lines && !lycon->line.is_line_start) {
+            // CSS Text 3 §5.2: UAs may add wrap opportunities at typographic symbol units.
+            // ? (UAX #14 class EX): break after in URL query separators (e.g. "q3?lang=").
+            // Guard: only break before alphanumeric to avoid breaking prose like: gone?"
+            str = next_ch;
+            uint32_t next_cp = peek_codepoint(str);
+            if ((next_cp >= 'A' && next_cp <= 'Z') || (next_cp >= 'a' && next_cp <= 'z')
+                    || (next_cp >= '0' && next_cp <= '9')) {
+                lycon->line.last_space = str - 1;
+                lycon->line.last_space_pos = rect->width;
+                lycon->line.last_space_kind = BRK_TEXT;
+            }
+            lycon->line.is_line_start = false;
+            lycon->line.has_space = false;
+            lycon->line.trailing_space_width = 0;
+            lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
+        }
+        else if (((break_all && (is_typographic_letter_unit(codepoint)
+                                  // CSS Text 3 §5.2: line-break: anywhere introduces soft wrap
+                                  // opportunities around ALL typographic character units, including
+                                  // GL class characters (NBSP U+00A0, NNBSP U+202F) which are
+                                  // normally non-breaking. word-break: break-all only converts
+                                  // letters and numbers, so NBSP remains non-breaking with break-all.
+                                  || (line_break_val == CSS_VALUE_ANYWHERE && (codepoint == 0x00A0 || codepoint == 0x202F))))
+                  || (has_id_line_break_class(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character.
             // Track as last_space so overflow handling can break at this position.
             // UAX #14 / CSS Text 3 §5.2: Apply OP/CL/NS rules:
@@ -2205,6 +2981,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             // Record break opportunity after this character, unless forbidden by line-break rules
             bool allow_break = true;
+            // CSS Text 3 §5.2: line-break: anywhere overrides standard UAX#14 prohibitions.
+            // All typographic character unit boundaries become soft wrap opportunities.
+            if (line_break_val != CSS_VALUE_ANYWHERE) {
             // UAX #14 §9.2: ZWJ (U+200D) suppresses break between adjacent characters
             if (zwj_preceded) allow_break = false;
             // CSS Text 3 §5.2: No break after OP characters (OP stays with following content)
@@ -2217,16 +2996,35 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (next_cp == 0) next_cp = peek_next_inline_codepoint(text_node);
                 if (next_cp == 0x200D) {
                     allow_break = false;  // ZWJ follows: suppress break
-                } else if (next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp) ||
-                                    is_line_break_ex_is_sy(next_cp))) {
-                    allow_break = false;
+                } else if (next_cp > 0) {
+                    bool is_loose = (line_break_val == CSS_VALUE_LOOSE);
+                    // CL class always prevents break
+                    if (is_line_break_cl(next_cp)) {
+                        allow_break = false;
+                    }
+                    // NS class prevents break; CJ chars also prevent unless loose mode
+                    else if (is_line_break_ns(next_cp) || (!is_loose && is_line_break_cj(next_cp))) {
+                        allow_break = false;
+                    }
+                    // EX/IS/SY prevents break, but loose mode allows break before fullwidth ！？
+                    else if (is_line_break_ex_is_sy(next_cp) && !(is_loose && is_fullwidth_ex(next_cp))) {
+                        allow_break = false;
+                    }
+                    // UAX #14 LB21: × BA — no break before Break After characters.
+                    // Other space separators (U+1680, U+2000-U+200A, U+205F) have
+                    // class BA. Suppress CJK/break-all break if one follows.
+                    else if (is_other_space_separator(next_cp)
+                             && next_cp != 0x00A0 && next_cp != 0x202F && next_cp != 0x3000) {
+                        allow_break = false;
+                    }
                 }
             }
+            } // end if not line-break: anywhere
             zwj_preceded = false;  // consumed
             if (allow_break) {
                 lycon->line.last_space = str - 1;  // last byte of current char
                 lycon->line.last_space_pos = rect->width;  // width including this char
-                lycon->line.last_space_is_hyphen = false;
+                lycon->line.last_space_kind = has_id_line_break_class(codepoint) ? BRK_CJK : BRK_TEXT;
             }
         }
         else {
@@ -2245,7 +3043,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (!(next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp)))) {
                     lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
-                    lycon->line.last_space_is_hyphen = false;
+                    lycon->line.last_space_kind = is_line_break_cl(codepoint) ? BRK_CL : BRK_NS;
                 }
             }
         }
@@ -2268,7 +3066,18 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // preserves hanging space width. line_break() adjusts advance_x
                 // to exclude hanging width from line box calculations.
                 float output_width = lycon->line.last_space_pos;
-                output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                int text_len = str - text_start - rect->start_index;
+                // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes, add visible hyphen
+                if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+                    text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
+                    GlyphInfo hglyph = font_get_glyph(lycon->font.font_handle, '-');
+                    float hyphen_width = (hglyph.id != 0) ? hglyph.advance_x : lycon->font.current_font_size * 0.3f;
+                    output_width += hyphen_width;
+                }
+                output_text(lycon, text_view, rect, text_len, output_width);
+                if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
+                    rect->has_trailing_hyphen = true;
+                }
                 line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text

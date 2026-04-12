@@ -7,13 +7,31 @@
 #include <string.h>  // for memcpy, strlen
 #include <unistd.h>  // for _exit
 #include <pthread.h> // for thread-safe initialization
+#include <sys/mman.h> // for mmap/munmap
 
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
 
+// mmap chunk for bump-allocator pools (no rpmalloc involvement)
+typedef struct MmapChunk {
+    struct MmapChunk* next;
+    uint8_t* base;
+    size_t size;
+} MmapChunk;
+
+#define MMAP_CHUNK_SIZE (4 * 1024 * 1024)  // 4 MB per chunk
+
+// Size header for mmap bump allocations (enables safe realloc)
+// Stored immediately before the returned pointer, 16-byte aligned
+#define MMAP_SIZE_HEADER 16
+
 struct Pool {
-    rpmalloc_heap_t* heap;  // rpmalloc heap handle for this pool
+    rpmalloc_heap_t* heap;  // rpmalloc heap handle (NULL for mmap mode)
     unsigned pool_id;       // unique pool identifier
     unsigned valid;         // validity marker (POOL_VALID_MARKER when valid)
+    // mmap mode fields (used when heap == NULL)
+    MmapChunk* chunks;     // linked list of mmap'd regions
+    uint8_t* cursor;       // bump pointer within current chunk
+    uint8_t* limit;        // end of current chunk
 };
 
 #define POOL_VALID_MARKER 0xDEADBEEF
@@ -23,6 +41,7 @@ static int rpmalloc_initialized = 0;
 static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
 static __thread int thread_initialized = 0;
 
+// ============================================================================
 // Initialize rpmalloc lazily when first needed
 static void ensure_rpmalloc_initialized(void) {
     // Global initialization
@@ -51,13 +70,12 @@ Pool* pool_create(void) {
     ensure_rpmalloc_initialized();
 
     // Allocate pool structure using standard malloc (not rpmalloc)
-    // This keeps the pool management separate from rpmalloc
     Pool* pool = (Pool*)malloc(sizeof(Pool));
     if (!pool) {
         return NULL;
     }
 
-    // Acquire a dedicated heap for this pool
+    // Acquire a fresh first-class heap for this pool
     pool->heap = rpmalloc_heap_acquire();
     if (!pool->heap) {
         free(pool);
@@ -66,8 +84,61 @@ Pool* pool_create(void) {
 
     pool->pool_id = next_pool_id++;
     pool->valid = POOL_VALID_MARKER;
+    pool->chunks = NULL;
+    pool->cursor = NULL;
+    pool->limit = NULL;
 
     return pool;
+}
+
+// ============================================================================
+// mmap-backed bump allocator pool (bypasses rpmalloc entirely)
+// ============================================================================
+
+static void mmap_pool_grow(Pool* pool, size_t min_size) {
+    size_t chunk_size = min_size < MMAP_CHUNK_SIZE ? MMAP_CHUNK_SIZE : min_size;
+    chunk_size = (chunk_size + 4095) & ~4095;  // page-align
+    void* mem = mmap(NULL, chunk_size, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mem == MAP_FAILED) {
+        log_error("mmap_pool_grow: mmap failed for %zu bytes", chunk_size);
+        pool->cursor = NULL;
+        pool->limit = NULL;
+        return;
+    }
+    MmapChunk* chunk = (MmapChunk*)malloc(sizeof(MmapChunk));
+    chunk->base = (uint8_t*)mem;
+    chunk->size = chunk_size;
+    chunk->next = pool->chunks;
+    pool->chunks = chunk;
+    pool->cursor = (uint8_t*)mem;
+    pool->limit = (uint8_t*)mem + chunk_size;
+}
+
+Pool* pool_create_mmap(void) {
+    Pool* pool = (Pool*)malloc(sizeof(Pool));
+    if (!pool) return NULL;
+    pool->heap = NULL;  // signals mmap mode
+    pool->pool_id = next_pool_id++;
+    pool->valid = POOL_VALID_MARKER;
+    pool->chunks = NULL;
+    pool->cursor = NULL;
+    pool->limit = NULL;
+    mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
+    return pool;
+}
+
+static void mmap_pool_free_chunks(Pool* pool) {
+    MmapChunk* chunk = pool->chunks;
+    while (chunk) {
+        MmapChunk* next = chunk->next;
+        munmap(chunk->base, chunk->size);
+        free(chunk);
+        chunk = next;
+    }
+    pool->chunks = NULL;
+    pool->cursor = NULL;
+    pool->limit = NULL;
 }
 
 void pool_destroy(Pool* pool) {
@@ -78,19 +149,40 @@ void pool_destroy(Pool* pool) {
 
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
 
-    // Free all memory allocated from this heap's spans, then release the heap
-    // structure back to the global recycling queue.
-    // NOTE: rpmalloc_heap_free_all alone does NOT unmap spans — it only moves
-    // the heap to a queue. Without heap_free_all, spans accumulate across
-    // pool create/destroy cycles and eventually corrupt the system allocator.
+    if (pool->heap) {
+        // rpmalloc mode
+        rpmalloc_heap_free_all(pool->heap);
+        rpmalloc_heap_release(pool->heap);
+    } else {
+        // mmap mode
+        mmap_pool_free_chunks(pool);
+    }
+
+    pool->valid = 0;
+    free(pool);
+}
+
+void pool_drain(Pool* pool) {
+    if (!pool || pool->valid != POOL_VALID_MARKER) return;
     if (pool->heap) {
         rpmalloc_heap_free_all(pool->heap);
         rpmalloc_heap_release(pool->heap);
+        pool->heap = NULL;
+    } else {
+        mmap_pool_free_chunks(pool);
     }
-
-    // Mark as invalid and free the pool structure using standard free
     pool->valid = 0;
-    free(pool);  // Use standard free since we used standard malloc
+}
+
+void pool_reset(Pool* pool) {
+    if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    if (pool->heap) {
+        rpmalloc_heap_free_all(pool->heap);
+    } else {
+        // mmap mode: munmap all chunks, allocate fresh initial chunk
+        mmap_pool_free_chunks(pool);
+        mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
+    }
 }
 
 void* pool_alloc(Pool* pool, size_t size) {
@@ -104,18 +196,33 @@ void* pool_alloc(Pool* pool, size_t size) {
     }
     if (size > SIZE_LIMIT) {
         log_error("pool_alloc: size %zu exceeds limit", size);
-        return NULL;  // Overflow protection
-    }
-    // Use heap-specific allocation for better memory isolation
-    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
-        log_error("pool_alloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
         return NULL;
     }
-    void* result = rpmalloc_heap_alloc(pool->heap, size);
-    if (!result) {
-        log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
+    if (pool->heap) {
+        // rpmalloc mode
+        if ((uintptr_t)pool->heap < 0x10000) {
+            log_error("pool_alloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
+            return NULL;
+        }
+        void* result = rpmalloc_heap_alloc(pool->heap, size);
+        if (!result) {
+            log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
+        }
+        return result;
     }
-    return result;
+    // mmap mode: bump allocate (16-byte aligned) with size header
+    size = (size + 15) & ~15;
+    size_t total = MMAP_SIZE_HEADER + size;
+    if (!pool->cursor || pool->cursor + total > pool->limit) {
+        mmap_pool_grow(pool, total);
+        if (!pool->cursor) return NULL;  // mmap failed
+    }
+    // store allocation size in header
+    size_t* header = (size_t*)pool->cursor;
+    *header = size;
+    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
+    pool->cursor += total;
+    return ptr;
 }
 
 void* pool_calloc(Pool* pool, size_t size) {
@@ -123,47 +230,69 @@ void* pool_calloc(Pool* pool, size_t size) {
         return NULL;
     }
     if (size > SIZE_LIMIT) {
-        return NULL;  // Overflow protection
-    }
-    // Guard against corrupted heap pointer (pre-existing bug in some JS bundles)
-    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
-        log_error("pool_calloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
         return NULL;
     }
-    // Use heap-specific zeroed allocation for better memory isolation
-    return rpmalloc_heap_calloc(pool->heap, 1, size);
+    if (pool->heap) {
+        // rpmalloc mode
+        if ((uintptr_t)pool->heap < 0x10000) {
+            log_error("pool_calloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
+            return NULL;
+        }
+        return rpmalloc_heap_calloc(pool->heap, 1, size);
+    }
+    // mmap mode: bump allocate (pages are pre-zeroed by mmap) with size header
+    size = (size + 15) & ~15;
+    size_t total = MMAP_SIZE_HEADER + size;
+    if (!pool->cursor || pool->cursor + total > pool->limit) {
+        mmap_pool_grow(pool, total);
+        if (!pool->cursor) return NULL;  // mmap failed
+    }
+    // store allocation size in header (pages are zeroed, so write size)
+    size_t* header = (size_t*)pool->cursor;
+    *header = size;
+    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
+    pool->cursor += total;
+    return ptr;  // data area zeroed by MAP_ANONYMOUS
 }
 
 void pool_free(Pool* pool, void* ptr) {
     if (!pool || pool->valid != POOL_VALID_MARKER || !ptr) {
         return;
     }
-    // Free using heap-specific free for better memory isolation
-    rpmalloc_heap_free(pool->heap, ptr);
+    if (pool->heap) {
+        rpmalloc_heap_free(pool->heap, ptr);
+    }
+    // mmap mode: no-op (bump allocator, freed in bulk on reset/destroy)
 }
 
 void* pool_realloc(Pool* pool, void* ptr, size_t size) {
     if (!pool || pool->valid != POOL_VALID_MARKER) {
         return NULL;
     }
-    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
-        log_error("pool_realloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
-        return NULL;
-    }
-    // Handle NULL pointer case (should behave like malloc)
-    if (!ptr) {
-        return rpmalloc_heap_alloc(pool->heap, size);
-    }
-    // Handle zero size case (should behave like free)
-    if (size == 0) {
-        rpmalloc_heap_free(pool->heap, ptr);
-        return NULL;
-    }
     if (size > SIZE_LIMIT) {
-        return NULL;  // Overflow protection
+        return NULL;
     }
-    // Use heap-specific reallocation for better memory isolation
-    return rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
+    if (pool->heap) {
+        // rpmalloc mode
+        if ((uintptr_t)pool->heap < 0x10000) {
+            log_error("pool_realloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
+            return NULL;
+        }
+        if (!ptr) return rpmalloc_heap_alloc(pool->heap, size);
+        if (size == 0) { rpmalloc_heap_free(pool->heap, ptr); return NULL; }
+        return rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
+    }
+    // mmap mode: allocate new + copy using size header
+    if (!ptr) return pool_alloc(pool, size);
+    if (size == 0) return NULL;
+    void* new_ptr = pool_alloc(pool, size);
+    if (new_ptr && ptr) {
+        // read old allocation size from embedded header
+        size_t old_size = *(size_t*)((uint8_t*)ptr - MMAP_SIZE_HEADER);
+        size_t copy_size = old_size < size ? old_size : size;
+        memcpy(new_ptr, ptr, copy_size);
+    }
+    return new_ptr;
 }
 
 void mempool_cleanup(void) {

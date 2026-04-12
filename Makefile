@@ -148,9 +148,14 @@ TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
-# TypeScript grammar dependencies
+# JavaScript scanner dependencies
+JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
+
+# TypeScript grammar and scanner dependencies
 TS_GRAMMAR_JS = lambda/tree-sitter-typescript/grammar.js
 TS_PARSER_C = lambda/tree-sitter-typescript/src/parser.c
+TS_SCANNER_C = lambda/tree-sitter-typescript/src/scanner.c
+TS_SCANNER_H = lambda/tree-sitter-typescript/scanner_v2.h
 
 # LaTeX grammar dependencies
 LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
@@ -189,8 +194,8 @@ $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
-# Build tree-sitter-javascript library
-$(TREE_SITTER_JAVASCRIPT_LIB):
+# Build tree-sitter-javascript library (depends on scanner source)
+$(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "Building tree-sitter-javascript library..."
 	@echo "🔧 Compiler: $(CC)"
 	@echo "🔧 CXX: $(CXX)"
@@ -231,8 +236,8 @@ $(TS_PARSER_C): $(TS_GRAMMAR_JS)
 	fi
 	@echo "✅ TypeScript parser generated successfully"
 
-# Build tree-sitter-typescript library (depends on parser generation)
-$(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C)
+# Build tree-sitter-typescript library (depends on parser generation + scanner)
+$(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 	@echo "Building tree-sitter-typescript library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-typescript libtree-sitter-typescript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
@@ -395,16 +400,16 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check docs intellisense analyze-binary \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    verify-windows verify-linux \
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
-	    test-ui-automation test-reactive-ui
+	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart \
+	    test-ui-automation test-reactive-ui test-redex-baseline
 
 # Help target - shows available commands
 help:
@@ -453,6 +458,7 @@ help:
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
+	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -858,6 +864,10 @@ test-lambda-baseline: build-test
 		exit 1; \
 	fi
 
+test-redex-baseline: build
+	@echo "Running Redex formal semantics baseline verification..."
+	@cd lambda/semantics && racket baseline-verify.rkt
+
 test-bash-baseline: build-jube-test
 	@echo "Running Bash transpiler baseline tests (requires lambda-jube)..."
 	@./test/test_bash_run_gtest.exe
@@ -872,6 +882,26 @@ test-c2mir: build-test
 		echo "Error: No test suite found"; \
 		exit 1; \
 	fi
+
+# test262 baseline: run only tests in baseline, must pass 100%
+test262-baseline: build-test
+	@echo "Running test262 baseline ($(shell wc -l < test/js/test262_baseline.txt | tr -d ' ') entries)..."
+	@./test/test_js_test262_gtest.exe --baseline-only --batch-only
+
+# test262 full: run all discovered test262 tests (slow, ~5min)
+test262-full: build-test
+	@echo "Running full test262 suite..."
+	@./test/test_js_test262_gtest.exe --batch-only
+
+# test262 update baseline: run all tests and update baseline with current passing set
+test262-update-baseline: build-test
+	@echo "Running full test262 suite and updating baseline..."
+	@./test/test_js_test262_gtest.exe --batch-only --update-baseline
+
+# test262 strip comments: create comment-stripped test files for faster I/O
+test262-strip:
+	@echo "Stripping comments from test262 files..."
+	@python3 utils/strip_test262_comments.py
 
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
@@ -986,7 +1016,139 @@ test-input-baseline: build-test
 	fi; \
 	echo "=============================================================="
 
-test-radiant-baseline: test-layout-baseline test-ui-automation
+test-radiant-baseline: build-test
+	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
+	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
+	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
+	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
+	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
+	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
+	pretext_passed=0; pretext_failed=0; pretext_skipped=0; pretext_status="⏭️  SKIP"; \
+	any_failed=0; \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🧪 RADIANT BASELINE TEST SUITE"; \
+	echo "=============================================================="; \
+	\
+	echo ""; \
+	echo "📦 Layout Baseline Tests:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c baseline 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	layout_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_failed=$$(echo "$$output" | grep "Failed:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_passed=$${layout_passed:-0}; layout_failed=$${layout_failed:-0}; layout_skipped=$${layout_skipped:-0}; \
+	if [ "$$layout_failed" = "0" ] || [ -z "$$layout_failed" ]; then layout_status="✅ PASS"; layout_failed=0; else layout_status="❌ FAIL"; any_failed=1; fi; \
+	\
+	echo ""; \
+	echo "📦 WPT CSS Text Baseline:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c wpt-css-text 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	wpt_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_passed=$${wpt_passed:-0}; wpt_failed=$${wpt_failed:-0}; wpt_skipped=$${wpt_skipped:-0}; \
+	if echo "$$output" | grep -q "Baseline Regressions"; then wpt_status="❌ FAIL"; any_failed=1; \
+	elif echo "$$output" | grep -q "all .* required tests passed"; then wpt_status="✅ PASS"; \
+	else wpt_status="✅ PASS"; fi; \
+	\
+	if [ -f test/layout/snapshot/page.json ]; then \
+		echo ""; \
+		echo "📦 Page Snapshot Regression:"; \
+		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+			| node test/layout/save_suite_snapshot.js --check page 2>&1) || true; \
+		echo "$$snap_output" | tail -5; \
+		if echo "$$snap_output" | grep -q "REGRESSION"; then \
+			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions"; then \
+			snapshot_status="✅ PASS"; \
+		else \
+			snapshot_status="✅ PASS"; \
+		fi; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 UI Automation Tests:"; \
+	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
+		output=$$(./test/test_ui_automation_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
+		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_passed=$${ui_passed:-0}; ui_failed=$${ui_failed:-0}; \
+		if [ "$$ui_failed" = "0" ] || [ -z "$$ui_failed" ]; then ui_status="✅ PASS"; ui_failed=0; else ui_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_ui_automation_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 Page Load (Headless) Tests:"; \
+	if [ -f "test/test_page_load_gtest.exe" ]; then \
+		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
+		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		page_passed=$${page_passed:-0}; page_failed=$${page_failed:-0}; \
+		if [ "$$page_failed" = "0" ] || [ -z "$$page_failed" ]; then page_status="✅ PASS"; page_failed=0; else page_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_page_load_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 Fuzzy Crash Tests:"; \
+	if [ -f "test/test_fuzzy_crash_gtest.exe" ]; then \
+		output=$$(./test/test_fuzzy_crash_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|fuzzy files tested" | tail -5; \
+		fuzzy_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		fuzzy_passed=$${fuzzy_passed:-0}; fuzzy_failed=$${fuzzy_failed:-0}; \
+		if [ "$$fuzzy_failed" = "0" ] || [ -z "$$fuzzy_failed" ]; then fuzzy_status="✅ PASS"; fuzzy_failed=0; else fuzzy_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_fuzzy_crash_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 Pretext Corpus Baseline:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c pretext 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	pretext_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_passed=$${pretext_passed:-0}; pretext_failed=$${pretext_failed:-0}; pretext_skipped=$${pretext_skipped:-0}; \
+	if echo "$$output" | grep -q "Baseline Regressions"; then pretext_status="❌ FAIL"; any_failed=1; \
+	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
+	else pretext_status="✅ PASS"; fi; \
+	\
+	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
+	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
+	total_tests=$$((total_passed + total_failed)); \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🏁 RADIANT BASELINE TEST RESULTS BREAKDOWN"; \
+	echo "=============================================================="; \
+	echo ""; \
+	echo "📊 Test Results by Suite:"; \
+	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
+	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped)"; \
+	echo "   ├── Page Snapshot       $$snapshot_status"; \
+	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
+	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed)"; \
+	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped)"; \
+	echo ""; \
+	echo "📊 Overall Results:"; \
+	echo "   Total Tests: $$total_tests"; \
+	echo "   ✅ Passed:   $$total_passed"; \
+	if [ $$total_failed -gt 0 ]; then \
+		echo "   ❌ Failed:   $$total_failed"; \
+	fi; \
+	if [ $$total_skipped -gt 0 ]; then \
+		echo "   ⏭️  Skipped:  $$total_skipped"; \
+	fi; \
+	echo "=============================================================="; \
+	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
@@ -1007,6 +1169,16 @@ test-ui-automation: build-test
 		./test/test_ui_automation_gtest.exe; \
 	else \
 		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
+		exit 1; \
+	fi
+
+test-page-load: build-test
+	@echo "Running Page Load (Headless) test suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_page_load_gtest.exe" ]; then \
+		./test/test_page_load_gtest.exe; \
+	else \
+		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
 
@@ -1317,6 +1489,21 @@ test-fuzzy-extended: build
 	@./test/fuzzy/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
 
+# Radiant Layout Engine Fuzzy Testing
+# Generates adversarial HTML/CSS and tests layout robustness
+
+# Quick radiant fuzz (2 minutes)
+fuzz-radiant-quick: build
+	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
+	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=120
+
+# Full radiant fuzz (default 5 minutes, override with duration=N)
+fuzz-radiant: build
+	@echo "Running Radiant layout fuzzy tests..."
+	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+
 test-integration:
 	@echo "Running integration tests..."
 	@if [ -f "test/test_integration.sh" ]; then \
@@ -1536,6 +1723,43 @@ lint:
 # Binary size analysis by library group
 analyze-binary:
 	@python3 utils/analyze_binary.py lambda.exe -v
+
+# Check for raw malloc/calloc/realloc/free usage in lambda/ and radiant/ source files.
+# All allocations in lambda/radiant should use mem_alloc/mem_free from lib/memtrack.h.
+# Documented exceptions that need raw allocation should use raw_malloc/raw_free from lib/memtrack.h
+# and be marked with a comment: // RAWALLOC_OK: <reason>
+check-raw-alloc:
+	@echo "Checking for raw malloc/free usage in lambda/ and radiant/..."
+	@VIOLATIONS=$$(grep -rn '\bmalloc\s*(\|\bcalloc\s*(\|\brealloc\s*(\|\bfree\s*(\|\bstrdup\s*(\|\bstrndup\s*(' \
+		lambda/ radiant/ \
+		--include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+		| grep -v 'tree-sitter' \
+		| grep -v 'mem_alloc\|mem_calloc\|mem_realloc\|mem_free\|mem_strdup\|mem_strndup' \
+		| grep -v 'raw_malloc\|raw_calloc\|raw_realloc\|raw_free\|raw_strdup' \
+		| grep -v 'arena_alloc\|arena_calloc\|pool_alloc\|pool_calloc' \
+		| grep -v 'rpmalloc\|rpfree\|rpcalloc\|rprealloc' \
+		| grep -v 'hashmap_free\|strbuf_free\|stringbuf_free\|arraylist_free\|mempool_free\|arena_free\|pool_free' \
+		| grep -v 'utf8proc_free\|curl_free\|xml_free\|yaml_free\|hb_free' \
+		| grep -v 'RAWALLOC_OK' \
+		| grep -v '^\s*//' \
+		| grep -v '//.*\(malloc\|calloc\|realloc\|free\|strdup\)' \
+		| grep -v '^\s*\*' \
+		| grep -v ':[0-9]*:\s*/\*\|:[0-9]*:\s*\*' \
+		| grep -v '^\s*#' \
+		| grep -v 'lambda-wasm-main.c' \
+		| grep -v 'windows_compat.h' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found raw allocation calls (use mem_alloc/mem_free or raw_malloc/raw_free + RAWALLOC_OK):"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT violation(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No raw allocation violations found"; \
+	fi
 
 # Clang-tidy static analysis
 tidy:

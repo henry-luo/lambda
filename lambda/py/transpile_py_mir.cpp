@@ -20,7 +20,7 @@
 #include <mir-gen.h>
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #ifdef _WIN32
 #include <malloc.h>
 #else
@@ -7473,7 +7473,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     }
 
     // allocate transpiler
-    PyMirTranspiler* mt = (PyMirTranspiler*)malloc(sizeof(PyMirTranspiler));
+    PyMirTranspiler* mt = (PyMirTranspiler*)mem_alloc(sizeof(PyMirTranspiler), MEM_CAT_PY_RUNTIME);
     if (!mt) {
         log_error("py-mir: failed to allocate PyMirTranspiler");
         MIR_finish(ctx);
@@ -7546,7 +7546,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         py_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -7564,7 +7564,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
 
     MIR_finish(ctx);
     py_transpiler_destroy(tp);
@@ -7620,7 +7620,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
 
     // ensure a heap context exists for module loading
     if (!context || !context->heap) {
-        EvalContext* temp_ctx = (EvalContext*)calloc(1, sizeof(EvalContext));
+        EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_PY_RUNTIME);
         temp_ctx->pool = pool_create();
         temp_ctx->result = ItemNull;
         temp_ctx->nursery = gc_nursery_create(0);
@@ -7646,14 +7646,14 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     PyTranspiler* tp = py_transpiler_create(runtime);
     if (!tp) {
         log_error("py-mir: module: failed to create transpiler for '%s'", py_path);
-        free(source);
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
     if (!py_transpiler_parse(tp, source, strlen(source))) {
         log_error("py-mir: module: parse failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source);
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
@@ -7662,7 +7662,7 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     if (!ast) {
         log_error("py-mir: module: AST build failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source);
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
@@ -7670,16 +7670,16 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     if (!ctx) {
         log_error("py-mir: module: MIR context init failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        free(source);
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
 
-    PyMirTranspiler* mt = (PyMirTranspiler*)malloc(sizeof(PyMirTranspiler));
+    PyMirTranspiler* mt = (PyMirTranspiler*)mem_alloc(sizeof(PyMirTranspiler), MEM_CAT_PY_RUNTIME);
     if (!mt) {
         log_error("py-mir: module: failed to allocate transpiler for '%s'", py_path);
         MIR_finish(ctx);
         py_transpiler_destroy(tp);
-        free(source);
+        mem_free(source); // source from read_text_file (lib)
         return ItemNull;
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
@@ -7768,10 +7768,10 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
     pm_defer_mir_cleanup(ctx);
     py_transpiler_destroy(tp);
-    free(source);
+    mem_free(source); // source from read_text_file (lib)
 
     log_info("py-mir: module '%s' loaded successfully", py_path);
     return ns;

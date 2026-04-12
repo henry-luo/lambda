@@ -12,7 +12,7 @@
 #include "../../lib/uv_loop.h"
 
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 extern Input* js_input;
 
@@ -25,8 +25,8 @@ static inline Item make_js_undefined() {
 }
 
 static Item make_string_item(const char* str, int len) {
-    if (!str || len <= 0) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
+    if (!str) return ItemNull;
+    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
     return (Item){.item = s2it(s)};
 }
 
@@ -78,7 +78,7 @@ typedef struct JsChildProcess {
 // =============================================================================
 
 static void child_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)malloc(suggested_size);
+    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
     buf->len = buf->base ? suggested_size : 0;
 }
 
@@ -94,9 +94,9 @@ static void child_handle_close_cb(uv_handle_t* handle) {
     cp->handles_closed++;
     // all 3 handles (process + 2 pipes) fully closed → safe to free struct
     if (cp->handles_closed >= 3) {
-        if (cp->stdout_buf) free(cp->stdout_buf);
-        if (cp->stderr_buf) free(cp->stderr_buf);
-        free(cp);
+        if (cp->stdout_buf) mem_free(cp->stdout_buf);
+        if (cp->stderr_buf) mem_free(cp->stderr_buf);
+        mem_free(cp);
     }
 }
 
@@ -110,7 +110,7 @@ static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
         if (cp->stdout_len + (size_t)nread >= cp->stdout_cap) {
             size_t new_cap = (cp->stdout_cap == 0) ? 4096 : cp->stdout_cap * 2;
             while (new_cap < cp->stdout_len + (size_t)nread + 1) new_cap *= 2;
-            char* nb = (char*)realloc(cp->stdout_buf, new_cap);
+            char* nb = (char*)mem_realloc(cp->stdout_buf, new_cap, MEM_CAT_JS_RUNTIME);
             if (nb) { cp->stdout_buf = nb; cp->stdout_cap = new_cap; }
         }
         if (cp->stdout_buf) {
@@ -119,7 +119,7 @@ static void child_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
             cp->stdout_buf[cp->stdout_len] = '\0';
         }
     }
-    if (buf->base) free(buf->base);
+    if (buf->base) mem_free(buf->base);
     if (nread < 0) { // EOF or error
         uv_close((uv_handle_t*)stream, child_handle_close_cb);
         if (cp) {
@@ -135,7 +135,7 @@ static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
         if (cp->stderr_len + (size_t)nread >= cp->stderr_cap) {
             size_t new_cap = (cp->stderr_cap == 0) ? 4096 : cp->stderr_cap * 2;
             while (new_cap < cp->stderr_len + (size_t)nread + 1) new_cap *= 2;
-            char* nb = (char*)realloc(cp->stderr_buf, new_cap);
+            char* nb = (char*)mem_realloc(cp->stderr_buf, new_cap, MEM_CAT_JS_RUNTIME);
             if (nb) { cp->stderr_buf = nb; cp->stderr_cap = new_cap; }
         }
         if (cp->stderr_buf) {
@@ -144,7 +144,7 @@ static void child_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_bu
             cp->stderr_buf[cp->stderr_len] = '\0';
         }
     }
-    if (buf->base) free(buf->base);
+    if (buf->base) mem_free(buf->base);
     if (nread < 0) { // EOF or error
         uv_close((uv_handle_t*)stream, child_handle_close_cb);
         if (cp) {
@@ -220,7 +220,7 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
         return ItemNull;
     }
 
-    JsChildProcess* cp = (JsChildProcess*)calloc(1, sizeof(JsChildProcess));
+    JsChildProcess* cp = (JsChildProcess*)mem_calloc(1, sizeof(JsChildProcess), MEM_CAT_JS_RUNTIME);
     if (!cp) return ItemNull;
 
     cp->callback = callback_item;
@@ -302,7 +302,7 @@ extern "C" Item js_cp_execSync(Item command_item) {
         if (result_len + chunk_len >= result_cap) {
             size_t new_cap = (result_cap == 0) ? 4096 : result_cap * 2;
             while (new_cap < result_len + chunk_len + 1) new_cap *= 2;
-            char* nb = (char*)realloc(result_buf, new_cap);
+            char* nb = (char*)mem_realloc(result_buf, new_cap, MEM_CAT_JS_RUNTIME);
             if (!nb) break;
             result_buf = nb;
             result_cap = new_cap;
@@ -321,7 +321,7 @@ extern "C" Item js_cp_execSync(Item command_item) {
             result_len--;
         }
         Item result = make_string_item(result_buf, (int)result_len);
-        free(result_buf);
+        mem_free(result_buf);
         return result;
     }
 

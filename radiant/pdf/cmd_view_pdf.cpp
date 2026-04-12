@@ -13,10 +13,6 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/font/font.h"
 
-// FreeType for direct glyph rendering in PDF viewer (OpenGL bitmap textures)
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 // External functions
 void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length); // From input-pdf.cpp
 int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
@@ -58,9 +54,8 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
     style.weight = fw;
     style.slant = fs;
     FontHandle* handle = font_resolve(uicon->font_ctx, &style);
-    FT_Face face = handle ? (FT_Face)font_handle_get_ft_face(handle) : NULL;
-    if (!face) {
-        log_warn("No font face available for text rendering");
+    if (!handle) {
+        log_warn("No font handle available for text rendering");
         return;
     }
 
@@ -71,12 +66,11 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
     float pen_y = y;
 
     for (const char* p = text; *p; p++) {
-        // Load character glyph
-        if (FT_Load_Char(face, *p, FT_LOAD_RENDER)) {
+        // Load character glyph via unified font module
+        LoadedGlyph* lg = font_load_glyph(handle, &style, (uint32_t)*p, true);
+        if (!lg || !lg->bitmap.buffer) {
             continue;
         }
-
-        FT_GlyphSlot glyph = face->glyph;
 
         // Create texture from glyph bitmap
         GLuint texture;
@@ -87,12 +81,12 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
             GL_TEXTURE_2D,
             0,
             GL_ALPHA,
-            glyph->bitmap.width,
-            glyph->bitmap.rows,
+            lg->bitmap.width,
+            lg->bitmap.height,
             0,
             GL_ALPHA,
             GL_UNSIGNED_BYTE,
-            glyph->bitmap.buffer
+            lg->bitmap.buffer
         );
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -100,10 +94,10 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-        float xpos = pen_x + glyph->bitmap_left;
-        float ypos = pen_y - glyph->bitmap_top;
-        float w = glyph->bitmap.width;
-        float h = glyph->bitmap.rows;
+        float xpos = pen_x + lg->bitmap.bearing_x;
+        float ypos = pen_y - lg->bitmap.bearing_y;
+        float w = lg->bitmap.width;
+        float h = lg->bitmap.height;
 
         // Render textured quad with text color
         glEnable(GL_TEXTURE_2D);
@@ -126,7 +120,7 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
         glDeleteTextures(1, &texture);
 
         // Advance cursor
-        pen_x += (glyph->advance.x >> 6);
+        pen_x += lg->advance_x;
     }
 
     glDisable(GL_BLEND);
@@ -839,14 +833,14 @@ int view_pdf_in_window(const char* pdf_file) {
     Input* input = InputManager::create_input(nullptr); // URL not needed for direct parsing
     if (!input) {
         log_error("Failed to create Input structure");
-        free(pdf_content);
+        mem_free(pdf_content);
         return 1;
     }
 
     // Parse PDF content with explicit size
     log_info("Parsing PDF content...");
     parse_pdf(input, pdf_content, pdf_size);
-    free(pdf_content); // Done with raw content
+    mem_free(pdf_content); // Done with raw content
 
     // Check if parsing succeeded
     if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {

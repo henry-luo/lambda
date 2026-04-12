@@ -695,9 +695,17 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     handler_ctx.pool = rt->heap->pool;
                                     context = &handler_ctx;
                                 }
-                                // Clear input_context to prevent stale arena access
-                                // during list expansion in retransformed body functions.
-                                input_context = nullptr;
+                                // Phase 5: Set ui_mode + arena so retransformed body functions
+                                // allocate fat DomElements/DomTexts on the result arena.
+                                if (rt && rt->ui_mode && rt->result_arena) {
+                                    handler_ctx.ui_mode = true;
+                                    handler_ctx.arena = rt->result_arena;
+                                    input_context = (Context*)&handler_ctx;
+                                } else {
+                                    // Clear input_context to prevent stale arena access
+                                    // during list expansion in retransformed body functions.
+                                    input_context = nullptr;
+                                }
 
                                 // build event object map: {type, target_class, target_tag, x, y}
                                 Item event_item = build_lambda_event_map(doc, target, event_name, evcon);

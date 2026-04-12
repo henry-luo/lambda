@@ -17,6 +17,11 @@ extern "C" {
  * - Adaptive chunk sizing (4KB -> 64KB)
  * - Zero per-allocation metadata overhead
  * - Bulk reset/clear operations
+ *
+ * @warning ARENA_NOT_THREAD_SAFE - Arena is NOT thread-safe.
+ * Each Arena instance must be owned and accessed by a single thread only.
+ * Concurrent access from multiple threads requires external synchronization
+ * (e.g., a mutex). ScratchArena is designed for single-threaded scoped use.
  */
 
 // Default chunk size configurations
@@ -161,6 +166,14 @@ size_t arena_chunk_count(Arena* arena);
  * @return true if ptr was allocated from this arena, false otherwise
  */
 bool arena_owns(Arena* arena, const void* ptr);
+
+/**
+ * Get the underlying pool backing this arena
+ * Useful when external APIs require Pool* but most work goes through Arena.
+ * @param arena Arena to query
+ * @return The backing Pool, or NULL if arena is invalid
+ */
+Pool* arena_pool(Arena* arena);
 
 /**
  * Reallocate memory in arena with free-list support

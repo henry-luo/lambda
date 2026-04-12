@@ -11,6 +11,7 @@
  */
 
 #include "font_internal.h"
+#include "../memtrack.h"
 
 #include <stdio.h>
 
@@ -20,14 +21,14 @@
 
 char* font_cache_make_key(Arena* arena, const char* family,
                            FontWeight weight, FontSlant slant, float size_px) {
-    // "family:weight:slant:size" — e.g. "Arial:400:0:16"
-    // Max: 128 chars for family + 4 digits weight + 1 digit slant + 5 digits size + separators
+    // "family:weight:slant:size" — e.g. "Arial:400:0:16.0"
+    // Use float precision for size to avoid cache collisions between e.g. 13.33px and 13.67px
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%d",
+    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%.1f",
                      family ? family : "",
                      (int)weight,
                      (int)slant,
-                     (int)size_px);
+                     size_px);
     if (n <= 0 || (size_t)n >= sizeof(buf)) {
         n = (int)sizeof(buf) - 1;
     }
@@ -74,7 +75,10 @@ void font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle) {
     // arena-dup the key so it outlives the caller
     char* dup_key = arena_strdup(ctx->arena, key);
     FontCacheKey entry = {.key_str = dup_key, .handle = handle};
-    hashmap_set(ctx->face_cache, &entry);
+    const FontCacheKey* old = (const FontCacheKey*)hashmap_set(ctx->face_cache, &entry);
+    if (old && old->handle) {
+        font_handle_release(old->handle); // release replaced entry's handle
+    }
 
     log_debug("font_cache: inserted '%s' (count=%zu)", key, count + 1);
 }
@@ -270,7 +274,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
             handle = font_load_face_internal(ctx, platform_path, 0,
                                               style->size_px, physical_size,
                                               style->weight, style->slant);
-            free(platform_path);
+            mem_free(platform_path);
             if (handle) {
                 log_info("font_resolve: platform fallback for '%s'", style->family);
                 font_cache_insert(ctx, key, handle);

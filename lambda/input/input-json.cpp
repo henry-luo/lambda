@@ -288,8 +288,21 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
         case '[':
             return parse_array(ctx, json, depth);
         case '"': {
+            const char* before = *json;
             String* str = parse_string(ctx, json);
-            if (!str) return ctx.builder.createNull();  // empty string maps to null
+            if (!str) {
+                // distinguish empty string "" from error: if pointer advanced past closing quote, it's empty string
+                if (*json > before + 1) {
+                    // allocate a zero-length String from arena
+                    Arena* arena = ctx.builder.arena();
+                    String* empty = (String*)arena_alloc(arena, sizeof(String) + 1);
+                    empty->len = 0;
+                    empty->is_ascii = 1;
+                    empty->chars[0] = '\0';
+                    return (Item){.item = s2it(empty)};
+                }
+                return ctx.builder.createNull();  // actual parse error
+            }
             return (Item){.item = s2it(str)};
         }
         case 't':
@@ -342,5 +355,31 @@ Item parse_json_to_item(Input* input, const char* json_string) {
         ctx.logErrors();
     }
 
+    return result;
+}
+
+// Strict variant: parse JSON and verify no trailing non-whitespace content
+// Returns ITEM_NULL and sets *ok = false if there is trailing content or parse error
+Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok) {
+    *ok = false;
+    if (!json_string || !*json_string) {
+        return {.item = ITEM_NULL};
+    }
+
+    InputContext ctx(input, json_string, strlen(json_string));
+
+    Item result = parse_value(ctx, &json_string, 0);
+
+    if (ctx.hasErrors()) {
+        return {.item = ITEM_NULL};
+    }
+
+    // check for trailing non-whitespace content
+    skip_whitespace(&json_string);
+    if (*json_string != '\0') {
+        return {.item = ITEM_NULL};
+    }
+
+    *ok = true;
     return result;
 }

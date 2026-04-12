@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lib/gc/gc_heap.h"
 #include "lambda-decimal.hpp"
@@ -44,7 +45,7 @@ extern "C" String* get_ascii_char_string(unsigned char ch) {
 
 void heap_init() {
     log_debug("heap init: %p", context);
-    context->heap = (Heap*)calloc(1, sizeof(Heap));
+    context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
     context->heap->gc = gc_heap_create();
     context->heap->pool = context->heap->gc->pool;  // alias for compatibility
 
@@ -59,6 +60,22 @@ void heap_init() {
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
 
     // initialize interned single-char ASCII table (one-time, idempotent)
+    if (!ascii_char_table_initialized) {
+        init_ascii_char_table();
+    }
+}
+
+void heap_init_with_pool(Pool* pool) {
+    log_debug("heap init with pool: %p (pool=%p)", context, pool);
+    context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
+    context->heap->gc = gc_heap_create_with_pool(pool);
+    context->heap->pool = context->heap->gc->pool;
+
+    gc_register_root(context->heap->gc, &context->result.item);
+    gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+    context->heap->gc->vmap_trace = vmap_gc_trace;
+    context->heap->gc->vmap_destroy = vmap_gc_destroy;
+
     if (!ascii_char_table_initialized) {
         init_ascii_char_table();
     }
@@ -331,7 +348,7 @@ void heap_destroy() {
             gc_heap_destroy(context->heap->gc);  // pool_destroy frees all pool memory
         }
         context->heap->pool = NULL;
-        free(context->heap);
+        mem_free(context->heap);
     }
 }
 

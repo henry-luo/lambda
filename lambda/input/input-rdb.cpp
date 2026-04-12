@@ -20,6 +20,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/mem.h"
 #include <string.h>
 
 // helper: get a map attribute by key using direct shape lookup.
@@ -479,13 +480,13 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
             entry.pk_value = fk_val;
             entry.count = 0;
             entry.capacity = 4;
-            entry.rows = (Item*)malloc(4 * sizeof(Item));
+            entry.rows = (Item*)mem_alloc(4 * sizeof(Item), MEM_CAT_INPUT_OTHER);
             if (!entry.rows) continue;
         }
 
         if (entry.count >= entry.capacity) {
             entry.capacity *= 2;
-            Item* new_rows = (Item*)realloc(entry.rows, entry.capacity * sizeof(Item));
+            Item* new_rows = (Item*)mem_realloc(entry.rows, entry.capacity * sizeof(Item), MEM_CAT_INPUT_OTHER);
             if (!new_rows) continue;
             entry.rows = new_rows;
         }
@@ -553,7 +554,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
     void* grp_item;
     while (hashmap_iter(groups, &iter, &grp_item)) {
         RevFkEntry* e = (RevFkEntry*)grp_item;
-        free(e->rows);
+        mem_free(e->rows);
     }
     hashmap_free(groups);
 

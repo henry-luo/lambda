@@ -12,7 +12,7 @@
 #include "../../lib/log.h"
 
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cctype>
 
 // ============================================================================

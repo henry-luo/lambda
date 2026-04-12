@@ -2,6 +2,8 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
+#include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 extern "C" void* heap_data_alloc(size_t size);
@@ -784,12 +786,24 @@ Item map_get(Map* map, Item key) {
 }
 
 Element* elmt(int64_t type_index) {
-    Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
-    elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);
-    elmt->type = elmt_type;
-    return elmt;
+
+    if (context->ui_mode && context->arena) {
+        // ui_mode: allocate fat DomElement on result arena
+        DomElement* dom = (DomElement*)arena_calloc(context->arena, sizeof(DomElement));
+        dom->node_type = DOM_NODE_ELEMENT;
+        Element* e = dom_element_to_element(dom);
+        e->type_id = LMD_TYPE_ELEMENT;
+        e->type = elmt_type;
+        return e;
+    }
+
+    // non-UI: allocate plain Element on GC heap
+    Element *e = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    e->type_id = LMD_TYPE_ELEMENT;
+    e->type = elmt_type;
+    return e;
 }
 
 // MIR Direct module-type-list-aware wrapper for elmt.
@@ -799,6 +813,37 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
     Element* r = elmt(type_index);
     context->type_list = saved;
     return r;
+}
+
+// ui_mode helper: copy a GC-heap string into the result arena as a fat DomText node.
+// Returns the new String* (embedded in [DomText][String][chars]) on the arena.
+// Called by list_push() when adding a string to an element's content list in ui_mode.
+Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
+    String* src = str_item.get_string();
+    if (!src) return str_item;
+    size_t total = sizeof(DomText) + sizeof(String) + src->len + 1;
+    DomText* dt = (DomText*)arena_calloc(arena, total);
+    dt->node_type = DOM_NODE_TEXT;
+    String* dst = dom_text_to_string(dt);
+    dst->len = src->len;
+    dst->is_ascii = src->is_ascii;
+    memcpy(dst->chars, src->chars, src->len + 1);
+    return {.item = s2it(dst)};
+}
+
+// ui_mode helper: merge two strings into a new fat DomText on the result arena.
+// Called by list_push() string merge path in ui_mode.
+Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
+    size_t new_len = prev->len + next->len;
+    size_t total = sizeof(DomText) + sizeof(String) + new_len + 1;
+    DomText* dt = (DomText*)arena_calloc(arena, total);
+    dt->node_type = DOM_NODE_TEXT;
+    String* merged = dom_text_to_string(dt);
+    merged->len = new_len;
+    memcpy(merged->chars, prev->chars, prev->len);
+    memcpy(merged->chars + prev->len, next->chars, next->len);
+    merged->chars[new_len] = '\0';
+    return {.item = s2it(merged)};
 }
 
 Object* object(int64_t type_index) {
@@ -916,7 +961,11 @@ Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     // skip data allocation if already set (combined allocation via elmt_with_data)
     if (!elmt->data) {
-        elmt->data = heap_data_calloc(elmt_type->byte_size);
+        if (context->ui_mode && context->arena) {
+            elmt->data = arena_calloc(context->arena, elmt_type->byte_size);
+        } else {
+            elmt->data = heap_data_calloc(elmt_type->byte_size);
+        }
     }
     // set attributes
     long count = elmt_type->length;

@@ -2,14 +2,25 @@
 #include "lambda-decimal.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
+
+#ifndef LAMBDA_STATIC
+// ui_mode helper: copy GC-heap string into result arena as fat DomText node
+// (defined in lambda-data-runtime.cpp which has access to DOM headers)
+Item ui_copy_string_to_arena(Arena* arena, Item str_item);
+
+// ui_mode helper: merge two strings into a new fat DomText on the result arena
+// (defined in lambda-data-runtime.cpp which has access to DOM headers)
+Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
+#endif
 
 // data zone allocation helper (defined in lambda-mem.cpp)
 // weak fallback uses malloc — overridden by real GC implementation when linked
 extern "C" {
     __attribute__((weak))
     void* heap_data_alloc(size_t size) {
-        return malloc(size);
+        return raw_malloc(size);  // RAWALLOC_OK: GC heap allocation — managed by garbage collector, not memtrack
     }
 }
 
@@ -421,16 +432,18 @@ void expand_list(List *list, Arena* arena = nullptr) {
     bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
 
     if (use_arena) {
-        // Use arena alloc/realloc for arena-allocated buffers (MarkBuilder/Input path)
-        if (old_items == nullptr) {
-            // First allocation — use arena_alloc
-            list->items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
-        } else {
-            // Realloc existing arena buffer
-            list->items = (Item*)arena_realloc(arena, list->items,
-                                               (list->capacity/2) * sizeof(Item),
-                                               list->capacity * sizeof(Item));
+        // Use arena alloc for arena-allocated buffers (MarkBuilder/Input path).
+        // Always allocate fresh — do NOT arena_realloc (which frees the old
+        // buffer to the arena's free-list).  In ui_mode the old items buffer
+        // may still be pointed-to by other Element structs in the retained
+        // tree (siblings of a retransformed subtree).  Freeing it allows the
+        // arena to recycle that memory for new DomElement allocations, which
+        // overwrites the items data and causes use-after-free crashes.
+        Item* new_items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
+        if (new_items && old_items) {
+            memcpy(new_items, old_items, (list->capacity/2) * sizeof(Item));
         }
+        list->items = new_items;
     } else {
         // Use data zone allocation for GC-managed runtime containers.
         // Allocate new buffer; old buffer is abandoned in the data zone
@@ -582,6 +595,16 @@ void list_push(List *list, Item item) {
 
     // 3. need to merge with previous string if any (unless disabled)
     if (type_id == LMD_TYPE_STRING) {
+#ifndef LAMBDA_STATIC
+        // ui_mode: copy GC-heap string to result arena as fat DomText when adding to element content
+        bool is_ui = input_context && input_context->ui_mode && input_context->arena;
+        if (is_ui && list->is_content) {
+            item = ui_copy_string_to_arena(input_context->arena, item);
+        }
+#else
+        bool is_ui = false;
+#endif
+
         // Only attempt string merging if input_context is available and merging is enabled
         bool should_merge = input_context != NULL &&
                            !input_context->disable_string_merging &&
@@ -593,6 +616,14 @@ void list_push(List *list, Item item) {
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
                 String *prev_str = prev_item.get_string();
                 String *new_str = item.get_string();
+#ifndef LAMBDA_STATIC
+                if (is_ui) {
+                    // ui_mode: merge into a new fat DomText on the arena
+                    list->items[list->length - 1] = ui_merge_strings_to_arena(
+                        input_context->arena, prev_str, new_str);
+                    return;
+                }
+#endif
                 // merge the two strings
                 size_t new_len = prev_str->len + new_str->len;
                 String *merged_str;
@@ -1031,7 +1062,8 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             continue;
         }
         // compare both name AND namespace
-        if (strncmp(field->name->str, key, field->name->length) == 0 &&
+        if (field->name->str &&
+            strncmp(field->name->str, key, field->name->length) == 0 &&
             strlen(key) == field->name->length &&
             target_equal(field->ns, key_ns)) {
             *is_found = true;

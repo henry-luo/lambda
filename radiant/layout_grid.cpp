@@ -580,7 +580,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Phase 6: Position grid items
     log_debug("%s DEBUG: Phase 6 - Positioning grid items", container->source_loc());
-    position_grid_items(grid_layout, container);
+    position_grid_items(grid_layout, container, &lycon->scratch);
 
     // Phase 7: Align grid items
     log_debug("%s DEBUG: Phase 7 - Aligning grid items", container->source_loc());

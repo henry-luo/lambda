@@ -17,13 +17,14 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <time.h>
 
 // forward declaration for JSON parser
 extern Item parse_json_to_item(Input* input, const char* json_string);
+extern Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 
 // v24: strict mode flag from js_runtime.cpp
 extern bool js_strict_mode;
@@ -47,6 +48,10 @@ extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_object_prevent_extensions(Item obj);
+
+// forward declaration for builtin method check helper
+static bool js_map_has_builtin_method(Map* m, const char* name, int len);
+extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 
 // v18l: helper to throw TypeError if argument is not an object (ES5 §15.2.3.*)
 static bool js_require_object_type(Item arg, const char* method_name) {
@@ -167,35 +172,56 @@ extern "C" Item js_date_new(void) {
     return obj;
 }
 
+// Date() without 'new' — returns a string representation of the current date/time
+extern "C" Item js_date_now_string(void) {
+    time_t now = time(NULL);
+    struct tm* tm_info = localtime(&now);
+    char buf[128];
+    // Match V8/SpiderMonkey format: "Thu Jan 01 1970 00:00:00 GMT+0000 (Timezone)"
+    strftime(buf, sizeof(buf), "%a %b %d %Y %H:%M:%S GMT%z", tm_info);
+    return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+}
+
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
     Item obj = js_new_object();
     Item key = (Item){.item = s2it(heap_create_name("_time"))};
     TypeId tid = get_type_id(value);
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
-        double ms;
-        if (tid == LMD_TYPE_FLOAT) ms = it2d(value);
-        else ms = (double)it2i(value);
+
+    // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
+    auto store_time = [&](double ms) {
+        if (isnan(ms) || isinf(ms) || ms > 8.64e15 || ms < -8.64e15) ms = NAN;
         static double date_buf[16];
         static int date_idx = 0;
         double* fp = &date_buf[date_idx++ % 16];
         *fp = ms;
         js_property_set(obj, key, (Item){.item = d2it(fp)});
+    };
+
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
+        double ms;
+        if (tid == LMD_TYPE_FLOAT) ms = it2d(value);
+        else ms = (double)it2i(value);
+        store_time(ms);
     } else if (tid == LMD_TYPE_STRING) {
         // parse date string — try ISO 8601 format
         String* s = it2s(value);
         if (s) {
             struct tm tm = {};
-            if (strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm) ||
-                strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
-                strptime(s->chars, "%c", &tm)) {
+            char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%c", &tm);
+            if (rest) {
                 time_t t = timegm(&tm);
                 double ms = (double)t * 1000.0;
-                static double date_buf2[16];
-                static int date_idx2 = 0;
-                double* fp = &date_buf2[date_idx2++ % 16];
-                *fp = ms;
-                js_property_set(obj, key, (Item){.item = d2it(fp)});
+                // Parse fractional seconds (e.g. ".872" → 872ms)
+                if (rest && *rest == '.') {
+                    char* end_frac;
+                    double frac = strtod(rest, &end_frac);
+                    ms += frac * 1000.0;
+                    rest = end_frac;
+                }
+                store_time(ms);
             } else {
                 // fallback: try mktime (local time)
                 struct tm tm2 = {};
@@ -204,22 +230,84 @@ extern "C" Item js_date_new_from(Item value) {
                     tm2.tm_mon -= 1;
                     time_t t = mktime(&tm2);
                     double ms = (double)t * 1000.0;
-                    static double date_buf3[16];
-                    static int date_idx3 = 0;
-                    double* fp = &date_buf3[date_idx3++ % 16];
-                    *fp = ms;
-                    js_property_set(obj, key, (Item){.item = d2it(fp)});
+                    store_time(ms);
                 } else {
-                    // If unparseable, set NaN
-                    js_property_set(obj, key, js_date_now());
+                    // If unparseable, set NaN (Invalid Date)
+                    store_time(NAN);
                 }
             }
         } else {
-            js_property_set(obj, key, js_date_now());
+            store_time(NAN);
+        }
+    } else if (tid == LMD_TYPE_MAP) {
+        // Date object: extract _time from the other Date
+        bool has_time = false;
+        Item other_time = js_map_get_fast_ext(value.map, "_time", 5, &has_time);
+        if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
+            double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
+            store_time(ms);
+        } else {
+            // Non-Date object: ToPrimitive(value) per ES spec §21.4.2
+            // 1. Check Symbol.toPrimitive
+            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+            Item to_prim = js_property_get(value, sym_key);
+            Item prim;
+            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
+                Item args[1] = { hint };
+                prim = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
+                // If result is an object, throw TypeError
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
+                // Symbol results → throw TypeError
+                if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+                    js_throw_type_error("Cannot convert a Symbol value to a number");
+                    return ItemNull;
+                }
+            } else {
+                // No Symbol.toPrimitive: try valueOf/toString
+                prim = js_to_number(value);
+                if (js_check_exception()) return ItemNull;
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_FLOAT)
+                    store_time(it2d(prim));
+                else if (pt == LMD_TYPE_INT || pt == LMD_TYPE_INT64)
+                    store_time((double)it2i(prim));
+                else
+                    store_time(NAN);
+                goto date_done;
+            }
+            // Dispatch on ToPrimitive result type
+            TypeId pt = get_type_id(prim);
+            if (pt == LMD_TYPE_STRING) {
+                // Re-enter Date constructor with the string
+                return js_date_new_from(prim);
+            } else {
+                // ToNumber on the primitive
+                Item num = js_to_number(prim);
+                TypeId nt = get_type_id(num);
+                if (nt == LMD_TYPE_FLOAT)
+                    store_time(it2d(num));
+                else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64)
+                    store_time((double)it2i(num));
+                else
+                    store_time(NAN);
+            }
         }
     } else {
-        js_property_set(obj, key, js_date_now());
+        // Per spec: ToNumber(value) then TimeClip
+        // null→0, undefined→NaN, true→1, false→0
+        Item num = js_to_number(value);
+        TypeId nt = get_type_id(num);
+        if (nt == LMD_TYPE_FLOAT) store_time(it2d(num));
+        else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64) store_time((double)it2i(num));
+        else store_time(NAN);
     }
+date_done:
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
     return obj;
@@ -271,12 +359,10 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     Item key = (Item){.item = s2it(heap_create_name("_time"))};
     Item time_val = js_property_get(date_obj, key);
 
-    // guard: if no _time property, receiver is not a Date object — return NaN
+    // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return js_throw_type_error("this is not a Date object");
     }
 
     double ms = time_val.get_double();
@@ -285,6 +371,16 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
         static int gt_idx = 0;
         double* fp = &gt_buf[gt_idx++ % 16];
         *fp = ms;
+        return (Item){.item = d2it(fp)};
+    }
+    // NaN (Invalid Date) handling
+    if (isnan(ms)) {
+        if (method_id == 8) // toISOString: throw RangeError for Invalid Date
+            return js_throw_type_error("Invalid time value");
+        if (method_id == 17 || method_id == 9) // toString, toLocaleDateString
+            return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
         return (Item){.item = d2it(fp)};
     }
     time_t secs = (time_t)(ms / 1000.0);
@@ -353,8 +449,10 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     return ItemNull;
 }
 
-// Process argv storage
+// Process argv storage — C-level copy (safe before heap init)
 static Item js_process_argv_items = {.item = ITEM_NULL};
+static const char** js_process_argv_raw = NULL;
+static int js_process_argc_raw = 0;
 
 // v20: Date setter methods — mutate internal _time timestamp
 // method_id: 20=setTime, 21=setFullYear, 22=setMonth, 23=setDate,
@@ -367,7 +465,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     Item key = (Item){.item = s2it(heap_create_name("_time"))};
     Item time_val = js_property_get(date_obj, key);
 
-    // guard: if no _time property, receiver is not a Date object
+    // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
         if (method_id == 43) { // valueOf — fall back to generic Object.prototype.valueOf
@@ -378,10 +476,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             }
             return date_obj;
         }
-        // other Date methods on non-Date objects: return NaN
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return (Item){.item = d2it(fp)};
+        return js_throw_type_error("this is not a Date object");
     }
 
     double ms = time_val.get_double();
@@ -406,6 +501,21 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
     // getDay / getUTCDay / getTimezoneOffset / valueOf / toJSON / toUTCString / toDateString / toTimeString
     if (method_id >= 40) {
+        // NaN (Invalid Date) handling
+        if (isnan(ms)) {
+            if (method_id == 43) { // valueOf — return NaN
+                double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *fp = NAN;
+                return (Item){.item = d2it(fp)};
+            }
+            if (method_id == 44) // toJSON — return null for Invalid Date
+                return ItemNull;
+            if (method_id == 45 || method_id == 46 || method_id == 47) // string representations
+                return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = NAN;
+            return (Item){.item = d2it(fp)};
+        }
         time_t secs = (time_t)(ms / 1000.0);
         if (method_id == 40) { // getDay
             struct tm tm; localtime_r(&secs, &tm);
@@ -619,6 +729,8 @@ extern "C" Item js_date_parse(Item str_item) {
     // Try ISO 8601 first
     if (strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm) ||
         strptime(s->chars, "%Y-%m-%d", &tm) ||
+        strptime(s->chars, "%a, %d %b %Y %H:%M:%S", &tm) ||
+        strptime(s->chars, "%d %b %Y %H:%M:%S", &tm) ||
         strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
         strptime(s->chars, "%c", &tm)) {
         time_t t = timegm(&tm);
@@ -632,8 +744,14 @@ extern "C" Item js_date_parse(Item str_item) {
     return (Item){.item = d2it(fp)};
 }
 
+extern "C" void js_store_process_argv(int argc, const char** argv) {
+    // Store C-level copy — no heap allocation (safe before runtime context is ready)
+    js_process_argc_raw = argc;
+    js_process_argv_raw = argv;
+}
+
 extern "C" void js_set_process_argv(int argc, const char** argv) {
-    // Build a Lambda array from the argv
+    // Build a Lambda array from the argv (requires heap to be active)
     Array* arr = array();
     for (int i = 0; i < argc; i++) {
         array_push(arr, (Item){.item = s2it(heap_create_name(argv[i]))});
@@ -642,7 +760,30 @@ extern "C" void js_set_process_argv(int argc, const char** argv) {
 }
 
 extern "C" Item js_get_process_argv(void) {
+    // Lazy build: if raw argv was stored but Lambda array not yet built, build it now
+    if (js_process_argv_items.item == ITEM_NULL && js_process_argc_raw > 0) {
+        js_set_process_argv(js_process_argc_raw, js_process_argv_raw);
+    }
+    // Return an empty array if process.argv was never set (prevents null subscript crash)
+    if (js_process_argv_items.item == ITEM_NULL) {
+        Array* arr = array();
+        js_process_argv_items = array_end(arr);
+    }
     return js_process_argv_items;
+}
+
+// process object (lazy-initialized for `var p = process` standalone usage)
+static Item js_process_object = {.item = ITEM_NULL};
+
+extern "C" Item js_get_process_object_value(void) {
+    if (js_process_object.item == ITEM_NULL) {
+        js_process_object = js_object_create(ItemNull);
+        heap_register_gc_root(&js_process_object.item);
+        // Set argv
+        Item argv_key = (Item){.item = s2it(heap_create_name("argv", 4))};
+        js_property_set(js_process_object, argv_key, js_get_process_argv());
+    }
+    return js_process_object;
 }
 
 // =============================================================================
@@ -659,18 +800,36 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
         return (Item){.item = d2it(fp)};
     }
 
-    // Get radix (default 10, auto-detect 16 for 0x prefix)
+    // Get radix per ES spec: ToInt32(radix), then validate 2-36
     int radix = 10;
     bool radix_explicit = false;
     TypeId rtype = get_type_id(radix_item);
-    if (rtype == LMD_TYPE_INT) {
-        radix = (int)it2i(radix_item);
-        radix_explicit = true;
-    } else if (rtype == LMD_TYPE_FLOAT) {
-        radix = (int)it2d(radix_item);
+    if (rtype != LMD_TYPE_UNDEFINED) {
+        // Convert radix to number (handles strings, booleans, boxed numbers, etc.)
+        Item radix_num = js_to_number(radix_item);
+        TypeId rn_type = get_type_id(radix_num);
+        double rdbl = 0;
+        if (rn_type == LMD_TYPE_INT) rdbl = (double)it2i(radix_num);
+        else if (rn_type == LMD_TYPE_FLOAT) rdbl = it2d(radix_num);
+        // ToInt32: NaN, Infinity, -Infinity → 0
+        if (isnan(rdbl) || isinf(rdbl)) {
+            radix = 0;
+        } else {
+            // ToInt32 per ES spec: modulo 2^32, then signed 32-bit
+            double d = fmod(trunc(rdbl), 4294967296.0);
+            if (d < 0) d += 4294967296.0;
+            if (d >= 2147483648.0) d -= 4294967296.0;
+            radix = (int)d;
+        }
         radix_explicit = true;
     }
     if (radix == 0) { radix = 10; radix_explicit = false; }
+    // Invalid radix: return NaN
+    if (radix_explicit && (radix < 2 || radix > 36)) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
 
     // Null-terminate
     char buf[256];
@@ -678,9 +837,41 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     memcpy(buf, s->chars, len);
     buf[len] = '\0';
 
-    // Skip whitespace
+    // Skip whitespace (ES spec StrWhiteSpaceChar: ASCII + Unicode whitespace)
     char* start = buf;
-    while (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r') start++;
+    char* end_buf = buf + len;
+    for (;;) {
+        if (start >= end_buf) break;
+        unsigned char c = (unsigned char)*start;
+        // ASCII whitespace: space, tab, LF, CR, FF, VT
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') { start++; continue; }
+        // 2-byte UTF-8: U+00A0 (NBSP) = 0xC2 0xA0
+        if (c == 0xC2 && start + 1 < end_buf && (unsigned char)start[1] == 0xA0) { start += 2; continue; }
+        // 3-byte UTF-8 whitespace chars
+        if (c == 0xE2 && start + 2 < end_buf) {
+            unsigned char b1 = (unsigned char)start[1], b2 = (unsigned char)start[2];
+            // U+2000-U+200A (en/em space etc) = E2 80 80..8A
+            if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) { start += 3; continue; }
+            // U+2028 (LS) = E2 80 A8, U+2029 (PS) = E2 80 A9
+            if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) { start += 3; continue; }
+            // U+202F (narrow NBSP) = E2 80 AF
+            if (b1 == 0x80 && b2 == 0xAF) { start += 3; continue; }
+            // U+205F (medium math space) = E2 81 9F
+            if (b1 == 0x81 && b2 == 0x9F) { start += 3; continue; }
+        }
+        // U+3000 (ideographic space) = E3 80 80
+        if (c == 0xE3 && start + 2 < end_buf && (unsigned char)start[1] == 0x80 && (unsigned char)start[2] == 0x80) { start += 3; continue; }
+        // U+FEFF (BOM/ZWNBSP) = EF BB BF
+        if (c == 0xEF && start + 2 < end_buf && (unsigned char)start[1] == 0xBB && (unsigned char)start[2] == 0xBF) { start += 3; continue; }
+        // U+1680 (ogham space) = E1 9A 80
+        if (c == 0xE1 && start + 2 < end_buf && (unsigned char)start[1] == 0x9A && (unsigned char)start[2] == 0x80) { start += 3; continue; }
+        break;
+    }
+
+    // Parse sign (before hex prefix per ES spec)
+    int sign = 1;
+    if (*start == '-') { sign = -1; start++; }
+    else if (*start == '+') { start++; }
 
     // Auto-detect hex prefix (0x/0X) when no explicit radix
     if (!radix_explicit && start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
@@ -690,15 +881,35 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
         start += 2; // skip 0x prefix even with explicit radix 16
     }
 
-    char* endptr;
-    long long val = strtoll(start, &endptr, radix);
-    if (endptr == start) {
+    // Manual parseInt per ES spec: accumulate as double to handle large values
+    double result = 0;
+    bool found_digit = false;
+    while (*start) {
+        int digit = -1;
+        char ch = *start;
+        if (ch >= '0' && ch <= '9') digit = ch - '0';
+        else if (ch >= 'a' && ch <= 'z') digit = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'Z') digit = ch - 'A' + 10;
+        if (digit < 0 || digit >= radix) break;
+        found_digit = true;
+        result = result * radix + digit;
+        start++;
+    }
+    if (!found_digit) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
     }
+    result *= sign;
 
-    return (Item){.item = i2it((int64_t)val)};
+    // Return as int if it fits, otherwise as double
+    if (result >= -9007199254740992.0 && result <= 9007199254740992.0 &&
+        result == (double)(int64_t)result) {
+        return (Item){.item = i2it((int64_t)result)};
+    }
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = result;
+    return (Item){.item = d2it(fp)};
 }
 
 extern "C" Item js_parseFloat(Item str_item) {
@@ -715,9 +926,81 @@ extern "C" Item js_parseFloat(Item str_item) {
     memcpy(buf, s->chars, len);
     buf[len] = '\0';
 
+    // ES spec: skip leading StrWhiteSpaceChar (includes Unicode whitespace)
+    char* p = buf;
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v') { p++; continue; }
+        // UTF-8 two-byte: U+00A0 (NBSP) = C2 A0
+        if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) { p += 2; continue; }
+        // UTF-8 three-byte Unicode whitespace:
+        // U+FEFF (BOM) = EF BB BF
+        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) { p += 3; continue; }
+        // U+2000-U+200A (various spaces), U+2028 (LS), U+2029 (PS), U+202F, U+205F, U+3000
+        // All encoded as E2 8x xx or E3 80 80
+        if ((unsigned char)p[0] == 0xE2) {
+            unsigned char b1 = (unsigned char)p[1], b2 = (unsigned char)p[2];
+            // U+2000-U+200A: E2 80 80 - E2 80 8A
+            if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) { p += 3; continue; }
+            // U+2028: E2 80 A8, U+2029: E2 80 A9
+            if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) { p += 3; continue; }
+            // U+202F: E2 80 AF
+            if (b1 == 0x80 && b2 == 0xAF) { p += 3; continue; }
+            // U+205F: E2 81 9F
+            if (b1 == 0x81 && b2 == 0x9F) { p += 3; continue; }
+        }
+        // U+3000 (ideographic space): E3 80 80
+        if ((unsigned char)p[0] == 0xE3 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x80) { p += 3; continue; }
+        break;
+    }
+
+    // ES spec: parseFloat only parses StrDecimalLiteral — no hex (0x), no 0o, no 0b.
+    // strtod parses hex on many platforms, so we must guard against it.
+    // StrDecimalLiteral: [+-]? (Infinity | DecimalDigits [. DecimalDigits] [eE [+-] DecimalDigits] | . DecimalDigits [eE ...])
+    char* start = p;
+    if (*p == '+' || *p == '-') p++;
+    if (*p == 'I') {
+        // check for "Infinity"
+        if (strncmp(p, "Infinity", 8) == 0) {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = (*start == '-') ? -HUGE_VAL : HUGE_VAL;
+            return (Item){.item = d2it(fp)};
+        }
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // must start with a decimal digit or '.'
+    if ((*p < '0' || *p > '9') && *p != '.') {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // '.' alone without a following digit is not valid
+    if (*p == '.' && (p[1] < '0' || p[1] > '9')) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+
+    // scan to find the end of the valid decimal literal (no hex)
+    char* q = p;
+    while (*q >= '0' && *q <= '9') q++;         // integer part
+    if (*q == '.') { q++; while (*q >= '0' && *q <= '9') q++; } // fractional part
+    if (*q == 'e' || *q == 'E') {                // exponent
+        q++;
+        if (*q == '+' || *q == '-') q++;
+        if (*q >= '0' && *q <= '9') { while (*q >= '0' && *q <= '9') q++; }
+        else { q = q - (q[-1] == '+' || q[-1] == '-' ? 2 : 1); } // no digits after e → backtrack
+    }
+
+    // null-terminate at the end of valid decimal literal and parse
+    char saved = *q;
+    *q = '\0';
     char* endptr;
-    double val = strtod(buf, &endptr);
-    if (endptr == buf) {
+    double val = strtod(start, &endptr);
+    *q = saved;
+
+    if (endptr == start) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
@@ -766,13 +1049,32 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
         return js_to_string(num_item);
     }
 
+    // Step 1-4 per spec: validate fractionDigits BEFORE checking NaN
     int digits = 0;
     TypeId dtype = get_type_id(digits_item);
     if (dtype == LMD_TYPE_INT) {
         digits = (int)it2i(digits_item);
     } else if (dtype == LMD_TYPE_FLOAT) {
-        digits = (int)it2d(digits_item);
+        double fd = it2d(digits_item);
+        if (!isfinite(fd)) return js_throw_range_error("toFixed() digits argument must be between 0 and 100");
+        digits = (int)fd;
+    } else if (dtype != LMD_TYPE_UNDEFINED) {
+        // coerce non-numeric to 0 (e.g. NaN string → 0)
+        digits = 0;
     }
+
+    // ES spec: RangeError if digits < 0 or > 100
+    if (digits < 0 || digits > 100) {
+        return js_throw_range_error("toFixed() digits argument must be between 0 and 100");
+    }
+
+    // Step 5: If x is NaN, return "NaN"
+    if (isnan(num)) return (Item){.item = s2it(heap_create_name("NaN", 3))};
+
+    // Step 6: If x is not finite, format Infinity
+    if (isinf(num)) return num > 0
+        ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
+        : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
 
     char buf[128];
     snprintf(buf, sizeof(buf), "%.*f", digits, num);
@@ -789,21 +1091,18 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_toFixed(num, digits);
     }
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
-        // v18l: Handle NaN and Infinity before radix conversion
-        TypeId nt = get_type_id(num);
-        if (nt == LMD_TYPE_FLOAT) {
-            double d = it2d(num);
-            if (isnan(d)) return (Item){.item = s2it(heap_create_name("NaN", 3))};
-            if (isinf(d)) return d > 0
-                ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
-                : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
-        }
-        if (argc > 0) {
+        // per spec: ToInteger(radix) + range check BEFORE NaN/Infinity handling
+        if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
             Item radix_item = js_to_number(args[0]);
+            if (js_check_exception()) return ItemNull;
             int radix = 10;
             TypeId rt = get_type_id(radix_item);
             if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
-            else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
+            else if (rt == LMD_TYPE_FLOAT) {
+                double rd = it2d(radix_item);
+                if (isnan(rd)) radix = 0; // will trigger RangeError
+                else radix = (int)rd;
+            }
             // v20: RangeError for invalid radix
             if (radix < 2 || radix > 36) {
                 return js_throw_range_error("toString() radix must be between 2 and 36");
@@ -814,6 +1113,11 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
                 double dval = 0;
                 if (nt == LMD_TYPE_INT) dval = (double)it2i(num);
                 else if (nt == LMD_TYPE_FLOAT) dval = it2d(num);
+                // Handle NaN/Infinity for non-10 radix
+                if (isnan(dval)) return (Item){.item = s2it(heap_create_name("NaN", 3))};
+                if (isinf(dval)) return dval > 0
+                    ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
+                    : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
                 bool negative = dval < 0;
                 if (negative) dval = -dval;
 
@@ -865,30 +1169,83 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     }
     if (method->len == 11 && strncmp(method->chars, "toPrecision", 11) == 0) {
         if (argc < 1 || get_type_id(args[0]) == LMD_TYPE_UNDEFINED) return js_to_string(num);
+        // per spec: step 3 ToInteger(precision) before step 4 NaN/Infinity check
         Item prec_item = js_to_number(args[0]);
+        if (js_check_exception()) return ItemNull;
         int precision = 1;
         TypeId pt = get_type_id(prec_item);
         if (pt == LMD_TYPE_INT) precision = (int)it2i(prec_item);
         else if (pt == LMD_TYPE_FLOAT) precision = (int)it2d(prec_item);
+        double d = 0;
+        TypeId nt = get_type_id(num);
+        if (nt == LMD_TYPE_INT) d = (double)it2i(num);
+        else if (nt == LMD_TYPE_FLOAT) d = it2d(num);
+        // Handle special cases (after ToInteger per spec)
+        if (isnan(d)) return (Item){.item = s2it(heap_create_name("NaN", 3))};
+        if (isinf(d)) return d > 0
+            ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
+            : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
+        // Range check after NaN/Infinity per spec
         if (precision < 1 || precision > 100) {
-            log_error("js_number_method: toPrecision precision %d out of range", precision);
-            return ItemNull;
+            return js_throw_range_error("toPrecision() argument must be between 1 and 100");
+        }        // Use %e to get the exponent, then decide format
+        char ebuf[128];
+        snprintf(ebuf, sizeof(ebuf), "%.*e", precision - 1, d);
+        // Parse exponent from ebuf
+        char* epos = strchr(ebuf, 'e');
+        int exponent = epos ? atoi(epos + 1) : 0;
+        char buf[128];
+        if (exponent >= 0 && exponent < precision) {
+            // Fixed-point format: e.g. 100.00(5) or 1.00(3)
+            int frac_digits = precision - 1 - exponent;
+            if (frac_digits < 0) frac_digits = 0;
+            snprintf(buf, sizeof(buf), "%.*f", frac_digits, d);
+        } else if (exponent < 0 && exponent >= -6) {
+            // Small number: 0.000123(2) → use fixed-point with enough decimals
+            int frac_digits = precision - 1 - exponent; // e.g. 2 - 1 - (-4) = 5
+            snprintf(buf, sizeof(buf), "%.*f", frac_digits, d);
+        } else {
+            // Use exponential format
+            snprintf(buf, sizeof(buf), "%.*e", precision - 1, d);
+            // Normalize exponent format: remove leading zeros, use e+ or e-
+            // C's %e uses e+01, JS uses e+1
+            char* ep = strchr(buf, 'e');
+            if (ep) {
+                char sign = ep[1];
+                int exp_val = atoi(ep + 1);
+                char exp_buf[16];
+                snprintf(exp_buf, sizeof(exp_buf), "e%c%d", sign, abs(exp_val));
+                strcpy(ep, exp_buf);
+            }
+        }
+        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
+    if (method->len == 13 && strncmp(method->chars, "toExponential", 13) == 0) {
+        // per spec: step 2 ToInteger(fractionDigits) before step 4 NaN check
+        bool has_frac = (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED);
+        int frac = 0;
+        if (has_frac) {
+            Item frac_item = js_to_number(args[0]);
+            if (js_check_exception()) return ItemNull;
+            TypeId ft = get_type_id(frac_item);
+            if (ft == LMD_TYPE_INT) frac = (int)it2i(frac_item);
+            else if (ft == LMD_TYPE_FLOAT) frac = (int)it2d(frac_item);
         }
         double d = 0;
         TypeId nt = get_type_id(num);
         if (nt == LMD_TYPE_INT) d = (double)it2i(num);
         else if (nt == LMD_TYPE_FLOAT) d = it2d(num);
+        // Handle special cases per spec (after ToInteger)
+        if (isnan(d)) return (Item){.item = s2it(heap_create_name("NaN", 3))};
+        if (isinf(d)) return d > 0
+            ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
+            : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
+        // Range check after NaN/Infinity per spec
+        if (has_frac && (frac < 0 || frac > 100)) {
+            return js_throw_range_error("toExponential() argument must be between 0 and 100");
+        }
         char buf[128];
-        snprintf(buf, sizeof(buf), "%.*g", precision, d);
-        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    if (method->len == 13 && strncmp(method->chars, "toExponential", 13) == 0) {
-        double d = 0;
-        TypeId nt = get_type_id(num);
-        if (nt == LMD_TYPE_INT) d = (double)it2i(num);
-        else if (nt == LMD_TYPE_FLOAT) d = it2d(num);
-        char buf[128];
-        if (argc < 1 || get_type_id(args[0]) == LMD_TYPE_UNDEFINED) {
+        if (!has_frac) {
             snprintf(buf, sizeof(buf), "%e", d);
             // Remove trailing zeros after decimal in exponent format
             char* e = strchr(buf, 'e');
@@ -899,15 +1256,6 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
                 memmove(p + 1, e, strlen(e) + 1);
             }
         } else {
-            Item frac_item = js_to_number(args[0]);
-            int frac = 0;
-            TypeId ft = get_type_id(frac_item);
-            if (ft == LMD_TYPE_INT) frac = (int)it2i(frac_item);
-            else if (ft == LMD_TYPE_FLOAT) frac = (int)it2d(frac_item);
-            if (frac < 0 || frac > 100) {
-                log_error("js_number_method: toExponential fraction %d out of range", frac);
-                return ItemNull;
-            }
             snprintf(buf, sizeof(buf), "%.*e", frac, d);
         }
         // Normalize exponent: remove leading zeros (e+07 -> e+7)
@@ -921,6 +1269,10 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
             strcpy(e, norm);
         }
         return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
+
+    if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
+        return js_to_string(num);
     }
 
     log_debug("js_number_method: unknown method '%.*s'", (int)method->len, method->chars);
@@ -1012,7 +1364,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
         int len = ta->length;
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-        char* buf = (char*)malloc(len * 3 + 1);
+        char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         for (int i = 0; i < len; i++) {
             int code = 0;
@@ -1030,7 +1382,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         }
         buf[pos] = '\0';
         Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-        free(buf);
+        mem_free(buf);
         return result;
     }
 
@@ -1040,7 +1392,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)malloc(len * 3 + 1);
+    char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
@@ -1054,7 +1406,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -1106,7 +1458,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)malloc(len * 4 + 1);
+    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
@@ -1120,7 +1472,7 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    free(buf);
+    mem_free(buf);
     return result;
 }
 
@@ -1230,10 +1582,16 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // contains right's prototype. For our implementation, we check if right has
     // a __class_name__ marker that matches any __class_name__ in left's proto chain.
 
+    // ES spec: if right is not an object, throw TypeError
+    TypeId rt = get_type_id(right);
+    if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_FUNC) {
+        js_throw_type_error("Right-hand side of 'instanceof' is not an object");
+        return (Item){.item = b2it(false)};
+    }
+
     // v16: Check for Symbol.hasInstance on the right-hand constructor FIRST (before type check)
     // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
     {
-        TypeId rt = get_type_id(right);
         if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_FUNC) {
             // look for __sym_3 (Symbol.hasInstance = ID 3) via property_get (handles both MAP and FUNC)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
@@ -1243,6 +1601,17 @@ extern "C" Item js_instanceof(Item left, Item right) {
                 Item result = js_call_function(has_instance_fn, right, args, 1);
                 return (Item){.item = b2it(js_is_truthy(result))};
             }
+        }
+    }
+
+    // ES spec: if right is an object but not callable, throw TypeError
+    if (rt == LMD_TYPE_MAP) {
+        // MAP is only valid if it has __class_name__ (constructor object) — otherwise not callable
+        Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+        Item cn = map_get(right.map, class_key);
+        if (cn.item == 0 || get_type_id(cn) != LMD_TYPE_STRING) {
+            js_throw_type_error("Right-hand side of 'instanceof' is not callable");
+            return (Item){.item = b2it(false)};
         }
     }
 
@@ -1404,7 +1773,8 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                     (on->len == 11 && strncmp(on->chars, "SyntaxError", 11) == 0) ||
                     (on->len == 14 && strncmp(on->chars, "ReferenceError", 14) == 0) ||
                     (on->len == 8 && strncmp(on->chars, "URIError", 8) == 0) ||
-                    (on->len == 9 && strncmp(on->chars, "EvalError", 9) == 0)) {
+                    (on->len == 9 && strncmp(on->chars, "EvalError", 9) == 0) ||
+                    (on->len == 14 && strncmp(on->chars, "AggregateError", 14) == 0)) {
                     return (Item){.item = b2it(true)};
                 }
             }
@@ -1423,6 +1793,11 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 
 extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
+    // ES spec: TypeError if RHS is not an object
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC
+        && type != LMD_TYPE_ELEMENT) {
+        return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
+    }
     if (type == LMD_TYPE_MAP) {
         // Check for symbol keys FIRST (before any numeric coercion)
         // Symbol items are encoded as negative ints <= -JS_SYMBOL_BASE
@@ -1465,8 +1840,10 @@ extern "C" Item js_in(Item key, Item object) {
                 snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
             } else {
                 double dv = it2d(key);
-                // v24: -0.0 should stringify to "0" per ES spec
-                if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
+                if (dv != dv) snprintf(buf, sizeof(buf), "NaN");
+                else if (dv == 1.0/0.0) snprintf(buf, sizeof(buf), "Infinity");
+                else if (dv == -1.0/0.0) snprintf(buf, sizeof(buf), "-Infinity");
+                else if (dv == 0.0) snprintf(buf, sizeof(buf), "0");
                 else snprintf(buf, sizeof(buf), "%g", dv);
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -1511,13 +1888,72 @@ extern "C" Item js_in(Item key, Item object) {
             Item result = map_get(object.map, key);
             if (result.item != ItemNull.item) return (Item){.item = b2it(true)};
         }
+        // v26: check builtin methods on object and prototype chain
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* ks = it2s(key);
+            if (ks) {
+                // Check builtin methods on explicit prototype chain objects
+                Item proto = js_get_prototype(object);
+                int depth = 0;
+                while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                    if (js_map_has_builtin_method(proto.map, ks->chars, (int)ks->len))
+                        return (Item){.item = b2it(true)};
+                    proto = js_get_prototype(proto);
+                    depth++;
+                }
+                // Fallback: all objects implicitly inherit Object.prototype methods
+                // UNLESS explicitly created with null prototype (Object.create(null))
+                bool has_null_proto = false;
+                bool proto_found = false;
+                js_map_get_fast_ext(object.map, "__proto__", 9, &proto_found);
+                if (proto_found) {
+                    // __proto__ exists — walk chain to see if it terminates at null
+                    Item pv = js_get_prototype(object);
+                    if (pv.item == ItemNull.item || get_type_id(pv) != LMD_TYPE_MAP)
+                        has_null_proto = true;
+                }
+                if (!has_null_proto) {
+                    Item builtin = js_lookup_builtin_method(LMD_TYPE_MAP, ks->chars, (int)ks->len);
+                    if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
+                    // "constructor" is also on Object.prototype
+                    if (ks->len == 11 && strncmp(ks->chars, "constructor", 11) == 0)
+                        return (Item){.item = b2it(true)};
+                }
+            }
+        }
         return (Item){.item = b2it(false)};
     }
     if (type == LMD_TYPE_ARRAY) {
-        // check if index is valid
-        int idx = (int)it2i(key);
-        int len = fn_len(object);
-        return (Item){.item = b2it(idx >= 0 && idx < len)};
+        // check if index is valid and not a deleted hole
+        int64_t idx = -1;
+        if (get_type_id(key) == LMD_TYPE_INT) {
+            idx = it2i(key);
+        } else if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->len <= 10) {
+                bool is_num = true;
+                int64_t n = 0;
+                for (int i = 0; i < (int)sk->len; i++) {
+                    char c = sk->chars[i];
+                    if (c < '0' || c > '9') { is_num = false; break; }
+                    n = n * 10 + (c - '0');
+                }
+                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
+            }
+            // Also check "length" for arrays
+            if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
+                return (Item){.item = b2it(true)};
+            }
+        }
+        Array* arr = object.array;
+        if (idx >= 0 && idx < arr->length) {
+            // v25: check for deleted sentinel (array hole)
+            if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+                return (Item){.item = b2it(false)};
+            }
+            return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(false)};
 }
@@ -1537,10 +1973,17 @@ extern "C" Item js_nullish_coalesce(Item left, Item right) {
 // =============================================================================
 
 extern "C" Item js_object_create(Item proto) {
+    // Per spec: proto must be Object or null, else TypeError
+    TypeId pt = get_type_id(proto);
+    bool is_null = (proto.item == ITEM_NULL || proto.item == 0 || pt == LMD_TYPE_NULL);
+    bool is_object = (pt == LMD_TYPE_MAP || pt == LMD_TYPE_ELEMENT || pt == LMD_TYPE_FUNC);
+    if (!is_null && !is_object) {
+        return js_throw_type_error("Object prototype may only be an Object or null");
+    }
     Item obj = js_new_object();
-    if (proto.item != 0 && get_type_id(proto) == LMD_TYPE_MAP) {
+    if (is_object && pt == LMD_TYPE_MAP) {
         js_set_prototype(obj, proto);
-    } else if (proto.item == ITEM_NULL || proto.item == 0) {
+    } else if (is_null) {
         // Object.create(null): mark explicitly as no prototype
         // Use JS undefined as sentinel — distinguished from "no __proto__ key"
         Item key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
@@ -1583,8 +2026,26 @@ extern "C" Item js_get_prototype_of(Item object) {
         }
         return ItemNull;
     }
-    // Functions → return Function.prototype
+    // Functions → return Function.prototype (or Error for NativeError constructors)
     if (get_type_id(object) == LMD_TYPE_FUNC) {
+        // v82d: NativeError constructors have [[Prototype]] = Error (not Function.prototype)
+        // Check .name property to see if it's a NativeError constructor
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        Item name_val = js_property_get(object, name_key);
+        if (get_type_id(name_val) == LMD_TYPE_STRING) {
+            String* n = it2s(name_val);
+            bool is_native_error =
+                (n->len == 9 && strncmp(n->chars, "TypeError", 9) == 0) ||
+                (n->len == 10 && strncmp(n->chars, "RangeError", 10) == 0) ||
+                (n->len == 14 && strncmp(n->chars, "ReferenceError", 14) == 0) ||
+                (n->len == 11 && strncmp(n->chars, "SyntaxError", 11) == 0) ||
+                (n->len == 8 && strncmp(n->chars, "URIError", 8) == 0) ||
+                (n->len == 9 && strncmp(n->chars, "EvalError", 9) == 0) ||
+                (n->len == 14 && strncmp(n->chars, "AggregateError", 14) == 0);
+            if (is_native_error) {
+                return js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+            }
+        }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
         if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
@@ -1659,11 +2120,75 @@ extern Item js_constructor_create_object(Item callee);
 extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 extern Item js_array_get(Item array, Item index);
 extern int64_t js_array_length(Item array);
+extern void js_throw_value(Item value);
+extern Item js_new_error_with_name(Item type_name, Item msg);
 
-extern "C" Item js_reflect_construct(Item target, Item args_array) {
-    if (get_type_id(target) != LMD_TYPE_FUNC) return ItemNull;
-    // create new object inheriting from target's prototype
-    Item new_obj = js_constructor_create_object(target);
+// Check if a function value is a constructor (has [[Construct]] internal method).
+// Arrow functions, generators, and built-in prototype methods are NOT constructors.
+#define JS_FUNC_FLAG_GENERATOR_G 1
+#define JS_FUNC_FLAG_ARROW_G     2
+
+struct JsFunctionLayout {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+    Item properties_map;
+    uint8_t flags;
+    int16_t formal_length;
+};
+
+static bool js_func_is_constructor(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
+    JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
+    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if (fn->flags & JS_FUNC_FLAG_GENERATOR_G) return false;
+    if (fn->builtin_id > 0) return false;
+    if (fn->builtin_id == -2) return false; // global builtin wrappers are not constructors
+    return true;
+}
+
+// Check if a function has its own .prototype property.
+// Constructors and generators have .prototype; arrows and built-ins do not.
+static bool js_func_has_own_prototype(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
+    JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
+    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if (fn->builtin_id > 0) return false;
+    if (fn->builtin_id == -2) return false;
+    return true;
+}
+
+extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_target) {
+    // Validate target is a constructor
+    if (!js_func_is_constructor(target)) {
+        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("target is not a constructor"))};
+        Item error = js_new_error_with_name(type_name, msg);
+        js_throw_value(error);
+        return ItemNull;
+    }
+    // Validate newTarget is a constructor (if provided and not undefined/null)
+    TypeId nt_type = get_type_id(new_target);
+    if (nt_type == LMD_TYPE_FUNC) {
+        if (!js_func_is_constructor(new_target)) {
+            Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("newTarget is not a constructor"))};
+            Item error = js_new_error_with_name(type_name, msg);
+            js_throw_value(error);
+            return ItemNull;
+        }
+    }
+    // create new object inheriting from target's (or newTarget's) prototype
+    Item proto_source = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
+    Item new_obj = js_constructor_create_object(proto_source);
     // extract args from array
     int argc = 0;
     Item* args = NULL;
@@ -1851,6 +2376,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             return desc;
         }
         if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
+            // Only constructor functions have prototype as own property
+            if (!js_func_has_own_prototype(obj)) return make_js_undefined();
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
@@ -1928,6 +2455,10 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 idx = idx * 10 + (name_str->chars[i] - '0');
             }
             if (idx >= 0 && idx < obj.array->length) {
+                // v25: deleted elements (holes) have no descriptor
+                if (obj.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+                    return make_js_undefined();
+                }
                 Item desc = js_new_object();
                 js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, obj.array->items[idx]);
                 // v25: Check companion map for attribute markers set by defineProperty
@@ -1996,41 +2527,62 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         // Check for own data property
         Item has_own = js_has_own_property(obj, name);
         if (!it2b(has_own)) {
-            // v20: Check if this is a prototype with virtual builtin methods
-            // e.g. Object.getOwnPropertyDescriptor(Array.prototype, 'push')
-            bool cn_own = false;
-            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
-            if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn);
-                TypeId lookup_type = (TypeId)0;
-                if (cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0)
-                    lookup_type = LMD_TYPE_ARRAY;
-                else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0)
-                    lookup_type = LMD_TYPE_STRING;
-                else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0)
-                    lookup_type = LMD_TYPE_FUNC;
-                else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)
-                    lookup_type = LMD_TYPE_INT;  // triggers Number prototype method lookup
-
-                Item builtin = ItemNull;
-                if (lookup_type != (TypeId)0) {
-                    builtin = js_lookup_builtin_method(lookup_type, name_str->chars, (int)name_str->len);
-                }
-                // Also try Object.prototype methods (on all prototype types)
-                if (builtin.item == ItemNull.item) {
-                    builtin = js_lookup_builtin_method(LMD_TYPE_MAP, name_str->chars, (int)name_str->len);
-                }
-                if (builtin.item != ItemNull.item) {
-                    // Built-in methods: writable:true, enumerable:false, configurable:true
-                    Item desc = js_new_object();
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, builtin);
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-                    return desc;
-                }
-            }
             return make_js_undefined();
+        }
+
+        // v26: Check if the property is actually stored in the map, or if it's a
+        // virtual builtin method from __class_name__ resolution. Builtins should have
+        // enumerable:false, configurable:true.
+        {
+            bool stored = false;
+            js_map_get_fast_ext(m, name_str->chars, (int)name_str->len, &stored);
+            if (!stored) {
+                // Not stored = virtual builtin method (only on prototypes)
+                bool ip_own = false;
+                js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
+                if (ip_own) {
+                    bool cn_own = false;
+                    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
+                    if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+                    String* cn_str = it2s(cn);
+                    TypeId lookup_type = (TypeId)0;
+                    if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0)
+                        lookup_type = LMD_TYPE_ARRAY;
+                    else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0)
+                        lookup_type = LMD_TYPE_STRING;
+                    else if (cn_str && cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0)
+                        lookup_type = LMD_TYPE_FUNC;
+                    else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)
+                        lookup_type = LMD_TYPE_INT;
+
+                    Item builtin = ItemNull;
+                    if (lookup_type != (TypeId)0) {
+                        builtin = js_lookup_builtin_method(lookup_type, name_str->chars, (int)name_str->len);
+                    }
+                    if (builtin.item == ItemNull.item) {
+                        builtin = js_lookup_builtin_method(LMD_TYPE_MAP, name_str->chars, (int)name_str->len);
+                    }
+                    if (builtin.item != ItemNull.item) {
+                        Item desc = js_new_object();
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, builtin);
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+                        return desc;
+                    }
+                    }
+                    // "constructor" — always has a descriptor if hasOwn returned true
+                    if (name_str->len == 11 && strncmp(name_str->chars, "constructor", 11) == 0) {
+                        Item value = js_property_get(obj, name);
+                        Item desc = js_new_object();
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+                        return desc;
+                    }
+                } // ip_own
+            }
         }
 
         Item value = js_property_get(obj, name);
@@ -2571,7 +3123,8 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (!js_require_object_type(obj, "defineProperties")) return ItemNull;
-    if (obj.item == 0 || get_type_id(props) != LMD_TYPE_MAP) return obj;
+    TypeId pt = get_type_id(props);
+    if (obj.item == 0 || (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY)) return obj;
     Item keys = js_object_keys(props);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
     for (int i = 0; i < keys.array->length; i++) {
@@ -2628,13 +3181,15 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     if (type == LMD_TYPE_ARRAY) {
         // indices + "length" + companion map custom properties
         int len = object.array->length;
-        Item result = js_array_new(len + 1);
+        // v26: use push approach to skip deleted sentinel elements
+        Item result = js_array_new(0);
         for (int i = 0; i < len; i++) {
+            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             char buf[16];
             snprintf(buf, sizeof(buf), "%d", i);
-            js_array_set(result, (Item){.item = i2it(i)}, (Item){.item = s2it(heap_create_name(buf))});
+            js_array_push(result, (Item){.item = s2it(heap_create_name(buf))});
         }
-        js_array_set(result, (Item){.item = i2it(len)}, (Item){.item = s2it(heap_create_name("length", 6))});
+        js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
         // v25: also include custom properties from companion map
         Map* pm = js_array_props_map(object.array);
         if (pm && pm->type) {
@@ -2654,12 +3209,34 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         return result;
     }
     if (type == LMD_TYPE_FUNC) {
-        // function own properties: length, name, prototype + custom
-        Item result = js_array_new(3);
-        int i = 0;
-        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("length", 6))});
-        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("name", 4))});
-        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        // function own properties: length, name, [prototype] + custom from properties_map
+        JsFunctionLayout* fn_lay = (JsFunctionLayout*)object.function;
+        bool has_proto = js_func_has_own_prototype(object); // constructors & generators have prototype
+        Item result = js_array_new(0);
+        js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
+        js_array_push(result, (Item){.item = s2it(heap_create_name("name", 4))});
+        if (has_proto)
+            js_array_push(result, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        // Include properties from properties_map (Number.NEGATIVE_INFINITY, static methods, etc.)
+        JsFuncProps* fn_props = (JsFuncProps*)object.function;
+        if (fn_props->properties_map.item != 0 && get_type_id(fn_props->properties_map) == LMD_TYPE_MAP) {
+            Map* pm = fn_props->properties_map.map;
+            if (pm && pm->type) {
+                TypeMap* pmt = (TypeMap*)pm->type;
+                ShapeEntry* e = pmt->shape;
+                while (e) {
+                    const char* s = e->name->str;
+                    int slen = (int)e->name->length;
+                    // skip internal markers (__ne_, __nw_, __nc_, etc.)
+                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    // skip deleted sentinels
+                    Item val = _map_read_field(e, pm->data);
+                    if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+                    js_array_push(result, (Item){.item = s2it(heap_create_name(s, slen))});
+                    e = e->next;
+                }
+            }
+        }
         return result;
     }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
@@ -2678,13 +3255,19 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                 if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
                     String* pv_s = it2s(pv);
                     int slen = pv_s ? (int)pv_s->len : 0;
-                    Item result = js_array_new(slen + 1);
+                    Item result = js_array_new(0);
                     for (int i = 0; i < slen; i++) {
                         char buf[16];
                         int blen = snprintf(buf, sizeof(buf), "%d", i);
-                        js_array_set(result, (Item){.item = i2it(i)}, (Item){.item = s2it(heap_create_name(buf, blen))});
+                        js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
                     }
-                    js_array_set(result, (Item){.item = i2it(slen)}, (Item){.item = s2it(heap_create_name("length", 6))});
+                    js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
+                    // v26: append builtin String method names only for prototype objects
+                    bool is_proto = false;
+                    js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
+                    if (is_proto) {
+                        js_append_builtin_method_names(LMD_TYPE_STRING, result);
+                    }
                     return result;
                 }
             }
@@ -2744,6 +3327,43 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         }
         e = e->next;
     }
+    // v26: for prototype Maps with __class_name__ and __is_proto__, append builtin method names
+    {
+        bool ip_own = false;
+        js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
+        if (ip_own) {
+            bool cn_own = false;
+            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
+            if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn);
+                if (cn_str) {
+                    TypeId lookup_type = LMD_TYPE_MAP;
+                    if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) lookup_type = LMD_TYPE_STRING;
+                    else if (cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) lookup_type = LMD_TYPE_ARRAY;
+                    else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
+                    else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
+                    // Append builtin method names (they are "own" properties of the prototype)
+                    int prev_len = arr->length;
+                    js_append_builtin_method_names(lookup_type, result);
+                    // Deduplicate: remove any that were already in the list
+                    for (int i = arr->length - 1; i >= prev_len; i--) {
+                        String* new_s = it2s(arr->items[i]);
+                        bool dup = false;
+                        for (int j = 0; j < prev_len; j++) {
+                            String* old_s = it2s(arr->items[j]);
+                            if (old_s && new_s && old_s->len == new_s->len && memcmp(old_s->chars, new_s->chars, new_s->len) == 0) {
+                                dup = true; break;
+                            }
+                        }
+                        if (dup) {
+                            for (int k = i; k < arr->length - 1; k++) arr->items[k] = arr->items[k+1];
+                            arr->length--;
+                        }
+                    }
+                }
+            }
+        }
+    }
     return result;
 }
 
@@ -2793,15 +3413,25 @@ extern "C" Item js_object_keys(Item object) {
     // For arrays, return indices as string keys: ["0", "1", "2", ...]
     if (type == LMD_TYPE_ARRAY) {
         int len = object.array->length;
-        Item result = js_array_new(len);
+        Item result = js_array_new(0);
+        Map* pm = js_array_props_map(object.array);
         for (int i = 0; i < len; i++) {
+            // v25: skip deleted elements (holes)
+            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
+            // v27: skip non-enumerable elements (defineProperty with enumerable: false)
+            if (pm) {
+                char ne_buf[32];
+                snprintf(ne_buf, sizeof(ne_buf), "__ne_%d", i);
+                bool ne_found = false;
+                Item ne_val = js_map_get_fast_ext(pm, ne_buf, (int)strlen(ne_buf), &ne_found);
+                if (ne_found && js_is_truthy(ne_val)) continue;
+            }
             char buf[16];
             snprintf(buf, sizeof(buf), "%d", i);
             Item key_str = (Item){.item = s2it(heap_create_name(buf))};
-            js_array_set(result, (Item){.item = i2it(i)}, key_str);
+            js_array_push(result, key_str);
         }
         // v25: also include custom (non-index) properties from companion map
-        Map* pm = js_array_props_map(object.array);
         if (pm && pm->type) {
             TypeMap* pmt = (TypeMap*)pm->type;
             ShapeEntry* e = pmt->shape;
@@ -3266,6 +3896,10 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
 }
 
 extern "C" Item js_to_string_val(Item value) {
+    // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
+    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_symbol_to_string(value);
+    }
     return js_to_string(value);
 }
 
@@ -3312,6 +3946,15 @@ extern "C" Item js_number_property(Item prop_name) {
 
 extern "C" Item js_object_values(Item object) {
     TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_STRING) {
+        String* str = it2s(object);
+        int slen = str ? (int)str->len : 0;
+        Item result = js_array_new(slen);
+        for (int i = 0; i < slen; i++) {
+            js_array_set(result, (Item){.item = i2it(i)}, (Item){.item = s2it(heap_create_name(str->chars + i, 1))});
+        }
+        return result;
+    }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
 
     // v20: use js_object_keys for spec-compliant ordering
@@ -3332,6 +3975,20 @@ extern "C" Item js_object_values(Item object) {
 
 extern "C" Item js_object_entries(Item object) {
     TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_STRING) {
+        String* str = it2s(object);
+        int slen = str ? (int)str->len : 0;
+        Item result = js_array_new(0);
+        for (int i = 0; i < slen; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", i);
+            Item pair = js_array_new(2);
+            js_array_set(pair, (Item){.item = i2it(0)}, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))});
+            js_array_set(pair, (Item){.item = i2it(1)}, (Item){.item = s2it(heap_create_name(str->chars + i, 1))});
+            js_array_push(result, pair);
+        }
+        return result;
+    }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
 
     // v20: use js_object_keys for spec-compliant ordering
@@ -3353,19 +4010,90 @@ extern "C" Item js_object_entries(Item object) {
 // Object.fromEntries(iterable) — create object from [key, value] pairs
 // =============================================================================
 
+extern "C" Item js_iterable_to_array(Item iterable);
+
 extern "C" Item js_object_from_entries(Item iterable) {
     TypeId type = get_type_id(iterable);
-    if (type != LMD_TYPE_ARRAY) return js_new_object();
+    // Convert non-array iterables (Map, generator, etc.) to array first
+    Item arr = iterable;
+    if (type != LMD_TYPE_ARRAY) {
+        arr = js_iterable_to_array(iterable);
+        if (get_type_id(arr) != LMD_TYPE_ARRAY) return js_new_object();
+    }
 
     Item result = js_new_object();
-    int64_t len = js_array_length(iterable);
+    int64_t len = js_array_length(arr);
     for (int64_t i = 0; i < len; i++) {
-        Item pair = js_array_get(iterable, (Item){.item = i2it(i)});
+        Item pair = js_array_get(arr, (Item){.item = i2it(i)});
         if (get_type_id(pair) != LMD_TYPE_ARRAY) continue;
         Item key = js_array_get(pair, (Item){.item = i2it(0)});
         Item val = js_array_get(pair, (Item){.item = i2it(1)});
         Item key_str = js_to_string(key);
         js_property_set(result, key_str, val);
+    }
+    return result;
+}
+
+// =============================================================================
+// Object.groupBy(items, callbackFn) — groups items into plain object by key
+// =============================================================================
+
+extern "C" Item js_iterable_to_array(Item iterable);
+
+extern "C" Item js_object_group_by(Item items, Item callback) {
+    // Convert iterable to array first
+    Item arr = js_iterable_to_array(items);
+    // Create null-prototype object per spec
+    Item result = js_object_create(ItemNull);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = {.item = i2it(i)};
+        Item fn_args[2] = {elem, idx_item};
+        Item key = js_call_function(callback, make_js_undefined(), fn_args, 2);
+        Item key_str = js_to_string(key);
+        // get or create array for this group
+        String* ks = it2s(key_str);
+        bool found = false;
+        Item group = js_map_get_fast_ext(result.map, ks->chars, (int)ks->len, &found);
+        if (!found) {
+            group = js_array_new(0);
+            js_property_set(result, key_str, group);
+        }
+        js_array_push(group, elem);
+    }
+    return result;
+}
+
+// =============================================================================
+// Map.groupBy(items, callbackFn) — groups items into a Map by key
+// =============================================================================
+
+extern "C" Item js_map_collection_new(void);
+
+extern "C" Item js_map_group_by(Item items, Item callback) {
+    extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    Item result = js_map_collection_new();
+    // Convert iterable to array first
+    Item arr = js_iterable_to_array(items);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = {.item = i2it(i)};
+        Item fn_args[2] = {elem, idx_item};
+        Item key = js_call_function(callback, make_js_undefined(), fn_args, 2);
+        // has(key) -> method_id=2
+        Item has = js_collection_method(result, 2, key, ItemNull);
+        if (it2b(has)) {
+            // get(key) -> method_id=1, then push elem
+            Item group = js_collection_method(result, 1, key, ItemNull);
+            js_array_push(group, elem);
+        } else {
+            Item group = js_array_new(0);
+            js_array_push(group, elem);
+            // set(key, group) -> method_id=0
+            js_collection_method(result, 0, key, group);
+        }
     }
     return result;
 }
@@ -3398,11 +4126,682 @@ extern "C" Item js_object_is(Item left, Item right) {
 }
 
 // =============================================================================
+// Native assert.sameValue / assert.notSameValue for test262 (debug builds only)
+// =============================================================================
+// These bypass the JS-level assert.sameValue/notSameValue, avoiding:
+//   - full JS function dispatch overhead (property lookup, args array, etc.)
+//   - string concatenation for error messages on the hot (passing) path
+// The transpiler intercepts assert.sameValue(a,b,msg) calls and emits direct
+// calls to these C++ functions instead.
+
+#ifndef NDEBUG
+
+// helper: build error message string for assert.sameValue/notSameValue
+static Item assert_build_error_msg(Item actual, Item expected, Item message, bool same) {
+    extern Item js_to_string_val(Item value);
+
+    Item actual_str = js_to_string_val(actual);
+    Item expected_str = js_to_string_val(expected);
+    String* a_s = it2s(actual_str);
+    String* e_s = it2s(expected_str);
+    const char* a_chars = a_s ? a_s->chars : "undefined";
+    int a_len = a_s ? (int)a_s->len : 9;
+    const char* e_chars = e_s ? e_s->chars : "undefined";
+    int e_len = e_s ? (int)e_s->len : 9;
+
+    // format: "[<message> ]Expected SameValue(«<actual>», «<expected>») to be true/false"
+    const char* tail = same ? "\xC2\xBB) to be true" : "\xC2\xBB) to be false";
+    const char* mid = "\xC2\xBB, \xC2\xAB";
+    const char* head = "Expected SameValue(\xC2\xAB";
+
+    // get optional message prefix
+    const char* msg_chars = NULL;
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* m_s = it2s(message);
+        if (m_s && m_s->len > 0) { msg_chars = m_s->chars; msg_len = (int)m_s->len; }
+    }
+
+    int total = msg_len + (msg_len > 0 ? 1 : 0) + (int)strlen(head) + a_len +
+                (int)strlen(mid) + e_len + (int)strlen(tail) + 1;
+    char* buf = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    if (msg_chars) {
+        memcpy(buf + pos, msg_chars, msg_len); pos += msg_len;
+        buf[pos++] = ' ';
+    }
+    int hlen = (int)strlen(head);
+    memcpy(buf + pos, head, hlen); pos += hlen;
+    memcpy(buf + pos, a_chars, a_len); pos += a_len;
+    int mlen = (int)strlen(mid);
+    memcpy(buf + pos, mid, mlen); pos += mlen;
+    memcpy(buf + pos, e_chars, e_len); pos += e_len;
+    int tlen = (int)strlen(tail);
+    memcpy(buf + pos, tail, tlen); pos += tlen;
+    buf[pos] = '\0';
+
+    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    return result;
+}
+
+extern "C" void js_assert_same_value(Item actual, Item expected, Item message) {
+    // SameValue semantics: NaN === NaN, +0 !== -0
+    Item result = js_object_is(actual, expected);
+    if (it2b(result)) return;  // fast path: values are the same
+
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    Item msg = assert_build_error_msg(actual, expected, message, true);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    js_throw_value(js_new_error_with_name(err_name, msg));
+}
+
+extern "C" void js_assert_not_same_value(Item actual, Item unexpected, Item message) {
+    Item result = js_object_is(actual, unexpected);
+    if (!it2b(result)) return;  // fast path: values are different
+
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    Item msg = assert_build_error_msg(actual, unexpected, message, false);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    js_throw_value(js_new_error_with_name(err_name, msg));
+}
+
+// =============================================================================
+// Native compareArray / assert.compareArray for test262 (debug builds only)
+// =============================================================================
+
+// compareArray(a, b): element-wise SameValue comparison, returns bool Item
+extern "C" Item js_compare_array(Item a, Item b) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+
+    if (get_type_id(a) != LMD_TYPE_ARRAY || get_type_id(b) != LMD_TYPE_ARRAY)
+        return (Item){.item = b2it(false)};
+
+    int64_t len_a = js_array_length(a);
+    int64_t len_b = js_array_length(b);
+    if (len_a != len_b) return (Item){.item = b2it(false)};
+
+    for (int64_t i = 0; i < len_a; i++) {
+        Item ai = js_array_get_int(a, i);
+        Item bi = js_array_get_int(b, i);
+        if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(true)};
+}
+
+// helper: format array as "[elem1, elem2, ...]" for error messages
+static Item assert_format_array(Item arr) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_to_string_val(Item value);
+
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+        return (Item){.item = s2it(heap_create_name("(not an array)"))};
+    }
+    int64_t len = js_array_length(arr);
+    // pre-pass: compute total length
+    int total = 2; // "[]"
+    char* strs[256];
+    int slens[256];
+    int maxn = len > 256 ? 256 : (int)len;
+    for (int i = 0; i < maxn; i++) {
+        Item elem = js_array_get_int(arr, i);
+        Item s = js_to_string_val(elem);
+        String* ss = it2s(s);
+        strs[i] = ss ? ss->chars : (char*)"undefined";
+        slens[i] = ss ? (int)ss->len : 9;
+        total += slens[i] + (i > 0 ? 2 : 0); // ", " separator
+    }
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    buf[pos++] = '[';
+    for (int i = 0; i < maxn; i++) {
+        if (i > 0) { buf[pos++] = ','; buf[pos++] = ' '; }
+        memcpy(buf + pos, strs[i], slens[i]); pos += slens[i];
+    }
+    buf[pos++] = ']';
+    buf[pos] = '\0';
+    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    return result;
+}
+
+// assert.compareArray(actual, expected, message): throws on mismatch
+extern "C" void js_assert_compare_array(Item actual, Item expected, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    // null checks
+    TypeId at = get_type_id(actual);
+    if (at == LMD_TYPE_NULL || at == LMD_TYPE_UNDEFINED) {
+        const char* msg_prefix = "Actual argument shouldn't be nullish. ";
+        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
+        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+        memcpy(buf, msg_prefix, strlen(msg_prefix));
+        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
+        buf[total] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
+        mem_free(buf);
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    TypeId et = get_type_id(expected);
+    if (et == LMD_TYPE_NULL || et == LMD_TYPE_UNDEFINED) {
+        const char* msg_prefix = "Expected argument shouldn't be nullish. ";
+        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
+        char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+        memcpy(buf, msg_prefix, strlen(msg_prefix));
+        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
+        buf[total] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
+        mem_free(buf);
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    Item result = js_compare_array(actual, expected);
+    if (it2b(result)) return; // pass
+
+    // build error message: "Actual [...] and expected [...] should have the same contents. <message>"
+    Item a_fmt = assert_format_array(actual);
+    Item e_fmt = assert_format_array(expected);
+    String* as = it2s(a_fmt);
+    String* es = it2s(e_fmt);
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+
+    const char* p1 = "Actual ";
+    const char* p2 = " and expected ";
+    const char* p3 = " should have the same contents. ";
+    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
+                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    int l;
+    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
+    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
+    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
+    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
+    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
+    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
+    buf[pos] = '\0';
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native verifyProperty for test262 (debug builds only)
+// =============================================================================
+// Simplified native version: checks descriptor fields against
+// Object.getOwnPropertyDescriptor result. Skips destructive isWritable/
+// isConfigurable/isEnumerable checks for performance.
+
+extern "C" void js_verify_property(Item obj, Item name, Item desc, Item options) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_object_get_own_property_descriptor(Item obj, Item name);
+    extern Item js_has_own_property(Item obj, Item key);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_to_string_val(Item value);
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+
+    // verifyProperty requires at least 3 arguments: obj, name, desc
+    // (always true when called from transpiler)
+
+    Item originalDesc = js_object_get_own_property_descriptor(obj, name);
+
+    // desc === undefined → verify property doesn't exist
+    if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
+        if (get_type_id(originalDesc) != LMD_TYPE_UNDEFINED) {
+            Item name_str = js_to_string_val(name);
+            String* ns = it2s(name_str);
+            char buf[256];
+            int len = snprintf(buf, sizeof(buf), "obj['%.*s'] descriptor should be undefined",
+                              ns ? (int)ns->len : 0, ns ? ns->chars : "");
+            js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(buf, len))}));
+        }
+        return;
+    }
+
+    // assert(hasOwnProperty(obj, name))
+    if (!it2b(js_has_own_property(obj, name))) {
+        Item name_str = js_to_string_val(name);
+        String* ns = it2s(name_str);
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "obj should have an own property %.*s",
+                          ns ? (int)ns->len : 0, ns ? ns->chars : "");
+        js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(buf, len))}));
+        return;
+    }
+
+    // desc must be an object
+    if (get_type_id(desc) != LMD_TYPE_MAP) {
+        js_throw_value(js_new_error_with_name(err_name,
+            (Item){.item = s2it(heap_create_name("The desc argument should be an object or undefined"))}));
+        return;
+    }
+
+    if (get_type_id(originalDesc) == LMD_TYPE_UNDEFINED) {
+        // property should exist but getOwnPropertyDescriptor returned undefined
+        js_throw_value(js_new_error_with_name(err_name,
+            (Item){.item = s2it(heap_create_name("property descriptor is undefined but property should exist"))}));
+        return;
+    }
+
+    // check each descriptor field
+    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+    Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+    Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+
+    // collect failure messages
+    char failures[1024];
+    int fpos = 0;
+    failures[0] = '\0';
+
+    auto append_failure = [&](const char* msg) {
+        if (fpos > 0) {
+            memcpy(failures + fpos, "; ", 2);
+            fpos += 2;
+        }
+        int ml = (int)strlen(msg);
+        if (fpos + ml < (int)sizeof(failures) - 1) {
+            memcpy(failures + fpos, msg, ml);
+            fpos += ml;
+        }
+        failures[fpos] = '\0';
+    };
+
+    if (it2b(js_has_own_property(desc, value_key))) {
+        Item desc_value = js_property_get(desc, value_key);
+        Item orig_value = js_property_get(originalDesc, value_key);
+        if (!it2b(js_object_is(desc_value, orig_value))) {
+            append_failure("descriptor value mismatch");
+        }
+        // also check obj[name] matches
+        Item obj_value = js_property_get(obj, name);
+        if (!it2b(js_object_is(desc_value, obj_value))) {
+            append_failure("object value mismatch");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, enumerable_key))) {
+        Item desc_enum = js_property_get(desc, enumerable_key);
+        Item orig_enum = js_property_get(originalDesc, enumerable_key);
+        bool desc_e = it2b(desc_enum);
+        bool orig_e = it2b(orig_enum);
+        if (desc_e != orig_e) {
+            append_failure(desc_e ? "descriptor should be enumerable" : "descriptor should not be enumerable");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, writable_key))) {
+        Item desc_writ = js_property_get(desc, writable_key);
+        Item orig_writ = js_property_get(originalDesc, writable_key);
+        bool desc_w = it2b(desc_writ);
+        bool orig_w = it2b(orig_writ);
+        if (desc_w != orig_w) {
+            append_failure(desc_w ? "descriptor should be writable" : "descriptor should not be writable");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, configurable_key))) {
+        Item desc_conf = js_property_get(desc, configurable_key);
+        Item orig_conf = js_property_get(originalDesc, configurable_key);
+        bool desc_c = it2b(desc_conf);
+        bool orig_c = it2b(orig_conf);
+        if (desc_c != orig_c) {
+            append_failure(desc_c ? "descriptor should be configurable" : "descriptor should not be configurable");
+        }
+    }
+
+    if (fpos > 0) {
+        js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(failures, fpos))}));
+        return;
+    }
+
+    // options.restore: restore the original descriptor
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item restore_key = (Item){.item = s2it(heap_create_name("restore", 7))};
+        Item restore_val = js_property_get(options, restore_key);
+        if (it2b(restore_val)) {
+            extern Item js_object_define_property(Item obj, Item name, Item desc);
+            js_object_define_property(obj, name, originalDesc);
+        }
+    }
+}
+
+// =============================================================================
+// Native assert.deepEqual for test262 (debug builds only)
+// =============================================================================
+
+// forward declaration for recursive call
+static bool js_deep_equal_compare(Item a, Item b, int depth);
+
+static bool js_deep_equal_compare(Item a, Item b, int depth) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_object_keys(Item object);
+    extern Item js_strict_equal(Item left, Item right);
+
+    if (depth > 100) return false; // prevent infinite recursion
+
+    // fast path: strict equality (same reference, same primitives)
+    if (it2b(js_strict_equal(a, b))) return true;
+
+    TypeId ta = get_type_id(a);
+    TypeId tb = get_type_id(b);
+
+    // null/undefined: only equal if both the same
+    if (ta == LMD_TYPE_NULL || ta == LMD_TYPE_UNDEFINED ||
+        tb == LMD_TYPE_NULL || tb == LMD_TYPE_UNDEFINED) {
+        return ta == tb && a.item == b.item;
+    }
+
+    // NaN handling: NaN === NaN for deepEqual
+    if (ta == LMD_TYPE_FLOAT && tb == LMD_TYPE_FLOAT) {
+        double da = it2d(a);
+        double db = it2d(b);
+        if (da != da && db != db) return true; // both NaN
+        return da == db;
+    }
+
+    // different primitive types
+    if ((ta == LMD_TYPE_BOOL || ta == LMD_TYPE_INT || ta == LMD_TYPE_FLOAT ||
+         ta == LMD_TYPE_STRING) &&
+        (tb == LMD_TYPE_BOOL || tb == LMD_TYPE_INT || tb == LMD_TYPE_FLOAT ||
+         tb == LMD_TYPE_STRING)) {
+        // both primitives but not strict equal — not deep equal
+        // (cross-type like int/float: 1 === 1.0 should have passed strict equal)
+        return false;
+    }
+
+    // both arrays: element-wise deep comparison
+    if (ta == LMD_TYPE_ARRAY && tb == LMD_TYPE_ARRAY) {
+        int64_t len_a = js_array_length(a);
+        int64_t len_b = js_array_length(b);
+        if (len_a != len_b) return false;
+        for (int64_t i = 0; i < len_a; i++) {
+            if (!js_deep_equal_compare(js_array_get_int(a, i), js_array_get_int(b, i), depth + 1))
+                return false;
+        }
+        return true;
+    }
+
+    // both objects/maps: structural comparison
+    if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
+        Item keys_a = js_object_keys(a);
+        Item keys_b = js_object_keys(b);
+        int64_t len_a = js_array_length(keys_a);
+        int64_t len_b = js_array_length(keys_b);
+        if (len_a != len_b) return false;
+
+        for (int64_t i = 0; i < len_a; i++) {
+            Item key = js_array_get_int(keys_a, i);
+            // check same key exists in b
+            Item val_a = js_property_get(a, key);
+            Item val_b = js_property_get(b, key);
+            if (!js_deep_equal_compare(val_a, val_b, depth + 1))
+                return false;
+        }
+        return true;
+    }
+
+    // mismatched types (array vs object, etc.)
+    return false;
+}
+
+extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_to_string_val(Item value);
+
+    bool equal = js_deep_equal_compare(actual, expected, 0);
+    if (equal) return;
+
+    // build error message
+    Item a_str = js_to_string_val(actual);
+    Item e_str = js_to_string_val(expected);
+    String* as = it2s(a_str);
+    String* es = it2s(e_str);
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+
+    const char* p1 = "Expected ";
+    const char* p2 = " to be structurally equal to ";
+    const char* p3 = ". ";
+    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
+                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
+    char* buf = (char*)mem_alloc(total + 1, MEM_CAT_JS_RUNTIME);
+    int pos = 0;
+    int l;
+    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
+    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
+    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
+    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
+    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
+    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
+    buf[pos] = '\0';
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
+    mem_free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native assert.throws for test262 (debug builds only)
+// assert.throws(expectedErrorConstructor, func [, message])
+// =============================================================================
+
+extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_to_string_val(Item value);
+    extern Item js_instanceof(Item left, Item right);
+    extern Item js_property_get(Item obj, Item key);
+
+    // validate func argument
+    if (get_type_id(func) != LMD_TYPE_FUNC) {
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name("assert.throws requires two arguments: the error constructor and a function to run"))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    // get message prefix
+    const char* msg_chars = "";
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) { msg_chars = ms->chars; msg_len = (int)ms->len; }
+    }
+
+    // call the function — expect it to throw
+    js_call_function(func, make_js_undefined(), NULL, 0);
+
+    if (js_check_exception()) {
+        // good — an exception was thrown. check its type.
+        Item thrown = js_clear_exception();
+
+        // thrown must be an object
+        TypeId tid = get_type_id(thrown);
+        if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) {
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 1000 ? msg_len : 1000); pos = msg_len < 1000 ? msg_len : 1000; buf[pos++] = ' '; }
+            const char* t = "Thrown value was not an object!";
+            int tl = (int)strlen(t);
+            memcpy(buf + pos, t, tl); pos += tl;
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return;
+        }
+
+        // check: thrown instanceof expectedErrorConstructor
+        Item instanceof_result = js_instanceof(thrown, expected_ctor);
+        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
+
+        if (!is_instance) {
+            // type mismatch — build error message
+            Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+            Item exp_name = js_property_get(expected_ctor, name_key);
+            // get actual constructor name via prototype chain
+            extern Item js_prototype_lookup(Item obj, Item key);
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+            Item thrown_ctor = js_prototype_lookup(thrown, ctor_key);
+            Item act_name = (get_type_id(thrown_ctor) != LMD_TYPE_UNDEFINED && get_type_id(thrown_ctor) != LMD_TYPE_NULL)
+                ? js_property_get(thrown_ctor, name_key) : make_js_undefined();
+            String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+            String* ans = (get_type_id(act_name) == LMD_TYPE_STRING) ? it2s(act_name) : NULL;
+            const char* en = ens ? ens->chars : "?";
+            int enl = ens ? (int)ens->len : 1;
+            const char* an = ans ? ans->chars : "?";
+            int anl = ans ? (int)ans->len : 1;
+
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+
+            if (enl == anl && strncmp(en, an, enl) == 0) {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a different error constructor with the same name";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+            } else {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a ";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+                memcpy(buf + pos, an, anl < 100 ? anl : 100); pos += anl < 100 ? anl : 100;
+            }
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+        }
+        return;
+    }
+
+    // no exception was thrown — that's a failure
+    {
+        Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+        Item exp_name = js_property_get(expected_ctor, name_key);
+        String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+        const char* en = ens ? ens->chars : "?";
+        int enl = ens ? (int)ens->len : 1;
+
+        char buf[1200];
+        int pos = 0;
+        if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+        const char* t = "Expected a ";
+        int tl = (int)strlen(t);
+        memcpy(buf + pos, t, tl); pos += tl;
+        memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+        const char* t2 = " to be thrown but no exception was thrown at all";
+        int t2l = (int)strlen(t2);
+        memcpy(buf + pos, t2, t2l); pos += t2l;
+        buf[pos] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+    }
+}
+
+// =============================================================================
+// Native assert() base function for test262 (debug builds only)
+// assert(mustBeTrue [, message])
+// =============================================================================
+
+extern "C" void js_assert_base(Item must_be_true, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_to_string_val(Item value);
+
+    // check mustBeTrue === true
+    if (get_type_id(must_be_true) == LMD_TYPE_BOOL && it2b(must_be_true)) return;
+
+    // build error message
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) {
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            js_throw_value(js_new_error_with_name(err_name, message));
+            return;
+        }
+    }
+
+    // default message: "Expected true but got <value>"
+    Item val_str = js_to_string_val(must_be_true);
+    String* vs = it2s(val_str);
+    const char* prefix = "Expected true but got ";
+    int plen = (int)strlen(prefix);
+    int vlen = vs ? (int)vs->len : 9;
+    const char* vchars = vs ? vs->chars : "undefined";
+    char* buf = (char*)mem_alloc(plen + vlen + 1, MEM_CAT_JS_RUNTIME);
+    memcpy(buf, prefix, plen);
+    memcpy(buf + plen, vchars, vlen);
+    buf[plen + vlen] = '\0';
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name(buf, plen + vlen))};
+    mem_free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native $DONOTEVALUATE for test262 (debug builds only)
+// =============================================================================
+
+extern "C" void js_donotevaluate(void) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name("Test262: This statement should not be evaluated."))};
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+#endif // !NDEBUG
+
+// =============================================================================
 // Object.assign(target, ...sources)
 // =============================================================================
 
 extern "C" Item js_object_assign(Item target, Item* sources, int count) {
-    if (get_type_id(target) != LMD_TYPE_MAP) return target;
+    TypeId tid = get_type_id(target);
+    if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+        (target.item == 0 && tid != LMD_TYPE_INT)) {
+        extern Item js_new_error_with_name(Item type_name, Item message);
+        extern void js_throw_value(Item error);
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("Cannot convert undefined or null to object"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
+    if (tid != LMD_TYPE_MAP) return target;
     for (int i = 0; i < count; i++) {
         Item source = sources[i];
         if (get_type_id(source) != LMD_TYPE_MAP) continue;
@@ -3479,6 +4878,34 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
 }
 
 // =============================================================================
+// Helper: check if a Map with __class_name__ has a built-in method as own prop
+// Returns true if the map is a prototype object and the key matches a builtin.
+// =============================================================================
+static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
+    // Only check builtin methods on actual prototype objects (not instances)
+    bool ip_own = false;
+    js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
+    if (!ip_own) return false;
+    bool cn_own = false;
+    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
+    if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return false;
+    String* cn_str = it2s(cn);
+    if (!cn_str) return false;
+    // map class name to TypeId for builtin lookup
+    TypeId lookup_type = LMD_TYPE_MAP;
+    if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) lookup_type = LMD_TYPE_STRING;
+    else if (cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) lookup_type = LMD_TYPE_ARRAY;
+    else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
+    else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
+    else if (cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) lookup_type = LMD_TYPE_MAP;
+    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_MAP;
+    // Skip "constructor" — handled separately
+    if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
+    Item builtin = js_lookup_builtin_method(lookup_type, name, len);
+    return builtin.item != ItemNull.item;
+}
+
+// =============================================================================
 // obj.hasOwnProperty(key) / Object.hasOwn(obj, key)
 // =============================================================================
 
@@ -3509,6 +4936,10 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         if (is_numeric) {
             Array* arr = obj.array;
             if (idx >= 0 && idx < arr->length) {
+                // v25: check for deleted sentinel (array hole)
+                if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+                    return (Item){.item = b2it(false)};
+                }
                 return (Item){.item = b2it(true)};
             }
         }
@@ -3532,10 +4963,13 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             }
         }
         // built-in own properties (not overridden/deleted)
-        if ((ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) ||
-            (ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
+        if ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
             (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)) {
             return (Item){.item = b2it(true)};
+        }
+        // prototype is own only for constructor functions
+        if (ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) {
+            return (Item){.item = b2it(js_func_has_own_prototype(obj))};
         }
         return (Item){.item = b2it(false)};
     }
@@ -3572,6 +5006,32 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             bool has_set = false;
             Item set_val = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_set);
             if (has_set && set_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+        }
+        // v26: check if this is a prototype Map with builtin methods
+        if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
+        // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
+        if (ks->len > 0 && ks->chars[0] >= '0' && ks->chars[0] <= '9') {
+            bool cn_found = false;
+            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn);
+                if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                    bool pv_found = false;
+                    Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &pv_found);
+                    if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
+                        String* pv_str = it2s(pv);
+                        bool is_idx = true;
+                        int64_t idx = 0;
+                        for (int ni = 0; ni < (int)ks->len; ni++) {
+                            if (ks->chars[ni] < '0' || ks->chars[ni] > '9') { is_idx = false; break; }
+                            idx = idx * 10 + (ks->chars[ni] - '0');
+                        }
+                        if (is_idx && idx >= 0 && idx < (int64_t)(pv_str ? pv_str->len : 0)) {
+                            return (Item){.item = b2it(true)};
+                        }
+                    }
+                }
+            }
         }
         return (Item){.item = b2it(false)};
     }
@@ -3812,7 +5272,10 @@ extern "C" Item js_object_is_extensible(Item obj) {
 
 extern "C" Item js_number_is_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(true)};
+    }
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         return (Item){.item = b2it(isfinite(d) && d == floor(d))};
@@ -3822,7 +5285,10 @@ extern "C" Item js_number_is_integer(Item value) {
 
 extern "C" Item js_number_is_finite(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(true)};
+    }
     if (type == LMD_TYPE_FLOAT) {
         return (Item){.item = b2it(isfinite(it2d(value)))};
     }
@@ -3839,7 +5305,11 @@ extern "C" Item js_number_is_nan(Item value) {
 
 extern "C" Item js_number_is_safe_integer(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return (Item){.item = b2it(true)};
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
+        if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
+        int64_t v = it2i(value);
+        return (Item){.item = b2it(v >= -9007199254740991LL && v <= 9007199254740991LL)};
+    }
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         return (Item){.item = b2it(isfinite(d) && d == floor(d) && fabs(d) <= 9007199254740991.0)};
@@ -3875,13 +5345,35 @@ extern "C" Item js_array_from(Item iterable) {
         return result;
     }
     if (tid == LMD_TYPE_STRING) {
-        // split string into array of single characters
+        // split string into individual code points (not bytes)
         String* s = it2s(iterable);
         if (!s) return js_array_new(0);
         Item result = js_array_new(0);
-        for (int i = 0; i < (int)s->len; i++) {
-            String* ch = heap_strcpy(&s->chars[i], 1);
+        int i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            int cp_len = 1;
+            if (lead >= 0xF0 && i + 4 <= (int)s->len)      cp_len = 4;
+            else if (lead >= 0xE0 && i + 3 <= (int)s->len)  cp_len = 3;
+            else if (lead >= 0xC0 && i + 2 <= (int)s->len)  cp_len = 2;
+            int total_len = cp_len;
+            // combine WTF-8/CESU-8 surrogate pairs
+            if (cp_len == 3 && lead == 0xED && i + 1 < (int)s->len) {
+                unsigned char second = (unsigned char)s->chars[i + 1];
+                if (second >= 0xA0 && second <= 0xAF) {
+                    int next = i + 3;
+                    if (next + 2 < (int)s->len &&
+                        (unsigned char)s->chars[next] == 0xED) {
+                        unsigned char ns = (unsigned char)s->chars[next + 1];
+                        if (ns >= 0xB0 && ns <= 0xBF) {
+                            total_len = 6;
+                        }
+                    }
+                }
+            }
+            String* ch = heap_strcpy(&s->chars[i], total_len);
             js_array_push(result, (Item){.item = s2it(ch)});
+            i += total_len;
         }
         return result;
     }
@@ -3945,7 +5437,11 @@ extern Input* js_input;
 extern "C" Item js_json_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
-    if (!s || s->len == 0) return ItemNull;
+    if (!s || s->len == 0) {
+        // empty string is not valid JSON
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected end of JSON input"))});
+        return ItemNull;
+    }
 
     // null-terminate for the parser
     char* buf = (char*)alloca(s->len + 1);
@@ -3957,7 +5453,12 @@ extern "C" Item js_json_parse(Item str_item) {
         return ItemNull;
     }
 
-    Item result = parse_json_to_item(js_input, buf);
+    bool ok = false;
+    Item result = parse_json_to_item_strict(js_input, buf, &ok);
+    if (!ok) {
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name("Unexpected token in JSON"))});
+        return ItemNull;
+    }
     return result;
 }
 
@@ -4017,6 +5518,10 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 // v20: forward declarations for recursive JSON serialization
 // Circular reference detection for JSON.stringify
 #define JSON_STRINGIFY_MAX_DEPTH 1024
+
+// Forward declaration: check if an Item is a JS Symbol (encoded as negative int)
+static bool js_is_symbol_item(Item item);
+
 static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char* gap,
                                int depth, Item holder, Item key,
                                void** visited, int visited_count);
@@ -4081,9 +5586,33 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         }
     }
 
-    // undefined, function, symbol → omit (return without writing)
-    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC) {
-        strbuf_append_str_n(sb, "null", 4); // in arrays, undefined → null
+    // Unwrap Boolean/Number/String wrapper objects
+    if (vtype == LMD_TYPE_MAP) {
+        bool cn_own = false;
+        Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
+        if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+            String* cn_str = it2s(cn);
+            bool pv_own = false;
+            Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
+            if (pv_own) {
+                if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                    value = pv;
+                    vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                    value = js_to_number(pv);
+                    vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                    value = js_to_string(pv);
+                    vtype = get_type_id(value);
+                }
+            }
+        }
+    }
+
+    // undefined, function, symbol → write "null" (in arrays, these become null)
+    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
+        || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
+        strbuf_append_str_n(sb, "null", 4);
         return;
     }
     if (value.item == ItemNull.item) {
@@ -4110,6 +5639,11 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         double d = it2d(value);
         if (d != d || d == (1.0/0.0) || d == (-1.0/0.0)) {
             strbuf_append_str_n(sb, "null", 4); // NaN, Infinity → null
+            return;
+        }
+        // Negative zero → "0"
+        if (d == 0.0) {
+            strbuf_append_str_n(sb, "0", 1);
             return;
         }
         char buf[64];
@@ -4227,9 +5761,10 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
                 }
             }
 
-            // Skip undefined and functions (they're omitted from objects)
+            // Skip undefined, functions, and symbols (they're omitted from objects)
             TypeId vt = get_type_id(v);
-            if (vt == LMD_TYPE_UNDEFINED || vt == LMD_TYPE_FUNC) continue;
+            if (vt == LMD_TYPE_UNDEFINED || vt == LMD_TYPE_FUNC || js_is_symbol_item(v)
+                || v.item == ITEM_JS_UNDEFINED) continue;
 
             if (!first) strbuf_append_char(sb, ',');
             first = false;
@@ -4298,9 +5833,10 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         }
     }
 
-    // Check if value would produce undefined (bare undefined/function at top level)
+    // Check if value would produce undefined (bare undefined/function/symbol at top level)
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC) {
+    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
+        || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
         // At top level, replacer can still transform
         if (get_type_id(replacer) == LMD_TYPE_FUNC) {
             Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
@@ -4309,10 +5845,12 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
             Item args[2] = {empty_key, value};
             Item replaced = js_call_function(replacer, wrapper, args, 2);
             TypeId rrt = get_type_id(replaced);
-            if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC) return ItemNull;
+            if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC
+                || js_is_symbol_item(replaced) || replaced.item == ITEM_JS_UNDEFINED)
+                return make_js_undefined();
             value = replaced;
         } else {
-            return ItemNull; // JSON.stringify(undefined) returns undefined
+            return make_js_undefined(); // JSON.stringify(undefined/function/symbol) returns undefined
         }
     }
 
@@ -4344,15 +5882,66 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             fn->properties_map = js_new_object();
             heap_register_gc_root(&fn->properties_map.item);
         }
-        // Check non-configurable: prototype is non-configurable by default
+        // Check non-configurable: prototype is non-configurable by default for constructors
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len == 9 && strncmp(sk->chars, "prototype", 9) == 0) {
-                return (Item){.item = b2it(false)}; // prototype is non-configurable
+                if (js_func_has_own_prototype(obj))
+                    return (Item){.item = b2it(false)}; // prototype is non-configurable
+                return (Item){.item = b2it(true)}; // non-constructors don't have prototype
             }
         }
         // Mark as deleted in properties_map
         js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        return (Item){.item = b2it(true)};
+    }
+    // v25: Handle array element deletion — set element to sentinel to create "hole"
+    if (get_type_id(obj) == LMD_TYPE_ARRAY) {
+        Array* arr = obj.array;
+        // Convert key to numeric index
+        int64_t idx = -1;
+        if (get_type_id(key) == LMD_TYPE_INT) {
+            idx = it2i(key);
+        } else if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->len <= 10) {
+                bool is_num = true;
+                int64_t n = 0;
+                for (int i = 0; i < (int)sk->len; i++) {
+                    char c = sk->chars[i];
+                    if (c < '0' || c > '9') { is_num = false; break; }
+                    n = n * 10 + (c - '0');
+                }
+                if (is_num && !(sk->len > 1 && sk->chars[0] == '0')) idx = n;
+            }
+        }
+        if (idx >= 0 && idx < arr->length) {
+            // v27: check __nc_ (non-configurable) marker before deleting
+            if (arr->extra != 0) {
+                Item k_str = js_to_string(key);
+                if (get_type_id(k_str) == LMD_TYPE_STRING) {
+                    String* ks = it2s(k_str);
+                    if (ks) {
+                        Map* pm = (Map*)(uintptr_t)arr->extra;
+                        char nc_buf[256];
+                        snprintf(nc_buf, sizeof(nc_buf), "__nc_%.*s", (int)ks->len, ks->chars);
+                        bool nc_found = false;
+                        js_map_get_fast_ext(pm, nc_buf, (int)strlen(nc_buf), &nc_found);
+                        if (nc_found) {
+                            return (Item){.item = b2it(false)};
+                        }
+                    }
+                }
+            }
+            arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+            return (Item){.item = b2it(true)};
+        }
+        // Non-numeric or out-of-range key: check companion map
+        if (arr->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)arr->extra;
+            Item k = js_to_string(key);
+            js_property_set((Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)}, k, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        }
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
@@ -4508,7 +6097,7 @@ extern "C" Item js_atob(Item str_item) {
     int src_len = s->len;
 
     // skip whitespace and compute output size
-    char* buf = (char*)malloc(src_len); // output is always <= input
+    char* buf = (char*)mem_alloc(src_len, MEM_CAT_JS_RUNTIME); // output is always <= input
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -4529,7 +6118,7 @@ extern "C" Item js_atob(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -4543,7 +6132,7 @@ extern "C" Item js_btoa(Item str_item) {
     const unsigned char* src = (const unsigned char*)s->chars;
     int src_len = s->len;
     int out_len = ((src_len + 2) / 3) * 4;
-    char* buf = (char*)malloc(out_len + 1);
+    char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -4562,7 +6151,7 @@ extern "C" Item js_btoa(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -4573,9 +6162,11 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded);
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
+
+extern "C" uint64_t js_get_heap_epoch();
 
 extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
@@ -4583,9 +6174,23 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
-    if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!decoded) {
+        // Cache URIError object per-epoch to avoid expensive error creation
+        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
+        return ItemNull;
+    }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded);
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -4597,7 +6202,7 @@ extern "C" Item js_encodeURI(Item str_item) {
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
-    free(encoded);
+    mem_free(encoded); // from url_encode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -4607,9 +6212,21 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
-    if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!decoded) {
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
+        return ItemNull;
+    }
     String* result = heap_create_name(decoded, decoded_len);
-    free(decoded);
+    mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
     return (Item){.item = s2it(result)};
 }
 
@@ -4634,7 +6251,7 @@ extern "C" Item js_unescape(Item str_item) {
 
     // allocate output buffer (worst case: all %XX with values >= 0x80 → 2 bytes each,
     // but that's still ≤ src_len since 3 input bytes → 2 output bytes)
-    char* buf = (char*)malloc(src_len * 2 + 1);
+    char* buf = (char*)mem_alloc(src_len * 2 + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     int out = 0;
@@ -4683,7 +6300,7 @@ extern "C" Item js_unescape(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -4709,7 +6326,7 @@ extern "C" Item js_escape(Item str_item) {
     int src_len = s->len;
 
     // worst case: every char becomes %uXXXX (6 bytes per input byte)
-    char* buf = (char*)malloc(src_len * 6 + 1);
+    char* buf = (char*)mem_alloc(src_len * 6 + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
     static const char hex[] = "0123456789ABCDEF";
@@ -4768,7 +6385,7 @@ extern "C" Item js_escape(Item str_item) {
     }
 
     String* result = heap_create_name(buf, out);
-    free(buf);
+    mem_free(buf);
     return (Item){.item = s2it(result)};
 }
 
@@ -4784,19 +6401,84 @@ static Item js_global_this_obj = {0};
  */
 extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
+    // reset constructor cache (function objects from old pool)
+    extern void js_ctor_cache_reset();
+    js_ctor_cache_reset();
+    // reset global builtin function cache (JsFunctionLayout* in old pool)
+    extern void js_global_builtin_fn_cache_reset();
+    js_global_builtin_fn_cache_reset();
+    // reset process.argv cache and process object
+    js_process_argv_items = (Item){.item = ITEM_NULL};
+    js_process_object = (Item){.item = ITEM_NULL};
+    js_process_argc_raw = 0;
+    js_process_argv_raw = NULL;
 }
+
+// forward declaration for populating globalThis with constructors
+extern "C" Item js_get_constructor(Item name_item);
 
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         js_global_this_obj = js_new_object();
         // populate standard globals
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, ItemNull);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, make_js_undefined());
         double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *nan_p = NAN;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, (Item){.item = d2it(nan_p)});
         double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *inf_p = INFINITY;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, (Item){.item = d2it(inf_p)});
+
+        // populate constructor functions on globalThis
+        static const struct { const char* name; int len; } ctor_names[] = {
+            {"Object", 6}, {"Array", 5}, {"Function", 8},
+            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6},
+            {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
+            {"ReferenceError", 14}, {"SyntaxError", 11},
+            {"URIError", 8}, {"EvalError", 9}, {"AggregateError", 14},
+            {"RegExp", 6}, {"Date", 4}, {"Promise", 7},
+            {"Map", 3}, {"Set", 3}, {"WeakMap", 7}, {"WeakSet", 7},
+            {"ArrayBuffer", 11}, {"DataView", 8},
+            {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
+            {"Int16Array", 10}, {"Uint16Array", 11},
+            {"Int32Array", 10}, {"Uint32Array", 11},
+            {"Float32Array", 12}, {"Float64Array", 12},
+            {NULL, 0}
+        };
+        for (int i = 0; ctor_names[i].name; i++) {
+            Item name_item = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+            Item ctor = js_get_constructor(name_item);
+            if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+                js_property_set(js_global_this_obj, name_item, ctor);
+            }
+        }
+        // globalThis self-reference
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
+
+        // populate namespace objects on globalThis (Math, JSON, Reflect, console)
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
+
+        // populate global functions as own properties
+        static const struct { const char* name; int len; int param_count; } global_fns[] = {
+            {"parseInt", 8, 2}, {"parseFloat", 10, 1},
+            {"isNaN", 5, 1}, {"isFinite", 8, 1},
+            {"eval", 4, 1},
+            {"decodeURI", 9, 1}, {"encodeURI", 9, 1},
+            {"decodeURIComponent", 18, 1}, {"encodeURIComponent", 18, 1},
+            {"escape", 6, 1}, {"unescape", 8, 1},
+            {NULL, 0, 0}
+        };
+        for (int i = 0; global_fns[i].name; i++) {
+            Item name_item = (Item){.item = s2it(heap_create_name(global_fns[i].name, global_fns[i].len))};
+            Item fn = js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
+            js_property_set(js_global_this_obj, name_item, fn);
+        }
+
+        // ES spec: all standard global properties are non-enumerable
+        js_mark_all_non_enumerable(js_global_this_obj);
     }
     return js_global_this_obj;
 }
@@ -4811,6 +6493,79 @@ extern "C" Item js_get_global_object() {
 extern "C" Item js_get_global_property(Item key) {
     Item global = js_get_global_this();
     return js_property_get(global, key);
+}
+
+// js_get_global_property_strict: like js_get_global_property but throws ReferenceError
+// for properties that don't exist on the global object. Used for bare identifier reads
+// (e.g. `x` as opposed to `obj.x`), which per ES spec must throw ReferenceError.
+extern "C" Item js_get_global_property_strict(Item key) {
+    Item global = js_get_global_this();
+    Item result = js_property_get(global, key);
+    // property_get returns JS undefined for missing keys.
+    // We need to distinguish "property exists with value undefined" from "not found".
+    if (get_type_id(result) == LMD_TYPE_UNDEFINED) {
+        // Check if the property actually exists on the global (own or prototype chain)
+        extern Item js_has_own_property(Item obj, Item key);
+        if (!it2b(js_has_own_property(global, key))) {
+            String* sk = it2s(key);
+            if (sk) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "%.*s is not defined", (int)sk->len, sk->chars);
+                extern void js_throw_reference_error(Item message);
+                js_throw_reference_error((Item){.item = s2it(heap_create_name(msg, strlen(msg)))});
+            }
+        }
+    }
+    return result;
+}
+
+// v48: Return a function wrapper for global builtins (parseInt, parseFloat, etc.)
+// so they can be passed as values, and have .name/.length properties.
+// Uses a simple cache indexed by name hash to avoid re-creating function objects.
+#define GLOBAL_BUILTIN_CACHE_SIZE 32
+static Item global_builtin_fn_cache[GLOBAL_BUILTIN_CACHE_SIZE];
+static bool global_builtin_fn_cache_init = false;
+
+void js_global_builtin_fn_cache_reset() {
+    global_builtin_fn_cache_init = false;
+}
+
+extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) {
+    if (!global_builtin_fn_cache_init) {
+        for (int i = 0; i < GLOBAL_BUILTIN_CACHE_SIZE; i++) global_builtin_fn_cache[i] = ItemNull;
+        global_builtin_fn_cache_init = true;
+    }
+    String* name = it2s(name_item);
+    if (!name) return ItemNull;
+    int pc = (int)it2i(param_count_item);
+
+    // Simple hash to cache slot
+    unsigned hash = 0;
+    for (int i = 0; i < (int)name->len; i++) hash = hash * 31 + (unsigned char)name->chars[i];
+    int slot = hash % GLOBAL_BUILTIN_CACHE_SIZE;
+    if (global_builtin_fn_cache[slot].item != ItemNull.item) {
+        // verify name matches
+        JsFunctionLayout* cached = (JsFunctionLayout*)global_builtin_fn_cache[slot].function;
+        if (cached && cached->name && cached->name->len == name->len &&
+            strncmp(cached->name->chars, name->chars, name->len) == 0) {
+            return global_builtin_fn_cache[slot];
+        }
+    }
+
+    // Create a new function object with builtin_id = -2 (dispatched by name at call site)
+    // pool_calloc zeros all fields; don't set properties_map or prototype to ItemNull
+    // since ItemNull.item != 0, which would confuse property lookup code.
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = pc;
+    fn->formal_length = -1; // -1 = use param_count for .length
+    fn->builtin_id = -2; // marker: global builtin wrapper
+    fn->name = heap_create_name(name->chars, name->len);
+    // prototype and properties_map left as zero (pool_calloc)
+    Item result = {.function = (Function*)fn};
+    global_builtin_fn_cache[slot] = result;
+    return result;
 }
 
 // =============================================================================
@@ -4834,6 +6589,7 @@ enum JsConstructorId {
     JS_CTOR_REFERENCE_ERROR,
     JS_CTOR_SYNTAX_ERROR,
     JS_CTOR_URI_ERROR,
+    JS_CTOR_EVAL_ERROR,
     JS_CTOR_REGEXP,
     JS_CTOR_DATE,
     JS_CTOR_PROMISE,
@@ -4852,11 +6608,17 @@ enum JsConstructorId {
     JS_CTOR_UINT32ARRAY,
     JS_CTOR_FLOAT32ARRAY,
     JS_CTOR_FLOAT64ARRAY,
+    JS_CTOR_AGGREGATE_ERROR,
     JS_CTOR_MAX
 };
 
 static Item js_constructor_cache[JS_CTOR_MAX];
 static bool js_ctor_cache_init = false;
+
+void js_ctor_cache_reset() {
+    memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
+    js_ctor_cache_init = false;
+}
 
 // Dummy func_ptr for constructors (makes typeof return "function")
 static Item js_ctor_placeholder() { return ItemNull; }
@@ -4864,7 +6626,56 @@ static Item js_ctor_placeholder() { return ItemNull; }
 // v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
 static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
 static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
-static Item js_ctor_string_fn(Item arg) { return js_to_string(arg); }
+static Item js_ctor_string_fn(Item arg) {
+    // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
+    if (get_type_id(arg) == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_symbol_to_string(arg);
+    }
+    return js_to_string(arg);
+}
+
+// RegExp(pattern, flags) without 'new' should behave like new RegExp(pattern, flags)
+extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item);
+static Item js_ctor_regexp_fn(Item pattern, Item flags) {
+    return js_regexp_construct(pattern, flags);
+}
+
+// Date() without 'new' should return a date string (not a Date object)
+extern "C" Item js_date_now_string();
+static Item js_ctor_date_fn(Item arg) {
+    (void)arg;
+    return js_date_now_string();
+}
+
+// Error(msg) without 'new' should behave like new Error(msg)
+static Item js_ctor_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("Error", 5))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_type_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_range_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("RangeError", 10))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_reference_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_syntax_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("SyntaxError", 11))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_uri_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+    return js_new_error_with_name(tn, msg);
+}
+static Item js_ctor_eval_error_fn(Item msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("EvalError", 9))};
+    return js_new_error_with_name(tn, msg);
+}
 
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
 struct JsCtor {
@@ -4881,7 +6692,74 @@ struct JsCtor {
     int builtin_id;
     Item properties_map; // v18: must match JsFunction layout
     uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
+    int16_t formal_length; // must match JsFunction layout
 };
+
+// Reset constructor prototype objects and globalThis between batch tests.
+// Tests may mutate built-in prototypes (e.g., Object.prototype.__proto__,
+// Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
+// Clearing the prototype field forces lazy re-creation of a fresh prototype
+// on next access, while keeping the constructor struct itself alive (pool-allocated).
+extern "C" void js_reset_constructor_prototypes() {
+    if (!js_ctor_cache_init) return;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        if (js_constructor_cache[i].item == 0 || js_constructor_cache[i].item == ItemNull.item)
+            continue;
+        JsCtor* ctor = (JsCtor*)js_constructor_cache[i].function;
+        if (ctor) {
+            ctor->prototype = ItemNull;
+            ctor->properties_map = (Item){0};
+        }
+    }
+    // Clear globalThis so it's re-populated with constructors that have fresh prototypes
+    js_global_this_obj = (Item){0};
+}
+
+// Forward declarations for functions in js_runtime.cpp used by constructor population
+extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
+extern "C" void js_mark_non_enumerable(Item object, Item name);
+extern "C" void js_mark_non_writable(Item object, Item name);
+extern "C" Item js_property_get(Item object, Item key);
+extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor_name, int ctor_len);
+
+// Populate Number constructor with own properties (constants + static methods)
+// so they appear via hasOwnProperty, Object.getOwnPropertyDescriptor, etc.
+static void js_populate_number_ctor(Item fn_item) {
+    // Constants: non-enumerable, non-writable, non-configurable
+    struct { const char* name; int len; double value; } constants[] = {
+        {"NEGATIVE_INFINITY", 17, -1.0/0.0},
+        {"POSITIVE_INFINITY", 17, 1.0/0.0},
+        {"NaN", 3, 0.0/0.0},
+        {"MAX_VALUE", 9, 1.7976931348623157e+308},
+        {"MIN_VALUE", 9, 5e-324},
+        {"MAX_SAFE_INTEGER", 16, 9007199254740991.0},
+        {"MIN_SAFE_INTEGER", 16, -9007199254740991.0},
+        {"EPSILON", 7, 2.220446049250313e-16},
+    };
+    for (int i = 0; i < 8; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(constants[i].name, constants[i].len))};
+        js_func_init_property(fn_item, key, make_double(constants[i].value));
+        js_mark_non_enumerable(fn_item, key);
+        js_mark_non_writable(fn_item, key);
+        // Also mark non-configurable
+        char nc_buf[64];
+        snprintf(nc_buf, sizeof(nc_buf), "__nc_%s", constants[i].name);
+        Item nc_key = (Item){.item = s2it(heap_create_name(nc_buf, strlen(nc_buf)))};
+        js_func_init_property(fn_item, nc_key, (Item){.item = b2it(true)});
+    }
+    // Static methods: non-enumerable (writable, configurable by default)
+    // Fetch via js_property_get which triggers js_lookup_constructor_static
+    const char* methods[] = {"isFinite", "isNaN", "isInteger", "isSafeInteger", "parseInt", "parseFloat"};
+    int method_lens[] = {8, 5, 9, 13, 8, 10};
+    for (int i = 0; i < 6; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(methods[i], method_lens[i]))};
+        Item method = js_property_get(fn_item, key);
+        if (method.item != ItemNull.item && method.item != make_js_undefined().item) {
+            js_func_init_property(fn_item, key, method);
+            js_mark_non_enumerable(fn_item, key);
+        }
+    }
+}
 
 static Item js_create_constructor(int ctor_id, const char* name, int param_count) {
     if (!js_ctor_cache_init) {
@@ -4899,8 +6777,18 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_BOOLEAN) fn->func_ptr = (void*)js_ctor_boolean_fn;
     else if (ctor_id == JS_CTOR_NUMBER) fn->func_ptr = (void*)js_ctor_number_fn;
     else if (ctor_id == JS_CTOR_STRING) fn->func_ptr = (void*)js_ctor_string_fn;
+    else if (ctor_id == JS_CTOR_REGEXP) fn->func_ptr = (void*)js_ctor_regexp_fn;
+    else if (ctor_id == JS_CTOR_DATE) fn->func_ptr = (void*)js_ctor_date_fn;
+    else if (ctor_id == JS_CTOR_ERROR) fn->func_ptr = (void*)js_ctor_error_fn;
+    else if (ctor_id == JS_CTOR_TYPE_ERROR) fn->func_ptr = (void*)js_ctor_type_error_fn;
+    else if (ctor_id == JS_CTOR_RANGE_ERROR) fn->func_ptr = (void*)js_ctor_range_error_fn;
+    else if (ctor_id == JS_CTOR_REFERENCE_ERROR) fn->func_ptr = (void*)js_ctor_reference_error_fn;
+    else if (ctor_id == JS_CTOR_SYNTAX_ERROR) fn->func_ptr = (void*)js_ctor_syntax_error_fn;
+    else if (ctor_id == JS_CTOR_URI_ERROR) fn->func_ptr = (void*)js_ctor_uri_error_fn;
+    else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
     else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
+    fn->formal_length = -1; // -1 = use param_count for .length
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
@@ -4912,6 +6800,10 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     fn->builtin_id = 0;
     Item fn_item = (Item){.function = (Function*)fn};
     js_constructor_cache[ctor_id] = fn_item;
+    // Populate constructor-specific own properties
+    if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
+    // Populate static methods as own properties for all constructors
+    js_populate_constructor_statics(fn_item, name, strlen(name));
     return fn_item;
 }
 
@@ -4934,6 +6826,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"ReferenceError", 14, JS_CTOR_REFERENCE_ERROR, 1},
         {"SyntaxError", 11, JS_CTOR_SYNTAX_ERROR, 1},
         {"URIError", 8, JS_CTOR_URI_ERROR, 1},
+        {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
+        {"AggregateError", 14, JS_CTOR_AGGREGATE_ERROR, 2},
         {"RegExp", 6, JS_CTOR_REGEXP, 2},
         {"Date", 4, JS_CTOR_DATE, 1},
         {"Promise", 7, JS_CTOR_PROMISE, 1},
@@ -5016,6 +6910,7 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_SEARCH         9
 #define JS_SYMBOL_ID_SPLIT          10
 #define JS_SYMBOL_ID_UNSCOPABLES    11
+#define JS_SYMBOL_ID_IS_CONCAT_SPREADABLE 12
 
 static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
     (void)udata;
@@ -5134,6 +7029,7 @@ extern "C" Item js_symbol_to_string(Item sym) {
     if (id == JS_SYMBOL_ID_SEARCH)         return (Item){.item = s2it(heap_create_name("Symbol(Symbol.search)", 21))};
     if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol(Symbol.split)", 20))};
     if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol(Symbol.unscopables)", 26))};
+    if (id == JS_SYMBOL_ID_IS_CONCAT_SPREADABLE) return (Item){.item = s2it(heap_create_name("Symbol(Symbol.isConcatSpreadable)", 32))};
 
     // check registry
     if (js_symbol_registry) {
@@ -5181,6 +7077,7 @@ extern "C" Item js_symbol_get_description(Item sym) {
     if (id == JS_SYMBOL_ID_SEARCH)         return (Item){.item = s2it(heap_create_name("Symbol.search", 13))};
     if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol.split", 12))};
     if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol.unscopables", 18))};
+    if (id == JS_SYMBOL_ID_IS_CONCAT_SPREADABLE) return (Item){.item = s2it(heap_create_name("Symbol.isConcatSpreadable", 24))};
 
     // check Symbol.for() registry
     if (js_symbol_registry) {
@@ -5236,6 +7133,8 @@ extern "C" Item js_symbol_well_known(Item name) {
             return js_make_symbol_item(JS_SYMBOL_ID_SPLIT);
         if (s->len == 11 && strncmp(s->chars, "unscopables", 11) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_UNSCOPABLES);
+        if (s->len == 18 && strncmp(s->chars, "isConcatSpreadable", 18) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_IS_CONCAT_SPREADABLE);
     }
     // Unknown well-known symbol — create a stable entry via Symbol.for semantics
     return js_symbol_for(name);

@@ -8,7 +8,6 @@
  * Extracted from input-markup.cpp parse_inline_math() (lines 3593-3660)
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 
 namespace lambda {
@@ -97,7 +96,7 @@ Item parse_inline_math(MarkupParser* parser, const char** text) {
     add_attribute_to_element(parser, math_elem, "type", "inline");
 
     // Create content string
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (!content) {
         return Item{.item = ITEM_ERROR};
     }
@@ -113,7 +112,7 @@ Item parse_inline_math(MarkupParser* parser, const char** text) {
         increment_element_content_length(math_elem);
     }
 
-    free(content);
+    mem_free(content);
     *text = pos + 1; // Skip closing $
 
     return Item{.item = (uint64_t)math_elem};

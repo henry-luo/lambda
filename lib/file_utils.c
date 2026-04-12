@@ -6,6 +6,7 @@
 #endif
 
 #include "file_utils.h"
+#include "memtrack.h"
 #include "file.h"
 #include "arraylist.h"
 #include "log.h"
@@ -39,7 +40,7 @@ int create_dir_recursive(const char* path) {
         return -1;
     }
 
-    char* path_copy = strdup(path);
+    char* path_copy = mem_strdup(path, MEM_CAT_TEMP);
     if (!path_copy) {
         return -1;
     }
@@ -60,7 +61,7 @@ int create_dir_recursive(const char* path) {
             if (stat(path_copy, &st) != 0) {
                 // Create directory
                 if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
-                    free(path_copy);
+                    mem_free(path_copy);
                     return -1;
                 }
             }
@@ -72,12 +73,12 @@ int create_dir_recursive(const char* path) {
     // Create final directory
     if (stat(path_copy, &st) != 0) {
         if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
-            free(path_copy);
+            mem_free(path_copy);
             return -1;
         }
     }
 
-    free(path_copy);
+    mem_free(path_copy);
     return 0;
 }
 
@@ -87,8 +88,8 @@ int create_dir_recursive(const char* path) {
 
 void dir_entry_free(DirEntry* entry) {
     if (!entry) return;
-    free(entry->name);
-    free(entry);
+    mem_free(entry->name);
+    mem_free(entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -101,13 +102,13 @@ ArrayList* dir_list(const char* dir_path) {
     if (!dir_path) return NULL;
 
     size_t plen = strlen(dir_path);
-    char* pattern = (char*)malloc(plen + 3);
+    char* pattern = (char*)mem_alloc(plen + 3, MEM_CAT_TEMP);
     if (!pattern) return NULL;
     snprintf(pattern, plen + 3, "%s\\*", dir_path);
 
     WIN32_FIND_DATAA fd;
     HANDLE hFind = FindFirstFileA(pattern, &fd);
-    free(pattern);
+    mem_free(pattern);
     if (hFind == INVALID_HANDLE_VALUE) {
         log_error("dir_list: cannot open directory '%s'", dir_path);
         return NULL;
@@ -120,9 +121,9 @@ ArrayList* dir_list(const char* dir_path) {
         if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
             continue;
 
-        DirEntry* entry = (DirEntry*)calloc(1, sizeof(DirEntry));
+        DirEntry* entry = (DirEntry*)mem_calloc(1, sizeof(DirEntry), MEM_CAT_TEMP);
         if (!entry) continue;
-        entry->name = strdup(fd.cFileName);
+        entry->name = mem_strdup(fd.cFileName, MEM_CAT_TEMP);
         entry->is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         entry->is_symlink = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         arraylist_append(list, entry);
@@ -151,9 +152,9 @@ ArrayList* dir_list(const char* dir_path) {
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
 
-        DirEntry* entry = (DirEntry*)calloc(1, sizeof(DirEntry));
+        DirEntry* entry = (DirEntry*)mem_calloc(1, sizeof(DirEntry), MEM_CAT_TEMP);
         if (!entry) continue;
-        entry->name = strdup(de->d_name);
+        entry->name = mem_strdup(de->d_name, MEM_CAT_TEMP);
 
         // determine type
 #ifdef _DIRENT_HAVE_D_TYPE
@@ -165,7 +166,7 @@ ArrayList* dir_list(const char* dir_path) {
         {
             // fallback to stat
             size_t plen = strlen(dir_path) + 1 + strlen(de->d_name) + 1;
-            char* full = (char*)malloc(plen);
+            char* full = (char*)mem_alloc(plen, MEM_CAT_TEMP);
             if (full) {
                 snprintf(full, plen, "%s/%s", dir_path, de->d_name);
                 struct stat st;
@@ -173,7 +174,7 @@ ArrayList* dir_list(const char* dir_path) {
                     entry->is_dir = S_ISDIR(st.st_mode);
                     entry->is_symlink = S_ISLNK(st.st_mode);
                 }
-                free(full);
+                mem_free(full);
             }
         }
         arraylist_append(list, entry);
@@ -200,7 +201,7 @@ static int dir_walk_recursive(const char* dir_path, FileWalkCallback cb,
 
         // build full path
         size_t plen = strlen(dir_path) + 1 + strlen(entry->name) + 1;
-        char* full = (char*)malloc(plen);
+        char* full = (char*)mem_alloc(plen, MEM_CAT_TEMP);
         if (!full) { result = -1; break; }
         snprintf(full, plen, "%s/%s", dir_path, entry->name);
 
@@ -208,13 +209,13 @@ static int dir_walk_recursive(const char* dir_path, FileWalkCallback cb,
 
         if (entry->is_dir && should_descend) {
             if (dir_walk_recursive(full, cb, user_data) != 0) {
-                free(full);
+                mem_free(full);
                 result = -1;
                 break;
             }
         }
 
-        free(full);
+        mem_free(full);
     }
 
     // free entries
@@ -260,7 +261,7 @@ int dir_delete(const char* dir_path) {
         DirEntry* entry = (DirEntry*)entries->data[i];
 
         size_t plen = strlen(dir_path) + 1 + strlen(entry->name) + 1;
-        char* full = (char*)malloc(plen);
+        char* full = (char*)mem_alloc(plen, MEM_CAT_TEMP);
         if (!full) { result = -1; break; }
         snprintf(full, plen, "%s/%s", dir_path, entry->name);
 
@@ -272,7 +273,7 @@ int dir_delete(const char* dir_path) {
                 result = -1;
             }
         }
-        free(full);
+        mem_free(full);
     }
 
     for (int i = 0; i < entries->length; i++) {
@@ -325,10 +326,10 @@ int dir_copy(const char* src, const char* dst) {
 
         size_t slen = strlen(src) + 1 + strlen(entry->name) + 1;
         size_t dlen = strlen(dst) + 1 + strlen(entry->name) + 1;
-        char* src_full = (char*)malloc(slen);
-        char* dst_full = (char*)malloc(dlen);
+        char* src_full = (char*)mem_alloc(slen, MEM_CAT_TEMP);
+        char* dst_full = (char*)mem_alloc(dlen, MEM_CAT_TEMP);
         if (!src_full || !dst_full) {
-            free(src_full); free(dst_full);
+            mem_free(src_full); mem_free(dst_full);
             result = -1; break;
         }
         snprintf(src_full, slen, "%s/%s", src, entry->name);
@@ -340,8 +341,8 @@ int dir_copy(const char* src, const char* dst) {
             if (file_copy(src_full, dst_full, &opts) != 0) result = -1;
         }
 
-        free(src_full);
-        free(dst_full);
+        mem_free(src_full);
+        mem_free(dst_full);
     }
 
     for (int i = 0; i < entries->length; i++) {
@@ -377,7 +378,7 @@ ArrayList* file_glob(const char* pattern) {
             continue;
 
         size_t need = prefix_len + strlen(fd.cFileName) + 1;
-        char* path = (char*)malloc(need);
+        char* path = (char*)mem_alloc(need, MEM_CAT_TEMP);
         if (!path) continue;
         if (prefix_len > 0) {
             memcpy(path, pattern, prefix_len);
@@ -407,7 +408,7 @@ ArrayList* file_glob(const char* pattern) {
 
     if (ret == 0) {
         for (size_t i = 0; i < g.gl_pathc; i++) {
-            char* dup = strdup(g.gl_pathv[i]);
+            char* dup = mem_strdup(g.gl_pathv[i], MEM_CAT_TEMP);
             if (dup) arraylist_append(list, dup);
         }
     }
@@ -464,7 +465,7 @@ static bool file_find_cb(const char* path, bool is_dir, void* user_data) {
         bool match = (fnmatch(ctx->name_pattern, base, 0) == 0);
 #endif
         if (match) {
-            char* dup = strdup(path);
+            char* dup = mem_strdup(path, MEM_CAT_TEMP);
             if (dup) arraylist_append(ctx->results, dup);
         }
     }

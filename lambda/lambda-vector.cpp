@@ -3,6 +3,7 @@
 
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <cmath>
 
 extern __thread EvalContext* context;
@@ -1742,8 +1743,8 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     }
 
     // build index permutation array and extract key doubles
-    int64_t* indices = (int64_t*)calloc(len, sizeof(int64_t));
-    double*  key_vals = (double*)calloc(len, sizeof(double));
+    int64_t* indices = (int64_t*)mem_calloc(len, sizeof(int64_t), MEM_CAT_EVAL);
+    double*  key_vals = (double*)mem_calloc(len, sizeof(double), MEM_CAT_EVAL);
     for (int64_t i = 0; i < len; i++) {
         indices[i] = i;
         key_vals[i] = item_to_double(vector_get(keys, i));
@@ -1765,14 +1766,14 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     // rearrange values array in-place using the sorted index permutation
     // values must be an Array (LMD_TYPE_ARRAY) with items pointer
     Array* arr = values.array;
-    Item* temp = (Item*)malloc(len * sizeof(Item));
+    Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
     for (int64_t i = 0; i < len; i++) {
         temp[i] = arr->items[indices[i]];
     }
     memcpy(arr->items, temp, len * sizeof(Item));
-    free(temp);
-    free(indices);
-    free(key_vals);
+    mem_free(temp);
+    mem_free(indices);
+    mem_free(key_vals);
 
     // mark as non-spreadable so the sorted result displays as a single array
     // (without this, list_push_spread would spread individual items)
@@ -1854,14 +1855,14 @@ Item fn_sort2(Item item, Item dir_item) {
         }
 
         // extract keys using the key function
-        Item* key_vals = (Item*)malloc(len * sizeof(Item));
-        int64_t* indices = (int64_t*)malloc(len * sizeof(int64_t));
+        Item* key_vals = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
+        int64_t* indices = (int64_t*)mem_alloc(len * sizeof(int64_t), MEM_CAT_EVAL);
         for (int64_t i = 0; i < len; i++) {
             indices[i] = i;
             Item key_result = fn_call1(key_fn, result->items[i]);
             if (get_type_id(key_result) == LMD_TYPE_ERROR) {
-                free(key_vals);
-                free(indices);
+                mem_free(key_vals);
+                mem_free(indices);
                 return key_result;  // propagate error
             }
             key_vals[i] = key_result;
@@ -1881,14 +1882,14 @@ Item fn_sort2(Item item, Item dir_item) {
         }
 
         // rearrange items by sorted indices
-        Item* temp = (Item*)malloc(len * sizeof(Item));
+        Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
         for (int64_t i = 0; i < len; i++) {
             temp[i] = result->items[indices[i]];
         }
         memcpy(result->items, temp, len * sizeof(Item));
-        free(temp);
-        free(indices);
-        free(key_vals);
+        mem_free(temp);
+        mem_free(indices);
+        mem_free(key_vals);
 
         result->is_spreadable = false;
         return { .array = result };

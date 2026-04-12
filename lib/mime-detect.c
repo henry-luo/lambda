@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include "mime-detect.h"
+#include "memtrack.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -153,7 +154,7 @@ static const char* detect_subtype(const char* base_type, const char* data, size_
 
 // Initialize MIME detector
 MimeDetector* mime_detector_init(void) {
-    MimeDetector* detector = malloc(sizeof(MimeDetector));
+    MimeDetector* detector = mem_alloc(sizeof(MimeDetector), MEM_CAT_TEMP);
     if (!detector) return NULL;
     
     detector->magic_patterns = magic_patterns;
@@ -167,7 +168,7 @@ MimeDetector* mime_detector_init(void) {
 // Destroy MIME detector
 void mime_detector_destroy(MimeDetector* detector) {
     if (detector) {
-        free(detector);
+        mem_free(detector);
     }
 }
 
@@ -176,7 +177,7 @@ const char* detect_mime_from_filename(MimeDetector* detector, const char* filena
     if (!detector || !filename) return NULL;
     
     // Convert to lowercase for comparison
-    char* lower_filename = malloc(strlen(filename) + 1);
+    char* lower_filename = mem_alloc(strlen(filename) + 1, MEM_CAT_TEMP);
     if (!lower_filename) return NULL;
     
     for (size_t i = 0; filename[i]; i++) {
@@ -187,12 +188,12 @@ const char* detect_mime_from_filename(MimeDetector* detector, const char* filena
     // Check glob patterns
     for (size_t i = 0; i < detector->glob_patterns_count; i++) {
         if (match_glob(detector->glob_patterns[i].pattern, lower_filename)) {
-            free(lower_filename);
+            mem_free(lower_filename);
             return detector->glob_patterns[i].mime_type;
         }
     }
     
-    free(lower_filename);
+    mem_free(lower_filename);
     return NULL;
 }
 

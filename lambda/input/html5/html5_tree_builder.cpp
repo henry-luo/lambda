@@ -1765,16 +1765,18 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         }
 
         // generic end tag handling: pop elements until matching tag found
+        // Use strcasecmp for the match to handle SVG camelCase tags (e.g. clipPath vs clippath)
+        // HTML tags are all lowercase in both tag and elem_tag, so this is safe for HTML too.
         for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
             Element* elem = (Element*)parser->open_elements->items[i].element;
             const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
 
-            if (strcmp(elem_tag, tag) == 0) {
+            if (strcasecmp(elem_tag, tag) == 0) {
                 // found matching element, generate implied end tags and pop
                 html5_generate_implied_end_tags_except(parser, tag);
                 while (parser->open_elements->length > 0) {
                     Element* popped = html5_pop_element(parser);
-                    if (strcmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
+                    if (strcasecmp(((TypeElmt*)popped->type)->name.str, tag) == 0) {
                         break;
                     }
                 }

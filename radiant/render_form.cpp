@@ -29,33 +29,20 @@ static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, 
     fill_surface_rect(rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip);
 }
 
-// Helper to draw a filled circle using ThorVG
+// Helper to draw a filled circle using RdtVector
 static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
-
-    tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
-    tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
-
-    tvg_canvas_remove(canvas, NULL);
-    tvg_canvas_push(canvas, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);
+    RdtPath* p = rdt_path_new();
+    rdt_path_add_circle(p, cx, cy, radius, radius);
+    rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+    rdt_path_free(p);
 }
 
-// Helper to draw a circle outline (ring) using ThorVG
+// Helper to draw a circle outline (ring) using RdtVector
 static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
-    Tvg_Canvas canvas = rdcon->canvas;
-    Tvg_Paint shape = tvg_shape_new();
-
-    tvg_shape_append_circle(shape, cx, cy, radius, radius, true);
-    tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
-    tvg_shape_set_stroke_width(shape, stroke_width);
-
-    tvg_canvas_remove(canvas, NULL);
-    tvg_canvas_push(canvas, shape);
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);
+    RdtPath* p = rdt_path_new();
+    rdt_path_add_circle(p, cx, cy, radius, radius);
+    rdt_stroke_path(&rdcon->vec, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+    rdt_path_free(p);
 }
 
 // Helper to draw a 3D border effect (inset or outset)
@@ -276,15 +263,9 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
 
-            // Draw caret via ThorVG
-            Tvg_Paint shape = tvg_shape_new();
-            if (shape) {
-                tvg_shape_append_rect(shape, caret_x, caret_y_pos, caret_w, caret_h, 0, 0, true);
-                tvg_shape_set_fill_color(shape, 0x33, 0x33, 0x33, 0xCC);
-                tvg_canvas_push(rdcon->canvas, shape);
-                tvg_canvas_reset_and_draw(rdcon, false);
-                tvg_canvas_remove(rdcon->canvas, NULL);
-            }
+            // Draw caret via RdtVector
+            Color caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
+            rdt_fill_rect(&rdcon->vec, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
 
@@ -307,37 +288,25 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // 3D inset border
     draw_3d_border(rdcon, x, y, size, size, true, 1 * s);
 
-    // Checkmark if checked - draw using ThorVG stroked path
+    // Checkmark if checked - draw using RdtVector stroked path
     if (form->checked) {
-        Tvg_Canvas canvas = rdcon->canvas;
-        Tvg_Paint shape = tvg_shape_new();
-
         float inset = 3 * s;
         // Checkmark points: short leg down-left, then long leg up-right
-        // Start point (left)
         float cx1 = x + inset;
         float cy1 = y + size * 0.5f;
-        // Middle point (bottom of check)
         float cx2 = x + size * 0.35f;
         float cy2 = y + size - inset;
-        // End point (top right)
         float cx3 = x + size - inset;
         float cy3 = y + inset;
 
-        tvg_shape_move_to(shape, cx1, cy1);
-        tvg_shape_line_to(shape, cx2, cy2);
-        tvg_shape_line_to(shape, cx3, cy3);
+        RdtPath* p = rdt_path_new();
+        rdt_path_move_to(p, cx1, cy1);
+        rdt_path_line_to(p, cx2, cy2);
+        rdt_path_line_to(p, cx3, cy3);
 
-        // Stroke style
         Color check_color = form->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
-        tvg_shape_set_stroke_color(shape, check_color.r, check_color.g, check_color.b, check_color.a);
-        tvg_shape_set_stroke_width(shape, 2.0f * s);
-        tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
-        tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_ROUND);
-
-        tvg_canvas_push(canvas, shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);
+        rdt_stroke_path(&rdcon->vec, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+        rdt_path_free(p);
     }
 
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
@@ -881,14 +850,9 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
                             float hl_y = content_y + line_num * line_height;
                             if (x1 > x0 && hl_y + line_height > y && hl_y < y + h) {
                                 // draw selection rectangle (semi-transparent blue)
-                                Tvg_Paint shape = tvg_shape_new();
-                                if (shape) {
-                                    tvg_shape_append_rect(shape, x0, hl_y, x1 - x0, line_height, 0, 0, true);
-                                    tvg_shape_set_fill_color(shape, 0x33, 0x99, 0xFF, 0x60);
-                                    tvg_canvas_push(rdcon->canvas, shape);
-                                    tvg_canvas_reset_and_draw(rdcon, false);
-                                    tvg_canvas_remove(rdcon->canvas, NULL);
-                                }
+                                // draw selection highlight via RdtVector
+                                Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
+                                rdt_fill_rect(&rdcon->vec, x0, hl_y, x1 - x0, line_height, sel_color);
                             }
                         }
 
@@ -934,14 +898,9 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
 
-            Tvg_Paint shape = tvg_shape_new();
-            if (shape) {
-                tvg_shape_append_rect(shape, caret_x, caret_y_pos, caret_w, caret_h, 0, 0, true);
-                tvg_shape_set_fill_color(shape, 0x33, 0x33, 0x33, 0xCC);
-                tvg_canvas_push(rdcon->canvas, shape);
-                tvg_canvas_reset_and_draw(rdcon, false);
-                tvg_canvas_remove(rdcon->canvas, NULL);
-            }
+            // draw textarea caret via RdtVector
+            Color ta_caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
+            rdt_fill_rect(&rdcon->vec, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
 

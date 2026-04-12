@@ -764,6 +764,13 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 // v24: strict mode flag setter (js_runtime.cpp)
 extern void js_set_strict_mode(int64_t strict);
 
+// Object.groupBy / Map.groupBy (ES2024)
+extern Item js_object_group_by(Item items, Item callback);
+extern Item js_map_group_by(Item items, Item callback);
+
+// Function formal length (ES spec .length)
+extern void js_set_formal_length(Item fn_item, int length);
+
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
 extern Item js_reflect_set(Item obj, Item key, Item value);
@@ -786,6 +793,19 @@ extern int64_t js_eq_raw(Item left, Item right);
 extern int64_t js_ne_raw(Item left, Item right);
 extern int64_t js_loose_eq_raw(Item left, Item right);
 extern int64_t js_loose_ne_raw(Item left, Item right);
+
+// debug-only: native test262 harness functions for performance
+#ifndef NDEBUG
+extern void js_assert_same_value(Item actual, Item expected, Item message);
+extern void js_assert_not_same_value(Item actual, Item unexpected, Item message);
+extern void js_assert_compare_array(Item actual, Item expected, Item message);
+extern void js_assert_deep_equal(Item actual, Item expected, Item message);
+extern Item js_compare_array(Item a, Item b);
+extern void js_verify_property(Item obj, Item name, Item desc, Item options);
+extern void js_assert_throws(Item expected_ctor, Item func, Item message);
+extern void js_assert_base(Item must_be_true, Item message);
+extern void js_donotevaluate(void);
+#endif
 
 JitImport jit_runtime_imports[] = {
     // C library functions
@@ -948,6 +968,8 @@ JitImport jit_runtime_imports[] = {
     {"js_math_floor", FPTR(js_math_floor)},
     {"js_math_ceil", FPTR(js_math_ceil)},
     {"js_math_round_item", FPTR(js_math_round_item)},
+    {"js_math_pow", FPTR(js_math_pow)},
+    {"js_math_pow_d", FPTR(js_math_pow_d)},
     {"fn_floor_i", FPTR(fn_floor_i)},
     {"fn_ceil_i", FPTR(fn_ceil_i)},
     {"fn_round_i", FPTR(fn_round_i)},
@@ -1175,6 +1197,17 @@ JitImport jit_runtime_imports[] = {
     {"js_build_template_object", FPTR(js_build_template_object)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+#ifndef NDEBUG
+    {"js_assert_same_value", FPTR(js_assert_same_value)},
+    {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
+    {"js_assert_compare_array", FPTR(js_assert_compare_array)},
+    {"js_assert_deep_equal", FPTR(js_assert_deep_equal)},
+    {"js_compare_array", FPTR(js_compare_array)},
+    {"js_verify_property", FPTR(js_verify_property)},
+    {"js_assert_throws", FPTR(js_assert_throws)},
+    {"js_assert_base", FPTR(js_assert_base)},
+    {"js_donotevaluate", FPTR(js_donotevaluate)},
+#endif
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},
     {"js_array_length", FPTR(js_array_length)},
@@ -1205,6 +1238,10 @@ JitImport jit_runtime_imports[] = {
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
     {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
+    {"js_get_slot_f", FPTR(js_get_slot_f)},
+    {"js_get_slot_i", FPTR(js_get_slot_i)},
+    {"js_set_slot_f", FPTR(js_set_slot_f)},
+    {"js_set_slot_i", FPTR(js_set_slot_i)},
     {"js_array_get_int", FPTR(js_array_get_int)},
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
@@ -1219,10 +1256,14 @@ JitImport jit_runtime_imports[] = {
     {"js_throw_value", FPTR(js_throw_value)},
     {"js_check_exception", FPTR(js_check_exception)},
     {"js_clear_exception", FPTR(js_clear_exception)},
+    {"js_require_object_coercible", FPTR(js_require_object_coercible)},
+    {"js_throw_syntax_error", FPTR(js_throw_syntax_error)},
+    {"js_throw_reference_error", FPTR(js_throw_reference_error)},
     {"js_new_error", FPTR(js_new_error)},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
+    {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
@@ -1294,6 +1335,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
+    {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
@@ -1314,6 +1356,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_entries", FPTR(js_object_entries)},
     {"js_object_from_entries", FPTR(js_object_from_entries)},
     {"js_object_is", FPTR(js_object_is)},
+    {"js_object_group_by", FPTR(js_object_group_by)},
+    {"js_map_group_by", FPTR(js_map_group_by)},
     {"js_object_assign", FPTR(js_object_assign)},
     {"js_object_spread_into", FPTR(js_object_spread_into)},
     {"js_has_own_property", FPTR(js_has_own_property)},
@@ -1397,6 +1441,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_this", FPTR(js_get_global_this)},
     {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
+    {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
+    {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
@@ -1421,6 +1467,10 @@ JitImport jit_runtime_imports[] = {
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
+    // v29: Lazy iterator protocol for for-of
+    {"js_get_iterator", FPTR(js_get_iterator)},
+    {"js_iterator_step", FPTR(js_iterator_step)},
+    {"js_iterator_close", FPTR(js_iterator_close)},
     // v14: Promise runtime
     {"js_promise_create", FPTR(js_promise_create)},
     {"js_promise_resolve", FPTR(js_promise_resolve)},
@@ -1707,6 +1757,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_le", FPTR(bash_test_le)},
     {"bash_test_str_eq", FPTR(bash_test_str_eq)},
     {"bash_test_str_eq_noescape", FPTR(bash_test_str_eq_noescape)},
+    {"bash_test_str_eq_literal", FPTR(bash_test_str_eq_literal)},
+    {"bash_test_str_ne_literal", FPTR(bash_test_str_ne_literal)},
     {"bash_str_eq", FPTR(bash_str_eq)},
     {"bash_test_str_ne", FPTR(bash_test_str_ne)},
     {"bash_test_str_lt", FPTR(bash_test_str_lt)},
@@ -1723,6 +1775,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_l", FPTR(bash_test_l)},
     {"bash_test_regex", FPTR(bash_test_regex)},
     {"bash_test_glob", FPTR(bash_test_glob)},
+    {"bash_glob_quote_str", FPTR(bash_glob_quote_str)},
     // string operations
     {"bash_string_length", FPTR(bash_string_length)},
     {"bash_string_concat", FPTR(bash_string_concat)},
@@ -1748,6 +1801,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_trim_suffix_long", FPTR(bash_expand_trim_suffix_long)},
     {"bash_expand_replace", FPTR(bash_expand_replace)},
     {"bash_expand_replace_all", FPTR(bash_expand_replace_all)},
+    {"bash_expand_replace_prefix", FPTR(bash_expand_replace_prefix)},
+    {"bash_expand_replace_suffix", FPTR(bash_expand_replace_suffix)},
     {"bash_expand_substring", FPTR(bash_expand_substring)},
     {"bash_expand_upper_first", FPTR(bash_expand_upper_first)},
     {"bash_expand_upper_all", FPTR(bash_expand_upper_all)},
@@ -1755,6 +1810,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_lower_all", FPTR(bash_expand_lower_all)},
     {"bash_expand_toggle_first", FPTR(bash_expand_toggle_first)},
     {"bash_expand_toggle_all", FPTR(bash_expand_toggle_all)},
+    {"bash_array_casemod", FPTR(bash_array_casemod)},
     {"bash_expand_indirect", FPTR(bash_expand_indirect)},
     {"bash_expand_prefix_names", FPTR(bash_expand_prefix_names)},
     {"bash_procsub_in", FPTR(bash_procsub_in)},
@@ -1768,6 +1824,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_array_get", FPTR(bash_array_get)},
     {"bash_array_append", FPTR(bash_array_append)},
     {"bash_array_concat", FPTR(bash_array_concat)},
+    {"bash_array_concat_positional", FPTR(bash_array_concat_positional)},
     {"bash_array_elem_append", FPTR(bash_array_elem_append)},
     {"bash_array_length", FPTR(bash_array_length)},
     {"bash_array_count", FPTR(bash_array_count)},
@@ -1778,6 +1835,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_assoc_new", FPTR(bash_assoc_new)},
     {"bash_ensure_assoc", FPTR(bash_ensure_assoc)},
     {"bash_assoc_set", FPTR(bash_assoc_set)},
+    {"bash_assoc_init_word", FPTR(bash_assoc_init_word)},
+    {"bash_array_init_word", FPTR(bash_array_init_word)},
     {"bash_assoc_get", FPTR(bash_assoc_get)},
     {"bash_assoc_keys", FPTR(bash_assoc_keys)},
     {"bash_assoc_values", FPTR(bash_assoc_values)},
@@ -1792,8 +1851,12 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
     {"bash_is_assoc", FPTR(bash_is_assoc)},
     {"bash_declare_print_var", FPTR(bash_declare_print_var)},
+    {"bash_builtin_set_dump", FPTR(bash_builtin_set_dump)},
     // variable scope
     {"bash_set_var", FPTR(bash_set_var)},
+    {"bash_restore_var_if_not_posix", FPTR(bash_restore_var_if_not_posix)},
+    {"bash_set_cmd_env_var", FPTR(bash_set_cmd_env_var)},
+    {"bash_restore_cmd_env_var", FPTR(bash_restore_cmd_env_var)},
     {"bash_get_var", FPTR(bash_get_var)},
     {"bash_set_local_var", FPTR(bash_set_local_var)},
     {"bash_export_var", FPTR(bash_export_var)},
@@ -1805,10 +1868,16 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_arg_count", FPTR(bash_get_arg_count)},
     {"bash_get_all_args", FPTR(bash_get_all_args)},
     {"bash_get_all_args_string", FPTR(bash_get_all_args_string)},
+    {"bash_get_positional_array", FPTR(bash_get_positional_array)},
+    {"bash_positional_slice", FPTR(bash_positional_slice)},
+    {"bash_positional_slice_array", FPTR(bash_positional_slice_array)},
     {"bash_shift_args", FPTR(bash_shift_args)},
     {"bash_arg_builder_start", FPTR(bash_arg_builder_start)},
     {"bash_arg_builder_push", FPTR(bash_arg_builder_push)},
     {"bash_arg_builder_push_at", FPTR(bash_arg_builder_push_at)},
+    {"bash_arg_builder_push_default_at", FPTR(bash_arg_builder_push_default_at)},
+    {"bash_arg_builder_push_default_star", FPTR(bash_arg_builder_push_default_star)},
+    {"bash_arg_builder_push_array", FPTR(bash_arg_builder_push_array)},
     {"bash_arg_builder_get_ptr", FPTR(bash_arg_builder_get_ptr)},
     {"bash_arg_builder_get_count", FPTR(bash_arg_builder_get_count)},
     {"bash_get_exit_code", FPTR(bash_get_exit_code)},
@@ -1880,6 +1949,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
     {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
     {"bash_clear_stdin_item", FPTR(bash_clear_stdin_item)},
+    {"bash_stdin_item_is_set", FPTR(bash_stdin_item_is_set)},
     // file redirections
     {"bash_redirect_write", FPTR(bash_redirect_write)},
     {"bash_redirect_append", FPTR(bash_redirect_append)},
@@ -1895,6 +1965,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_brace", FPTR(bash_expand_brace)},
     {"bash_words_split_into", FPTR(bash_words_split_into)},
     {"bash_ifs_split_into", FPTR(bash_ifs_split_into)},
+    {"bash_ifs_split_default_at", FPTR(bash_ifs_split_default_at)},
+    {"bash_ifs_split_default_star", FPTR(bash_ifs_split_default_star)},
     // word expansion (Module 1)
     {"bash_word_split", FPTR(bash_word_split)},
     {"bash_word_split_into", FPTR(bash_word_split_into)},
@@ -1907,6 +1979,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_scope_pop", FPTR(bash_scope_pop)},
     {"bash_scope_push_subshell", FPTR(bash_scope_push_subshell)},
     {"bash_scope_pop_subshell", FPTR(bash_scope_pop_subshell)},
+    {"bash_reset_errexit", FPTR(bash_reset_errexit)},
+    {"bash_comsub_reset_errexit", FPTR(bash_comsub_reset_errexit)},
     // built-in commands
     {"bash_builtin_echo", FPTR(bash_builtin_echo)},
     {"bash_builtin_printf", FPTR(bash_builtin_printf)},
@@ -1952,6 +2026,9 @@ JitImport jit_runtime_imports[] = {
     {"bash_source_file", FPTR(bash_source_file)},
     // runtime function registry
     {"bash_register_rt_func", FPTR(bash_register_rt_func)},
+    {"bash_register_rt_func_with_source", FPTR(bash_register_rt_func_with_source)},
+    {"bash_print_all_functions", FPTR(bash_print_all_functions)},
+    {"bash_declare_print_func", FPTR(bash_declare_print_func)},
     {"bash_call_rt_func", FPTR(bash_call_rt_func)},
     {"bash_lookup_rt_func", FPTR(bash_lookup_rt_func)},
     // shell options
@@ -1962,6 +2039,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_option_pipefail", FPTR(bash_get_option_pipefail)},
     {"bash_errexit_push", FPTR(bash_errexit_push)},
     {"bash_errexit_pop", FPTR(bash_errexit_pop)},
+    {"bash_set_errexit_suppressed", FPTR(bash_set_errexit_suppressed)},
     {"bash_check_errexit", FPTR(bash_check_errexit)},
     // signal handling / trap (Phase 8)
     {"bash_trap_set", FPTR(bash_trap_set)},
@@ -1984,6 +2062,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_builtin_wait", FPTR(bash_builtin_wait)},
     {"bash_builtin_hash", FPTR(bash_builtin_hash)},
     {"bash_builtin_enable", FPTR(bash_builtin_enable)},
+    {"bash_builtin_compgen", FPTR(bash_builtin_compgen)},
     {"bash_builtin_builtin", FPTR(bash_builtin_builtin)},
     {"bash_builtin_umask", FPTR(bash_builtin_umask)},
     {"bash_trap_print_all", FPTR(bash_trap_print_all)},
@@ -1994,6 +2073,14 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_rematch_count", FPTR(bash_get_rematch_count)},
     {"bash_get_rematch_all", FPTR(bash_get_rematch_all)},
     {"bash_clear_rematch", FPTR(bash_clear_rematch)},
+    // PIPESTATUS array
+    {"bash_pipestatus_reset", FPTR(bash_pipestatus_reset)},
+    {"bash_pipestatus_set", FPTR(bash_pipestatus_set)},
+    {"bash_pipestatus_apply_simple", FPTR(bash_pipestatus_apply_simple)},
+    {"bash_pipestatus_apply_pipefail", FPTR(bash_pipestatus_apply_pipefail)},
+    {"bash_get_pipestatus", FPTR(bash_get_pipestatus)},
+    {"bash_get_pipestatus_all", FPTR(bash_get_pipestatus_all)},
+    {"bash_get_pipestatus_count_item", FPTR(bash_get_pipestatus_count_item)},
     {"bash_cond_pattern", FPTR(bash_cond_pattern)},
     {"bash_test_nt", FPTR(bash_test_nt)},
     {"bash_test_ot", FPTR(bash_test_ot)},
@@ -2003,6 +2090,7 @@ JitImport jit_runtime_imports[] = {
     // heredoc engine (Module 11)
     {"bash_heredoc_expand", FPTR(bash_heredoc_expand)},
     {"bash_herestring_expand", FPTR(bash_herestring_expand)},
+    {"bash_append_newline", FPTR(bash_append_newline)},
     {"bash_heredoc_strip_tabs", FPTR(bash_heredoc_strip_tabs)},
     {"bash_set_heredoc_stdin", FPTR(bash_set_heredoc_stdin)},
     {"bash_get_heredoc_stdin", FPTR(bash_get_heredoc_stdin)},

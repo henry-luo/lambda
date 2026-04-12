@@ -8,10 +8,12 @@ and C representation layer, implemented in PLT Redex (Racket).
 | File | Description |
 |------|-------------|
 | `lambda-core.rkt` | Language grammar: syntax, values, types, environments, helpers |
-| `lambda-eval.rkt` | Big-step evaluator: expression → value |
+| `lambda-eval.rkt` | Big-step evaluator: expression → value (functional core + objects) |
+| `lambda-proc.rkt` | Procedural extension: mutable state, while/break/continue/return, pn closures |
+| `lambda-object.rkt` | Object type system: type registry, nominal typing, inheritance, constraints |
 | `lambda-types.rkt` | Type inference, subtyping, type join |
 | `c-repr.rkt` | C representation model: boxing, unboxing, type mapping |
-| `tests.rkt` | Comprehensive test suite |
+| `tests.rkt` | Comprehensive test suite (Parts 1–7) |
 
 ## Setup
 
@@ -60,6 +62,16 @@ Lambda Source Semantics (lambda-core.rkt + lambda-eval.rkt)
     │  "What Lambda programs mean"
     │  eval-lambda : env × expr → value
     │
+    ├── Object Type System (lambda-object.rkt)
+    │   Type registry: nominal types, single inheritance
+    │   Construction, constraints, methods (fn/pn), update/spread
+    │   Integrated into eval-lambda (fn methods) and eval-proc (pn methods)
+    │
+    ├── Procedural Extension (lambda-proc.rkt)
+    │   eval-proc : σ × ρ × e → Result(tag, value, output)
+    │   Store-passing: mutable vars, while/break/continue/return
+    │   Delegates pure expressions to eval-lambda
+    │
     ├── Type System (lambda-types.rkt)
     │   infer-type : Γ × expr → τ
     │   subtype? : τ × τ → bool
@@ -71,16 +83,21 @@ Lambda Source Semantics (lambda-core.rkt + lambda-eval.rkt)
         verify-call-args, verify-if-branches
 ```
 
-## Semantic Discrepancies Found
+## Semantic Status
 
-| Area | Docs Say | Implementation Does | Model Follows |
-|------|----------|-------------------|---------------|
-| Truthiness of `0` | Truthy | Falsy (`it2b` returns false) | Docs (spec) |
-| `and`/`or` return type | Docs unclear | Returns operand value (not bool) | Implementation |
+| Area | Status | Notes |
+|------|--------|-------|
+| Truthiness of `0` | **Aligned** | Both spec and implementation treat 0 as truthy. `i2it(0)` produces a tagged value with non-zero bits. |
+| `and`/`or` return type | **Aligned** | Returns operand value (short-circuit), model follows implementation |
+| Boxing/unboxing | **Aligned** | Model matches `type_box_table[]` in `transpile.cpp` (Phase 1 sync) |
+| Container unboxing | **Aligned** | Specific functions per container type (it2arr, it2map, it2elmt, etc.) |
+| New types (object, uint64, etc.) | **Modeled** | object-type, num-sized-type, uint64-type, array-num-type added |
 
 ## Scope
 
-The model covers Lambda's **functional core** (`fn` functions):
+The model covers Lambda's **functional core** (`fn` functions) and **procedural extension** (`pn` functions):
+
+### Functional Core (lambda-eval.rkt)
 - All primitive types and collections
 - Arithmetic, comparison, logical operators
 - If-else, for, pipe, where, match expressions
@@ -89,11 +106,36 @@ The model covers Lambda's **functional core** (`fn` functions):
 - Type inference, subtyping, type join
 - C-level boxing/unboxing correctness
 
+### Procedural Extension (lambda-proc.rkt)
+- Mutable variables (`var` with store-backed locations)
+- Variable assignment, type widening
+- Array element assignment (with negative indexing)
+- Map field assignment (add/update fields)
+- While loops with break and continue
+- Early return from functions
+- Procedural functions (`pn`) with mutable parameters
+- Closures with shared mutable state
+- Print side effects (output accumulator)
+- Statement sequencing with env threading
+
+### Object Type System (lambda-object.rkt + extensions in eval/proc)
+- Nominal type definitions with single inheritance
+- Object construction with field validation and defaults
+- Field-level constraints (`that` predicates on individual fields)
+- Object-level constraints (`that` predicates on whole object)
+- Pure methods (`fn`) — field access, computation, return value
+- Mutation methods (`pn`) — modify fields in-place via store
+- Object update/spread syntax (`<Type *:source, field: val>`)
+- Self-reference (`~`) in methods and constraints
+- Nominal type checking (`is-type`) with inheritance chain walk
+- Pattern matching on nominal object types
+- Method override (child methods shadow parent methods)
+
 **Not modeled** (deferred):
-- Procedural features (`pn`, `var`, `while`, `break`, `return`)
-- I/O operations (`input`, `output`, `print`)
+- I/O operations (`input`, `output`, `cmd`, file pipes)
 - Module system (`import`, `pub`)
 - CSS layout engine (Radiant)
 - String patterns (regex type-level matching)
 - Datetime/decimal arithmetic
 - Path operations
+- Bitwise operations

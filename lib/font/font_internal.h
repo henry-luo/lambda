@@ -22,6 +22,7 @@
 #include "../arraylist.h"
 #include "../log.h"
 
+#ifndef __APPLE__
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
@@ -33,6 +34,7 @@
 #include FT_SIZES_H
 #include FT_MODULE_H
 #include FT_MULTIPLE_MASTERS_H
+#endif
 
 #include <time.h>
 #include <string.h>
@@ -66,7 +68,9 @@ FontFormat font_detect_format_ext(const char* path);
 // ============================================================================
 
 struct FontHandle {
+#ifndef __APPLE__
     FT_Face     ft_face;                // FreeType face object
+#endif
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
     bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
@@ -76,9 +80,10 @@ struct FontHandle {
     bool        metrics_ready;
 
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
-    // FreeType requires the buffer to outlive the face, so arena-allocated.
+    // FreeType requires the buffer to outlive the face.
     uint8_t*    memory_buffer;
     size_t      memory_buffer_size;
+    char*       file_data_path;         // key into file_data_cache for ref-count management (malloc'd)
 
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
@@ -89,6 +94,10 @@ struct FontHandle {
 #ifdef __APPLE__
     // CoreText font reference for GPOS kerning (when FreeType lacks kern table)
     void* ct_font_ref;  // actually CTFontRef, void* to avoid CoreText headers
+
+    // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
+    // Created from raw font data for all fonts on macOS.
+    void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
 #endif
 
     // back-pointer to owning context (for pool access)
@@ -104,6 +113,7 @@ struct FontHandle {
     FontWeight  weight;
     FontSlant   slant;
     char*       family_name;            // arena-allocated
+    bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
 };
 
 // ============================================================================
@@ -231,8 +241,10 @@ struct FontContext {
     bool            owns_arena;         // true if we created the arena
 
     // FreeType
+#ifndef __APPLE__
     FT_Library      ft_library;
     struct FT_MemoryRec_   ft_memory;          // custom allocator routing to pool
+#endif
 
     // font database
     FontDatabase*   database;
@@ -240,6 +252,9 @@ struct FontContext {
     // face cache: cache_key → FontHandle*
     struct hashmap*  face_cache;
     uint32_t         lru_counter;       // monotonically increasing for LRU
+
+    // font file data cache: file_path → (data, len) — avoids re-reading the same file
+    struct hashmap*  file_data_cache;
 
     // glyph bitmap cache
     struct hashmap*  bitmap_cache;
@@ -272,6 +287,17 @@ typedef struct FontCacheKey {
 } FontCacheKey;
 
 // ============================================================================
+// Internal helper: font file data cache entry (avoids re-reading same file)
+// ============================================================================
+
+typedef struct FontFileDataEntry {
+    char*       path;           // malloc-allocated canonical path
+    uint8_t*    data;           // malloc-allocated raw font data (TTF/SFNT)
+    size_t      data_len;
+    int         ref_count;      // number of active FT_Faces using this data
+} FontFileDataEntry;
+
+// ============================================================================
 // Internal helper: glyph advance cache entry
 // ============================================================================
 
@@ -290,6 +316,15 @@ typedef struct KernPairEntry {
     uint32_t right_cp;
     float    kerning;       // kerning value in CSS pixels
 } KernPairEntry;
+
+// ============================================================================
+// Internal helper: codepoint fallback cache entry
+// ============================================================================
+
+typedef struct CodepointFallbackEntry {
+    uint32_t    codepoint;
+    FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
+} CodepointFallbackEntry;
 
 // ============================================================================
 // Internal helper: glyph bitmap cache entry
@@ -338,9 +373,11 @@ void                scan_windows_registry_fonts(FontDatabase* db);
 int                 get_font_metrics_platform(const char* font_family, float font_size,
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);
+float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
 char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);
+char*               font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index);
 
 // CoreText GPOS kerning (macOS only): create/destroy CTFont, get pair kerning
 #ifdef __APPLE__
@@ -352,6 +389,15 @@ void                font_platform_destroy_ct_font(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
+
+// font_rasterize_ct.c — CoreText rasterization (macOS)
+void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
+                                              float size_px, int face_index);
+bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
+                                               float bitmap_scale, GlyphInfo* out);
+GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
+                                              GlyphRenderMode mode, float bitmap_scale,
+                                              float pixel_ratio, Arena* arena);
 #endif
 
 // font_loader.c
@@ -361,7 +407,9 @@ FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
 FontHandle*         font_load_memory_internal(FontContext* ctx, const uint8_t* data,
                                               size_t len, int face_index, float size_px,
                                               float physical_size, FontWeight weight, FontSlant slant);
+#ifndef __APPLE__
 void                font_select_best_fixed_size(FT_Face face, int target_ppem);
+#endif
 
 // font_decompress.c
 bool                font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
@@ -391,6 +439,7 @@ const char**        font_get_aliases(const char* family);
 FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style);
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                                   uint32_t codepoint);
+void                font_fallback_reset_platform_cache(void);
 
 // font_face.c
 const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,
@@ -400,6 +449,7 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
 // Internal utility macros
 // ============================================================================
 
+#ifndef __APPLE__
 // 26.6 fixed-point to float conversion (FreeType uses 26.6 format)
 #define FT_F26DOT6_TO_FLOAT(x) ((float)(x) / 64.0f)
 
@@ -408,6 +458,7 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
 
 // 16.16 fixed-point to float (FreeType uses for some metrics)
 #define FT_F16DOT16_TO_FLOAT(x) ((float)(x) / 65536.0f)
+#endif
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

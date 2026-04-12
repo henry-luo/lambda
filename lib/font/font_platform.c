@@ -447,6 +447,23 @@ int get_font_metrics_platform(const char* font_family, float font_size,
     return 1;
 }
 
+float get_cjk_system_line_height(float font_size) {
+    if (font_size <= 0) return 0;
+
+    // Chrome blends system CJK font metrics for lines containing CJK characters.
+    // On macOS, PingFang SC is the default CJK system font.
+    static const char* cjk_fonts[] = { "PingFang SC", "Hiragino Sans GB", NULL };
+    for (int i = 0; cjk_fonts[i]; i++) {
+        float ascent, descent, lh;
+        if (get_font_metrics_platform(cjk_fonts[i], font_size, &ascent, &descent, &lh)) {
+            log_debug("CJK system line-height: %s@%.1f → %.0f (asc=%.0f, desc=%.0f)",
+                      cjk_fonts[i], font_size, lh, ascent, descent);
+            return lh;
+        }
+    }
+    return 0;
+}
+
 #else
 
 /**
@@ -457,6 +474,11 @@ int get_font_metrics_platform(const char* font_family, float font_size,
                               float* out_ascent, float* out_descent, float* out_line_height) {
     (void)font_family; (void)font_size;
     (void)out_ascent; (void)out_descent; (void)out_line_height;
+    return 0;
+}
+
+float get_cjk_system_line_height(float font_size) {
+    (void)font_size;
     return 0;
 }
 
@@ -479,9 +501,9 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
         utf16_len = 1;
     } else if (codepoint <= 0x10FFFF) {
         // surrogate pair
-        codepoint -= 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (codepoint >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (codepoint & 0x3FF));
+        uint32_t cp = codepoint - 0x10000;
+        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
         utf16_len = 2;
     } else {
         return NULL;
@@ -490,34 +512,166 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
     if (!str) return NULL;
 
-    // create a base font (Times New Roman at 12pt) and ask CoreText for a fallback
-    CTFontRef base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
-    if (!base_font) {
-        CFRelease(str);
-        return NULL;
+    // cache the base font for repeated fallback lookups (creating a CTFont
+    // per call is expensive — CoreText does font catalog lookups each time)
+    static CTFontRef s_base_font = NULL;
+    if (!s_base_font) {
+        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+        if (!s_base_font) {
+            CFRelease(str);
+            return NULL;
+        }
     }
 
-    CTFontRef fallback = CTFontCreateForString(base_font, str, CFRangeMake(0, utf16_len));
+    CTFontRef fallback = CTFontCreateForString(s_base_font, str, CFRangeMake(0, utf16_len));
     CFRelease(str);
-    CFRelease(base_font);
 
     if (!fallback) return NULL;
 
-    // get the font URL from the fallback font
+    // get the font URL and PostScript name from the fallback font
     CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
+    CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
     CFRelease(fallback);
-    if (!desc) return NULL;
+    if (!desc) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
 
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
     CFRelease(desc);
-    if (!url) return NULL;
+    if (!url) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
 
     char path[1024];
     bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
+
+    // for TTC/OTC collections, determine the correct face index by matching
+    // the PostScript name against all faces in the collection file
+    if (ok && path[0] && out_face_index && ps_name) {
+        size_t path_len = strlen(path);
+        bool is_collection = (path_len > 4 &&
+            (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
+             strcasecmp(path + path_len - 4, ".otc") == 0));
+        if (is_collection) {
+            CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromURL(url);
+            if (descs) {
+                CFIndex count = CFArrayGetCount(descs);
+                for (CFIndex i = 0; i < count; i++) {
+                    CTFontDescriptorRef face_desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
+                    CFStringRef face_ps = (CFStringRef)CTFontDescriptorCopyAttribute(face_desc, kCTFontNameAttribute);
+                    if (face_ps) {
+                        if (CFStringCompare(face_ps, ps_name, 0) == kCFCompareEqualTo) {
+                            *out_face_index = (int)i;
+                            log_debug("font_platform: TTC face index %d for '%s'",
+                                      (int)i, CFStringGetCStringPtr(ps_name, kCFStringEncodingUTF8));
+                            CFRelease(face_ps);
+                            break;
+                        }
+                        CFRelease(face_ps);
+                    }
+                }
+                CFRelease(descs);
+            }
+        }
+    }
+
     CFRelease(url);
+    if (ps_name) CFRelease(ps_name);
 
     if (ok && path[0]) {
-        log_debug("font_platform: codepoint U+%04X → '%s'", codepoint, path);
+        log_debug("font_platform: codepoint U+%04X → '%s' (face %d)",
+                  codepoint, path, out_face_index ? *out_face_index : 0);
+        return mem_strdup(path, MEM_CAT_FONT);
+    }
+    return NULL;
+}
+
+char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
+    if (out_face_index) *out_face_index = 0;
+
+    // Build UTF-16 string: codepoint + VS16 (U+FE0F) to force emoji presentation.
+    // CoreText uses the VS16 to select Apple Color Emoji for dual-presentation chars.
+    UniChar utf16[4];
+    CFIndex utf16_len = 0;
+    if (codepoint <= 0xFFFF) {
+        utf16[utf16_len++] = (UniChar)codepoint;
+    } else if (codepoint <= 0x10FFFF) {
+        uint32_t cp = codepoint - 0x10000;
+        utf16[utf16_len++] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[utf16_len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
+    } else {
+        return NULL;
+    }
+    utf16[utf16_len++] = 0xFE0F;  // VS16 — emoji presentation selector
+
+    CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
+    if (!str) return NULL;
+
+    static CTFontRef s_base_font = NULL;
+    if (!s_base_font) {
+        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+        if (!s_base_font) {
+            CFRelease(str);
+            return NULL;
+        }
+    }
+
+    CTFontRef fallback = CTFontCreateForString(s_base_font, str, CFRangeMake(0, utf16_len));
+    CFRelease(str);
+    if (!fallback) return NULL;
+
+    CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
+    CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
+    CFRelease(fallback);
+    if (!desc) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
+
+    CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
+    CFRelease(desc);
+    if (!url) {
+        if (ps_name) CFRelease(ps_name);
+        return NULL;
+    }
+
+    char path[1024];
+    bool ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)path, sizeof(path));
+
+    if (ok && path[0] && out_face_index && ps_name) {
+        size_t path_len = strlen(path);
+        bool is_collection = (path_len > 4 &&
+            (strcasecmp(path + path_len - 4, ".ttc") == 0 ||
+             strcasecmp(path + path_len - 4, ".otc") == 0));
+        if (is_collection) {
+            CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromURL(url);
+            if (descs) {
+                CFIndex count = CFArrayGetCount(descs);
+                for (CFIndex i = 0; i < count; i++) {
+                    CTFontDescriptorRef face_desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, i);
+                    CFStringRef face_ps = (CFStringRef)CTFontDescriptorCopyAttribute(face_desc, kCTFontNameAttribute);
+                    if (face_ps) {
+                        if (CFStringCompare(face_ps, ps_name, 0) == kCFCompareEqualTo) {
+                            *out_face_index = (int)i;
+                            CFRelease(face_ps);
+                            break;
+                        }
+                        CFRelease(face_ps);
+                    }
+                }
+                CFRelease(descs);
+            }
+        }
+    }
+
+    CFRelease(url);
+    if (ps_name) CFRelease(ps_name);
+
+    if (ok && path[0]) {
+        log_debug("font_platform_emoji: codepoint U+%04X → '%s' (face %d)",
+                  codepoint, path, out_face_index ? *out_face_index : 0);
         return mem_strdup(path, MEM_CAT_FONT);
     }
     return NULL;
@@ -526,6 +680,12 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
 #else
 
 char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+    (void)codepoint;
+    if (out_face_index) *out_face_index = 0;
+    return NULL;
+}
+
+char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
     (void)codepoint;
     if (out_face_index) *out_face_index = 0;
     return NULL;

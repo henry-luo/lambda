@@ -5,7 +5,7 @@
 #include <curl/curl.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -32,7 +32,7 @@ static HttpConfig default_http_config = {
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
-    char* new_data = (char*)realloc(response->data, response->size + total_size + 1);
+    char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_TEMP);  // tracked realloc: callers use mem_free()
 
     if (!new_data) {
         log_error("HTTP: Memory allocation failed");
@@ -121,7 +121,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (res != CURLE_OK) {
         log_error("HTTP: Download failed: %s", curl_easy_strerror(res));
-        free(response.data);
+        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -132,7 +132,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
-        free(response.data);
+        mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -175,7 +175,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
             if (out_cache_path) {
                 *out_cache_path = cache_filename;
             } else {
-                free(cache_filename);
+                mem_free(cache_filename); // from file_cache_path() - mem_alloc
             }
             return content;
         }
@@ -185,7 +185,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     size_t content_size;
     char* content = download_http_content(url, &content_size, NULL);
     if (!content) {
-        free(cache_filename);
+        mem_free(cache_filename); // from file_cache_path() - mem_alloc
         return NULL;
     }
 
@@ -199,7 +199,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     if (out_cache_path) {
         *out_cache_path = cache_filename;
     } else {
-        free(cache_filename);
+        mem_free(cache_filename); // from file_cache_path() - mem_alloc
     }
 
     return content;
@@ -225,8 +225,8 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     // Parse URL to create Url object
     Url* abs_url = url_parse(url);
     if (!abs_url) {
-        free(content);
-        free(cache_path);
+        mem_free(content); // from lib - uses mem_alloc
+        mem_free(cache_path); // from lib - uses mem_alloc
         return NULL;
     }
 
@@ -235,7 +235,7 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     String* flavor_str = NULL;
 
     if (type) {
-        type_str = (String*)malloc(sizeof(String) + strlen(type) + 1);
+        type_str = (String*)mem_alloc(sizeof(String) + strlen(type) + 1, MEM_CAT_INPUT_OTHER);
         if (type_str) {
             type_str->len = strlen(type);
             str_copy(type_str->chars, type_str->len + 1, type, type_str->len);
@@ -243,7 +243,7 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     }
 
     if (flavor) {
-        flavor_str = (String*)malloc(sizeof(String) + strlen(flavor) + 1);
+        flavor_str = (String*)mem_alloc(sizeof(String) + strlen(flavor) + 1, MEM_CAT_INPUT_OTHER);
         if (flavor_str) {
             flavor_str->len = strlen(flavor);
             str_copy(flavor_str->chars, flavor_str->len + 1, flavor, flavor_str->len);
@@ -254,10 +254,10 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     Input* input = input_from_source(content, abs_url, type_str, flavor_str);
 
     // Cleanup
-    free(content);
-    free(cache_path);
-    free(type_str);
-    free(flavor_str);
+    mem_free(content); // from lib - uses mem_alloc
+    mem_free(cache_path); // from lib - uses mem_alloc
+    mem_free(type_str);
+    mem_free(flavor_str);
     return input;
 }
 
@@ -284,8 +284,8 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
             value_len--;
         }
 
-        if (response->content_type) free(response->content_type);
-        response->content_type = (char*)malloc(value_len + 1);
+        if (response->content_type) mem_free(response->content_type);
+        response->content_type = (char*)mem_alloc(value_len + 1, MEM_CAT_INPUT_OTHER);
         if (response->content_type) {
             memcpy(response->content_type, value_start, value_len);
             response->content_type[value_len] = '\0';
@@ -293,10 +293,10 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
     }
 
     // Store all headers
-    response->response_headers = (char**)realloc(response->response_headers,
-                                               (response->response_header_count + 1) * sizeof(char*));
+    response->response_headers = (char**)mem_realloc(response->response_headers,
+                                               (response->response_header_count + 1) * sizeof(char*), MEM_CAT_INPUT_OTHER);
     if (response->response_headers) {
-        char* header_copy = (char*)malloc(header_size + 1);
+        char* header_copy = (char*)mem_alloc(header_size + 1, MEM_CAT_INPUT_OTHER);
         if (header_copy) {
             memcpy(header_copy, buffer, header_size);
             header_copy[header_size] = '\0';
@@ -318,25 +318,25 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
 void free_fetch_response(FetchResponse* response) {
     if (!response) return;
     if (response->data) {
-        free(response->data);
+        mem_free(response->data);
         response->data = NULL;
     }
 
     if (response->content_type) {
-        free(response->content_type);
+        mem_free(response->content_type);
         response->content_type = NULL;
     }
 
     for (int i = 0; i < response->response_header_count; i++) {
-        free(response->response_headers[i]);
+        mem_free(response->response_headers[i]);
     }
     if (response->response_headers) {
-        free(response->response_headers);
+        mem_free(response->response_headers);
         response->response_headers = NULL;
     }
     response->response_header_count = 0;
 
-    free(response);
+    mem_free(response);
 }
 
 // Perform HTTP request with full fetch-like functionality
@@ -349,7 +349,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         return NULL;
     }
 
-    FetchResponse* response = (FetchResponse*)calloc(1, sizeof(FetchResponse));
+    FetchResponse* response = (FetchResponse*)mem_calloc(1, sizeof(FetchResponse), MEM_CAT_INPUT_OTHER);
     if (!response) {
         curl_easy_cleanup(curl);
         return NULL;

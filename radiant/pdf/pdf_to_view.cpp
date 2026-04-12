@@ -5,13 +5,12 @@
 #include "operators.h"
 #include "pages.hpp"
 #include "pdf_fonts.h"
-#include "../../lib/log.h"
+#include "../../lib/log.h"\n#include "../../lib/arena.h"
 #include "../../lib/memtrack.h"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
-#include "../render.hpp"  // For RenderContext and ThorVG access
-#include <thorvg_capi.h>  // ThorVG C API
+#include "../render.hpp"  // For RenderContext
 #include <string.h>
 #include <math.h>         // For pow() in color space gamma correction
 
@@ -27,24 +26,24 @@ static inline String* input_create_string(Input* input, const char* str) {
 }
 
 // Forward declarations
-static ViewBlock* create_document_view(Pool* pool);
-static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item);
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data);
-static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
-static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
-static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, String* text);
-static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
-static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, const char* xobject_name);
-static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* image_dict, const char* name);
-static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, Map* form_dict, const char* name);
+static ViewBlock* create_document_view(Arena* arena);
+static void process_pdf_object(Input* input, Arena* view_arena, ViewBlock* parent, Item obj_item);
+static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data);
+static void process_pdf_operator(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
+static void create_text_view(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, String* text);
+static void create_text_view_raw(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, String* text);
+static void create_text_array_views(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
+static void handle_do_operator(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, const char* xobject_name);
+static void handle_image_xobject(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, Map* image_dict, const char* name);
+static void handle_form_xobject(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, Map* form_dict, const char* name);
 static ImageSurface* decode_raw_image_data(Map* image_dict, String* data, int width, int height, int bpc, Pool* pool);
 static ImageSurface* decode_image_data(const uint8_t* data, size_t length, ImageFormat format_hint);
 static void lookup_font_entry(PDFStreamParser* parser, const char* font_name);
 
 // Color space handling forward declarations
-static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources);
+static PDFColorSpaceInfo* parse_color_space(Input* input, Arena* arena, Item cs_item, Map* resources);
 static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* components, double* rgb_out);
-static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool, const char* cs_name, Map* resources);
+static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Arena* arena, const char* cs_name, Map* resources);
 
 // Path paint operation types
 typedef enum {
@@ -53,8 +52,8 @@ typedef enum {
     PAINT_FILL_AND_STROKE // B, B*, b, b* operators
 } PaintOperation;
 
-static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
-static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
+static void create_rect_view(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
+static void create_path_view_thorvg(Input* input, Arena* view_arena, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
 static bool needs_thorvg_path_render(PDFStreamParser* parser);
 static void update_text_position(PDFStreamParser* parser, double tx, double ty);
 static void append_child_view(View* parent, View* child);
@@ -95,6 +94,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
     }
 
     view_tree->pool = view_pool;
+    view_tree->arena = arena_create_default(view_pool);
     view_tree->html_version = HTML5; // Treat as HTML5 for layout purposes
 
     // Extract PDF version and statistics
@@ -118,14 +118,14 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root, float pixel_ratio) {
     log_info("Processing %d PDF objects", objects->length);
 
     // Create root view (represents the document)
-    ViewBlock* root_view = create_document_view(view_pool);
+    ViewBlock* root_view = create_document_view(view_tree->arena);
     view_tree->root = (View*)root_view;
 
     // Process each object looking for content streams
     for (int i = 0; i < objects->length; i++) {
         Item obj_item = objects->items[i];
         log_debug("Processing object %d/%d", i+1, objects->length);
-        process_pdf_object(input, view_pool, root_view, obj_item);
+        process_pdf_object(input, view_tree->arena, root_view, obj_item);
     }
 
     log_info("PDF to View Tree conversion complete");
@@ -274,10 +274,11 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
     }
 
     view_tree->pool = view_pool;  // Use dedicated pool, not input->pool
+    view_tree->arena = arena_create_default(view_pool);
     view_tree->html_version = HTML5;
 
     // Create root view with page dimensions
-    ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* root_view = (ViewBlock*)arena_calloc(view_tree->arena, sizeof(ViewBlock));
     if (!root_view) {
         log_error("Failed to allocate root view");
         pool_destroy(view_pool);
@@ -304,7 +305,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index, flo
             Map* stream_map = stream_item.map;
             log_debug("Processing content stream %d/%d for page %d",
                      i + 1, page_info->content_streams->length, page_index + 1);
-            process_pdf_stream(input, view_pool, root_view, stream_map, page_info->resources, pdf_data);
+            process_pdf_stream(input, view_tree->arena, root_view, stream_map, page_info->resources, pdf_data);
         }
     }
 
@@ -344,8 +345,8 @@ int pdf_get_page_count(Item pdf_root) {
 /**
  * Create root document view
  */
-static ViewBlock* create_document_view(Pool* pool) {
-    ViewBlock* root = (ViewBlock*)pool_calloc(pool, sizeof(ViewBlock));
+static ViewBlock* create_document_view(Arena* arena) {
+    ViewBlock* root = (ViewBlock*)arena_calloc(arena, sizeof(ViewBlock));
     if (!root) {
         log_error("Failed to allocate root view");
         return nullptr;
@@ -375,10 +376,10 @@ static ViewBlock* create_document_view(Pool* pool) {
  *            [/CalGray {WhitePoint [...] Gamma 1.0}]
  *            [/CalRGB {WhitePoint [...] Gamma [...]}]
  */
-static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_item, Map* resources) {
+static PDFColorSpaceInfo* parse_color_space(Input* input, Arena* arena, Item cs_item, Map* resources) {
     if (cs_item.item == ITEM_NULL) return nullptr;
 
-    PDFColorSpaceInfo* info = (PDFColorSpaceInfo*)pool_calloc(pool, sizeof(PDFColorSpaceInfo));
+    PDFColorSpaceInfo* info = (PDFColorSpaceInfo*)arena_calloc(arena, sizeof(PDFColorSpaceInfo));
     if (!info) return nullptr;
 
     // Default values
@@ -407,7 +408,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             info->num_components = 4;
         } else {
             // Might be a named color space reference - look up in resources
-            PDFColorSpaceInfo* resolved = lookup_named_colorspace(input, pool, cs_name->chars, resources);
+            PDFColorSpaceInfo* resolved = lookup_named_colorspace(input, arena, cs_name->chars, resources);
             if (resolved) {
                 return resolved;
             }
@@ -469,7 +470,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
             if (cs_array->length >= 4) {
                 // Base color space
                 Item base_item = cs_array->items[1];
-                PDFColorSpaceInfo* base_info = parse_color_space(input, pool, base_item, resources);
+                PDFColorSpaceInfo* base_info = parse_color_space(input, arena, base_item, resources);
                 if (base_info) {
                     info->base_type = base_info->type;
                 } else {
@@ -615,7 +616,7 @@ static PDFColorSpaceInfo* parse_color_space(Input* input, Pool* pool, Item cs_it
 /**
  * Look up a named color space from the resources dictionary
  */
-static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool,
+static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Arena* arena,
                                                    const char* cs_name, Map* resources) {
     if (!resources || !cs_name) return nullptr;
 
@@ -639,7 +640,7 @@ static PDFColorSpaceInfo* lookup_named_colorspace(Input* input, Pool* pool,
     }
 
     log_debug("Found named color space '%s' in resources", cs_name);
-    return parse_color_space(input, pool, cs_item, resources);
+    return parse_color_space(input, arena, cs_item, resources);
 }
 
 /**
@@ -775,7 +776,7 @@ static void apply_color_space_to_rgb(PDFColorSpaceInfo* cs_info, const double* c
 /**
  * Process a single PDF object
  */
-static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent, Item obj_item) {
+static void process_pdf_object(Input* input, Arena* view_arena, ViewBlock* parent, Item obj_item) {
     if (obj_item.item == ITEM_NULL) {
         log_debug("Skipping null object");
         return;
@@ -812,14 +813,14 @@ static void process_pdf_object(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Process stream objects
     if (strcmp(type_str->chars, "stream") == 0) {
-        process_pdf_stream(input, view_pool, parent, obj_map, nullptr, nullptr);
+        process_pdf_stream(input, view_arena, parent, obj_map, nullptr, nullptr);
     }
     // Process indirect objects
     else if (strcmp(type_str->chars, "indirect_object") == 0) {
         String* content_key = input_create_string(input, "content");
         Item content_item = {.item = map_get(obj_map, {.item = s2it(content_key)}).item};
         if (content_item.item != ITEM_NULL) {
-            process_pdf_object(input, view_pool, parent, content_item);
+            process_pdf_object(input, view_arena, parent, content_item);
         }
     }
 }
@@ -896,7 +897,7 @@ static void lookup_font_entry(PDFStreamParser* parser, const char* font_name) {
 /**
  * Process a PDF content stream
  */
-static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data) {
+static void process_pdf_stream(Input* input, Arena* view_arena, ViewBlock* parent, Map* stream_map, Map* resources, Map* pdf_data) {
     log_debug("Processing PDF stream");
 
     // Get stream data
@@ -1093,7 +1094,7 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
     if (!parser) {
         log_error("Failed to create stream parser");
         if (decompressed_data) {
-            free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
+            mem_free(decompressed_data);  // from pdf_decompress_stream_with_params which uses mem_alloc
         }
         return;
     }
@@ -1110,21 +1111,26 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
     // Process operators
     PDFOperator* op;
     while ((op = pdf_parse_next_operator(parser)) != nullptr) {
-        process_pdf_operator(input, view_pool, parent, parser, op);
+        process_pdf_operator(input, view_arena, parent, parser, op);
+    }
+
+    // Clean up font cache (releases FT faces, FontTables, FT_Library)
+    if (parser->font_cache) {
+        pdf_font_cache_destroy(parser->font_cache);
     }
 
     pdf_stream_parser_destroy(parser);
 
     // Free decompressed data if allocated
     if (decompressed_data) {
-        free(decompressed_data);  // from pdf_decompress_stream_with_params which uses stdlib
+        mem_free(decompressed_data);  // from pdf_decompress_stream_with_params which uses mem_alloc
     }
 }
 
 /**
  * Process a single PDF operator
  */
-static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* parent,
+static void process_pdf_operator(Input* input, Arena* view_arena, ViewBlock* parent,
                                  PDFStreamParser* parser, PDFOperator* op) {
     // Debug: log every operator type
     if (op->type == PDF_OP_gs) {
@@ -1182,14 +1188,14 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
         case PDF_OP_Tj:
             // Show text - create ViewText
             log_debug("Show text: %s", op->operands.show_text.text->chars);
-            create_text_view(input, view_pool, parent, parser, op->operands.show_text.text);
+            create_text_view(input, view_arena, parent, parser, op->operands.show_text.text);
             break;
 
         case PDF_OP_TJ:
             // Show text array (with kerning adjustments)
             log_debug("Show text array");
             if (op->operands.text_array.array) {
-                create_text_array_views(input, view_pool, parent, parser, op->operands.text_array.array);
+                create_text_array_views(input, view_arena, parent, parser, op->operands.text_array.array);
             }
             break;
 
@@ -1315,9 +1321,9 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             // Stroke path - uses ThorVG for curves/dashes, otherwise simple rect
             log_debug("Stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
+                create_path_view_thorvg(input, view_arena, parent, parser, PAINT_STROKE_ONLY);
             } else {
-                create_rect_view(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
+                create_rect_view(input, view_arena, parent, parser, PAINT_STROKE_ONLY);
             }
             break;
 
@@ -1325,22 +1331,22 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             // Close and stroke path
             log_debug("Close and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
+                create_path_view_thorvg(input, view_arena, parent, parser, PAINT_STROKE_ONLY);
             } else {
-                create_rect_view(input, view_pool, parent, parser, PAINT_STROKE_ONLY);
+                create_rect_view(input, view_arena, parent, parser, PAINT_STROKE_ONLY);
             }
             break;
 
         case PDF_OP_f:
         case PDF_OP_F:
             // Fill path
-            create_rect_view(input, view_pool, parent, parser, PAINT_FILL_ONLY);
+            create_rect_view(input, view_arena, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_f_star:
             // Fill path (even-odd)
             log_debug("Fill path (even-odd)");
-            create_rect_view(input, view_pool, parent, parser, PAINT_FILL_ONLY);
+            create_rect_view(input, view_arena, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_B:
@@ -1348,9 +1354,9 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             // Fill and stroke
             log_debug("Fill and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
+                create_path_view_thorvg(input, view_arena, parent, parser, PAINT_FILL_AND_STROKE);
             } else {
-                create_rect_view(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
+                create_rect_view(input, view_arena, parent, parser, PAINT_FILL_AND_STROKE);
             }
             break;
 
@@ -1359,9 +1365,9 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             // Close, fill and stroke
             log_debug("Close, fill and stroke path");
             if (needs_thorvg_path_render(parser)) {
-                create_path_view_thorvg(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
+                create_path_view_thorvg(input, view_arena, parent, parser, PAINT_FILL_AND_STROKE);
             } else {
-                create_rect_view(input, view_pool, parent, parser, PAINT_FILL_AND_STROKE);
+                create_rect_view(input, view_arena, parent, parser, PAINT_FILL_AND_STROKE);
             }
             break;
 
@@ -1432,7 +1438,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
             if (op->operands.show_text.text && parser->resources) {
                 const char* xobject_name = op->operands.show_text.text->chars;
                 log_debug("Do operator: invoking XObject '%s'", xobject_name);
-                handle_do_operator(input, view_pool, parent, parser, xobject_name);
+                handle_do_operator(input, view_arena, parent, parser, xobject_name);
             }
             break;
 
@@ -1448,7 +1454,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                     strcmp(cs_name, "DeviceGray") != 0 &&
                     strcmp(cs_name, "DeviceCMYK") != 0) {
                     PDFColorSpaceInfo* cs_info = lookup_named_colorspace(
-                        input, input->pool, cs_name, (Map*)parser->resources);
+                        input, view_arena, cs_name, (Map*)parser->resources);
                     if (cs_info) {
                         parser->state.fill_cs_info = cs_info;
                         parser->state.fill_color_space = cs_info->type;
@@ -1468,7 +1474,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
                     strcmp(cs_name, "DeviceGray") != 0 &&
                     strcmp(cs_name, "DeviceCMYK") != 0) {
                     PDFColorSpaceInfo* cs_info = lookup_named_colorspace(
-                        input, input->pool, cs_name, (Map*)parser->resources);
+                        input, view_arena, cs_name, (Map*)parser->resources);
                     if (cs_info) {
                         parser->state.stroke_cs_info = cs_info;
                         parser->state.stroke_color_space = cs_info->type;
@@ -1523,7 +1529,7 @@ static void process_pdf_operator(Input* input, Pool* view_pool, ViewBlock* paren
  * Create a ViewBlock node for a rectangle/shape
  * This is called after path painting operators (f, F, S, B, etc.)
  */
-static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
+static void create_rect_view(Input* input, Arena* view_arena, ViewBlock* parent,
                              PDFStreamParser* parser, PaintOperation paint_op) {
     // Check if we have a stored rectangle from 're' operator, or a general path
     if (!parser->state.has_current_rect && !parser->state.has_current_path) {
@@ -1572,7 +1578,7 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
              x, y, tx, ty, width, height, tw, th);
 
     // Create ViewBlock for the rectangle
-    ViewBlock* rect_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* rect_view = (ViewBlock*)arena_calloc(view_arena, sizeof(ViewBlock));
     if (!rect_view) {
         log_error("Failed to allocate rect view");
         return;
@@ -1592,7 +1598,7 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
              tx, ty, (float)tx, (float)screen_y, tw, th);
 
     // Create empty DomElement for styling
-    DomElement* dom_elem = (DomElement*)pool_calloc(view_pool, sizeof(DomElement));
+    DomElement* dom_elem = (DomElement*)arena_calloc(view_arena, sizeof(DomElement));
     if (dom_elem) {
         dom_elem->node_type = DOM_NODE_ELEMENT;
         dom_elem->tag_name = "div";  // Treat as div for layout
@@ -1613,12 +1619,12 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
     if ((paint_op == PAINT_FILL_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
         parser->state.fill_color[0] >= 0.0) {
         if (!bound) {
-            bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
+            bound = (BoundaryProp*)arena_calloc(view_arena, sizeof(BoundaryProp));
         }
 
         if (bound) {
             // Create background property
-            BackgroundProp* bg = (BackgroundProp*)pool_calloc(view_pool, sizeof(BackgroundProp));
+            BackgroundProp* bg = (BackgroundProp*)arena_calloc(view_arena, sizeof(BackgroundProp));
             if (bg) {
                 // Convert PDF RGB (0.0-1.0) to Color (0-255)
                 bg->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
@@ -1640,12 +1646,12 @@ static void create_rect_view(Input* input, Pool* view_pool, ViewBlock* parent,
     if ((paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
         parser->state.stroke_color[0] >= 0.0) {
         if (!bound) {
-            bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
+            bound = (BoundaryProp*)arena_calloc(view_arena, sizeof(BoundaryProp));
         }
 
         if (bound) {
             // Create border property
-            BorderProp* border = (BorderProp*)pool_calloc(view_pool, sizeof(BorderProp));
+            BorderProp* border = (BorderProp*)arena_calloc(view_arena, sizeof(BorderProp));
             if (border) {
                 // Convert PDF RGB (0.0-1.0) to Color (0-255)
                 Color stroke_color;
@@ -1766,7 +1772,7 @@ static PathLineType detect_line_type(PathSegment* segments) {
  * Create a ThorVG path view for complex paths (curves, dashed lines)
  * Uses ThorVG for rendering Bezier curves and dashed/dotted strokes
  */
-static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* parent,
+static void create_path_view_thorvg(Input* input, Arena* view_arena, ViewBlock* parent,
                                     PDFStreamParser* parser, PaintOperation paint_op) {
     PathSegment* segments = parser->state.path_segments;
     if (!segments) {
@@ -1835,7 +1841,7 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
              min_x, min_y, max_x, max_y, width, height, line_type);
 
     // Create ViewBlock for the path (container for ThorVG rendering)
-    ViewBlock* path_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* path_view = (ViewBlock*)arena_calloc(view_arena, sizeof(ViewBlock));
     if (!path_view) {
         log_error("Failed to allocate path view");
         return;
@@ -1866,12 +1872,12 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
         float view_origin_x = (float)pdf_x;
         float view_origin_y = (float)(parent->height - pdf_y - height);  // screen_y
 
-        VectorPathProp* vpath = (VectorPathProp*)pool_calloc(view_pool, sizeof(VectorPathProp));
+        VectorPathProp* vpath = (VectorPathProp*)arena_calloc(view_arena, sizeof(VectorPathProp));
         if (vpath) {
             // Copy path segments (transformed to screen coordinates RELATIVE to path_view position)
             VectorPathSegment* last_vseg = nullptr;
             for (PathSegment* seg = segments; seg; seg = seg->next) {
-                VectorPathSegment* vseg = (VectorPathSegment*)pool_calloc(view_pool, sizeof(VectorPathSegment));
+                VectorPathSegment* vseg = (VectorPathSegment*)arena_calloc(view_arena, sizeof(VectorPathSegment));
                 if (!vseg) break;
 
                 // Transform coordinates using CTM
@@ -1932,7 +1938,7 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
 
             // Copy dash pattern if present
             if (parser->state.dash_pattern && parser->state.dash_pattern_length > 0) {
-                vpath->dash_pattern = (float*)pool_calloc(view_pool,
+                vpath->dash_pattern = (float*)arena_calloc(view_arena,
                     sizeof(float) * parser->state.dash_pattern_length);
                 if (vpath->dash_pattern) {
                     for (int i = 0; i < parser->state.dash_pattern_length; i++) {
@@ -1969,9 +1975,9 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
 
     // Apply stroke color for stroke operations
     if (paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) {
-        BoundaryProp* bound = (BoundaryProp*)pool_calloc(view_pool, sizeof(BoundaryProp));
+        BoundaryProp* bound = (BoundaryProp*)arena_calloc(view_arena, sizeof(BoundaryProp));
         if (bound) {
-            BorderProp* border = (BorderProp*)pool_calloc(view_pool, sizeof(BorderProp));
+            BorderProp* border = (BorderProp*)arena_calloc(view_arena, sizeof(BorderProp));
             if (border) {
                 Color stroke_color;
                 stroke_color.r = (uint8_t)(parser->state.stroke_color[0] * 255.0);
@@ -2055,7 +2061,7 @@ static void create_path_view_thorvg(Input* input, Pool* view_pool, ViewBlock* pa
  * Create a ViewText node from PDF text
  * Creates TextRect for unified rendering with HTML text
  */
-static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
+static void create_text_view(Input* input, Arena* view_arena, ViewBlock* parent,
                             PDFStreamParser* parser, String* text) {
     if (!text || text->len == 0) return;
 
@@ -2067,7 +2073,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     if (parser->state.current_font_entry &&
         pdf_font_needs_decoding(parser->state.current_font_entry)) {
         // Allocate buffer for decoded text (UTF-8 can be up to 4x the length)
-        decoded_text = (char*)pool_calloc(view_pool, text->len * 4 + 1);
+        decoded_text = (char*)arena_calloc(view_arena, text->len * 4 + 1);
         if (decoded_text) {
             int decoded_len = pdf_font_decode_text(
                 parser->state.current_font_entry,
@@ -2112,7 +2118,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
     }
 
     // Create ViewText (which extends DomText, so it inherits text fields)
-    ViewText* text_view = (ViewText*)pool_calloc(view_pool, sizeof(ViewText));
+    ViewText* text_view = (ViewText*)arena_calloc(view_arena, sizeof(ViewText));
     if (!text_view) {
         log_error("Failed to allocate text view");
         return;
@@ -2133,7 +2139,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Create TextRect for unified rendering with HTML text
     // TextRect contains position relative to the page (parent block)
-    TextRect* rect = (TextRect*)pool_calloc(view_pool, sizeof(TextRect));
+    TextRect* rect = (TextRect*)arena_calloc(view_arena, sizeof(TextRect));
     if (rect) {
         rect->x = (float)x;
         rect->y = (float)screen_y;
@@ -2150,7 +2156,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
-        FontProp* font = create_font_from_pdf(view_pool,
+        FontProp* font = create_font_from_pdf(arena_pool(view_arena),
                                               parser->state.font_name->chars,
                                               effective_font_size);
         if (font) {
@@ -2177,7 +2183,7 @@ static void create_text_view(Input* input, Pool* view_pool, ViewBlock* parent,
  * Create a ViewText node from pre-decoded text (already UTF-8)
  * This is used when text has already been decoded by the caller (e.g., from TJ array combining)
  */
-static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* parent,
+static void create_text_view_raw(Input* input, Arena* view_arena, ViewBlock* parent,
                                  PDFStreamParser* parser, String* text) {
     if (!text || text->len == 0) return;
 
@@ -2204,7 +2210,7 @@ static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* paren
     }
 
     // Create ViewText
-    ViewText* text_view = (ViewText*)pool_calloc(view_pool, sizeof(ViewText));
+    ViewText* text_view = (ViewText*)arena_calloc(view_arena, sizeof(ViewText));
     if (!text_view) {
         log_error("Failed to allocate text view");
         return;
@@ -2224,7 +2230,7 @@ static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* paren
     text_view->content_type = DOM_TEXT_STRING;
 
     // Create TextRect
-    TextRect* rect = (TextRect*)pool_calloc(view_pool, sizeof(TextRect));
+    TextRect* rect = (TextRect*)arena_calloc(view_arena, sizeof(TextRect));
     if (rect) {
         rect->x = (float)x;
         rect->y = (float)screen_y;
@@ -2241,7 +2247,7 @@ static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* paren
 
     // Create font property
     if (parser->state.font_name) {
-        FontProp* font = create_font_from_pdf(view_pool,
+        FontProp* font = create_font_from_pdf(arena_pool(view_arena),
                                               parser->state.font_name->chars,
                                               effective_font_size);
         if (font) {
@@ -2270,7 +2276,7 @@ static void create_text_view_raw(Input* input, Pool* view_pool, ViewBlock* paren
  * Threshold: -1000 (1 em) is typically used for word spacing in justified text.
  * Adjustments smaller than this threshold are considered intra-word kerning.
  */
-static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* parent,
+static void create_text_array_views(Input* input, Arena* view_arena, ViewBlock* parent,
                                     PDFStreamParser* parser, Array* text_array) {
     if (!text_array || text_array->length == 0) return;
 
@@ -2288,7 +2294,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
 
     // Buffer for accumulating text
     size_t buffer_capacity = 4096;
-    char* buffer = (char*)pool_calloc(view_pool, buffer_capacity);
+    char* buffer = (char*)arena_calloc(view_arena, buffer_capacity);
     if (!buffer) return;
     size_t buffer_pos = 0;
 
@@ -2307,7 +2313,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
 
             if (buffer_pos > 0) {
                 buffer[buffer_pos] = '\0';
-                String* str = create_string(view_pool, buffer);
+                String* str = create_string(arena_pool(view_arena), buffer);
                 if (str) {
                     // Temporarily set position to segment start
                     double saved_x = parser->state.tm[4];
@@ -2315,7 +2321,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
                     parser->state.tm[4] = segment_start_x;
                     parser->state.tm[5] = segment_start_y;
 
-                    create_text_view_raw(input, view_pool, parent, parser, str);
+                    create_text_view_raw(input, view_arena, parent, parser, str);
 
                     parser->state.tm[4] = saved_x;
                     parser->state.tm[5] = saved_y;
@@ -2343,7 +2349,7 @@ static void create_text_array_views(Input* input, Pool* view_pool, ViewBlock* pa
                 // Decode and add to buffer
                 if (parser->state.current_font_entry &&
                     pdf_font_needs_decoding(parser->state.current_font_entry)) {
-                    char* decode_buf = (char*)pool_calloc(view_pool, text->len * 4 + 1);
+                    char* decode_buf = (char*)arena_calloc(view_arena, text->len * 4 + 1);
                     if (decode_buf) {
                         int decoded_len = pdf_font_decode_text(
                             parser->state.current_font_entry,
@@ -2425,7 +2431,7 @@ static void append_child_view(View* parent, View* child) {
  * - Image XObjects: embedded images (JPEG, JPEG2000, etc.)
  * - Form XObjects: reusable content streams (like nested PDF pages)
  */
-static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent,
+static void handle_do_operator(Input* input, Arena* view_arena, ViewBlock* parent,
                                PDFStreamParser* parser, const char* xobject_name) {
     if (!parser->resources) {
         log_warn("handle_do_operator: No resources available");
@@ -2478,10 +2484,10 @@ static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent,
 
     if (strcmp(subtype, "Image") == 0) {
         // Handle Image XObject
-        handle_image_xobject(input, view_pool, parent, parser, xobj, xobject_name);
+        handle_image_xobject(input, view_arena, parent, parser, xobj, xobject_name);
     } else if (strcmp(subtype, "Form") == 0) {
         // Handle Form XObject (nested content stream)
-        handle_form_xobject(input, view_pool, parent, parser, xobj, xobject_name);
+        handle_form_xobject(input, view_arena, parent, parser, xobj, xobject_name);
     } else {
         log_debug("Unsupported XObject subtype: %s", subtype);
     }
@@ -2490,7 +2496,7 @@ static void handle_do_operator(Input* input, Pool* view_pool, ViewBlock* parent,
 /**
  * Handle Image XObject - extract and render embedded image
  */
-static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* parent,
+static void handle_image_xobject(Input* input, Arena* view_arena, ViewBlock* parent,
                                   PDFStreamParser* parser, Map* image_dict, const char* name) {
     // Get image dimensions
     ConstItem width_item = image_dict->get("Width");
@@ -2586,7 +2592,7 @@ static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* paren
     }
 
     // Create a ViewBlock for the image
-    ViewBlock* img_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
+    ViewBlock* img_view = (ViewBlock*)arena_calloc(view_arena, sizeof(ViewBlock));
     if (!img_view) return;
 
     img_view->view_type = RDT_VIEW_BLOCK;
@@ -2594,7 +2600,7 @@ static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* paren
     img_view->tag_id = HTM_TAG_IMG;
 
     // Allocate EmbedProp to hold the image
-    EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
+    EmbedProp* embed = (EmbedProp*)arena_calloc(view_arena, sizeof(EmbedProp));
     embed->img = img_surface;
     img_view->embed = embed;
 
@@ -2615,7 +2621,7 @@ static void handle_image_xobject(Input* input, Pool* view_pool, ViewBlock* paren
 /**
  * Handle Form XObject - process nested content stream
  */
-static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent,
+static void handle_form_xobject(Input* input, Arena* view_arena, ViewBlock* parent,
                                  PDFStreamParser* parser, Map* form_dict, const char* name) {
     // Form XObjects are essentially embedded content streams with their own resources
     // They have: /BBox, /Matrix (optional), /Resources (optional), stream content
@@ -2641,7 +2647,7 @@ static void handle_form_xobject(Input* input, Pool* view_pool, ViewBlock* parent
 
     // TODO: Apply form matrix and save/restore graphics state
     // For now, just process the form content stream recursively
-    process_pdf_stream(input, view_pool, parent, form_dict, form_resources, parser->pdf_data);
+    process_pdf_stream(input, view_arena, parent, form_dict, form_resources, parser->pdf_data);
 }
 
 /**

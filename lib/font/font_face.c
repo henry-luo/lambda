@@ -283,9 +283,9 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             // verify the font has basic Latin characters — subsetted fonts
             // (e.g. Google Fonts unicode-range subsets) may load successfully
             // but lack common characters
-            FT_Face face = handle->ft_face;
-            if (face && (FT_Get_Char_Index(face, 'a') == 0 ||
-                         FT_Get_Char_Index(face, 'A') == 0) &&
+            CmapTable* cmap = handle->tables ? font_tables_get_cmap(handle->tables) : NULL;
+            if (cmap && (cmap_lookup(cmap, 'a') == 0 ||
+                         cmap_lookup(cmap, 'A') == 0) &&
                         i + 1 < desc->source_count) {
                 // this source lacks Latin chars — save as fallback and try next
                 // (icon fonts like FontAwesome legitimately lack Latin chars)
@@ -299,6 +299,7 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             }
 
             // cache in entry for future loads (mutable cast is safe here)
+            handle->is_document_font = true; // @font-face: cleared between documents
             if (entry) {
                 ((FontFaceEntry*)entry)->loaded_handle = handle;
                 font_handle_retain(handle); // entry holds a ref too
@@ -315,6 +316,7 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
     // If no source had Latin chars but we have a loadable fallback, use it
     // (icon/symbol fonts legitimately lack Latin characters)
     if (fallback_handle) {
+        fallback_handle->is_document_font = true; // @font-face: cleared between documents
         if (entry) {
             ((FontFaceEntry*)entry)->loaded_handle = fallback_handle;
             font_handle_retain(fallback_handle);

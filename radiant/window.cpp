@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <ft2build.h>
-#include FT_FREETYPE_H
 #include <wchar.h>
 #include <assert.h>
 #include <stdbool.h>

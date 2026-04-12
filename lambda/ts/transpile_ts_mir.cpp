@@ -16,7 +16,7 @@
 #include "../../lib/mempool.h"
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // TS transpiler creation — uses unified JsTranspiler with TS mode

@@ -1,9 +1,11 @@
 #include "view.hpp"
+#include "rdt_vector.hpp"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/base64.h"
+#include "../lib/url.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
@@ -63,10 +65,30 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             log_error("[BG-IMAGE] Invalid data URI (no comma)");
             return NULL;
         }
+
+        // Check if data URI is base64-encoded: "data:...;base64,..."
+        bool is_base64 = false;
+        const char* meta = img_url + 5;  // after "data:"
+        size_t meta_len = comma - meta;
+        for (size_t i = 0; i + 5 < meta_len; i++) {
+            if (strncasecmp(meta + i, "base64", 6) == 0) {
+                is_base64 = true;
+                break;
+            }
+        }
+
         size_t decoded_len = 0;
-        uint8_t* decoded = base64_decode(comma + 1, 0, &decoded_len);
+        uint8_t* decoded = NULL;
+        if (is_base64) {
+            decoded = base64_decode(comma + 1, 0, &decoded_len);
+        } else {
+            // URL-encoded (percent-encoded) data URI
+            const char* data_str = comma + 1;
+            size_t data_str_len = strlen(data_str);
+            decoded = (uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len);
+        }
         if (!decoded || decoded_len == 0) {
-            log_error("[BG-IMAGE] Failed to decode data URI base64");
+            log_error("[BG-IMAGE] Failed to decode data URI");
             return NULL;
         }
         // Detect format from MIME type or content
@@ -75,22 +97,20 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (is_svg) {
             surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
             surface->format = IMAGE_FORMAT_SVG;
-            surface->pic = tvg_picture_new();
-            Tvg_Result ret = tvg_picture_load_data(surface->pic, (const char*)decoded, (uint32_t)decoded_len, "svg", NULL, false);
-            free(decoded);
-            if (ret != TVG_RESULT_SUCCESS) {
-                tvg_paint_unref(surface->pic, true);
+            surface->pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
+            mem_free(decoded);
+            if (!surface->pic) {
                 mem_free(surface);
                 return NULL;
             }
             float svg_w, svg_h;
-            tvg_picture_get_size(surface->pic, &svg_w, &svg_h);
+            rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
             surface->width = svg_w;
             surface->height = svg_h;
         } else {
             int width, height, channels;
             unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
-            free(decoded);
+            mem_free(decoded);
             if (!data) {
                 log_error("[BG-IMAGE] Failed to decode data URI image");
                 return NULL;
@@ -132,7 +152,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
         // strdup to take ownership: entry->path must always be a malloc'd string
         // (url_get_href returns a pointer into the Url struct, not a separate allocation)
-        file_path = strdup(url_str);
+        file_path = mem_strdup(url_str, MEM_CAT_RENDER);
     } else {
         file_path = url_to_local_path(abs_url);
         if (!file_path) {
@@ -152,7 +172,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
         log_debug("Image loaded from cache: %s", file_path);
-        free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
+        mem_free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
         url_destroy(abs_url);
         return entry->image;
     }
@@ -177,33 +197,30 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (is_svg) {
         surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         surface->format = IMAGE_FORMAT_SVG;
-        surface->pic = tvg_picture_new();
-        Tvg_Result ret;
         if (is_http && downloaded_data) {
-            ret = tvg_picture_load_data(surface->pic, (const char*)downloaded_data, (uint32_t)downloaded_size, "svg", NULL, false);
+            surface->pic = rdt_picture_load_data((const char*)downloaded_data, (int)downloaded_size, "svg");
         } else {
-            ret = tvg_picture_load(surface->pic, file_path);
+            surface->pic = rdt_picture_load(file_path);
         }
-        if (ret != TVG_RESULT_SUCCESS) {
+        if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path);
-            tvg_paint_unref(surface->pic, true);
             mem_free(surface);
-            if (downloaded_data) free(downloaded_data);
+            if (downloaded_data) mem_free(downloaded_data);
             return NULL;
         }
         float svg_w, svg_h;
-        tvg_picture_get_size(surface->pic, &svg_w, &svg_h);
+        rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
         surface->width = svg_w;
         surface->height = svg_h;
         log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
-        if (downloaded_data) free(downloaded_data);
+        if (downloaded_data) mem_free(downloaded_data);
     }
     else {
         int width, height, channels;
         unsigned char *data;
         if (is_http && downloaded_data) {
             data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
-            free(downloaded_data);
+            mem_free(downloaded_data);
         } else {
             data = image_load(file_path, &width, &height, &channels, 4);
         }
@@ -233,63 +250,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     return surface;
 }
 
-// ============================================================================
-// ThorVG Picture Integration
-// ============================================================================
-
-/**
- * Create a ThorVG Picture from an ImageSurface
- *
- * This provides unified image loading for ThorVG integration - images are
- * loaded once via Radiant's load_image() and can then be used with ThorVG
- * rendering without needing ThorVG's image loaders.
- *
- * @param surface The ImageSurface containing RGBA pixel data
- * @return ThorVG Paint object (Picture) or nullptr on failure
- *         Caller is responsible for managing the ThorVG object lifecycle
- */
-Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface) {
-    if (!surface || !surface->pixels) {
-        log_debug("create_tvg_picture_from_surface: invalid surface");
-        return nullptr;
-    }
-
-    // skip SVG surfaces - they already have a ThorVG picture
-    if (surface->format == IMAGE_FORMAT_SVG && surface->pic) {
-        log_debug("create_tvg_picture_from_surface: surface is SVG, returning existing pic");
-        return surface->pic;
-    }
-
-    Tvg_Paint pic = tvg_picture_new();
-    if (!pic) {
-        log_debug("create_tvg_picture_from_surface: failed to create picture");
-        return nullptr;
-    }
-
-    // Load raw RGBA pixels into ThorVG Picture
-    // Note: TVG_COLORSPACE_ARGB8888 matches Radiant's pixel format (BGRA with alpha in high byte)
-    Tvg_Result result = tvg_picture_load_raw(
-        pic,
-        (uint32_t*)surface->pixels,
-        surface->width,
-        surface->height,
-        TVG_COLORSPACE_ABGR8888,  // Match Radiant's ABGR format (alpha, blue, green, red)
-        false  // Don't copy - surface manages memory, caller must ensure surface outlives picture
-    );
-
-    if (result != TVG_RESULT_SUCCESS) {
-        log_debug("create_tvg_picture_from_surface: tvg_picture_load_raw failed (%d)", result);
-        tvg_paint_unref(pic, true);
-        return nullptr;
-    }
-
-    log_debug("create_tvg_picture_from_surface: created %dx%d picture", surface->width, surface->height);
-    return pic;
-}
-
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
-    free((char*)entry->path);  // always malloc-owned: strdup for HTTP paths, url_to_local_path for local paths
+    mem_free((char*)entry->path);  // always mem_alloc-owned: mem_strdup for HTTP paths, url_to_local_path for local paths
     if (entry->image->url) url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;
@@ -572,7 +535,7 @@ void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         if (img_surface->pixels) mem_free(img_surface->pixels);
         if (img_surface->pic) {
-            tvg_paint_unref(img_surface->pic, true);
+            rdt_picture_free(img_surface->pic);
         }
         mem_free(img_surface);
     }

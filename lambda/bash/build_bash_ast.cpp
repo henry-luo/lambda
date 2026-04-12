@@ -13,7 +13,7 @@
 #include "../../lib/strbuf.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 
@@ -37,6 +37,7 @@ static BashAstNode* build_subshell(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_compound_statement(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_word(BashTranspiler* tp, TSNode node);
 static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, TSNode node);
+static String* process_ansi_c_content(NamePool* np, const char* s, int len);
 static BashAstNode* build_string_node(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node);
@@ -59,6 +60,39 @@ static BashAstNode* build_process_substitution(BashTranspiler* tp, TSNode node);
 // ============================================================================
 // Allocation
 // ============================================================================
+
+// process heredoc-specific backslash escapes: \$ → $, \\ → \, \` → `, \newline → skip
+// other \x sequences are kept as-is (unlike double-quoted strings)
+static String* heredoc_escape_text(BashTranspiler* tp, const char* src, size_t len) {
+    // fast path: no backslash at all
+    bool has_backslash = false;
+    for (size_t i = 0; i + 1 < len; i++) {
+        if (src[i] == '\\') { has_backslash = true; break; }
+    }
+    if (!has_backslash) {
+        return name_pool_create_len(tp->name_pool, src, len);
+    }
+    // process escapes
+    char* buf = (char*)pool_alloc(tp->ast_pool, len + 1);
+    size_t out = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '\\' && i + 1 < len) {
+            char next = src[i + 1];
+            if (next == '$' || next == '\\' || next == '`') {
+                buf[out++] = next;
+                i++; // skip backslash
+                continue;
+            }
+            if (next == '\n') {
+                i++; // line continuation: skip both
+                continue;
+            }
+            // keep other \x literally
+        }
+        buf[out++] = src[i];
+    }
+    return name_pool_create_len(tp->name_pool, buf, out);
+}
 
 BashAstNode* alloc_bash_ast_node(BashTranspiler* tp, BashAstNodeType node_type, TSNode node, size_t size) {
     BashAstNode* ast_node = (BashAstNode*)pool_alloc(tp->ast_pool, size);
@@ -245,8 +279,8 @@ static BashAstNode* build_statement(BashTranspiler* tp, TSNode node) {
             TSNode child = ts_node_named_child(node, 0);
             BashAstNode* inner = build_statement(tp, child);
             if (inner && inner->node_type == BASH_AST_NODE_PIPELINE) {
-                // inner is already a pipeline — just set its negated flag
-                ((BashPipelineNode*)inner)->negated = true;
+                // inner is already a pipeline — toggle its negated flag
+                ((BashPipelineNode*)inner)->negated = !((BashPipelineNode*)inner)->negated;
                 return inner;
             }
             // wrap non-pipeline in a pipeline with negated flag
@@ -358,6 +392,9 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
                             heredoc->body = build_concatenation(tp, hchild);
                         } else if (strcmp(htype, "raw_string") == 0) {
                             heredoc->body = build_raw_string(tp, hchild);
+                        } else if (strcmp(htype, "simple_expansion") == 0 ||
+                                   strcmp(htype, "expansion") == 0) {
+                            heredoc->body = build_expansion(tp, hchild);
                         }
                     }
                     heredoc->expand = true;
@@ -671,9 +708,18 @@ static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, 
         if (text->chars[i] == '$' && i + 1 < text->len) {
             char next = text->chars[i + 1];
             bool is_var = false;
+            bool is_ansi_c = false;
             int var_name_end = i + 1;
 
-            if (next == '{') {
+            if (next == '\'') {
+                // ANSI-C string $'...' — find matching closing quote
+                int j = i + 2;
+                while (j < text->len && text->chars[j] != '\'') {
+                    if (text->chars[j] == '\\' && j + 1 < text->len) j += 2;
+                    else j++;
+                }
+                if (j < text->len) { j++; is_ansi_c = true; var_name_end = j; }
+            } else if (next == '{') {
                 int depth = 1; int j = i + 2;
                 while (j < text->len && depth > 0) {
                     if (text->chars[j] == '{') depth++;
@@ -693,7 +739,7 @@ static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, 
                 is_var = true; var_name_end = i + 2;
             }
 
-            if (is_var) {
+            if (is_var || is_ansi_c) {
                 did_split = true;
                 if (!concat) concat = (BashConcatNode*)alloc_bash_ast_node(
                     tp, BASH_AST_NODE_CONCATENATION, node, sizeof(BashConcatNode));
@@ -706,8 +752,17 @@ static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, 
                     else parts_tail->next = (BashAstNode*)lit;
                     parts_tail = (BashAstNode*)lit;
                 }
-                // emit variable reference
-                if (text->chars[i + 1] == '{') {
+                if (is_ansi_c) {
+                    // emit ANSI-C string node with processed escapes
+                    BashRawStringNode* raw = (BashRawStringNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_RAW_STRING, node, sizeof(BashRawStringNode));
+                    int content_start = i + 2; // skip $'
+                    int content_len = var_name_end - 1 - content_start; // exclude closing '
+                    raw->text = process_ansi_c_content(tp->name_pool, text->chars + content_start, content_len);
+                    if (!concat->parts) concat->parts = (BashAstNode*)raw;
+                    else parts_tail->next = (BashAstNode*)raw;
+                    parts_tail = (BashAstNode*)raw;
+                } else if (text->chars[i + 1] == '{') {
                     int name_s = i + 2;
                     int name_e = var_name_end - 1;
                     BashVarRefNode* ref = (BashVarRefNode*)alloc_bash_ast_node(
@@ -807,6 +862,8 @@ static BashAstNode* build_expr_node(BashTranspiler* tp, TSNode node) {
         return build_process_substitution(tp, node);
     } else if (strcmp(type, "concatenation") == 0) {
         return build_concatenation(tp, node);
+    } else if (strcmp(type, "arithmetic_expansion") == 0) {
+        return build_arith_expression(tp, node);
     }
     return build_word(tp, node);
 }
@@ -911,10 +968,35 @@ static BashAstNode* build_string_node(BashTranspiler* tp, TSNode node) {
                 const char* src = tp->source + pos;
                 uint32_t src_len = sc_end - pos;
                 StrBuf* sb = strbuf_new_cap((int)src_len + 1);
-                for (uint32_t ei = 0; ei < src_len; ei++) {
-                    char c = src[ei];
-                    if (c == '\\' && ei + 1 < src_len) {
-                        char next = src[ei + 1];
+
+                // for backtick command substitution, apply backtick un-escaping first:
+                // \\ -> \, \$ -> $, \` -> `  (other \X kept as-is)
+                const char* pass_src = src;
+                uint32_t pass_len = src_len;
+                StrBuf* bt_buf = NULL;
+                if (tp->in_backtick) {
+                    bt_buf = strbuf_new_cap((int)src_len + 1);
+                    for (uint32_t bi = 0; bi < src_len; bi++) {
+                        char bc = src[bi];
+                        if (bc == '\\' && bi + 1 < src_len) {
+                            char bn = src[bi + 1];
+                            if (bn == '\\' || bn == '$' || bn == '`') {
+                                strbuf_append_char(bt_buf, bn);
+                                bi++;
+                                continue;
+                            }
+                        }
+                        strbuf_append_char(bt_buf, bc);
+                    }
+                    pass_src = bt_buf->str;
+                    pass_len = (uint32_t)bt_buf->length;
+                }
+
+                // then apply double-quote escape processing: \$ \` \\ \" \newline
+                for (uint32_t ei = 0; ei < pass_len; ei++) {
+                    char c = pass_src[ei];
+                    if (c == '\\' && ei + 1 < pass_len) {
+                        char next = pass_src[ei + 1];
                         if (next == '$' || next == '`' || next == '\\' || next == '"' || next == '\n') {
                             if (next != '\n') strbuf_append_char(sb, next);
                             ei++; // skip escaped char
@@ -923,6 +1005,7 @@ static BashAstNode* build_string_node(BashTranspiler* tp, TSNode node) {
                     }
                     strbuf_append_char(sb, c);
                 }
+                if (bt_buf) strbuf_free(bt_buf);
                 BashWordNode* literal = (BashWordNode*)alloc_bash_ast_node(
                     tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
                 literal->text = name_pool_create_len(tp->name_pool, sb->str, (int)sb->length);
@@ -973,24 +1056,13 @@ static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node) {
     return (BashAstNode*)raw;
 }
 
-static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
-    // ANSI-C quoted string: $'...'
-    BashRawStringNode* raw = (BashRawStringNode*)alloc_bash_ast_node(
-        tp, BASH_AST_NODE_RAW_STRING, node, sizeof(BashRawStringNode));
-
-    uint32_t start = ts_node_start_byte(node) + 2;  // skip $'
-    uint32_t end = ts_node_end_byte(node) - 1;      // skip trailing '
-    if (end <= start) {
-        raw->text = name_pool_create_len(tp->name_pool, "", 0);
-        return (BashAstNode*)raw;
-    }
-
-    StrBuf* sb = strbuf_new_cap((int)(end - start) + 1);
-    const char* s = tp->source + start;
-    uint32_t i = 0;
-    while (start + i < end) {
+// process ANSI-C escape sequences from content between $' and '
+static String* process_ansi_c_content(NamePool* np, const char* s, int len) {
+    StrBuf* sb = strbuf_new_cap(len + 1);
+    int i = 0;
+    while (i < len) {
         char c = s[i++];
-        if (c != '\\' || start + i >= end) {
+        if (c != '\\' || i >= len) {
             strbuf_append_char(sb, c);
             continue;
         }
@@ -1009,18 +1081,18 @@ static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
         case '\'': strbuf_append_char(sb, '\''); break;
         case '"': strbuf_append_char(sb, '"'); break;
         case 'c': {
-            if (start + i < end) {
+            if (i < len) {
                 unsigned char ctrl = (unsigned char)s[i++];
-                strbuf_append_char(sb, (char)(ctrl & 0x1f));
+                strbuf_append_char(sb, (char)(ctrl ^ 0x40));
             }
             break;
         }
         case 'x': {
             int value = 0;
             bool have_digits = false;
-            if (start + i < end && s[i] == '{') {
+            if (i < len && s[i] == '{') {
                 i++;
-                while (start + i < end && s[i] != '}') {
+                while (i < len && s[i] != '}') {
                     char h = s[i];
                     int digit = -1;
                     if (h >= '0' && h <= '9') digit = h - '0';
@@ -1031,16 +1103,15 @@ static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
                     have_digits = true;
                     i++;
                 }
-                if (start + i < end && s[i] == '}') {
+                if (i < len && s[i] == '}') {
                     i++;
                 }
                 if (!have_digits) {
-                    // bash treats malformed \x{...} with no hex digits as terminating the string
-                    i = end - start;
+                    i = len;
                     break;
                 }
             } else {
-                for (int j = 0; j < 2 && start + i < end; j++) {
+                for (int j = 0; j < 2 && i < len; j++) {
                     char h = s[i];
                     int digit = -1;
                     if (h >= '0' && h <= '9') digit = h - '0';
@@ -1060,7 +1131,7 @@ static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
             int max_digits = (esc == 'u') ? 4 : 8;
             int value = 0;
             bool have_digits = false;
-            for (int j = 0; j < max_digits && start + i < end; j++) {
+            for (int j = 0; j < max_digits && i < len; j++) {
                 char h = s[i];
                 int digit = -1;
                 if (h >= '0' && h <= '9') digit = h - '0';
@@ -1091,20 +1162,37 @@ static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
             int value = esc - '0';
-            for (int j = 0; j < 2 && start + i < end && s[i] >= '0' && s[i] <= '7'; j++) {
+            for (int j = 0; j < 2 && i < len && s[i] >= '0' && s[i] <= '7'; j++) {
                 value = value * 8 + (s[i++] - '0');
             }
             strbuf_append_char(sb, (char)value);
             break;
         }
         default:
+            strbuf_append_char(sb, '\\');
             strbuf_append_char(sb, esc);
             break;
         }
     }
 
-    raw->text = name_pool_create_len(tp->name_pool, sb->str, sb->length);
+    String* result = name_pool_create_len(np, sb->str, sb->length);
     strbuf_free(sb);
+    return result;
+}
+
+static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
+    // ANSI-C quoted string: $'...'
+    BashRawStringNode* raw = (BashRawStringNode*)alloc_bash_ast_node(
+        tp, BASH_AST_NODE_RAW_STRING, node, sizeof(BashRawStringNode));
+
+    uint32_t start = ts_node_start_byte(node) + 2;  // skip $'
+    uint32_t end = ts_node_end_byte(node) - 1;      // skip trailing '
+    if (end <= start) {
+        raw->text = name_pool_create_len(tp->name_pool, "", 0);
+        return (BashAstNode*)raw;
+    }
+
+    raw->text = process_ansi_c_content(tp->name_pool, tp->source + start, (int)(end - start));
     return (BashAstNode*)raw;
 }
 
@@ -1330,7 +1418,7 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                 if (ch_src.length == 1 && ch_src.str[0] == '!' && !has_subscript) {
                     has_bang_prefix = true;
                 }
-                // detect expansion operators after subscript: :-, :=, :+, :?, -, =, +, ?
+                // detect expansion operators after subscript: :-, :=, :+, :?, -, =, +, ?, ^, ^^, etc.
                 if (has_subscript && !subscript_op_str) {
                     bool is_op = false;
                     if (ch_src.length == 2 && ch_src.str[0] == ':') {
@@ -1338,7 +1426,16 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                         if (c2 == '-' || c2 == '=' || c2 == '+' || c2 == '?') is_op = true;
                     } else if (ch_src.length == 1) {
                         char c1 = ch_src.str[0];
-                        if (c1 == '-' || c1 == '=' || c1 == '+' || c1 == '?') is_op = true;
+                        if (c1 == '-' || c1 == '=' || c1 == '+' || c1 == '?'
+                            || c1 == '^' || c1 == ',' || c1 == '~'
+                            || c1 == '#' || c1 == '%' || c1 == '/') is_op = true;
+                    } else if (ch_src.length == 2) {
+                        if ((ch_src.str[0] == '^' && ch_src.str[1] == '^')
+                            || (ch_src.str[0] == ',' && ch_src.str[1] == ',')
+                            || (ch_src.str[0] == '~' && ch_src.str[1] == '~')
+                            || (ch_src.str[0] == '#' && ch_src.str[1] == '#')
+                            || (ch_src.str[0] == '%' && ch_src.str[1] == '%')
+                            || (ch_src.str[0] == '/' && ch_src.str[1] == '/')) is_op = true;
                     }
                     if (is_op) {
                         subscript_op_str = name_pool_create_len(tp->name_pool, ch_src.str, ch_src.length);
@@ -1396,12 +1493,52 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                 return (BashAstNode*)slice;
             }
 
-            if (is_all) {
-                // ${arr[@]} or ${arr[*]} — all elements
+            if (is_all && !subscript_op_str) {
+                // ${arr[@]} or ${arr[*]} — all elements (no operator)
                 BashArrayAllNode* all_node = (BashArrayAllNode*)alloc_bash_ast_node(
                     tp, BASH_AST_NODE_ARRAY_ALL, node, sizeof(BashArrayAllNode));
                 all_node->name = arr_name;
                 return (BashAstNode*)all_node;
+            }
+
+            if (is_all && subscript_op_str) {
+                // ${arr[@]^^pat}, ${arr[@],pat}, etc. — all elements with operator
+                BashArrayAllNode* all_node = (BashArrayAllNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_ARRAY_ALL, node, sizeof(BashArrayAllNode));
+                all_node->name = arr_name;
+
+                BashExpansionNode* sub_exp = (BashExpansionNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_EXPANSION, node, sizeof(BashExpansionNode));
+                sub_exp->variable = arr_name;
+                sub_exp->inner_expr = (BashAstNode*)all_node;
+                sub_exp->argument = subscript_op_arg;
+                const char* op_chars = subscript_op_str->chars;
+                int op_len = subscript_op_str->len;
+                if (op_len == 2 && op_chars[0] == '^' && op_chars[1] == '^')
+                    sub_exp->expand_type = BASH_EXPAND_UPPER_ALL;
+                else if (op_len == 1 && op_chars[0] == '^')
+                    sub_exp->expand_type = BASH_EXPAND_UPPER_FIRST;
+                else if (op_len == 2 && op_chars[0] == ',' && op_chars[1] == ',')
+                    sub_exp->expand_type = BASH_EXPAND_LOWER_ALL;
+                else if (op_len == 1 && op_chars[0] == ',')
+                    sub_exp->expand_type = BASH_EXPAND_LOWER_FIRST;
+                else if (op_len == 2 && op_chars[0] == '~' && op_chars[1] == '~')
+                    sub_exp->expand_type = BASH_EXPAND_TOGGLE_ALL;
+                else if (op_len == 1 && op_chars[0] == '~')
+                    sub_exp->expand_type = BASH_EXPAND_TOGGLE_FIRST;
+                else if (op_len == 2 && op_chars[0] == '#' && op_chars[1] == '#')
+                    sub_exp->expand_type = BASH_EXPAND_TRIM_PREFIX_LONG;
+                else if (op_len == 1 && op_chars[0] == '#')
+                    sub_exp->expand_type = BASH_EXPAND_TRIM_PREFIX;
+                else if (op_len == 2 && op_chars[0] == '%' && op_chars[1] == '%')
+                    sub_exp->expand_type = BASH_EXPAND_TRIM_SUFFIX_LONG;
+                else if (op_len == 1 && op_chars[0] == '%')
+                    sub_exp->expand_type = BASH_EXPAND_TRIM_SUFFIX;
+                else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '/')
+                    sub_exp->expand_type = BASH_EXPAND_REPLACE_ALL;
+                else if (op_len == 1 && op_chars[0] == '/')
+                    sub_exp->expand_type = BASH_EXPAND_REPLACE;
+                return (BashAstNode*)sub_exp;
             }
 
             // ${arr[idx]} — indexed access
@@ -1411,6 +1548,18 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
             // subscript stays as an expression; the transpiler will wrap it with
             // bash_arith_eval_value for indexed (non-associative) arrays
             access->index = build_expr_node(tp, index_node);
+
+            // ${arr[idx]:offset:length} — array element substring
+            if (has_colon_op) {
+                BashExpansionNode* sub_exp = (BashExpansionNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_EXPANSION, node, sizeof(BashExpansionNode));
+                sub_exp->variable = arr_name;
+                sub_exp->inner_expr = (BashAstNode*)access;
+                sub_exp->expand_type = BASH_EXPAND_SUBSTRING;
+                sub_exp->argument = colon_arg1;
+                sub_exp->replacement = colon_arg2;
+                return (BashAstNode*)sub_exp;
+            }
 
             // if no expansion operator, return plain array access
             if (!subscript_op_str) {
@@ -1432,12 +1581,34 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                 else if (op_chars[1] == '=') sub_exp->expand_type = BASH_EXPAND_ASSIGN_DEFAULT;
                 else if (op_chars[1] == '+') sub_exp->expand_type = BASH_EXPAND_ALT;
                 else if (op_chars[1] == '?') sub_exp->expand_type = BASH_EXPAND_ERROR;
+            } else if (op_len == 2 && op_chars[0] == '^' && op_chars[1] == '^') {
+                sub_exp->expand_type = BASH_EXPAND_UPPER_ALL;
+            } else if (op_len == 2 && op_chars[0] == ',' && op_chars[1] == ',') {
+                sub_exp->expand_type = BASH_EXPAND_LOWER_ALL;
+            } else if (op_len == 2 && op_chars[0] == '~' && op_chars[1] == '~') {
+                sub_exp->expand_type = BASH_EXPAND_TOGGLE_ALL;
+            } else if (op_len == 2 && op_chars[0] == '#' && op_chars[1] == '#') {
+                sub_exp->expand_type = BASH_EXPAND_TRIM_PREFIX_LONG;
+            } else if (op_len == 2 && op_chars[0] == '%' && op_chars[1] == '%') {
+                sub_exp->expand_type = BASH_EXPAND_TRIM_SUFFIX_LONG;
+            } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '/') {
+                sub_exp->expand_type = BASH_EXPAND_REPLACE_ALL;
+            } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '#') {
+                sub_exp->expand_type = BASH_EXPAND_REPLACE_PREFIX;
+            } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '%') {
+                sub_exp->expand_type = BASH_EXPAND_REPLACE_SUFFIX;
             } else if (op_len == 1) {
                 sub_exp->has_colon = false;
                 if      (op_chars[0] == '-') sub_exp->expand_type = BASH_EXPAND_DEFAULT;
                 else if (op_chars[0] == '=') sub_exp->expand_type = BASH_EXPAND_ASSIGN_DEFAULT;
                 else if (op_chars[0] == '+') sub_exp->expand_type = BASH_EXPAND_ALT;
                 else if (op_chars[0] == '?') sub_exp->expand_type = BASH_EXPAND_ERROR;
+                else if (op_chars[0] == '^') sub_exp->expand_type = BASH_EXPAND_UPPER_FIRST;
+                else if (op_chars[0] == ',') sub_exp->expand_type = BASH_EXPAND_LOWER_FIRST;
+                else if (op_chars[0] == '~') sub_exp->expand_type = BASH_EXPAND_TOGGLE_FIRST;
+                else if (op_chars[0] == '#') sub_exp->expand_type = BASH_EXPAND_TRIM_PREFIX;
+                else if (op_chars[0] == '%') sub_exp->expand_type = BASH_EXPAND_TRIM_SUFFIX;
+                else if (op_chars[0] == '/') sub_exp->expand_type = BASH_EXPAND_REPLACE;
             }
             return (BashAstNode*)sub_exp;
         }
@@ -1508,6 +1679,10 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                     expansion->expand_type = BASH_EXPAND_TRIM_SUFFIX;
                 else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '/')
                     expansion->expand_type = BASH_EXPAND_REPLACE_ALL;
+                else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '#')
+                    expansion->expand_type = BASH_EXPAND_REPLACE_PREFIX;
+                else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '%')
+                    expansion->expand_type = BASH_EXPAND_REPLACE_SUFFIX;
                 else if (ch_src.length == 1 && ch_src.str[0] == '/')
                     expansion->expand_type = BASH_EXPAND_REPLACE;
                 else if (ch_src.length == 1 && ch_src.str[0] == ':')
@@ -1520,6 +1695,10 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                     expansion->expand_type = BASH_EXPAND_LOWER_ALL;
                 else if (ch_src.length == 1 && ch_src.str[0] == ',')
                     expansion->expand_type = BASH_EXPAND_LOWER_FIRST;
+                else if (ch_src.length == 2 && ch_src.str[0] == '~' && ch_src.str[1] == '~')
+                    expansion->expand_type = BASH_EXPAND_TOGGLE_ALL;
+                else if (ch_src.length == 1 && ch_src.str[0] == '~')
+                    expansion->expand_type = BASH_EXPAND_TOGGLE_FIRST;
             }
             // skip second / in replacement patterns
             continue;
@@ -1562,6 +1741,13 @@ static BashAstNode* build_command_substitution(BashTranspiler* tp, TSNode node) 
     BashCommandSubNode* cmd_sub = (BashCommandSubNode*)alloc_bash_ast_node(
         tp, BASH_AST_NODE_COMMAND_SUB, node, sizeof(BashCommandSubNode));
 
+    // detect backtick form: starts with ` instead of $(
+    uint32_t node_start = ts_node_start_byte(node);
+    bool is_backtick = (node_start < tp->source_length && tp->source[node_start] == '`');
+
+    bool prev_in_backtick = tp->in_backtick;
+    tp->in_backtick = is_backtick;
+
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* body_tail = NULL;
 
@@ -1577,6 +1763,8 @@ static BashAstNode* build_command_substitution(BashTranspiler* tp, TSNode node) 
         }
         body_tail = stmt;
     }
+
+    tp->in_backtick = prev_in_backtick;
 
     return (BashAstNode*)cmd_sub;
 }
@@ -1613,7 +1801,6 @@ static BashAstNode* build_if_statement(BashTranspiler* tp, TSNode node) {
 
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* elif_tail = NULL;
-    bool found_condition = false;
     BashBlockNode* then_block = NULL;
     BashAstNode* then_tail = NULL;
 
@@ -1625,30 +1812,53 @@ static BashAstNode* build_if_statement(BashTranspiler* tp, TSNode node) {
             BashElifNode* elif = (BashElifNode*)alloc_bash_ast_node(
                 tp, BASH_AST_NODE_ELIF, child, sizeof(BashElifNode));
 
-            // elif has condition + body children
-            uint32_t elif_children = ts_node_named_child_count(child);
-            bool elif_found_cond = false;
+            // elif_clause grammar: elif <stmts> then <stmts>
+            // No field names — use "then" keyword position to split condition vs body.
+            uint32_t elif_raw_count = ts_node_child_count(child);
+            bool past_then = false;
             BashBlockNode* elif_block = NULL;
             BashAstNode* elif_body_tail = NULL;
-            for (uint32_t j = 0; j < elif_children; j++) {
-                TSNode elif_child = ts_node_named_child(child, j);
-                if (!elif_found_cond) {
-                    elif->condition = build_statement(tp, elif_child);
-                    elif_found_cond = true;
-                } else {
-                    BashAstNode* stmt = build_statement(tp, elif_child);
-                    if (stmt) {
-                        if (!elif_block) {
-                            elif_block = (BashBlockNode*)alloc_bash_ast_node(
-                                tp, BASH_AST_NODE_BLOCK, child, sizeof(BashBlockNode));
-                        }
-                        if (!elif_block->statements) {
-                            elif_block->statements = stmt;
+            for (uint32_t r = 0; r < elif_raw_count; r++) {
+                TSNode raw_ch = ts_node_child(child, r);
+                if (!ts_node_is_named(raw_ch)) {
+                    // check for "then" keyword
+                    const char* raw_type = ts_node_type(raw_ch);
+                    if (strcmp(raw_type, "then") == 0) past_then = true;
+                    continue;
+                }
+                BashAstNode* stmt = build_statement(tp, raw_ch);
+                if (!stmt) continue;
+
+                if (!past_then) {
+                    // condition part — accumulate (may be multiple commands)
+                    if (!elif->condition) {
+                        elif->condition = stmt;
+                    } else {
+                        BashBlockNode* cond_block;
+                        if (elif->condition->node_type == BASH_AST_NODE_BLOCK) {
+                            cond_block = (BashBlockNode*)elif->condition;
                         } else {
-                            elif_body_tail->next = stmt;
+                            cond_block = (BashBlockNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_BLOCK, raw_ch, sizeof(BashBlockNode));
+                            cond_block->statements = elif->condition;
+                            elif->condition = (BashAstNode*)cond_block;
                         }
-                        elif_body_tail = stmt;
+                        BashAstNode* tail = cond_block->statements;
+                        while (tail->next) tail = tail->next;
+                        tail->next = stmt;
                     }
+                } else {
+                    // body part
+                    if (!elif_block) {
+                        elif_block = (BashBlockNode*)alloc_bash_ast_node(
+                            tp, BASH_AST_NODE_BLOCK, child, sizeof(BashBlockNode));
+                    }
+                    if (!elif_block->statements) {
+                        elif_block->statements = stmt;
+                    } else {
+                        elif_body_tail->next = stmt;
+                    }
+                    elif_body_tail = stmt;
                 }
             }
             elif->body = (BashAstNode*)elif_block;
@@ -1678,10 +1888,44 @@ static BashAstNode* build_if_statement(BashTranspiler* tp, TSNode node) {
             }
             if_node->else_body = (BashAstNode*)else_block;
         } else {
-            // condition or then-body statement
-            if (!found_condition) {
-                if_node->condition = build_statement(tp, child);
-                found_condition = true;
+            // condition or then-body statement — use raw child index to check field name
+            // tree-sitter gives multiple condition: fields for "if cmd1; cmd2; then ..."
+            uint32_t raw_index = 0;
+            uint32_t raw_count = ts_node_child_count(node);
+            // find the raw child index that matches this named child
+            uint32_t named_seen = 0;
+            for (raw_index = 0; raw_index < raw_count; raw_index++) {
+                TSNode raw_child = ts_node_child(node, raw_index);
+                if (ts_node_is_named(raw_child)) {
+                    if (named_seen == i) break;
+                    named_seen++;
+                }
+            }
+            const char* field = ts_node_field_name_for_child(node, raw_index);
+            bool is_condition = field && strcmp(field, "condition") == 0;
+
+            if (is_condition) {
+                BashAstNode* stmt = build_statement(tp, child);
+                if (stmt) {
+                    if (!if_node->condition) {
+                        if_node->condition = stmt;
+                    } else {
+                        // wrap in block for multiple condition commands
+                        BashBlockNode* cond_block;
+                        if (if_node->condition->node_type == BASH_AST_NODE_BLOCK) {
+                            cond_block = (BashBlockNode*)if_node->condition;
+                        } else {
+                            cond_block = (BashBlockNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_BLOCK, child, sizeof(BashBlockNode));
+                            cond_block->statements = if_node->condition;
+                            if_node->condition = (BashAstNode*)cond_block;
+                        }
+                        // append to block
+                        BashAstNode* tail = cond_block->statements;
+                        while (tail->next) tail = tail->next;
+                        tail->next = stmt;
+                    }
+                }
             } else {
                 // accumulate then-body statements
                 BashAstNode* stmt = build_statement(tp, child);
@@ -1713,25 +1957,20 @@ static BashAstNode* build_for_statement(BashTranspiler* tp, TSNode node) {
         BashForArithNode* for_arith = (BashForArithNode*)alloc_bash_ast_node(
             tp, BASH_AST_NODE_FOR_ARITHMETIC, node, sizeof(BashForArithNode));
 
-        // tree-sitter-bash: c_style_for_statement children include
-        // the arithmetic expressions and the body
-        uint32_t child_count = ts_node_named_child_count(node);
-        int arith_idx = 0;
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode child = ts_node_named_child(node, i);
-            const char* child_type = ts_node_type(child);
+        // use field names to correctly handle empty init/cond/step
+        TSNode init_node = ts_node_child_by_field_name(node, "initializer", 11);
+        TSNode cond_node = ts_node_child_by_field_name(node, "condition", 9);
+        TSNode update_node = ts_node_child_by_field_name(node, "update", 6);
+        TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
 
-            if (strcmp(child_type, "do_group") == 0 ||
-                strcmp(child_type, "compound_statement") == 0) {
-                for_arith->body = build_block(tp, child);
-            } else {
-                BashAstNode* arith = build_arith_expression(tp, child);
-                if (arith_idx == 0) for_arith->init = arith;
-                else if (arith_idx == 1) for_arith->condition = arith;
-                else if (arith_idx == 2) for_arith->step = arith;
-                arith_idx++;
-            }
-        }
+        if (!ts_node_is_null(init_node))
+            for_arith->init = build_arith_expression(tp, init_node);
+        if (!ts_node_is_null(cond_node))
+            for_arith->condition = build_arith_expression(tp, cond_node);
+        if (!ts_node_is_null(update_node))
+            for_arith->step = build_arith_expression(tp, update_node);
+        if (!ts_node_is_null(body_node))
+            for_arith->body = build_block(tp, body_node);
 
         return (BashAstNode*)for_arith;
     }
@@ -1839,7 +2078,7 @@ static BashAstNode* build_while_statement(BashTranspiler* tp, TSNode node) {
         tp, ast_type, node, sizeof(BashWhileNode));
 
     uint32_t child_count = ts_node_named_child_count(node);
-    bool found_condition = false;
+    uint32_t raw_count = ts_node_child_count(node);
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
@@ -1847,9 +2086,41 @@ static BashAstNode* build_while_statement(BashTranspiler* tp, TSNode node) {
 
         if (strcmp(child_type, "do_group") == 0) {
             while_node->body = build_block(tp, child);
-        } else if (!found_condition) {
-            while_node->condition = build_statement(tp, child);
-            found_condition = true;
+        } else {
+            // check field name to see if this is a condition
+            uint32_t raw_idx = 0;
+            uint32_t ns = 0;
+            for (raw_idx = 0; raw_idx < raw_count; raw_idx++) {
+                TSNode raw_ch = ts_node_child(node, raw_idx);
+                if (ts_node_is_named(raw_ch)) {
+                    if (ns == i) break;
+                    ns++;
+                }
+            }
+            const char* fld = ts_node_field_name_for_child(node, raw_idx);
+            bool is_cond = fld && strcmp(fld, "condition") == 0;
+
+            if (is_cond) {
+                BashAstNode* stmt = build_statement(tp, child);
+                if (stmt) {
+                    if (!while_node->condition) {
+                        while_node->condition = stmt;
+                    } else {
+                        BashBlockNode* cond_block;
+                        if (while_node->condition->node_type == BASH_AST_NODE_BLOCK) {
+                            cond_block = (BashBlockNode*)while_node->condition;
+                        } else {
+                            cond_block = (BashBlockNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_BLOCK, child, sizeof(BashBlockNode));
+                            cond_block->statements = while_node->condition;
+                            while_node->condition = (BashAstNode*)cond_block;
+                        }
+                        BashAstNode* tail = cond_block->statements;
+                        while (tail->next) tail = tail->next;
+                        tail->next = stmt;
+                    }
+                }
+            }
         }
     }
 
@@ -1899,6 +2170,7 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
             strcmp(child_type, "simple_expansion") == 0 ||
             strcmp(child_type, "expansion") == 0 ||
             strcmp(child_type, "string") == 0 ||
+            strcmp(child_type, "raw_string") == 0 ||
             strcmp(child_type, "concatenation") == 0 ||
             strcmp(child_type, "command_substitution") == 0 ||
             strcmp(child_type, "process_substitution") == 0 ||
@@ -2132,7 +2404,8 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
                     strcmp(item_child_type, "concatenation") == 0 ||
                     strcmp(item_child_type, "raw_string") == 0 ||
                     strcmp(item_child_type, "ansi_c_string") == 0 ||
-                    strcmp(item_child_type, "translated_string") == 0) {
+                    strcmp(item_child_type, "translated_string") == 0 ||
+                    strcmp(item_child_type, "arithmetic_expansion") == 0) {
                     BashAstNode* pattern = build_expr_node(tp, item_child);
                     if (pattern) {
                         if (!item->patterns) {
@@ -2382,12 +2655,18 @@ static BashAstNode* build_assignment(BashTranspiler* tp, TSNode node) {
     }
 
     // detect += (compound assignment)
+    // only scan the operator portion, not the value, to avoid false positives
+    // from [idx]+=val inside array literals. Stop at the first '(' (array start)
+    // or stop once we've seen '=' (meaning we've already found the operator).
     StrView source = bash_node_source(tp, node);
     for (size_t i = 0; i < source.length - 1; i++) {
-        if (source.str[i] == '+' && source.str[i + 1] == '=') {
+        char c = source.str[i];
+        if (c == '(') break;  // don't scan inside array literal value
+        if (c == '+' && source.str[i + 1] == '=') {
             assign->is_append = true;
             break;
         }
+        if (c == '=' && (i == 0 || source.str[i - 1] != '+')) break;  // past operator
     }
 
     // register in scope (but not subscript assignments like arr[idx]=val)
@@ -2432,7 +2711,9 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
                         case 'x': declare_flags |= BASH_ATTR_EXPORT; break;
                         case 'l': declare_flags |= BASH_ATTR_LOWERCASE; break;
                         case 'u': declare_flags |= BASH_ATTR_UPPERCASE; break;
+                        case 'c': declare_flags |= BASH_ATTR_CAPITALIZE; break;
                         case 'p': declare_flags |= BASH_ATTR_PRINT; break;
+                        case 'f': declare_flags |= BASH_ATTR_FUNC; break;
                         case 'n': declare_flags |= BASH_ATTR_NAMEREF; break;
                         default: break;
                     }
@@ -2496,6 +2777,17 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
             }
             tail = (BashAstNode*)assign;
         }
+    }
+
+    // handle declare/typeset -f with no variable names: print all functions
+    // also handle declare -f funcname: print specific function
+    if ((declare_flags & BASH_ATTR_FUNC) && !result) {
+        // no names given: create a dummy node to trigger printing all functions
+        BashAssignmentNode* assign = (BashAssignmentNode*)alloc_bash_ast_node(
+            tp, BASH_AST_NODE_ASSIGNMENT, node, sizeof(BashAssignmentNode));
+        assign->name = NULL;
+        assign->declare_flags = declare_flags;
+        result = (BashAstNode*)assign;
     }
 
     return result;
@@ -2756,22 +3048,56 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
         // tree-sitter may parse `! $b -gt 5` as `(! $b) -gt 5`.
         // in bash, `!` negates the whole comparison: `! ($b -gt 5)`.
         // detect this and rewrite the AST accordingly.
+        // BUT: for || and &&, `!` has higher precedence, so DON'T rewrite.
+        TSNode bin_op_node = ts_node_child_by_field_name(node, "operator", 8);
+        bool is_logical_op = false;
+        if (!ts_node_is_null(bin_op_node)) {
+            StrView bin_op_src = bash_node_source(tp, bin_op_node);
+            if ((bin_op_src.length == 2 && memcmp(bin_op_src.str, "||", 2) == 0) ||
+                (bin_op_src.length == 2 && memcmp(bin_op_src.str, "&&", 2) == 0)) {
+                is_logical_op = true;
+            }
+        }
+
         TSNode left_node = ts_node_child_by_field_name(node, "left", 4);
-        if (!ts_node_is_null(left_node) &&
+        if (!is_logical_op && !ts_node_is_null(left_node) &&
             strcmp(ts_node_type(left_node), "unary_expression") == 0) {
             TSNode unary_op = ts_node_child_by_field_name(left_node, "operator", 8);
             if (!ts_node_is_null(unary_op)) {
                 StrView unary_op_src = bash_node_source(tp, unary_op);
                 if (unary_op_src.length == 1 && unary_op_src.str[0] == '!') {
-                    // rewrite: unary(!, binary(inner_operand, op, right))
+                    // rewrite: peel all ! layers, then wrap the binary
+                    // e.g. `! ! x -eq y` → !(!(x -eq y))
+                    int not_count = 1;
+                    TSNode cur_unary = left_node;
                     TSNode inner_operand = {0};
-                    uint32_t un_children = ts_node_named_child_count(left_node);
-                    for (uint32_t j = 0; j < un_children; j++) {
-                        TSNode uc = ts_node_named_child(left_node, j);
-                        if (strcmp(ts_node_type(uc), "test_operator") != 0) {
-                            inner_operand = uc;
-                            break;
+
+                    // peel ! layers
+                    while (true) {
+                        uint32_t un_children = ts_node_named_child_count(cur_unary);
+                        TSNode child_operand = {0};
+                        for (uint32_t j = 0; j < un_children; j++) {
+                            TSNode uc = ts_node_named_child(cur_unary, j);
+                            if (strcmp(ts_node_type(uc), "test_operator") != 0) {
+                                child_operand = uc;
+                                break;
+                            }
                         }
+                        if (ts_node_is_null(child_operand)) break;
+                        // check if child is another unary ! expression
+                        if (strcmp(ts_node_type(child_operand), "unary_expression") == 0) {
+                            TSNode inner_op = ts_node_child_by_field_name(child_operand, "operator", 8);
+                            if (!ts_node_is_null(inner_op)) {
+                                StrView inner_op_src = bash_node_source(tp, inner_op);
+                                if (inner_op_src.length == 1 && inner_op_src.str[0] == '!') {
+                                    not_count++;
+                                    cur_unary = child_operand;
+                                    continue;
+                                }
+                            }
+                        }
+                        inner_operand = child_operand;
+                        break;
                     }
 
                     BashTestBinaryNode* bin = (BashTestBinaryNode*)alloc_bash_ast_node(
@@ -2789,11 +3115,16 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
                         bin->right = build_test_expression(tp, right_node);
                     }
 
-                    BashTestUnaryNode* unary = (BashTestUnaryNode*)alloc_bash_ast_node(
-                        tp, BASH_AST_NODE_TEST_UNARY, left_node, sizeof(BashTestUnaryNode));
-                    unary->op = BASH_TEST_NOT;
-                    unary->operand = (BashAstNode*)bin;
-                    return (BashAstNode*)unary;
+                    // wrap with NOT layers
+                    BashAstNode* result = (BashAstNode*)bin;
+                    for (int ni = 0; ni < not_count; ni++) {
+                        BashTestUnaryNode* unary = (BashTestUnaryNode*)alloc_bash_ast_node(
+                            tp, BASH_AST_NODE_TEST_UNARY, left_node, sizeof(BashTestUnaryNode));
+                        unary->op = BASH_TEST_NOT;
+                        unary->operand = result;
+                        result = (BashAstNode*)unary;
+                    }
+                    return result;
                 }
             }
         }
@@ -2844,6 +3175,66 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
                     word->text = name_pool_create_len(tp->name_pool, raw, (int)raw_len);
                     bin->right = (BashAstNode*)word;
                     bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_GLOB : BASH_TEST_STR_NE;
+                } else if (raw_len > 0 && !memchr(raw, '$', raw_len) &&
+                           strcmp(ts_node_type(bin_right), "regex") == 0) {
+                    // regex node (from [[ ]] RHS): tree-sitter's scanner swallows
+                    // quotes into the regex token text. Process quoting to determine
+                    // whether this is a literal comparison or glob pattern.
+                    // in bash, quoted portions are literal; unquoted glob chars
+                    // (* ? [) trigger pattern matching.
+                    char* processed = (char*)alloca(raw_len + 1);
+                    size_t out = 0;
+                    bool has_unquoted_glob = false;
+                    for (size_t i = 0; i < raw_len; i++) {
+                        if (raw[i] == '\'' ) {
+                            // single-quoted segment: everything literal until closing quote
+                            i++;
+                            while (i < raw_len && raw[i] != '\'') {
+                                processed[out++] = raw[i++];
+                            }
+                            // skip closing quote (loop increment handles it if at end)
+                        } else if (raw[i] == '"') {
+                            // double-quoted segment: literal until closing quote
+                            // in double quotes, \ only escapes $, `, ", \, and newline
+                            i++;
+                            while (i < raw_len && raw[i] != '"') {
+                                if (raw[i] == '\\' && i + 1 < raw_len) {
+                                    char next = raw[i + 1];
+                                    if (next == '$' || next == '`' || next == '"' ||
+                                        next == '\\' || next == '\n') {
+                                        i++; // skip backslash
+                                        processed[out++] = raw[i++];
+                                    } else {
+                                        // backslash is literal
+                                        processed[out++] = raw[i++];
+                                    }
+                                    continue;
+                                }
+                                processed[out++] = raw[i++];
+                            }
+                        } else if (raw[i] == '\\' && i + 1 < raw_len) {
+                            // backslash escape: next char is literal
+                            i++;
+                            processed[out++] = raw[i];
+                        } else {
+                            if (raw[i] == '*' || raw[i] == '?' || raw[i] == '[') {
+                                has_unquoted_glob = true;
+                            }
+                            processed[out++] = raw[i];
+                        }
+                    }
+                    processed[out] = '\0';
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, bin_right, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool, processed, (int)out);
+                    word->no_backslash_escape = true; // already processed
+                    bin->right = (BashAstNode*)word;
+                    if (has_unquoted_glob) {
+                        bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_GLOB : BASH_TEST_STR_NE;
+                    } else {
+                        // fully quoted or plain literal — use literal comparison
+                        bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_EQ_LIT : BASH_TEST_STR_NE_LIT;
+                    }
                 } else {
                     bin->right = build_test_expression(tp, bin_right);
                 }
@@ -2871,6 +3262,14 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
             }
         }
         return (BashAstNode*)unary;
+    } else if (strcmp(type, "parenthesized_expression") == 0) {
+        // [[ ( expr ) ]] — unwrap and recurse into the inner expression
+        log_debug("bash-ast: unwrapping parenthesized_expression in test");
+        uint32_t ch_count = ts_node_named_child_count(node);
+        if (ch_count > 0) {
+            return build_test_expression(tp, ts_node_named_child(node, 0));
+        }
+        return build_expr_node(tp, node);
     } else {
         return build_expr_node(tp, node);
     }
@@ -3089,7 +3488,7 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                             if (dollar_pos > pos) {
                                 BashWordNode* gap = (BashWordNode*)alloc_bash_ast_node(
                                     tp, BASH_AST_NODE_WORD, bc, sizeof(BashWordNode));
-                                gap->text = name_pool_create_len(tp->name_pool, tp->source + pos, dollar_pos - pos);
+                                gap->text = heredoc_escape_text(tp, tp->source + pos, dollar_pos - pos);
                                 gap->no_backslash_escape = true;
                                 if (!str->parts) str->parts = (BashAstNode*)gap;
                                 else parts_tail->next = (BashAstNode*)gap;
@@ -3107,7 +3506,7 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                             if (cs_start > pos) {
                                 BashWordNode* gap = (BashWordNode*)alloc_bash_ast_node(
                                     tp, BASH_AST_NODE_WORD, bc, sizeof(BashWordNode));
-                                gap->text = name_pool_create_len(tp->name_pool, tp->source + pos, cs_start - pos);
+                                gap->text = heredoc_escape_text(tp, tp->source + pos, cs_start - pos);
                                 gap->no_backslash_escape = true;
                                 if (!str->parts) str->parts = (BashAstNode*)gap;
                                 else parts_tail->next = (BashAstNode*)gap;
@@ -3126,7 +3525,7 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                     if (pos < body_end) {
                         BashWordNode* tail = (BashWordNode*)alloc_bash_ast_node(
                             tp, BASH_AST_NODE_WORD, hchild, sizeof(BashWordNode));
-                        tail->text = name_pool_create_len(tp->name_pool, tp->source + pos, body_end - pos);
+                        tail->text = heredoc_escape_text(tp, tp->source + pos, body_end - pos);
                         tail->no_backslash_escape = true;
                         if (!str->parts) str->parts = (BashAstNode*)tail;
                         else parts_tail->next = (BashAstNode*)tail;
@@ -3256,7 +3655,7 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                             if (dollar_pos > pos) {
                                 BashWordNode* gap = (BashWordNode*)alloc_bash_ast_node(
                                     tp, BASH_AST_NODE_WORD, bc, sizeof(BashWordNode));
-                                gap->text = name_pool_create_len(tp->name_pool, tp->source + pos, dollar_pos - pos);
+                                gap->text = heredoc_escape_text(tp, tp->source + pos, dollar_pos - pos);
                                 gap->no_backslash_escape = true;
                                 if (!str->parts) str->parts = (BashAstNode*)gap;
                                 else parts_tail->next = (BashAstNode*)gap;
@@ -3274,7 +3673,7 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                     if (pos < body_end) {
                         BashWordNode* tail_word = (BashWordNode*)alloc_bash_ast_node(
                             tp, BASH_AST_NODE_WORD, hchild, sizeof(BashWordNode));
-                        tail_word->text = name_pool_create_len(tp->name_pool, tp->source + pos, body_end - pos);
+                        tail_word->text = heredoc_escape_text(tp, tp->source + pos, body_end - pos);
                         tail_word->no_backslash_escape = true;
                         if (!str->parts) str->parts = (BashAstNode*)tail_word;
                         else parts_tail->next = (BashAstNode*)tail_word;
@@ -3471,6 +3870,31 @@ BashAstNode* build_bash_program(BashTranspiler* tp, TSNode program_node) {
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(program_node, i);
+        const char* ctype = ts_node_type(child);
+        uint32_t cstart = ts_node_start_byte(child);
+        uint32_t cend = ts_node_end_byte(child);
+        bool has_error = ts_node_has_error(child);
+
+        // If the top-level child is an ERROR node, try to recover by extracting
+        // valid children from inside it
+        if (strcmp(ctype, "ERROR") == 0) {
+            uint32_t err_named = ts_node_named_child_count(child);
+            log_debug("bash-ast: ERROR node bytes=%d-%d, recovering %d children", cstart, cend, err_named);
+            for (uint32_t j = 0; j < err_named; j++) {
+                TSNode err_child = ts_node_named_child(child, j);
+                uint32_t estart = ts_node_start_byte(err_child);
+                uint32_t eend = ts_node_end_byte(err_child);
+                if (ts_node_has_error(err_child)) continue;
+                if (estart < last_end_byte) continue;
+                BashAstNode* stmt = build_statement(tp, err_child);
+                if (!stmt) continue;
+                last_end_byte = eend;
+                if (!program->body) { program->body = stmt; }
+                else { tail->next = stmt; }
+                tail = stmt;
+            }
+            continue;
+        }
 
         // Skip children that overlap with a previous statement's byte range.
         // tree-sitter error recovery can produce overlapping nodes.

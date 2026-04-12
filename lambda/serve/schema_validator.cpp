@@ -10,7 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cctype>
@@ -419,7 +419,7 @@ static void validate_object(const char *data, const char *schema,
             while (*p && *p != ']' && req_count < 64) {
                 char key_buf[256];
                 if (extract_string_value(p, key_buf, sizeof(key_buf))) {
-                    req_keys[req_count] = strdup(key_buf);
+                    req_keys[req_count] = mem_strdup(key_buf, MEM_CAT_SERVE);
                     req_found[req_count] = 0;
                     req_count++;
                 }
@@ -438,9 +438,9 @@ static void validate_object(const char *data, const char *schema,
                     snprintf(msg, sizeof(msg), "missing required field '%s'", req_keys[i]);
                     char err_path[256];
                     snprintf(err_path, sizeof(err_path), "%s/%s", path, req_keys[i]);
-                    add_error(result, strdup(err_path), strdup(msg));
+                    add_error(result, mem_strdup(err_path, MEM_CAT_SERVE), mem_strdup(msg, MEM_CAT_SERVE));
                 }
-                free((void*)req_keys[i]);
+                mem_free((void*)req_keys[i]);
             }
         }
     }
@@ -575,7 +575,7 @@ char* schema_validation_error_json(const ValidationResult *result) {
     strbuf_append_str(buf, "]}");
 
     size_t len = buf->length;
-    char *json = (char*)malloc(len + 1);
+    char *json = (char*)mem_alloc(len + 1, MEM_CAT_SERVE);
     memcpy(json, buf->str, len + 1);
     strbuf_free(buf);
 
@@ -633,7 +633,7 @@ static void schema_validate_middleware_fn(HttpRequest* req, HttpResponse* resp,
         http_response_status(resp, 422);
         http_response_set_header(resp, "Content-Type", "application/json");
         http_response_write_str(resp, error_json);
-        free(error_json);
+        mem_free(error_json);
         return;
     }
 

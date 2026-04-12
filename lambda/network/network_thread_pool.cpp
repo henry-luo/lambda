@@ -5,7 +5,7 @@
 #include "network_thread_pool.h"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <unistd.h>
 #include <time.h>
 #include <uv.h>
@@ -43,7 +43,7 @@ static void after_work_cb(uv_work_t* req, int status) {
     if (!wr) return;
 
     atomic_fetch_sub(&wr->pool->pending_count, 1);
-    free(wr);
+    mem_free(wr);
 }
 
 // Create thread pool
@@ -60,7 +60,7 @@ NetworkThreadPool* thread_pool_create(int num_threads) {
         setenv("UV_THREADPOOL_SIZE", buf, 0);
     }
 
-    NetworkThreadPool* pool = (NetworkThreadPool*)calloc(1, sizeof(NetworkThreadPool));
+    NetworkThreadPool* pool = (NetworkThreadPool*)mem_calloc(1, sizeof(NetworkThreadPool), MEM_CAT_NETWORK);
     if (!pool) return NULL;
 
     pool->num_threads = num_threads;
@@ -85,7 +85,7 @@ void thread_pool_destroy(NetworkThreadPool* pool) {
     // wait for outstanding work to complete
     thread_pool_wait_all(pool);
 
-    free(pool);
+    mem_free(pool);
     log_debug("network: thread pool destroyed");
 }
 
@@ -104,7 +104,7 @@ bool thread_pool_enqueue(NetworkThreadPool* pool,
         return false;
     }
 
-    WorkRequest* wr = (WorkRequest*)calloc(1, sizeof(WorkRequest));
+    WorkRequest* wr = (WorkRequest*)mem_calloc(1, sizeof(WorkRequest), MEM_CAT_NETWORK);
     if (!wr) return false;
 
     wr->pool = pool;
@@ -121,7 +121,7 @@ bool thread_pool_enqueue(NetworkThreadPool* pool,
         log_error("network: uv_queue_work failed: %s", uv_strerror(r));
         atomic_fetch_sub(&pool->queued_count, 1);
         atomic_fetch_sub(&pool->pending_count, 1);
-        free(wr);
+        mem_free(wr);
         return false;
     }
 

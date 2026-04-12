@@ -7,7 +7,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // TypeScript parser (unified: handles both JS and TS)
 extern "C" {
@@ -171,7 +171,7 @@ void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...) {
 // Transpiler lifecycle functions
 
 JsTranspiler* js_transpiler_create(Runtime* runtime) {
-    JsTranspiler* tp = (JsTranspiler*)malloc(sizeof(JsTranspiler));
+    JsTranspiler* tp = (JsTranspiler*)mem_alloc(sizeof(JsTranspiler), MEM_CAT_JS_RUNTIME);
     memset(tp, 0, sizeof(JsTranspiler));
 
     // Initialize memory pools
@@ -237,7 +237,7 @@ void js_transpiler_destroy(JsTranspiler* tp) {
         hashmap_free(tp->type_registry);
     }
 
-    free(tp);
+    mem_free(tp);
 }
 
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {

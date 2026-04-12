@@ -12,6 +12,7 @@
  */
 
 #include "font_internal.h"
+#include "../memtrack.h"
 #include <zlib.h>
 
 // WOFF2 C++ API — confined to this file
@@ -87,7 +88,7 @@ static inline void write_u32_be(uint8_t* p, uint32_t v) {
 
 bool font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
                            uint8_t** out, size_t* out_len) {
-    if (!arena || !data || !out || !out_len) return false;
+    if (!data || !out || !out_len) return false;
 
     // validate minimum header size
     if (len < sizeof(WoffHeader)) {
@@ -121,10 +122,12 @@ bool font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
         return false;
     }
 
-    // allocate output SFNT buffer from arena
-    uint8_t* sfnt = (uint8_t*)arena_calloc(arena, total_sfnt_sz);
+    // allocate output SFNT buffer (malloc if arena is NULL, arena otherwise)
+    uint8_t* sfnt = arena
+        ? (uint8_t*)arena_calloc(arena, total_sfnt_sz)
+        : (uint8_t*)mem_calloc(1, total_sfnt_sz, MEM_CAT_FONT);
     if (!sfnt) {
-        log_error("font_decompress_woff1: arena_calloc failed for %u bytes", total_sfnt_sz);
+        log_error("font_decompress_woff1: alloc failed for %u bytes", total_sfnt_sz);
         return false;
     }
 
@@ -224,7 +227,7 @@ bool font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
 
 bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
                            uint8_t** out, size_t* out_len) {
-    if (!arena || !data || !out || !out_len) return false;
+    if (!data || !out || !out_len) return false;
 
     // compute final size first
     size_t final_size = woff2::ComputeWOFF2FinalSize(data, len);
@@ -233,10 +236,12 @@ bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
         return false;
     }
 
-    // allocate output buffer from arena (no std::string needed!)
-    uint8_t* buf = (uint8_t*)arena_alloc(arena, final_size);
+    // allocate output buffer (malloc if arena is NULL, arena otherwise)
+    uint8_t* buf = arena
+        ? (uint8_t*)arena_alloc(arena, final_size)
+        : (uint8_t*)mem_alloc(final_size, MEM_CAT_FONT);
     if (!buf) {
-        log_error("font_decompress_woff2: arena_alloc failed for %zu bytes", final_size);
+        log_error("font_decompress_woff2: alloc failed for %zu bytes", final_size);
         return false;
     }
 
@@ -245,7 +250,7 @@ bool font_decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
 
     if (!woff2::ConvertWOFF2ToTTF(data, len, &output)) {
         log_error("font_decompress_woff2: ConvertWOFF2ToTTF failed");
-        // arena memory is not individually freed; it's fine
+        if (!arena) mem_free(buf);
         return false;
     }
 
@@ -302,7 +307,7 @@ FontFormat font_detect_format_ext(const char* path) {
 bool font_decompress_if_needed(Arena* arena, const uint8_t* data, size_t len,
                                FontFormat format,
                                const uint8_t** out, size_t* out_len) {
-    if (!arena || !data || !out || !out_len) return false;
+    if (!data || !out || !out_len) return false;
 
     switch (format) {
         case FONT_FORMAT_WOFF: {

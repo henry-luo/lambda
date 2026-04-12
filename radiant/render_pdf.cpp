@@ -146,7 +146,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
     // Apply text-transform if needed
-    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 1, MEM_CAT_RENDER);  // Extra space for UTF-8 expansion
+    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 2, MEM_CAT_RENDER);  // Extra space for UTF-8 + trailing hyphen
     if (text_transform != CSS_VALUE_NONE) {
         unsigned char* src = str + text_rect->start_index;
         unsigned char* src_end = src + text_rect->length;
@@ -162,6 +162,9 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 if (bytes <= 0) bytes = 1;
             }
 
+            // Skip soft hyphens (U+00AD) — invisible in rendered output
+            if (codepoint == 0x00AD) { src += bytes; continue; }
+
             if (is_space(codepoint)) {
                 is_word_start = true;
                 *dst++ = *src;
@@ -169,10 +172,16 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 continue;
             }
 
-            uint32_t transformed = apply_text_transform(codepoint, text_transform, is_word_start);
+            // Apply transformation (full case mapping: 1 codepoint may become 2-3)
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
             is_word_start = false;
 
-            // Encode back to UTF-8
+            // Encode all expanded codepoints back to UTF-8
+            for (int tti = 0; tti < tt_count; tti++) {
+            uint32_t transformed = tt_out[tti];
+            if (transformed == 0) continue;
+
             if (transformed < 0x80) {
                 *dst++ = (char)transformed;
             } else if (transformed < 0x800) {
@@ -188,12 +197,29 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
                 *dst++ = (char)(0x80 | (transformed & 0x3F));
             }
+            } // end for tti
             src += bytes;
         }
         *dst = '\0';
     } else {
-        strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
-        text_content[text_rect->length] = '\0';
+        // No transformation — copy while stripping soft hyphens (U+00AD = 0xC2 0xAD)
+        unsigned char* src = str + text_rect->start_index;
+        unsigned char* src_end = src + text_rect->length;
+        char* dst = text_content;
+        while (src < src_end) {
+            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
+                src += 2;  // skip soft hyphen
+            } else {
+                *dst++ = (char)*src++;
+            }
+        }
+        *dst = '\0';
+    }
+    // CSS Text 3 §5.2: Soft hyphen — append visible '-' when line breaks at SHY
+    if (text_rect->has_trailing_hyphen) {
+        size_t len = strlen(text_content);
+        text_content[len] = '-';
+        text_content[len + 1] = '\0';
     }
 
     if (strlen(text_content) == 0) {

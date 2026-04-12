@@ -1739,10 +1739,11 @@ class PremakeGenerator:
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
 
-                self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources, binary_name)
+                test_disable_sanitizer = test.get('disable_sanitizer', False)
+                self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources, binary_name, test_disable_sanitizer)
 
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str],
-                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None, target_name: str = None) -> None:
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None, target_name: str = None, disable_sanitizer_override: bool = False) -> None:
         """Generate a single test project"""
         if libraries is None:
             libraries = []
@@ -2303,6 +2304,9 @@ class PremakeGenerator:
             linux_config = platforms_config.get('linux', {})
             disable_sanitizer = linux_config.get('disable_sanitizer', False)
 
+        if disable_sanitizer_override:
+            disable_sanitizer = True
+
         if not disable_sanitizer:
             self.premake_content.extend([
                 '    -- AddressSanitizer for test projects only',
@@ -2743,6 +2747,30 @@ class PremakeGenerator:
             '    ',
             ''
         ])
+
+        # Memtrack poison enforcement: force-include lib/mem.h and define MEMTRACK_POISON_RAW_ALLOC
+        # for lambda/ and radiant/ source files (not lib/ — which implements the allocator itself)
+        if self.config.get('memtrack_poison', False):
+            poison_dirs = self.config.get('memtrack_poison_dirs', ['lambda', 'radiant'])
+            exempt_files = self.config.get('memtrack_poison_exempt', [])
+            for pdir in poison_dirs:
+                self.premake_content.extend([
+                    f'    -- Memtrack poison enforcement for {pdir}/',
+                    f'    filter "files:{pdir}/**"',
+                    '        buildoptions { "-include lib/mem.h", "-DMEMTRACK_POISON_RAW_ALLOC" }',
+                    '    ',
+                ])
+            # Exempt specific files (e.g., WASM build, tree-sitter bindings)
+            for exempt in exempt_files:
+                self.premake_content.extend([
+                    f'    filter "files:{exempt}"',
+                    '        buildoptions { "-UMEMTRACK_POISON_RAW_ALLOC" }',
+                    '    ',
+                ])
+            self.premake_content.extend([
+                '    filter {}',
+                '    ',
+            ])
 
         # AddressSanitizer for main lambda.exe (opt-in via enable_sanitizer_main)
         if self.config.get('enable_sanitizer_main', False):

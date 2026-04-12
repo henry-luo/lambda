@@ -17,4 +17,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect);
 
 // Software Gaussian blur (3-pass box blur approximation)
 // Can be used by box-shadow, text-shadow, and filter:blur()
-void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius);
+void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius);
+
+// CSS blend mode compositing: blend source pixel onto backdrop
+// pixel format: ABGR (A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7)
+uint32_t composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);

@@ -12,6 +12,7 @@
 
 #include "font_internal.h"
 #include "../base64.h"
+#include "../memtrack.h"
 
 #include <stdio.h>
 #include <limits.h>
@@ -20,6 +21,7 @@
 // Fixed size selection (for bitmap/emoji fonts) — unified from 4 duplicates
 // ============================================================================
 
+#ifndef __APPLE__
 void font_select_best_fixed_size(FT_Face face, int target_ppem) {
     if (!face || face->num_fixed_sizes <= 0) return;
 
@@ -56,11 +58,76 @@ static void set_face_size(FT_Face face, float physical_size_px) {
         FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_size_px);
     }
 }
+#endif
 
 // ============================================================================
-// Wrap an FT_Face into a FontHandle
+// Wrap font data into a FontHandle
 // ============================================================================
 
+#ifdef __APPLE__
+// macOS: create FontHandle using CoreText + FontTables (no FreeType)
+static FontHandle* create_handle(FontContext* ctx,
+                                  uint8_t* memory_buffer, size_t memory_buffer_size,
+                                  int face_index, float size_px, float physical_size,
+                                  FontWeight weight, FontSlant slant) {
+    FontHandle* handle = (FontHandle*)pool_calloc(ctx->pool, sizeof(FontHandle));
+    if (!handle) return NULL;
+
+    handle->tables = NULL;
+    handle->ref_count = 1;
+    handle->ctx = ctx;
+    handle->memory_buffer = memory_buffer;
+    handle->memory_buffer_size = memory_buffer_size;
+    handle->size_px = size_px;
+    handle->physical_size_px = physical_size;
+    handle->weight = weight;
+    handle->slant = slant;
+    handle->metrics_ready = false;
+    handle->bitmap_scale = 1.0f;
+
+    // create FontTables from raw font data (handles TTC via face_index)
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->tables = font_tables_open_face(memory_buffer, memory_buffer_size,
+                                                face_index, ctx->pool);
+        if (!handle->tables) {
+            log_debug("font_loader: font_tables_open_face failed (non-fatal)");
+        }
+    }
+
+    // get family name and PostScript name from FontTables name table
+    if (handle->tables) {
+        NameTable* name = font_tables_get_name(handle->tables);
+        if (name && name->family_name) {
+            handle->family_name = arena_strdup(ctx->arena, name->family_name);
+        }
+    }
+
+    // create CoreText rasterizer from raw font data
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
+                                                          size_px, face_index);
+        if (!handle->ct_raster_ref) {
+            log_debug("font_loader: ct_raster_ref creation failed (non-fatal)");
+        }
+    }
+
+    // create CoreText font for glyph advance overrides and GPOS kerning.
+    // Use FontTables name table for PostScript and family names.
+    {
+        const char* ps_name = NULL;
+        const char* family = handle->family_name;
+        if (handle->tables) {
+            NameTable* name = font_tables_get_name(handle->tables);
+            if (name) ps_name = name->postscript_name;
+        }
+        handle->ct_font_ref = font_platform_create_ct_font(
+            ps_name, family, size_px, (int)weight);
+    }
+
+    return handle;
+}
+#else
+// Non-macOS: create FontHandle using FreeType
 static FontHandle* create_handle(FontContext* ctx, FT_Face face,
                                   uint8_t* memory_buffer, size_t memory_buffer_size,
                                   float size_px, float physical_size,
@@ -92,7 +159,6 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     }
 
     // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
-    // these fonts have a fixed ppem (e.g. 109) that may differ from target size
     handle->bitmap_scale = 1.0f;
     if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
         (face->face_flags & FT_FACE_FLAG_COLOR) &&
@@ -111,32 +177,15 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
         handle->family_name = arena_strdup(ctx->arena, face->family_name);
     }
 
-#ifdef __APPLE__
-    // create CoreText font for GPOS kerning fallback
-    // only when font has NO kern table at all (e.g., SFNS.ttf with GPOS only).
-    // Skip fonts that have a kern table in Apple AAT format — FreeType can't read
-    // those (FT_HAS_KERNING=false), but enabling CoreText for them would change
-    // existing baseline behaviour.
-    if (!FT_HAS_KERNING(face)) {
-        FT_ULong kern_len = 0;
-        FT_Error kern_err = FT_Load_Sfnt_Table(face, FT_MAKE_TAG('k','e','r','n'),
-                                                0, NULL, &kern_len);
-        bool has_any_kern_table = (kern_err == 0 && kern_len > 0);
-        if (!has_any_kern_table) {
-            const char* ps_name = FT_Get_Postscript_Name(face);
-            handle->ct_font_ref = font_platform_create_ct_font(
-                ps_name, face->family_name, size_px, (int)weight);  // CSS size+weight
-        }
-    }
-#endif
-
     return handle;
 }
+#endif
 
 // ============================================================================
 // Variable font axis selection (opsz, wght)
 // ============================================================================
 
+#ifndef __APPLE__
 static void apply_variable_font_axes(FT_Face face, FT_Library library,
                                      float size_px, FontWeight weight) {
     if (!face || !(face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) return;
@@ -145,7 +194,7 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
     if (FT_Get_MM_Var(face, &mm) != 0 || !mm) return;
 
     // read current design coordinates
-    FT_Fixed* coords = (FT_Fixed*)malloc(mm->num_axis * sizeof(FT_Fixed));
+    FT_Fixed* coords = (FT_Fixed*)mem_alloc(mm->num_axis * sizeof(FT_Fixed), MEM_CAT_FONT);
     if (!coords) { FT_Done_MM_Var(library, mm); return; }
 
     FT_Get_Var_Design_Coordinates(face, mm->num_axis, coords);
@@ -178,8 +227,76 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
         FT_Set_Var_Design_Coordinates(face, mm->num_axis, coords);
     }
 
-    free(coords);
+    mem_free(coords);
     FT_Done_MM_Var(library, mm);
+}
+#endif // !__APPLE__
+
+// ============================================================================
+// Font file data cache — avoids re-reading the same file into the arena
+// ============================================================================
+
+static uint64_t file_data_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const FontFileDataEntry* e = (const FontFileDataEntry*)item;
+    if (!e || !e->path) return 0;
+    return hashmap_xxhash3(e->path, strlen(e->path), seed0, seed1);
+}
+
+static int file_data_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const FontFileDataEntry* ea = (const FontFileDataEntry*)a;
+    const FontFileDataEntry* eb = (const FontFileDataEntry*)b;
+    if (!ea || !eb || !ea->path || !eb->path) return -1;
+    return strcmp(ea->path, eb->path);
+}
+
+static void file_data_free(void* item) {
+    FontFileDataEntry* e = (FontFileDataEntry*)item;
+    if (e) {
+        if (e->data) { mem_free(e->data); e->data = NULL; }
+        if (e->path) { mem_free(e->path); e->path = NULL; }
+    }
+}
+
+static struct hashmap* ensure_file_data_cache(FontContext* ctx) {
+    if (!ctx->file_data_cache) {
+        ctx->file_data_cache = hashmap_new(sizeof(FontFileDataEntry), 32, 0, 0,
+                                            file_data_hash, file_data_compare,
+                                            file_data_free, NULL);
+    }
+    return ctx->file_data_cache;
+}
+
+// look up cached font file data; returns true if found, increments ref_count
+static bool file_data_cache_lookup(FontContext* ctx, const char* path,
+                                    const uint8_t** out_data, size_t* out_len) {
+    struct hashmap* cache = ensure_file_data_cache(ctx);
+    if (!cache) return false;
+    FontFileDataEntry search = {.path = (char*)path, .data = NULL, .data_len = 0};
+    FontFileDataEntry* found = (FontFileDataEntry*)hashmap_get(cache, &search);
+    if (found) {
+        found->ref_count++;
+        *out_data = found->data;
+        *out_len = found->data_len;
+        return true;
+    }
+    return false;
+}
+
+// store font file data in cache (data is malloc-allocated, takes ownership)
+static void file_data_cache_insert(FontContext* ctx, const char* path,
+                                    uint8_t* data, size_t len) {
+    struct hashmap* cache = ensure_file_data_cache(ctx);
+    if (!cache) return;
+    char* dup_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by file_data_free/raw free
+    FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len, .ref_count = 1};
+    FontFileDataEntry* old = (FontFileDataEntry*)hashmap_set(cache, &entry);
+    if (old) {
+        // replaced an existing entry — free old data (but NOT our new entry's data).
+        // hashmap_set returns a copy of the replaced entry.
+        if (old->data != data) { mem_free(old->data); }
+        if (old->path != dup_path) { mem_free(old->path); }
+    }
 }
 
 // ============================================================================
@@ -226,6 +343,35 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
 
     // WOFF/WOFF2: read entire file → decompress → load from memory
     if (format == FONT_FORMAT_WOFF || format == FONT_FORMAT_WOFF2) {
+        // check file data cache for previously decompressed SFNT data
+        const uint8_t* cached_data = NULL;
+        size_t cached_len = 0;
+        if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
+            // reuse cached decompressed SFNT data
+#ifdef __APPLE__
+            FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
+                                                face_index, size_px, physical_size, weight, slant);
+#else
+            FT_Face face = NULL;
+            FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
+                                               face_index, &face);
+            if (err) {
+                log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+                return NULL;
+            }
+            apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+            set_face_size(face, physical_size);
+            FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
+                                                size_px, physical_size, weight, slant);
+#endif
+            if (handle) {
+                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
+                log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
+                         path, handle->family_name ? handle->family_name : "?", physical_size);
+            }
+            return handle;
+        }
+
         // read entire file into memory
         fp = fopen(path, "rb");
         if (!fp) {
@@ -237,77 +383,132 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         fseek(fp, 0, SEEK_SET);
         if (file_size_long <= 0) { fclose(fp); return NULL; }
         size_t file_size = (size_t)file_size_long;
-        uint8_t* file_data = (uint8_t*)malloc(file_size);
+        uint8_t* file_data = (uint8_t*)mem_alloc(file_size, MEM_CAT_FONT);
         if (!file_data) { fclose(fp); return NULL; }
         size_t read_count = fread(file_data, 1, file_size, fp);
         fclose(fp);
         if (read_count != file_size) {
-            free(file_data);
+            mem_free(file_data);
             log_error("font_loader: failed to read '%s'", path);
             return NULL;
         }
 
         const uint8_t* sfnt_data = NULL;
         size_t sfnt_len = 0;
-        bool ok = font_decompress_if_needed(ctx->arena, file_data, file_size,
+        bool ok = font_decompress_if_needed(NULL, file_data, file_size,
                                              format, &sfnt_data, &sfnt_len);
-        free(file_data);
+        mem_free(file_data);
 
         if (!ok) {
             log_error("font_loader: decompression failed for '%s'", path);
             return NULL;
         }
 
-        // sfnt_data is arena-allocated, load from memory
-        return font_load_memory_internal(ctx, sfnt_data, sfnt_len, face_index,
-                                          size_px, physical_size, weight, slant);
+        // cache decompressed SFNT data for reuse at different sizes
+        file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len);
+
+        // use cached data directly — avoid a second copy
+#ifdef __APPLE__
+        FontHandle* handle = create_handle(ctx, (uint8_t*)sfnt_data, sfnt_len,
+                                            face_index, size_px, physical_size, weight, slant);
+#else
+        FT_Face face = NULL;
+        FT_Error err = FT_New_Memory_Face(ctx->ft_library, sfnt_data, (FT_Long)sfnt_len,
+                                           face_index, &face);
+        if (err) {
+            log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+            return NULL;
+        }
+        apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+        set_face_size(face, physical_size);
+        FontHandle* handle = create_handle(ctx, face, (uint8_t*)sfnt_data, sfnt_len,
+                                            size_px, physical_size, weight, slant);
+#endif
+        if (handle) {
+            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
+            log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
+                     path, handle->family_name ? handle->family_name : "?", physical_size);
+        }
+        return handle;
     }
 
-    // TTF/OTF/TTC: read file into arena and load from memory
-    // This ensures we have raw bytes for FontTables parsing.
-    fp = fopen(path, "rb");
-    if (!fp) {
-        log_error("font_loader: cannot reopen '%s'", path);
-        return NULL;
-    }
-    fseek(fp, 0, SEEK_END);
-    long ttf_size_long = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    if (ttf_size_long <= 0) { fclose(fp); return NULL; }
-    size_t ttf_size = (size_t)ttf_size_long;
-    uint8_t* ttf_buf = (uint8_t*)arena_alloc(ctx->arena, ttf_size);
-    if (!ttf_buf) { fclose(fp); return NULL; }
-    size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
-    fclose(fp);
-    if (ttf_read != ttf_size) {
-        log_error("font_loader: failed to read '%s'", path);
-        return NULL;
-    }
+    // TTF/OTF/TTC: check file data cache first, then read from disk
+    {
+        const uint8_t* cached_data = NULL;
+        size_t cached_len = 0;
+        if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
+            // reuse cached file data — avoid re-reading and arena-allocating
+#ifdef __APPLE__
+            FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
+                                                face_index, size_px, physical_size, weight, slant);
+#else
+            FT_Face face = NULL;
+            FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
+                                               face_index, &face);
+            if (err) {
+                log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+                return NULL;
+            }
+            apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+            set_face_size(face, physical_size);
+            FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
+                                                size_px, physical_size, weight, slant);
+#endif
+            if (handle) {
+                handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
+                log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
+                         path, handle->family_name ? handle->family_name : "?", physical_size);
+            }
+            return handle;
+        }
 
-    // For TTC collections, compute the offset for the requested face_index
-    const uint8_t* face_data = ttf_buf;
-    size_t face_data_len = ttf_size;
-    // (FreeType handles TTC internally via face_index; our tables parser
-    //  needs the sub-font offset. We'll handle this when wiring up tables.)
+        fp = fopen(path, "rb");
+        if (!fp) {
+            log_error("font_loader: cannot reopen '%s'", path);
+            return NULL;
+        }
+        fseek(fp, 0, SEEK_END);
+        long ttf_size_long = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (ttf_size_long <= 0) { fclose(fp); return NULL; }
+        size_t ttf_size = (size_t)ttf_size_long;
+        uint8_t* ttf_buf = (uint8_t*)mem_alloc(ttf_size, MEM_CAT_FONT);
+        if (!ttf_buf) { fclose(fp); return NULL; }
+        size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
+        fclose(fp);
+        if (ttf_read != ttf_size) {
+            log_error("font_loader: failed to read '%s'", path);
+            return NULL;
+        }
 
-    FT_Face face = NULL;
-    FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
-                                       face_index, &face);
-    if (err) {
-        log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-        return NULL;
+        // cache the raw file data for reuse at different sizes
+        file_data_cache_insert(ctx, path, ttf_buf, ttf_size);
+
+#ifdef __APPLE__
+        FontHandle* handle = create_handle(ctx, ttf_buf, ttf_size,
+                                            face_index, size_px, physical_size, weight, slant);
+#else
+        FT_Face face = NULL;
+        FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
+                                           face_index, &face);
+        if (err) {
+            log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+            return NULL;
+        }
+
+        apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+        set_face_size(face, physical_size);
+
+        FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
+                                            size_px, physical_size, weight, slant);
+#endif
+        if (handle) {
+            handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by raw free
+            log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
+                     path, handle->family_name ? handle->family_name : "?", physical_size);
+        }
+        return handle;
     }
-
-    apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-    set_face_size(face, physical_size);
-
-    FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
-                                        size_px, physical_size, weight, slant);
-    if (handle) {
-        log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
-                 path, face->family_name ? face->family_name : "?", physical_size);
-    }
-    return handle;
 }
 
 // ============================================================================
@@ -328,7 +529,7 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
     if (format == FONT_FORMAT_WOFF || format == FONT_FORMAT_WOFF2) {
         const uint8_t* decompressed = NULL;
         size_t decompressed_len = 0;
-        if (!font_decompress_if_needed(ctx->arena, data, len, format,
+        if (!font_decompress_if_needed(NULL, data, len, format,
                                         &decompressed, &decompressed_len)) {
             log_error("font_loader: in-memory decompression failed");
             return NULL;
@@ -337,20 +538,26 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
         sfnt_len = decompressed_len;
     }
 
-    // copy to arena if the data isn't already arena-owned
-    // (FreeType requires the buffer to outlive the face)
-    uint8_t* buf = NULL;
-    if (!arena_owns(ctx->arena, sfnt_data)) {
-        buf = (uint8_t*)arena_alloc(ctx->arena, sfnt_len);
-        if (!buf) {
-            log_error("font_loader: arena_alloc failed for %zu bytes", sfnt_len);
-            return NULL;
-        }
-        memcpy(buf, sfnt_data, sfnt_len);
+    // copy data to a malloc buffer that outlives the face
+    // (caller's data may be temporary, e.g. from base64 decode)
+    uint8_t* buf = (uint8_t*)mem_alloc(sfnt_len, MEM_CAT_FONT);
+    if (!buf) {
+        log_error("font_loader: malloc failed for %zu bytes", sfnt_len);
+        if (sfnt_data != data) mem_free((void*)sfnt_data); // free decompressed data
+        return NULL;
+    }
+    if (sfnt_data == (const uint8_t*)buf) {
+        // already our buffer (shouldn't happen, but guard)
     } else {
-        buf = (uint8_t*)sfnt_data; // already arena-owned
+        memcpy(buf, sfnt_data, sfnt_len);
+        // free decompressed buffer if we allocated one
+        if (sfnt_data != data) mem_free((void*)sfnt_data);
     }
 
+#ifdef __APPLE__
+    FontHandle* handle = create_handle(ctx, buf, sfnt_len,
+                                        face_index, size_px, physical_size, weight, slant);
+#else
     FT_Face face = NULL;
     FT_Error err = FT_New_Memory_Face(ctx->ft_library, buf, (FT_Long)sfnt_len,
                                        face_index, &face);
@@ -364,9 +571,10 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
 
     FontHandle* handle = create_handle(ctx, face, buf, sfnt_len,
                                         size_px, physical_size, weight, slant);
+#endif
     if (handle) {
         log_info("font_loader: loaded from memory (family=%s, size=%.0f, %zu bytes)",
-                 face->family_name ? face->family_name : "?", physical_size, sfnt_len);
+                 handle->family_name ? handle->family_name : "?", physical_size, sfnt_len);
     }
     return handle;
 }

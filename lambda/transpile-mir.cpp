@@ -6,6 +6,7 @@
 #include "template_registry.h"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
 #include "../lib/gc/gc_heap.h"
@@ -66,6 +67,10 @@ void runner_setup_context(Runner* runner);
 void clear_persistent_last_error();
 extern __thread LambdaError* persistent_last_error;
 extern __thread EvalContext* context;
+
+// Ensure MIR inline allocation offsets stay correct if Context struct changes
+static_assert(offsetof(EvalContext, heap) == sizeof(Context),
+    "EvalContext.heap offset changed — update MIR inline bump allocation code");
 
 // Forward declare has_current_item_ref from build_ast.cpp
 bool has_current_item_ref(AstNode* node);
@@ -9597,7 +9602,7 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     while (param && param_count < 16) {
         char pname[64];
         snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
-        params[param_count] = {MIR_T_I64, strdup(pname), 0};
+        params[param_count] = {MIR_T_I64, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_name_copies[param_count] = (char*)params[param_count].name;
         param_count++;
         param = (AstNamedNode*)param->next;
@@ -9616,7 +9621,7 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     mt->current_func = wrapper_func;
 
     // Free strdup copies
-    for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
+    for (int i = 0; i < param_count; i++) mem_free(param_name_copies[i]);
 
     // Unbox each param to match native function's expected types
     MIR_op_t call_args[16];
@@ -9831,11 +9836,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Hidden leading params (_env_ptr for closures, _self for methods)
     if (is_closure) {
-        params[param_count] = {MIR_T_P, strdup("_env_ptr"), 0};
+        params[param_count] = {MIR_T_P, raw_strdup("_env_ptr"), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
     }
     if (is_method && !is_closure) {
-        params[param_count] = {MIR_T_P, strdup("_self"), 0};
+        params[param_count] = {MIR_T_P, raw_strdup("_self"), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
     }
 
@@ -9850,7 +9855,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         if (generate_native && pi_build < user_param_count) {
             mir_ptype = type_to_mir(resolved_param_types[pi_build]);
         }
-        params[param_count] = {mir_ptype, strdup(pname), 0};
+        params[param_count] = {mir_ptype, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
         pi_build++;
         param = (AstNamedNode*)param->next;
@@ -9858,7 +9863,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     // Hidden trailing params (_vargs)
     if (is_variadic && param_count < 32) {
-        params[param_count] = {MIR_T_P, strdup("_vargs"), 0};
+        params[param_count] = {MIR_T_P, raw_strdup("_vargs"), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_count++;
     }
 
@@ -9895,7 +9900,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->current_func = func;
 
     // Free our strdup copies (MIR made its own)
-    for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
+    for (int i = 0; i < param_count; i++) mem_free(param_name_copies[i]);
 
     // Set up consts_reg from per-module BSS _mod_consts_ptr so that cross-module
     // function calls always use this module's own const_list (not context->consts).
@@ -9928,7 +9933,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
     MIR_reg_t heap_reg_fn = new_reg(mt, "heap_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg_fn),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_fn, 0, 1)));  // context->heap
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_fn, 0, 1)));  // context->heap
     mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg_fn, 0, 1)));  // heap->gc
@@ -10913,14 +10918,14 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
     // create MIR function: Item _view_N(Item _model) -> Item (i64)
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_var_t params[1] = {{MIR_T_I64, strdup("_model"), 0}};
+    MIR_var_t params[1] = {{MIR_T_I64, raw_strdup("_model"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
     char* param_name_copy = (char*)params[0].name;
 
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf, 1, &ret_type, 1, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->current_func_item = func_item;
     mt->current_func = func;
-    free(param_name_copy);
+    mem_free(param_name_copy);
 
     // load runtime context from _lambda_rt
     MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
@@ -11082,7 +11087,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
 
     // create MIR function: Item _handler_N_M(Item _model, Item _event) -> Item (i64)
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_var_t params[2] = {{MIR_T_I64, strdup("_model"), 0}, {MIR_T_I64, strdup("_event"), 0}};
+    MIR_var_t params[2] = {{MIR_T_I64, raw_strdup("_model"), 0}, {MIR_T_I64, raw_strdup("_event"), 0}}; // RAWALLOC_OK: MIR manages param name lifetime
     char* param_name_copy = (char*)params[0].name;
     char* event_name_copy = (char*)params[1].name;
 
@@ -11090,8 +11095,8 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->current_func_item = func_item;
     mt->current_func = func;
-    free(param_name_copy);
-    free(event_name_copy);
+    mem_free(param_name_copy);
+    mem_free(event_name_copy);
 
     // load runtime context from _lambda_rt
     MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
@@ -11162,6 +11167,21 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sname));
 
         set_state_var(mt, sname, state_val, MIR_T_I64, LMD_TYPE_ANY, sname);
+    }
+
+    // re-emit view body let declarations so handlers can reference them
+    // (the AST scope says handler inherits template scope which includes body lets)
+    if (view->body && view->body->node_type == AST_NODE_CONTENT) {
+        AstListNode* body_list = (AstListNode*)view->body;
+        AstNode* body_item = body_list->item;
+        while (body_item) {
+            if (body_item->node_type == AST_NODE_LET_STAM ||
+                body_item->node_type == AST_NODE_PUB_STAM ||
+                body_item->node_type == AST_NODE_VAR_STAM) {
+                transpile_let_stam(mt, (AstLetNode*)body_item);
+            }
+            body_item = body_item->next;
+        }
     }
 
     // transpile handler body (procedural)
@@ -11513,10 +11533,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
-    // EvalContext.heap is at offset 64 (sizeof(Context)), Heap.gc is at offset 8
+    // EvalContext.heap is at offsetof(EvalContext, heap), Heap.gc is at offset 8
     MIR_reg_t heap_reg = new_reg(&mt, "heap_ptr", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, heap_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));  // context->heap
+        MIR_new_mem_op(ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_reg, 0, 1)));  // context->heap
     mt.gc_reg = new_reg(&mt, "gc_ptr", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.gc_reg),
         MIR_new_mem_op(ctx, MIR_T_I64, 8, heap_reg, 0, 1)));  // heap->gc
@@ -11695,7 +11715,7 @@ static void register_module_pub_fns(AstImportNode* imp) {
                         // Register with module-prefixed name for unique cross-module lookup
                         StrBuf* reg_name = strbuf_new_cap(64);
                         write_fn_name_ex(reg_name, fn_node, imp, "_b");
-                        register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                        register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
                         log_debug("mir: registered import wrapper fn: %s -> %p", reg_name->str, fn_ptr);
                         strbuf_free(reg_name);
                     }
@@ -11710,7 +11730,7 @@ static void register_module_pub_fns(AstImportNode* imp) {
                     // Register with module-prefixed name for unique cross-module lookup
                     StrBuf* reg_name = strbuf_new_cap(64);
                     write_fn_name(reg_name, fn_node, imp);
-                    register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                    register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
                     log_debug("mir: registered import fn: %s -> %p", reg_name->str, fn_ptr);
                     strbuf_free(reg_name);
                 }
@@ -11738,7 +11758,7 @@ static void register_module_pub_fns(AstImportNode* imp) {
                         bss_item = find_import(imp->script->jit_context, import_key->str);
                     }
                     if (bss_item && bss_item->addr) {
-                        register_dynamic_import(strdup(import_key->str), bss_item->addr);
+                        register_dynamic_import(raw_strdup(import_key->str), bss_item->addr); // RAWALLOC_OK: MIR manages param name lifetime
                         log_debug("mir: registered import var BSS: %s -> %p", import_key->str, bss_item->addr);
                     }
                     strbuf_free(import_key);
@@ -11756,7 +11776,7 @@ static void register_module_pub_fns(AstImportNode* imp) {
                         err_bss = find_import(imp->script->jit_context, err_key->str);
                     }
                     if (err_bss && err_bss->addr) {
-                        register_dynamic_import(strdup(err_key->str), err_bss->addr);
+                        register_dynamic_import(raw_strdup(err_key->str), err_bss->addr); // RAWALLOC_OK: MIR manages param name lifetime
                         log_debug("mir: registered import error var BSS: %s -> %p", err_key->str, err_bss->addr);
                     }
                     strbuf_free(err_key);
@@ -11806,7 +11826,7 @@ static void register_cross_lang_pub_fns(AstImportNode* imp) {
                         // Register with module-prefixed name (e.g., "m2._add_1000000")
                         StrBuf* reg_name = strbuf_new_cap(64);
                         write_fn_name(reg_name, fn_node, imp);
-                        register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                        register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
                         strbuf_free(reg_name);
                     } else {
                         log_error("mir: cross-lang fn '%s' has null ptr", name_buf);

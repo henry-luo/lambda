@@ -49,6 +49,12 @@
     {"type": "click", "target": {"selector": ".delete-btn"}},
     {"type": "wait", "ms": 300},
 
+    {"type": "log", "message": "--- Cleanup: delete the accidentally created file ---"},
+    {"type": "click", "target": {"selector": ".file-delete", "index": 0}},
+    {"type": "wait", "ms": 300},
+    {"type": "click", "target": {"selector": ".confirm-yes"}},
+    {"type": "wait", "ms": 300},
+
     {"type": "log", "message": "=== Todo2 Basic Test Complete ==="}
   ]
 }

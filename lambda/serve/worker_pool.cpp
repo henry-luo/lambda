@@ -12,7 +12,7 @@
 #include "../../lib/log.h"
 
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Worker pool lifecycle

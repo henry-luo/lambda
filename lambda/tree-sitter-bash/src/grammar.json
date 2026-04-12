@@ -2071,11 +2071,19 @@
             },
             {
               "type": "SYMBOL",
+              "name": "negated_command"
+            },
+            {
+              "type": "SYMBOL",
               "name": "test_command"
             },
             {
               "type": "SYMBOL",
               "name": "subshell"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "compound_statement"
             }
           ]
         }
@@ -6063,6 +6071,14 @@
               {
                 "type": "STRING",
                 "value": "^^"
+              },
+              {
+                "type": "STRING",
+                "value": "~"
+              },
+              {
+                "type": "STRING",
+                "value": "~~"
               }
             ]
           }
@@ -7140,6 +7156,5 @@
     "_statement",
     "_expression",
     "_primary_expression"
-  ],
-  "reserved": {}
+  ]
 }

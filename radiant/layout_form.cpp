@@ -101,27 +101,66 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
  * Calculate intrinsic size for a textarea based on cols/rows and font.
  * Returns CONTENT-AREA dimensions (without border/padding).
  * The layout code adds actual CSS-resolved border/padding on top.
- * Chrome default (20 cols, 2 rows): 182x36 border-box → ~176x30 content.
+ *
+ * HTML spec: textarea intrinsic height = rows × line-height.
+ * When CSS overrides font-size/line-height, use the resolved values.
+ * Fall back to Chrome UA defaults (monospace 13.333px) when no CSS overrides.
  */
-static void calc_textarea_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
+static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
     int cols = form->cols > 0 ? form->cols : FormDefaults::TEXTAREA_COLS;
     int rows = form->rows > 0 ? form->rows : FormDefaults::TEXTAREA_ROWS;
 
     if (font && font->font_size > 0) {
-        // Chrome uses monospace ~13.333px for textarea (UA default)
-        // Textarea content width formula: cols × char_width + scrollbar_reserve
-        // Chrome char width at 13.333px monospace ≈ 8px (font_size × 0.60)
-        // Chrome reserves ~16px for vertical scrollbar within the layout width
-        // E.g.: 20 cols → 20×8+16=176px content; 70 cols → 70×8+16=576px content
-        float ta_font = 13.333f;  // Chrome textarea monospace font size
-        float char_w = ta_font * 0.60f;  // monospace char width
-        float scrollbar_reserve = 16.0f;  // Chrome scrollbar reserve in content area
+        // Determine if CSS overrides the UA default font-size.
+        // font_size_from_medium is true when font-size is the initial value (CSS 'medium').
+        bool has_css_font = !font->font_size_from_medium;
+        float font_size = font->font_size;
+
+        // Width: cols × char_width + scrollbar_reserve
+        float char_w;
+        float scrollbar_reserve;
+        if (has_css_font) {
+            // CSS specifies font — use space_width if available, else approximate
+            char_w = (font->space_width > 0) ? font->space_width : font_size * 0.60f;
+            scrollbar_reserve = 16.0f;
+        } else {
+            // UA default: Chrome monospace ~13.333px, char width ≈ 8px
+            float ta_font = 13.333f;
+            char_w = ta_font * 0.60f;
+            scrollbar_reserve = 16.0f;
+        }
         float content_w = cols * char_w + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
-        // Content height: rows * line-height (monospace line-height ≈ 15px at 13.333px)
-        float content_h = rows * 15.0f;
+
+        // Height: rows × line-height
+        // Resolve line-height from the block's computed style (CSS 2.1 §10.8.1)
+        float line_ht = 0;
+        if (block && block->blk && block->blk->line_height) {
+            const CssValue* lh = block->blk->line_height;
+            if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                // e.g. line-height: 1.5 → 1.5 × font-size
+                line_ht = lh->data.number.value * font_size;
+            } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                // e.g. line-height: 20px, or line-height: 1em (resolved to px by style)
+                line_ht = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
+            } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // e.g. line-height: 120% → 1.2 × font-size
+                line_ht = (lh->data.number.value / 100.0f) * font_size;
+            }
+            // CSS_VALUE_NORMAL or unrecognized → fall through to default
+        }
+        if (line_ht <= 0) {
+            // 'normal' or no explicit line-height: approximate as font_size × 1.2
+            // For UA default monospace (13.333px), this gives ~16px; Chrome uses ~15px.
+            if (has_css_font) {
+                line_ht = font_size * 1.2f;
+            } else {
+                line_ht = 15.0f;  // Chrome UA default for 13.333px monospace
+            }
+        }
+        float content_h = rows * line_ht;
         form->intrinsic_height = content_h * pr;
     } else {
         // Fallback: content-area only (182x36 are border-box, subtract defaults)
@@ -304,7 +343,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         break;
 
     case FORM_CONTROL_TEXTAREA:
-        calc_textarea_size(lycon, form, font);
+        calc_textarea_size(lycon, block, form, font);
         break;
 
     case FORM_CONTROL_BUTTON:

@@ -1,8 +1,11 @@
 #include "mark_editor.hpp"
+#include "input/css/dom_node.hpp"
+#include "input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 
 // Maximum number of batch updates supported
 #define MAX_BATCH_UPDATES 64
@@ -26,6 +29,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , shape_pool_(input->shape_pool)
     , type_list_(input->type_list)
     , mode_(mode)
+    , ui_mode_(input->ui_mode)
     , current_version_(nullptr)
     , version_head_(nullptr)
     , next_version_num_(0)
@@ -53,6 +57,60 @@ MarkEditor::~MarkEditor() {
 }
 
 //==============================================================================
+// DOM Linked-List Sync (ui_mode only)
+//==============================================================================
+
+/**
+ * Rebuild the DOM first_child/last_child/next_sibling/prev_sibling linked list
+ * from the Element's items[] array. Called after inline child mutations in ui_mode.
+ *
+ * In ui_mode, each Element in items[] is embedded inside a DomElement (via fat pointer),
+ * and each String is embedded inside a DomText. We recover the DomNode* from each Item
+ * and link them into the sibling chain.
+ */
+void MarkEditor::dom_relink_children(Element* parent_elem) {
+    DomElement* parent = element_to_dom_element(parent_elem);
+    parent->first_child = nullptr;
+    parent->last_child = nullptr;
+
+    DomNode* prev = nullptr;
+
+    for (int64_t i = 0; i < parent_elem->length; i++) {
+        Item child = parent_elem->items[i];
+        TypeId tid = get_type_id(child);
+        DomNode* node = nullptr;
+
+        if (tid == LMD_TYPE_ELEMENT) {
+            DomElement* ce = element_to_dom_element(child.element);
+            node = static_cast<DomNode*>(ce);
+        } else if (tid == LMD_TYPE_STRING) {
+            String* s = child.get_string();
+            if (s) {
+                DomText* dt = string_to_dom_text(s);
+                // safety: verify this is a fat DomText-String allocation
+                if (dt->node_type == DOM_NODE_TEXT && dt->native_string == s) {
+                    node = static_cast<DomNode*>(dt);
+                }
+            }
+        }
+        // Symbols and other types: skip (no DOM node)
+
+        if (node) {
+            node->parent = parent;
+            node->prev_sibling = prev;
+            node->next_sibling = nullptr;
+            if (prev) {
+                prev->next_sibling = node;
+            } else {
+                parent->first_child = node;
+            }
+            parent->last_child = node;
+            prev = node;
+        }
+    }
+}
+
+//==============================================================================
 // Version Control Helpers
 //==============================================================================
 
@@ -62,7 +120,7 @@ EditVersion* MarkEditor::create_version(Item root, const char* description) {
 
     version->root = root;
     version->version_number = next_version_num_++;
-    version->description = description ? strdup(description) : nullptr;
+    version->description = description ? mem_strdup(description, MEM_CAT_SYSTEM) : nullptr;
     version->prev = nullptr;
     version->next = nullptr;
 
@@ -77,7 +135,7 @@ void MarkEditor::free_version_chain(EditVersion* version) {
     while (current) {
         EditVersion* next = current->next;
         if (current->description) {
-            free((void*)current->description);
+            mem_free((void*)current->description);
         }
         pool_free(pool_, current);
         current = next;
@@ -529,7 +587,12 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
 
     // Free old data (inline mode only), replace with new
     if (is_inline && old_map->data) {
-        pool_free(pool_, old_map->data);
+        // In ui_mode, old data was arena-allocated during JIT execution
+        // (via context->arena = result_arena). The MarkEditor's pool_ is a
+        // different allocator; calling pool_free here would corrupt rpmalloc.
+        if (!ui_mode_) {
+            pool_free(pool_, old_map->data);
+        }
     }
     result_map->data = new_data;
     result_map->data_cap = new_byte_size;
@@ -1047,7 +1110,12 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
 
     // Free old data (inline mode only), replace with new
     if (is_inline && old_elmt->data) {
-        pool_free(pool_, old_elmt->data);
+        // In ui_mode, old data was arena-allocated during JIT execution
+        // (via context->arena = result_arena). The MarkEditor's pool_ is a
+        // different allocator; calling pool_free here would corrupt rpmalloc.
+        if (!ui_mode_) {
+            pool_free(pool_, old_elmt->data);
+        }
     }
     result_elmt->data = new_data;
     result_elmt->data_cap = new_byte_size;
@@ -1273,15 +1341,16 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
             int64_t new_capacity = elmt->capacity ? elmt->capacity * 2 : 8;
             bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
             if (use_arena) {
-                if (elmt->items == nullptr) {
-                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                } else {
-                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
-                                                       elmt->capacity * sizeof(Item),
-                                                       new_capacity * sizeof(Item));
+                // Always fresh alloc — do NOT arena_realloc (frees old buffer
+                // to arena free-list, which can be recycled by new DomElement
+                // allocations, overwriting still-referenced items buffers).
+                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                if (new_items && elmt->items) {
+                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
                 }
+                elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items — heap-allocated, freed by free_container
                 if (!new_items) {
                     log_error("elmt_insert_child: realloc failed");
                     return ItemError;
@@ -1304,6 +1373,9 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
         // Update TypeElmt content_length
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
+
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
 
         return {.element = elmt};
 
@@ -1375,15 +1447,13 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
             }
             bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
             if (use_arena) {
-                if (elmt->items == nullptr) {
-                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                } else {
-                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
-                                                       elmt->capacity * sizeof(Item),
-                                                       new_capacity * sizeof(Item));
+                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                if (new_items && elmt->items) {
+                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
                 }
+                elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                 if (!new_items) return ItemError;
                 elmt->items = new_items;
             }
@@ -1405,6 +1475,9 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
 
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
+
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
 
         return {.element = elmt};
 
@@ -1455,6 +1528,9 @@ Item MarkEditor::elmt_delete_child(Item element, int index) {
 
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = elmt->length;
+
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
 
         return {.element = elmt};
 
@@ -1508,6 +1584,9 @@ Item MarkEditor::elmt_delete_children(Item element, int start, int end) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
 
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
+
         return {.element = elmt};
 
     } else {
@@ -1547,6 +1626,8 @@ Item MarkEditor::elmt_replace_child(Item element, int index, Item new_child) {
 
     if (mode_ == EDIT_MODE_INLINE) {
         elmt->items[index] = new_child;
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
         return {.element = elmt};
     } else {
         Item* new_items = (Item*)arena_alloc(arena_, elmt->length * sizeof(Item));
@@ -1691,15 +1772,13 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
                 // Check if items are arena-allocated to avoid realloc on arena pointers
                 bool use_arena = (arena_ != nullptr && (arr->items == nullptr || arena_owns(arena_, arr->items)));
                 if (use_arena) {
-                    if (arr->items == nullptr) {
-                        arr->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                    } else {
-                        arr->items = (Item*)arena_realloc(arena_, arr->items,
-                                                          arr->capacity * sizeof(Item),
-                                                          new_capacity * sizeof(Item));
+                    Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                    if (new_items && arr->items) {
+                        memcpy(new_items, arr->items, arr->capacity * sizeof(Item));
                     }
+                    arr->items = new_items;
                 } else {
-                    Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
+                    Item* new_items = (Item*)raw_realloc(arr->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                     if (!new_items) return ItemError;
                     arr->items = new_items;
                 }

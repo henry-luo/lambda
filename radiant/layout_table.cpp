@@ -1226,37 +1226,39 @@ struct TableMetadata {
     float collapsed_border_bottom;
     float collapsed_border_left;
 
-    TableMetadata(int cols, int rows)
-        : column_count(cols), row_count(rows),
+    ScratchArena* sa;  // scratch allocator (not owned)
+
+    TableMetadata(ScratchArena* scratch, int cols, int rows)
+        : column_count(cols), row_count(rows), sa(scratch),
           collapsed_border_top(0), collapsed_border_right(0),
           collapsed_border_bottom(0), collapsed_border_left(0) {
-        grid_occupied = (bool*)mem_calloc(rows * cols, sizeof(bool), MEM_CAT_LAYOUT);
-        col_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
-        col_min_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Minimum content widths (CSS MCW)
-        col_max_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Preferred content widths (CSS PCW)
-        row_heights = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
-        row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
-        row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
-        col_collapsed = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
-        col_original_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
-        row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
-        col_edge_max_border = (float*)mem_calloc(cols + 1, sizeof(float), MEM_CAT_LAYOUT);
-        col_has_explicit_width = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
+        grid_occupied = (bool*)scratch_calloc(sa, rows * cols * sizeof(bool));
+        col_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        col_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        col_max_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        row_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
+        row_y_positions = (float*)scratch_calloc(sa, rows * sizeof(float));
+        row_collapsed = (bool*)scratch_calloc(sa, rows * sizeof(bool));
+        col_collapsed = (bool*)scratch_calloc(sa, cols * sizeof(bool));
+        col_original_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+        row_has_percent_height = (bool*)scratch_calloc(sa, rows * sizeof(bool));
+        col_edge_max_border = (float*)scratch_calloc(sa, (cols + 1) * sizeof(float));
+        col_has_explicit_width = (bool*)scratch_calloc(sa, cols * sizeof(bool));
     }
 
     ~TableMetadata() {
-        mem_free(grid_occupied);
-        mem_free(col_widths);
-        mem_free(col_min_widths);
-        mem_free(col_max_widths);
-        mem_free(row_heights);
-        mem_free(row_y_positions);
-        mem_free(row_collapsed);
-        mem_free(col_collapsed);
-        mem_free(col_original_widths);
-        mem_free(row_has_percent_height);
-        mem_free(col_edge_max_border);
-        mem_free(col_has_explicit_width);
+        scratch_free(sa, col_has_explicit_width);
+        scratch_free(sa, col_edge_max_border);
+        scratch_free(sa, row_has_percent_height);
+        scratch_free(sa, col_original_widths);
+        scratch_free(sa, col_collapsed);
+        scratch_free(sa, row_collapsed);
+        scratch_free(sa, row_y_positions);
+        scratch_free(sa, row_heights);
+        scratch_free(sa, col_max_widths);
+        scratch_free(sa, col_min_widths);
+        scratch_free(sa, col_widths);
+        scratch_free(sa, grid_occupied);
     }
 
     // Grid accessor
@@ -3942,8 +3944,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     log_debug("%s Building table structure", tableNode->source_loc());
 
-    // Create table view and resolve styles
-    ViewTable* table = (ViewTable*)lycon->view;
+    // Use tableNode directly — lycon->view may not point to the table
+    // (e.g., when table is an abs-positioned child of a grid container)
+    ViewTable* table = (ViewTable*)tableNode;
     dom_node_resolve_style(tableNode, lycon);
     resolve_table_properties(lycon, tableNode, table);
 
@@ -4735,6 +4738,29 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     // Check if we should collapse whitespace based on CSS white-space property
     bool collapse_ws = should_collapse_whitespace(cell);
 
+    // Get overflow-wrap from cell or ancestors (inherited property)
+    // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
+    CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
+    {
+        DomNode* n = (DomNode*)cell;
+        while (n) {
+            if (n->is_element()) {
+                DomElement* el = (DomElement*)n;
+                if (el->blk) {
+                    if (el->blk->overflow_wrap != 0) {
+                        cell_overflow_wrap = el->blk->overflow_wrap;
+                        break;
+                    }
+                    if (el->blk->word_break == CSS_VALUE_BREAK_WORD) {
+                        cell_overflow_wrap = CSS_VALUE_ANYWHERE;
+                        break;
+                    }
+                }
+            }
+            n = n->parent;
+        }
+    }
+
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     // We track "inline run width" - the accumulated max-content width of consecutive
     // inline/text children that would flow together on one line.
@@ -4794,7 +4820,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant);
+                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant,
+                    CSS_VALUE_NORMAL, cell_overflow_wrap);
 
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
@@ -4985,7 +5012,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
             size_t content_len = strlen(content);
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, content, content_len, cell_text_transform, cell_font_variant);
+                lycon, content, content_len, cell_text_transform, cell_font_variant,
+                CSS_VALUE_NORMAL, cell_overflow_wrap);
 
             float text_max = (float)widths.max_content;
             float text_min = (float)widths.min_content;
@@ -5143,7 +5171,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             // Use a simple grid simulation to find actual column count
             // Allocate a temporary occupancy array (rows × current_columns_estimate)
             int est_cols = columns * 2 + 4;  // generous estimate
-            bool* occupied = (bool*)calloc(rows * est_cols, sizeof(bool));
+            bool* occupied = (bool*)mem_calloc(rows * est_cols, sizeof(bool), MEM_CAT_LAYOUT);
             int max_col_used = 0;
 
             cur_row = 0;
@@ -5164,7 +5192,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 }
                 cur_row++;
             }
-            free(occupied);
+            mem_free(occupied);
             if (max_col_used > columns) {
                 log_debug("%s Recount columns after rowspan=0 resolution: %d -> %d", table->source_loc(), columns, max_col_used);
                 columns = max_col_used;
@@ -5173,7 +5201,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     }
 
     // Create metadata structure
-    TableMetadata* meta = new TableMetadata(columns, rows);
+    TableMetadata* meta = new TableMetadata(&lycon->scratch, columns, rows);
 
     // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
@@ -5938,7 +5966,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         log_debug("Content width for columns: %dpx", content_width);
         // STEP 3: Read explicit column widths from FIRST ROW cells
-        float* explicit_col_widths = (float*)mem_calloc(columns, sizeof(float), MEM_CAT_LAYOUT);
+        float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
         // Find first row using navigation helper
@@ -6058,7 +6086,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // STEP 5: Replace col_widths with fixed layout widths
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
-        mem_free(explicit_col_widths);
+        scratch_free(&lycon->scratch, explicit_col_widths);
 
         log_debug("=== FIXED LAYOUT COMPLETE ===");
         for (int i = 0; i < columns; i++) {
@@ -6641,7 +6669,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Step 4: Position cells and calculate row heights with CSS 2.1 border model
 
-    float* col_x_positions = (float*)mem_calloc(columns + 1, sizeof(float), MEM_CAT_LAYOUT);
+    float* col_x_positions = (float*)scratch_calloc(&lycon->scratch, (columns + 1) * sizeof(float));
 
     // Start with table padding and left border-spacing for separate border model
     // CSS 2.1 §17.6.2: Padding on table elements is ignored in border-collapse mode
@@ -8597,7 +8625,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
     delete meta;
-    mem_free(col_x_positions);
+    scratch_free(&lycon->scratch, col_x_positions);
 
     #undef GRID
 }
@@ -8932,13 +8960,13 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
 
 // Main table layout entry point
 void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
+    if (!tableNode) {
+        log_debug("layout_table_content: null tableNode, returning");
+        return;
+    }
     log_debug("=== TABLE LAYOUT START ===");
     log_debug("%s Starting table layout", tableNode->source_loc());
     log_debug("%s Initial layout context - line.left=%d, advance_y=%d", tableNode->source_loc(), lycon->line.left, lycon->block.advance_y);
-    if (!tableNode) {
-        log_debug("%s ERROR: Null table node", tableNode->source_loc());
-        return;
-    }
 
     // CRITICAL: Save the table's font-size BEFORE building table tree.
     // Cell layout in build_table_tree will modify lycon->font to the cell's font-size,
@@ -8954,20 +8982,44 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // CRITICAL: Update font context before building table tree
     // This ensures children inherit the correct computed font-size from the table element.
     // Without this, lycon->font.style would still point to the grandparent's font.
-    ViewTable* table = (ViewTable*)lycon->view;
-    log_debug("%s Table font context check: table=%p, table->font=%p, lycon->font.style=%p, lycon->font.style->font_size=%.1f", tableNode->source_loc(),
-        (void*)table, table ? (void*)table->font : nullptr,
-        (void*)lycon->font.style, lycon->font.style ? lycon->font.style->font_size : -1.0f);
-    if (table && table->font) {
-        setup_font(lycon->ui_context, &lycon->font, table->font);
-        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table->font->font_size);
+    // Use tableNode->font directly (safe) instead of casting lycon->view to ViewTable*
+    // (which may not be a ViewTable yet — it's the parent's view at this point).
+    ViewBlock* table_block = tableNode->is_element() ? (ViewBlock*)tableNode->as_element() : nullptr;
+    if (table_block && table_block->font) {
+        log_debug("%s Table font context check: table_block=%p, font=%p, font_size=%.1f", tableNode->source_loc(),
+            (void*)table_block, (void*)table_block->font, table_block->font->font_size);
+        setup_font(lycon->ui_context, &lycon->font, table_block->font);
+        log_debug("%s Updated font context for table: font-size=%.1f", tableNode->source_loc(), table_block->font->font_size);
     } else {
-        log_debug("%s WARNING: table->font is NULL, cannot update font context", tableNode->source_loc());
+        log_debug("%s WARNING: table font is NULL, cannot update font context", tableNode->source_loc());
+    }
+
+    // Ensure the table has proper ViewTable setup.
+    // When a table is an absolutely positioned child of a grid/flex container,
+    // init_grid_item_view/init_flex_item_view sets view_type=RDT_VIEW_BLOCK and
+    // item_prop_type=ITEM_PROP_GRID/FLEX without allocating TableProp.
+    // We must allocate tb before build_table_tree accesses it.
+    if (tableNode->is_element()) {
+        ViewTable* vtable = (ViewTable*)tableNode;
+        if (vtable->item_prop_type != DomElement::ITEM_PROP_TABLE) {
+            vtable->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
+            vtable->item_prop_type = DomElement::ITEM_PROP_TABLE;
+            vtable->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
+            vtable->tb->border_spacing_h = 0.0f;
+            vtable->tb->border_spacing_v = 0.0f;
+            vtable->tb->border_collapse = false;
+            vtable->tb->is_annoy_tbody = 0;
+            vtable->tb->is_annoy_tr = 0;
+            vtable->tb->is_annoy_td = 0;
+            vtable->tb->is_annoy_colgroup = 0;
+            vtable->view_type = RDT_VIEW_TABLE;
+        }
+        lycon->view = (View*)vtable;
     }
 
     // Step 1: Build table structure from DOM
     log_debug("%s Step 1 - Building table tree", tableNode->source_loc());
-    table = build_table_tree(lycon, tableNode);
+    ViewTable* table = build_table_tree(lycon, tableNode);
     if (!table) {
         log_debug("%s ERROR: Failed to build table structure", tableNode->source_loc());
         return;

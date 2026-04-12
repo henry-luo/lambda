@@ -14,7 +14,7 @@
  */
 #include "block_common.hpp"
 #include "lib/arraylist.h"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 #include <cctype>
 #include <cstring>
 
@@ -40,7 +40,7 @@ extern Item parse_block_element(MarkupParser* parser);
  * Returns a newly allocated string that must be freed.
  */
 static char* strip_quote_markers_with_tabs(const char* line, int depth) {
-    if (!line) return strdup("");
+    if (!line) return mem_strdup("", MEM_CAT_INPUT_MARKUP);
 
     const char* pos = line;
     int removed = 0;
@@ -97,8 +97,8 @@ static char* strip_quote_markers_with_tabs(const char* line, int depth) {
                 }
 
                 // Allocate and build result
-                char* result = (char*)malloc(expanded_len + 1);
-                if (!result) return strdup(pos);
+                char* result = (char*)mem_alloc(expanded_len + 1, MEM_CAT_INPUT_MARKUP);
+                if (!result) return mem_strdup(pos, MEM_CAT_INPUT_MARKUP);
 
                 char* out = result;
                 for (int i = 0; i < virtual_spaces; i++) {
@@ -140,8 +140,8 @@ static char* strip_quote_markers_with_tabs(const char* line, int depth) {
         }
     }
 
-    char* result = (char*)malloc(expanded_len + 1);
-    if (!result) return strdup(pos);
+    char* result = (char*)mem_alloc(expanded_len + 1, MEM_CAT_INPUT_MARKUP);
+    if (!result) return mem_strdup(pos, MEM_CAT_INPUT_MARKUP);
 
     char* out = result;
     int out_col = col;
@@ -350,7 +350,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
                 while (*np == ' ') { next_indent++; np++; }
                 if (next_indent >= base_indent) {
                     // Empty line is part of the blockquote
-                    arraylist_append(content_lines, strdup(""));
+                    arraylist_append(content_lines, mem_strdup("", MEM_CAT_INPUT_MARKUP));
                     parser->current_line++;
                     continue;
                 }
@@ -373,7 +373,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
         }
 
         // Strip exactly base_indent spaces
-        char* stripped = strdup(current + base_indent);
+        char* stripped = mem_strdup(current + base_indent, MEM_CAT_INPUT_MARKUP);
         arraylist_append(content_lines, stripped);
         parser->current_line++;
     }
@@ -383,7 +383,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
     // Parse the collected content as block elements
     if (content_lines->length > 0) {
         size_t num_lines = content_lines->length;
-        char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+        char** lines_array = (char**)mem_alloc(sizeof(char*) * num_lines, MEM_CAT_INPUT_MARKUP);
         for (size_t i = 0; i < num_lines; i++) {
             lines_array[i] = (char*)content_lines->data[i];
         }
@@ -423,9 +423,9 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
 
         // Free content lines
         for (size_t i = 0; i < num_lines; i++) {
-            free(lines_array[i]);
+            mem_free(lines_array[i]);
         }
-        free(lines_array);
+        mem_free(lines_array);
     }
     arraylist_free(content_lines);
 
@@ -529,7 +529,7 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
             log_debug("blockquote: lazy check = %d, content_lines.size = %d", lazy, content_lines->length);
             if (content_lines->length > 0 && lazy) {
-                arraylist_append(content_lines, strdup(current));
+                arraylist_append(content_lines, mem_strdup(current, MEM_CAT_INPUT_MARKUP));
                 arraylist_append(is_lazy_line, (ArrayListValue)(intptr_t)1);  // Mark as lazy continuation
                 parser->current_line++;
                 continue;
@@ -591,8 +591,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
     if (content_lines->length > 0) {
         // Create a temporary array of line pointers
         size_t num_lines = content_lines->length;
-        char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
-        bool* lazy_array = (bool*)malloc(sizeof(bool) * num_lines);
+        char** lines_array = (char**)mem_alloc(sizeof(char*) * num_lines, MEM_CAT_INPUT_MARKUP);
+        bool* lazy_array = (bool*)mem_alloc(sizeof(bool) * num_lines, MEM_CAT_INPUT_MARKUP);
         for (size_t i = 0; i < num_lines; i++) {
             lines_array[i] = (char*)content_lines->data[i];
             lazy_array[i] = (bool)(intptr_t)is_lazy_line->data[i];
@@ -688,10 +688,10 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
         // Free the content lines and arrays
         for (size_t i = 0; i < num_lines; i++) {
-            free(lines_array[i]);
+            mem_free(lines_array[i]);
         }
-        free(lines_array);
-        free(lazy_array);
+        mem_free(lines_array);
+        mem_free(lazy_array);
     }
     arraylist_free(content_lines);
     arraylist_free(is_lazy_line);

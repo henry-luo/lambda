@@ -19,7 +19,7 @@ static bool s_owns_map = false;
 static Item s_doc_root = {0};  // top-level element tree for parent fixup
 
 // forward declarations
-static bool replace_in_element_tree(Item node, Item old_child, Item new_child);
+static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0);
 
 // ============================================================================
 // Reverse map: result_node.item → RenderMapKey (source_item, template_ref)
@@ -146,6 +146,7 @@ void render_map_record(Item source_item, const char* template_ref,
 
     log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
               template_ref ? template_ref : "(anon)",
+              (unsigned long long)result_node.item,
               s_reverse_map ? hashmap_count(s_reverse_map) : 0);
 }
 
@@ -207,10 +208,15 @@ int render_map_retransform(void) {
         RenderMapEntry* entry = (RenderMapEntry*)item;
         if (!entry->dirty) continue;
 
+        // Save entry data BEFORE re-execution. fn() may call apply() which
+        // calls render_map_record() → hashmap_set(), potentially resizing the
+        // hashmap and invalidating the 'entry' pointer.
+        RenderMapEntry saved = *entry;
+
         // find the template by template_ref
         TemplateEntry* tmpl = NULL;
         for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
-            if (e->template_ref == entry->key.template_ref) {
+            if (e->template_ref == saved.key.template_ref) {
                 tmpl = e;
                 break;
             }
@@ -218,67 +224,73 @@ int render_map_retransform(void) {
 
         if (!tmpl || !tmpl->body_func) {
             log_error("render_map_retransform: no template found for ref=%s",
-                      entry->key.template_ref ? entry->key.template_ref : "(null)");
+                      saved.key.template_ref ? saved.key.template_ref : "(null)");
             entry->dirty = false;
             continue;
         }
 
+        Item old_result = saved.result_node;
+
+        // Find parent in element tree BEFORE fn() re-executes, because fn()
+        // may trigger GC which reuses memory of old elements in the tree.
+        Item tree_parent = saved.parent_result;
+        int tree_child_index = saved.child_index;
+        if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
+            if (s_doc_root.item == old_result.item) {
+                // old result IS the doc root — will be replaced directly
+            } else {
+                // Walk tree to find parent while tree is still valid
+                tree_parent = find_parent_of(s_doc_root, old_result, &tree_child_index);
+            }
+        }
+
         // re-execute template body with the source item
-        // NOTE: Do NOT call heap_gc_collect() here — the GC doesn't know about
-        // s_doc_root or other static roots, so it would collect live elements.
+        // NOTE: fn() may call apply() which modifies this hashmap — after this
+        // call, 'entry' may be dangling. Use 'saved' for old values.
         typedef Item (*template_body_fn)(Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
-        Item new_result = fn(entry->key.source_item);
+        Item new_result = fn(saved.key.source_item);
 
-        // update the entry
-        Item old_result = entry->result_node;
-        entry->result_node = new_result;
-        entry->dirty = false;
-
-        // update reverse map: keep old result mapping (DOM still references it),
-        // add new result mapping for the updated element tree
+        // update reverse map
         if (s_reverse_map) {
             if (new_result.item) {
                 ReverseMapEntry rentry;
                 memset(&rentry, 0, sizeof(rentry));
                 rentry.result_item_bits = new_result.item;
-                rentry.key = entry->key;
+                rentry.key = saved.key;
                 hashmap_set(s_reverse_map, &rentry);
             }
         }
 
-        // if we have a parent, replace the child in the parent's children
-        if (get_type_id(entry->parent_result) != LMD_TYPE_NULL && entry->child_index >= 0) {
-            TypeId parent_type = get_type_id(entry->parent_result);
+        // Replace old result with new result in the element tree
+        if (get_type_id(tree_parent) != LMD_TYPE_NULL && tree_child_index >= 0) {
+            TypeId parent_type = get_type_id(tree_parent);
             if (parent_type == LMD_TYPE_ELEMENT) {
-                Element* parent_elmt = it2elmt(entry->parent_result);
-                if (parent_elmt && entry->child_index < (int)parent_elmt->length) {
-                    parent_elmt->items[entry->child_index] = new_result;
+                Element* parent_elmt = it2elmt(tree_parent);
+                if (parent_elmt && tree_child_index < (int)parent_elmt->length) {
+                    parent_elmt->items[tree_child_index] = new_result;
                 }
             } else if (parent_type == LMD_TYPE_ARRAY) {
-                Array* parent_arr = it2arr(entry->parent_result);
-                if (parent_arr && entry->child_index < (int)parent_arr->length) {
-                    parent_arr->items[entry->child_index] = new_result;
+                Array* parent_arr = it2arr(tree_parent);
+                if (parent_arr && tree_child_index < (int)parent_arr->length) {
+                    parent_arr->items[tree_child_index] = new_result;
                 }
             }
-        } else if (s_doc_root.item && old_result.item != new_result.item) {
-            if (s_doc_root.item == old_result.item) {
-                // the retransformed template IS the doc root — update directly
-                s_doc_root = new_result;
-                log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
-                          (unsigned long long)new_result.item);
-            } else {
-                // parent unknown — walk the doc root tree to find and replace
-                replace_in_element_tree(s_doc_root, old_result, new_result);
-            }
+        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {
+            s_doc_root = new_result;
+            log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
+                      (unsigned long long)new_result.item);
         }
 
-        // write back the updated entry to the map
-        hashmap_set(map, entry);
+        // write back the updated entry to the map (re-lookup since entry may be stale)
+        RenderMapEntry updated = saved;
+        updated.result_node = new_result;
+        updated.dirty = false;
+        hashmap_set(map, &updated);
 
         count++;
         log_debug("render_map_retransform: re-transformed tmpl=%s (entry %d)",
-                  entry->key.template_ref ? entry->key.template_ref : "(anon)", count);
+                  saved.key.template_ref ? saved.key.template_ref : "(anon)", count);
     }
 
     if (count > 0) {
@@ -301,10 +313,15 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         RenderMapEntry* entry = (RenderMapEntry*)item;
         if (!entry->dirty) continue;
 
+        // Save entry data BEFORE re-execution. fn() may call apply() which
+        // calls render_map_record() → hashmap_set(), potentially resizing the
+        // hashmap and invalidating the 'entry' pointer.
+        RenderMapEntry saved = *entry;
+
         // find the template by template_ref
         TemplateEntry* tmpl = NULL;
         for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
-            if (e->template_ref == entry->key.template_ref) {
+            if (e->template_ref == saved.key.template_ref) {
                 tmpl = e;
                 break;
             }
@@ -312,71 +329,80 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
 
         if (!tmpl || !tmpl->body_func) {
             log_error("render_map_retransform_with_results: no template found for ref=%s",
-                      entry->key.template_ref ? entry->key.template_ref : "(null)");
+                      saved.key.template_ref ? saved.key.template_ref : "(null)");
             entry->dirty = false;
             continue;
         }
 
+        Item old_result = saved.result_node;
+
+        // Find parent in element tree BEFORE fn() re-executes, because fn()
+        // may trigger GC which reuses memory of old elements in the tree.
+        Item tree_parent = saved.parent_result;
+        int tree_child_index = saved.child_index;
+        if (get_type_id(tree_parent) == LMD_TYPE_NULL && s_doc_root.item) {
+            if (s_doc_root.item == old_result.item) {
+                // old result IS the doc root — will be replaced directly
+            } else {
+                // Walk tree to find parent while tree is still valid
+                tree_parent = find_parent_of(s_doc_root, old_result, &tree_child_index);
+            }
+        }
+
         // re-execute template body with the source item
+        // NOTE: fn() may call apply() which modifies this hashmap — after this
+        // call, 'entry' may be dangling. Use 'saved' for old values.
         typedef Item (*template_body_fn)(Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
-        Item new_result = fn(entry->key.source_item);
-
-        Item old_result = entry->result_node;
+        Item new_result = fn(saved.key.source_item);
 
         // record result before updating entry
         if (out_results && count < max_results) {
-            out_results[count].parent_result = entry->parent_result;
+            out_results[count].parent_result = tree_parent;
             out_results[count].new_result = new_result;
             out_results[count].old_result = old_result;
-            out_results[count].child_index = entry->child_index;
-            out_results[count].template_ref = entry->key.template_ref;
+            out_results[count].child_index = tree_child_index;
+            out_results[count].template_ref = saved.key.template_ref;
         }
-
-        // update the entry
-        entry->result_node = new_result;
-        entry->dirty = false;
 
         // update reverse map
         if (s_reverse_map && new_result.item) {
             ReverseMapEntry rentry;
             memset(&rentry, 0, sizeof(rentry));
             rentry.result_item_bits = new_result.item;
-            rentry.key = entry->key;
+            rentry.key = saved.key;
             hashmap_set(s_reverse_map, &rentry);
         }
 
-        // replace child in parent's Lambda element tree
-        if (get_type_id(entry->parent_result) != LMD_TYPE_NULL && entry->child_index >= 0) {
-            TypeId parent_type = get_type_id(entry->parent_result);
+        // Replace old result with new result in the element tree
+        if (get_type_id(tree_parent) != LMD_TYPE_NULL && tree_child_index >= 0) {
+            TypeId parent_type = get_type_id(tree_parent);
             if (parent_type == LMD_TYPE_ELEMENT) {
-                Element* parent_elmt = it2elmt(entry->parent_result);
-                if (parent_elmt && entry->child_index < (int)parent_elmt->length) {
-                    parent_elmt->items[entry->child_index] = new_result;
+                Element* parent_elmt = it2elmt(tree_parent);
+                if (parent_elmt && tree_child_index < (int)parent_elmt->length) {
+                    parent_elmt->items[tree_child_index] = new_result;
                 }
             } else if (parent_type == LMD_TYPE_ARRAY) {
-                Array* parent_arr = it2arr(entry->parent_result);
-                if (parent_arr && entry->child_index < (int)parent_arr->length) {
-                    parent_arr->items[entry->child_index] = new_result;
+                Array* parent_arr = it2arr(tree_parent);
+                if (parent_arr && tree_child_index < (int)parent_arr->length) {
+                    parent_arr->items[tree_child_index] = new_result;
                 }
             }
-        } else if (s_doc_root.item && old_result.item != new_result.item) {
-            if (s_doc_root.item == old_result.item) {
-                // the retransformed template IS the doc root — update directly
-                s_doc_root = new_result;
-                log_debug("render_map_retransform_with_results: updated s_doc_root to new result 0x%llx",
-                          (unsigned long long)new_result.item);
-            } else {
-                // parent unknown — walk the doc root tree to find and replace
-                replace_in_element_tree(s_doc_root, old_result, new_result);
-            }
+        } else if (s_doc_root.item == old_result.item && old_result.item != new_result.item) {
+            s_doc_root = new_result;
+            log_debug("render_map_retransform_with_results: updated s_doc_root to new result 0x%llx",
+                      (unsigned long long)new_result.item);
         }
 
-        hashmap_set(map, entry);
+        // write back the updated entry to the map (re-lookup since entry may be stale)
+        RenderMapEntry updated = saved;
+        updated.result_node = new_result;
+        updated.dirty = false;
+        hashmap_set(map, &updated);
 
         count++;
         log_debug("render_map_retransform_with_results: re-transformed tmpl=%s (entry %d)",
-                  entry->key.template_ref ? entry->key.template_ref : "(anon)", count);
+                  saved.key.template_ref ? saved.key.template_ref : "(anon)", count);
     }
 
     if (count > 0) {
@@ -438,34 +464,34 @@ Item render_map_get_doc_root(void) {
     return s_doc_root;
 }
 
-// Recursively search the element tree for old_child and replace with new_child.
-// Returns true if replacement was made.
-static bool replace_in_element_tree(Item node, Item old_child, Item new_child) {
+// Find the parent element/array that contains target as a direct child.
+// Returns the parent Item and sets *out_index to the child index.
+// Must be called BEFORE fn() re-execution while the tree is still valid.
+static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
+    if (depth > 64) return ItemNull;
     TypeId tid = get_type_id(node);
     if (tid == LMD_TYPE_ELEMENT) {
         Element* elmt = it2elmt(node);
-        if (!elmt) return false;
+        if (!elmt) return ItemNull;
         for (unsigned i = 0; i < elmt->length; i++) {
-            if (elmt->items[i].item == old_child.item) {
-                elmt->items[i] = new_child;
-                return true;
+            if (elmt->items[i].item == target.item) {
+                *out_index = (int)i;
+                return node;
             }
-            if (replace_in_element_tree(elmt->items[i], old_child, new_child)) {
-                return true;
-            }
+            Item found = find_parent_of(elmt->items[i], target, out_index, depth + 1);
+            if (get_type_id(found) != LMD_TYPE_NULL) return found;
         }
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* arr = it2arr(node);
-        if (!arr) return false;
+        if (!arr) return ItemNull;
         for (unsigned i = 0; i < arr->length; i++) {
-            if (arr->items[i].item == old_child.item) {
-                arr->items[i] = new_child;
-                return true;
+            if (arr->items[i].item == target.item) {
+                *out_index = (int)i;
+                return node;
             }
-            if (replace_in_element_tree(arr->items[i], old_child, new_child)) {
-                return true;
-            }
+            Item found = find_parent_of(arr->items[i], target, out_index, depth + 1);
+            if (get_type_id(found) != LMD_TYPE_NULL) return found;
         }
     }
-    return false;
+    return ItemNull;
 }

@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "../ts/ts_transpiler.hpp"
+#include "../ts/ts_type_parser.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
@@ -7,7 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // forward declarations
 static char js_decode_escape_char(char c);
@@ -187,7 +188,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             }
         }
         // Create null-terminated string, stripping numeric separators (_)
-        char* temp_str = (char*)malloc(source.length + 1);
+        char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
         if (temp_str) {
             size_t j = 0;
             for (size_t i = 0; i < source.length; i++) {
@@ -203,7 +204,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             } else {
                 literal->value.number_value = strtod(temp_str, &endptr);
             }
-            free(temp_str);
+            mem_free(temp_str);
         } else {
             literal->value.number_value = 0.0;
         }
@@ -215,7 +216,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             size_t content_len = source.length - 2;
             const char* src = source.str + 1;
             // Process escape sequences in-place
-            char* temp_str = (char*)malloc(content_len + 1);
+            char* temp_str = (char*)mem_alloc(content_len + 1, MEM_CAT_JS_RUNTIME);
             if (temp_str) {
                 size_t out = 0;
                 for (size_t i = 0; i < content_len; i++) {
@@ -286,8 +287,18 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                 temp_str[out++] = src[i];
                             }
                         } else {
-                            temp_str[out++] = js_decode_escape_char(next);
-                            i++; // skip the escaped char
+                            // Line continuation: \<newline> removes both the backslash and line break
+                            if (next == '\n') {
+                                i++; // skip over \<LF>
+                            } else if (next == '\r') {
+                                i++; // skip over \<CR>
+                                if (i + 1 < content_len && src[i + 1] == '\n') {
+                                    i++; // also skip <LF> in \<CR><LF>
+                                }
+                            } else {
+                                temp_str[out++] = js_decode_escape_char(next);
+                                i++; // skip the escaped char
+                            }
                         }
                     } else {
                         temp_str[out++] = src[i];
@@ -295,7 +306,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                 }
                 temp_str[out] = '\0';
                 literal->value.string_value = name_pool_create_len(tp->name_pool, temp_str, out);
-                free(temp_str);
+                mem_free(temp_str);
             } else {
                 literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
             }
@@ -341,7 +352,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     }
 
     // Create a null-terminated string for the identifier
-    char* temp_str = (char*)malloc(source.length + 1);
+    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_JS_RUNTIME);
     if (!temp_str) {
         log_error("Failed to allocate memory for identifier");
         return NULL;
@@ -349,8 +360,63 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     memcpy(temp_str, source.str, source.length);
     temp_str[source.length] = '\0';
 
-    identifier->name = name_pool_create_len(tp->name_pool, temp_str, source.length);
-    free(temp_str);
+    // Decode Unicode escapes (\uXXXX and \u{XXXX}) in identifier names
+    // Per ES spec, IdentifierName can contain UnicodeEscapeSequence
+    char* name_str = temp_str;
+    int name_len = (int)source.length;
+    char decoded_buf[512];
+    if (memchr(temp_str, '\\', source.length) != NULL) {
+        int oi = 0;
+        for (int i = 0; i < (int)source.length && oi < (int)sizeof(decoded_buf) - 4; ) {
+            if (temp_str[i] == '\\' && i + 1 < (int)source.length && temp_str[i+1] == 'u') {
+                i += 2; // skip \u
+                unsigned int cp = 0;
+                if (i < (int)source.length && temp_str[i] == '{') {
+                    i++; // skip {
+                    while (i < (int)source.length && temp_str[i] != '}') {
+                        char c = temp_str[i++];
+                        cp <<= 4;
+                        if (c >= '0' && c <= '9') cp |= (c - '0');
+                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                    }
+                    if (i < (int)source.length && temp_str[i] == '}') i++;
+                } else {
+                    for (int j = 0; j < 4 && i < (int)source.length; j++, i++) {
+                        char c = temp_str[i];
+                        cp <<= 4;
+                        if (c >= '0' && c <= '9') cp |= (c - '0');
+                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                    }
+                }
+                // encode as UTF-8
+                if (cp < 0x80) {
+                    decoded_buf[oi++] = (char)cp;
+                } else if (cp < 0x800) {
+                    decoded_buf[oi++] = (char)(0xC0 | (cp >> 6));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    decoded_buf[oi++] = (char)(0xE0 | (cp >> 12));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    decoded_buf[oi++] = (char)(0xF0 | (cp >> 18));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                }
+            } else {
+                decoded_buf[oi++] = temp_str[i++];
+            }
+        }
+        decoded_buf[oi] = '\0';
+        name_str = decoded_buf;
+        name_len = oi;
+    }
+
+    identifier->name = name_pool_create_len(tp->name_pool, name_str, name_len);
+    mem_free(temp_str);
 
     if (!identifier->name) {
         log_error("Failed to create identifier name");
@@ -515,9 +581,21 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     // Function calls return ANY type by default
     call->base.type = &TYPE_ANY;
 
-    // Detect optional chaining (obj?.method())
+    // Detect optional chaining (obj?.method() or obj?.())
     TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
     call->optional = !ts_node_is_null(opt_chain);
+    // Fallback: scan children for '?.' token (tree-sitter may not assign field name)
+    if (!call->optional) {
+        uint32_t cc = ts_node_child_count(call_node);
+        for (uint32_t ci = 0; ci < cc; ci++) {
+            TSNode ch = ts_node_child(call_node, ci);
+            const char* ch_type = ts_node_type(ch);
+            if (strcmp(ch_type, "?.") == 0 || strcmp(ch_type, "optional_chain") == 0) {
+                call->optional = true;
+                break;
+            }
+        }
+    }
 
     return (JsAstNode*)call;
 }
@@ -691,17 +769,68 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             }
 
             TSNode name_node = ts_node_child_by_field_name(property_node, "name", strlen("name"));
+
+            // v2 fallback: get/set consumed by opaque _ts_class_modifiers — check source prefix
+            if (!is_getter && !is_setter && !ts_node_is_null(name_node)) {
+                uint32_t ms = ts_node_start_byte(property_node);
+                uint32_t ns = ts_node_start_byte(name_node);
+                if (ns > ms) {
+                    const char* pfx = tp->source + ms;
+                    int plen = (int)(ns - ms);
+                    int i = 0;
+                    while (i < plen && (pfx[i] == ' ' || pfx[i] == '\t' || pfx[i] == '\n' || pfx[i] == '\r')) i++;
+                    if (plen - i >= 4 && memcmp(pfx + i, "get", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_getter = true;
+                    else if (plen - i >= 4 && memcmp(pfx + i, "set", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_setter = true;
+                }
+            }
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
             if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
-                // Getter/Setter: store as __get_<name> or __set_<name> key with a function expression value
-                StrView accessor_name = js_node_source(tp, name_node);
-                char acc_key[256];
-                snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
-                         (int)accessor_name.length, accessor_name.str);
-                JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
-                property->key = (JsAstNode*)key_id;
+                const char* name_type = ts_node_type(name_node);
+                if (strcmp(name_type, "computed_property_name") == 0) {
+                    // Computed getter/setter: { get [expr]() { }, set [expr](v) { } }
+                    property->computed = true;
+                    property->is_getter = is_getter;
+                    property->is_setter = is_setter;
+                    property->key = build_js_expression(tp, name_node);
+                } else {
+                    // Static getter/setter: store as __get_<name> or __set_<name> key
+                    StrView accessor_name = js_node_source(tp, name_node);
+                    // Strip quotes from string literal keys (e.g., "test" → test)
+                    if (strcmp(name_type, "string") == 0 && accessor_name.length >= 2) {
+                        accessor_name.str++;
+                        accessor_name.length -= 2;
+                    }
+                    char acc_key[256];
+                    // Decode Unicode escapes in accessor names
+                    char dec_acc[256];
+                    const char* acc_str = accessor_name.str;
+                    int acc_len = (int)accessor_name.length;
+                    if (memchr(accessor_name.str, '\\', accessor_name.length) != NULL) {
+                        int oi = 0;
+                        for (int ii = 0; ii < (int)accessor_name.length && oi < (int)sizeof(dec_acc) - 4; ) {
+                            if (accessor_name.str[ii] == '\\' && ii + 1 < (int)accessor_name.length && accessor_name.str[ii+1] == 'u') {
+                                ii += 2; unsigned int cp = 0;
+                                if (ii < (int)accessor_name.length && accessor_name.str[ii] == '{') {
+                                    ii++;
+                                    while (ii < (int)accessor_name.length && accessor_name.str[ii] != '}') { char c = accessor_name.str[ii++]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                    if (ii < (int)accessor_name.length && accessor_name.str[ii] == '}') ii++;
+                                } else {
+                                    for (int j = 0; j < 4 && ii < (int)accessor_name.length; j++, ii++) { char c = accessor_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                }
+                                if (cp < 0x80) { dec_acc[oi++] = (char)cp; } else if (cp < 0x800) { dec_acc[oi++] = (char)(0xC0|(cp>>6)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec_acc[oi++] = (char)(0xE0|(cp>>12)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else { dec_acc[oi++] = (char)(0xF0|(cp>>18)); dec_acc[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); }
+                            } else { dec_acc[oi++] = accessor_name.str[ii++]; }
+                        }
+                        dec_acc[oi] = '\0';
+                        acc_str = dec_acc;
+                        acc_len = oi;
+                    }
+                    snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
+                             acc_len, acc_str);
+                    JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                    key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
+                    property->key = (JsAstNode*)key_id;
+                }
 
                 // Build as function expression using build_js_function (handles params for setters)
                 property->value = build_js_function(tp, property_node);
@@ -715,7 +844,27 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     // Regular method: method_definition without get/set prefix
                     StrView method_name = js_node_source(tp, name_node);
                     JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                    key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                    // Decode Unicode escapes in method names
+                    if (memchr(method_name.str, '\\', method_name.length) != NULL) {
+                        char dec[512]; int oi = 0;
+                        for (int ii = 0; ii < (int)method_name.length && oi < (int)sizeof(dec) - 4; ) {
+                            if (method_name.str[ii] == '\\' && ii + 1 < (int)method_name.length && method_name.str[ii+1] == 'u') {
+                                ii += 2; unsigned int cp = 0;
+                                if (ii < (int)method_name.length && method_name.str[ii] == '{') {
+                                    ii++;
+                                    while (ii < (int)method_name.length && method_name.str[ii] != '}') { char c = method_name.str[ii++]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                    if (ii < (int)method_name.length && method_name.str[ii] == '}') ii++;
+                                } else {
+                                    for (int j = 0; j < 4 && ii < (int)method_name.length; j++, ii++) { char c = method_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                }
+                                if (cp < 0x80) { dec[oi++] = (char)cp; } else if (cp < 0x800) { dec[oi++] = (char)(0xC0|(cp>>6)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec[oi++] = (char)(0xE0|(cp>>12)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else { dec[oi++] = (char)(0xF0|(cp>>18)); dec[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); }
+                            } else { dec[oi++] = method_name.str[ii++]; }
+                        }
+                        dec[oi] = '\0';
+                        key_id->name = name_pool_create_len(tp->name_pool, dec, oi);
+                    } else {
+                        key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                    }
                     property->key = (JsAstNode*)key_id;
                 }
                 // Build the full method as a function expression
@@ -784,6 +933,21 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             // stop once we hit the parameters or body
             if (strcmp(ctype, "formal_parameters") == 0 || strcmp(ctype, "statement_block") == 0) break;
         }
+        // v2 fallback: '*' consumed by opaque _ts_class_modifiers — check source prefix
+        if (!is_generator) {
+            TSNode name_tmp = ts_node_child_by_field_name(func_node, "name", 4);
+            if (!ts_node_is_null(name_tmp)) {
+                uint32_t ms = ts_node_start_byte(func_node);
+                uint32_t ns = ts_node_start_byte(name_tmp);
+                if (ns > ms) {
+                    const char* pfx = tp->source + ms;
+                    int plen = (int)(ns - ms);
+                    for (int pi = 0; pi < plen; pi++) {
+                        if (pfx[pi] == '*') { is_generator = true; break; }
+                    }
+                }
+            }
+        }
     }
 
     bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0) ||
@@ -807,6 +971,26 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             const char* ctype = ts_node_type(child);
             if (strcmp(ctype, "async") == 0) { func->is_async = true; break; }
             if (strcmp(ctype, "function") == 0 || strcmp(ctype, "=>") == 0) break;
+        }
+    }
+    // v2 fallback: 'async' consumed by opaque _ts_class_modifiers — check source prefix
+    if (!func->is_async) {
+        TSNode name_tmp = ts_node_child_by_field_name(func_node, "name", 4);
+        if (!ts_node_is_null(name_tmp)) {
+            uint32_t ms = ts_node_start_byte(func_node);
+            uint32_t ns = ts_node_start_byte(name_tmp);
+            if (ns > ms && (ns - ms) >= 5) {
+                const char* pfx = tp->source + ms;
+                int plen = (int)(ns - ms);
+                for (int pi = 0; pi <= plen - 5; pi++) {
+                    if (pfx[pi] == 'a' && memcmp(pfx + pi, "async", 5) == 0) {
+                        // ensure it's a word boundary (not part of a longer identifier)
+                        bool left_ok = (pi == 0) || !isalnum((unsigned char)pfx[pi - 1]);
+                        bool right_ok = (pi + 5 >= plen) || !isalnum((unsigned char)pfx[pi + 5]);
+                        if (left_ok && right_ok) { func->is_async = true; break; }
+                    }
+                }
+            }
         }
     }
 
@@ -1030,7 +1214,7 @@ JsAstNode* build_js_return_statement(JsTranspiler* tp, TSNode return_node) {
     if (child_count > 0) {
         TSNode arg_node = ts_node_named_child(return_node, 0);
         return_stmt->argument = build_js_expression(tp, arg_node);
-        return_stmt->base.type = return_stmt->argument->type;
+        return_stmt->base.type = return_stmt->argument ? return_stmt->argument->type : &TYPE_NULL;
     } else {
         return_stmt->base.type = &TYPE_NULL; // return undefined
     }
@@ -2531,6 +2715,26 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         }
     }
 
+    // v2 fallback: 'static' consumed by opaque _ts_class_modifiers — check source prefix
+    if (!field->is_static) {
+        TSNode prop_tmp = ts_node_child_by_field_name(field_node, "property", 8);
+        if (ts_node_is_null(prop_tmp))
+            prop_tmp = ts_node_child_by_field_name(field_node, "name", 4);
+        if (!ts_node_is_null(prop_tmp)) {
+            uint32_t fs = ts_node_start_byte(field_node);
+            uint32_t ps = ts_node_start_byte(prop_tmp);
+            if (ps > fs) {
+                const char* pfx = tp->source + fs;
+                int plen = (int)(ps - fs);
+                int pi = 0;
+                while (pi < plen && (pfx[pi] == ' ' || pfx[pi] == '\t' || pfx[pi] == '\n' || pfx[pi] == '\r')) pi++;
+                if (plen - pi >= 7 && memcmp(pfx + pi, "static", 6) == 0 && (pfx[pi+6] == ' ' || pfx[pi+6] == '\t' || pfx[pi+6] == '\n' || pfx[pi+6] == '[')) {
+                    field->is_static = true;
+                }
+            }
+        }
+    }
+
     // get property name — tree-sitter uses "property" for field_definition,
     // "name" for public_field_definition
     TSNode prop_node = ts_node_child_by_field_name(field_node, "property", strlen("property"));
@@ -2620,6 +2824,31 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
             method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
         } else if (strcmp(child_type, "set") == 0) {
             method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
+        }
+    }
+
+    // v2 fallback: get/set/static consumed by opaque _ts_class_modifiers — check source prefix
+    if (method->kind == JsMethodDefinitionNode::JS_METHOD_METHOD || !method->static_method) {
+        TSNode name_tmp = ts_node_child_by_field_name(method_node, "name", 4);
+        if (!ts_node_is_null(name_tmp)) {
+            uint32_t ms = ts_node_start_byte(method_node);
+            uint32_t ns = ts_node_start_byte(name_tmp);
+            if (ns > ms) {
+                const char* pfx = tp->source + ms;
+                int plen = (int)(ns - ms);
+                int pi = 0;
+                while (pi < plen) {
+                    while (pi < plen && (pfx[pi] == ' ' || pfx[pi] == '\t' || pfx[pi] == '\n' || pfx[pi] == '\r')) pi++;
+                    if (pi >= plen) break;
+                    if (pfx[pi] == '*') { pi++; continue; }
+                    int ws = pi;
+                    while (pi < plen && pfx[pi] >= 'a' && pfx[pi] <= 'z') pi++;
+                    int wl = pi - ws;
+                    if (wl == 3 && memcmp(pfx + ws, "get", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
+                    else if (wl == 3 && memcmp(pfx + ws, "set", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
+                    else if (wl == 6 && memcmp(pfx + ws, "static", 6) == 0) method->static_method = true;
+                }
+            }
         }
     }
 
@@ -2875,6 +3104,13 @@ static TsTypeNode* build_ts_conditional_type_u(JsTranspiler* tp, TSNode node) {
 static TsTypeNode* build_ts_type_expr_u(JsTranspiler* tp, TSNode node) {
     const char* type_str = ts_node_type(node);
 
+    // v2: opaque _ts_type token — parse type text with recursive descent parser
+    if (strcmp(type_str, "type") == 0) {
+        int len;
+        const char* text = ts_node_text_util(tp, node, &len);
+        return ts_parse_type_text(tp, text, len);
+    }
+
     if (strcmp(type_str, "predefined_type") == 0)
         return build_ts_predefined_type_u(tp, node);
     if (strcmp(type_str, "type_identifier") == 0 || strcmp(type_str, "identifier") == 0)
@@ -2949,7 +3185,17 @@ static JsAstNode* build_ts_interface_decl_u(JsTranspiler* tp, TSNode node) {
             const char* text = ts_node_text_util(tp, child, &len);
             iface->name = ts_pool_string_util(tp, text, len);
         } else if (strcmp(child_type, "object_type") == 0 || strcmp(child_type, "interface_body") == 0) {
-            iface->body = (TsObjectTypeNode*)build_ts_object_type_u(tp, child);
+            // v2: interface_body is an opaque external token — parse with C++ parser
+            uint32_t named_count = ts_node_named_child_count(child);
+            if (named_count == 0) {
+                // opaque token: extract text and parse with C++ interface body parser
+                int len;
+                const char* text = ts_node_text_util(tp, child, &len);
+                iface->body = (TsObjectTypeNode*)ts_parse_interface_body_text(tp, text, len);
+            } else {
+                // fallback: non-opaque CST (e.g. legacy grammar)
+                iface->body = (TsObjectTypeNode*)build_ts_object_type_u(tp, child);
+            }
         } else if (strcmp(child_type, "extends_type_clause") == 0 ||
                    strcmp(child_type, "extends_clause") == 0) {
             uint32_t ext_count = ts_node_named_child_count(child);

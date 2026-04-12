@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/file.h"
 #include "../lib/shell.h"
 #include "utf_string.h"
@@ -158,7 +159,7 @@ static int create_parent_dirs(const char* file_path) {
     char* dir = file_path_dirname(file_path);
     if (!dir) return 0;
     bool ok = create_dir(dir);
-    free(dir);
+    mem_free(dir);
     return ok ? 0 : -1;
 }
 

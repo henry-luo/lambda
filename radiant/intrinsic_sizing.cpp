@@ -103,7 +103,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    size_t length,
                                                    CssEnum text_transform,
                                                    CssEnum font_variant,
-                                                   CssEnum white_space) {
+                                                   CssEnum white_space,
+                                                   CssEnum overflow_wrap,
+                                                   CssEnum word_break) {
+    // CSS Text 3 §3.4: overflow-wrap: anywhere introduces soft wrap opportunities
+    // at every typographic character unit for min-content sizing.
+    bool break_anywhere = (overflow_wrap == CSS_VALUE_ANYWHERE);
+    // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class) have implicit
+    // break opportunities between each pair under word-break: normal.
+    // word-break: keep-all suppresses these breaks.
+    bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -140,6 +149,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             } else {
                 current_word += 11.0f;  // Use 11.0 to match font fallback width
                 total_width += 11.0f;
+                if (break_anywhere) {
+                    longest_word = fmax(longest_word, current_word);
+                    current_word = 0.0f;
+                }
             }
         }
         longest_word = fmax(longest_word, current_word);
@@ -155,7 +168,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
     uint32_t prev_glyph = 0;
     uint32_t prev_codepoint = 0;
-    bool has_kerning = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
+    const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+    bool has_kerning = fm ? fm->has_kerning : false;
     const unsigned char* str = (const unsigned char*)text;
     bool is_word_start = true;  // for text-transform: capitalize
     bool after_zwj = false;     // track ZWJ for emoji sequence composition
@@ -257,12 +271,30 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             prev_glyph = 0;
             i++;
             is_word_start = false;
+            if (break_anywhere) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
             continue;
         }
 
-        // Apply text-transform if specified
+        // Apply text-transform if specified (full case mapping: 1→many)
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
+            // Add advance widths for extra codepoints from full case mapping
+            for (int tti = 1; tti < tt_count; tti++) {
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
+                if (extra_glyph) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
+                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
+                    current_word += extra_advance;
+                    total_width += extra_advance;
+                }
+            }
         }
 
         // Emoji combining marks: skin tone modifiers, variation selectors, and
@@ -330,6 +362,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             }
             prev_glyph = 0;
             i += bytes;
+            if (break_anywhere) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
+            // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class)
+            // have break opportunities before and after them.
+            else if (cjk_breaks && has_id_line_break_class(codepoint)) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
             continue;
         }
 
@@ -361,6 +403,18 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         prev_glyph = glyph_index;
         prev_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
+
+        // overflow-wrap: anywhere — every character is a break opportunity
+        if (break_anywhere) {
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+        }
+        // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class)
+        // have break opportunities before and after them.
+        else if (cjk_breaks && has_id_line_break_class(codepoint)) {
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+        }
     }
 
     // Don't forget the last word
@@ -401,7 +455,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
     // Use font metrics if available, otherwise rough estimate
     bool has_font = lycon->font.font_handle != nullptr;
-    bool has_kerning = has_font ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
+    const FontMetrics* fm2 = has_font ? font_get_metrics(lycon->font.font_handle) : NULL;
+    bool has_kerning = fm2 ? fm2->has_kerning : false;
     uint32_t prev_glyph = 0;
     uint32_t prev_codepoint = 0;
     bool is_word_start = true;
@@ -472,7 +527,20 @@ float compute_text_height_at_width(LayoutContext* lycon,
         }
 
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
+            // Add advance widths for extra codepoints from full case mapping
+            for (int tti = 1; tti < tt_count; tti++) {
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
+                if (extra_glyph) {
+                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
+                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
+                    current_word_width += extra_advance;
+                }
+            }
         }
 
         // CSS font-variant: small-caps scaling (matching measure_text_intrinsic_widths)
@@ -1643,8 +1711,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (col_count > 1) {
             // Compute per-column max-content: assign each child to a column (auto-placement)
             // and take max of children's max-content in each column
-            float* col_min = (float*)calloc(col_count, sizeof(float));
-            float* col_max = (float*)calloc(col_count, sizeof(float));
+            float* col_min = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
+            float* col_max = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
 
             int item_idx = 0;
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -1696,8 +1764,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 total_max += column_gap * (col_count - 1);
             }
 
-            free(col_min);
-            free(col_max);
+            scratch_free(&lycon->scratch, col_max);
+            scratch_free(&lycon->scratch, col_min);
 
             // Add padding and border
             float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
@@ -1881,6 +1949,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum ws = get_white_space_value(child);
                 bool preserve_spaces = (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
                                         ws == CSS_VALUE_BREAK_SPACES);
+                bool preserve_newlines = preserve_spaces || (ws == CSS_VALUE_PRE_LINE);
 
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
@@ -1892,6 +1961,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 } else {
                     // white-space: normal/nowrap/pre-line — collapse consecutive spaces
+                    // For pre-line: newlines are preserved as forced breaks; spaces collapse.
                     // Only trim leading whitespace if this is the first child or preceded only by whitespace.
                     // If there's inline content before this text node, leading whitespace should
                     // collapse to a single space (which contributes to intrinsic width).
@@ -1901,7 +1971,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
                     for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
                         unsigned char ch = (unsigned char)text[i];
-                        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                        if (ch == '\n' && preserve_newlines) {
+                            // CSS Text 3 §4.1: pre-line preserves newlines as forced breaks
+                            normalized_buffer[out_pos++] = '\n';
+                            in_whitespace = true;  // spaces after newline collapse
+                        } else if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
                             if (!in_whitespace) {
                                 normalized_buffer[out_pos++] = ' ';  // Collapse to single space
                                 in_whitespace = true;
@@ -1954,9 +2028,40 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum text_transform = get_element_text_transform(element);
                 CssEnum font_variant = get_element_font_variant(element);
 
+                // Get overflow-wrap from element or ancestors (inherited property)
+                // CSS Text 3 §5.2: word-break: break-word is a deprecated keyword that
+                // has the same effect as word-break: normal and overflow-wrap: anywhere.
+                // Get overflow-wrap and word-break from element or ancestors (inherited properties)
+                CssEnum ow = CSS_VALUE_NORMAL;
+                CssEnum wb = CSS_VALUE_NORMAL;
+                {
+                    DomNode* n = (DomNode*)element;
+                    while (n) {
+                        if (n->is_element()) {
+                            DomElement* el = (DomElement*)n;
+                            if (el->blk) {
+                                // Capture word-break from nearest block ancestor
+                                if (el->blk->word_break != 0 && wb == CSS_VALUE_NORMAL) {
+                                    wb = el->blk->word_break;
+                                }
+                                // Original overflow-wrap resolution (unchanged)
+                                if (el->blk->overflow_wrap != 0) {
+                                    ow = el->blk->overflow_wrap;
+                                    break;
+                                }
+                                if (el->blk->word_break == CSS_VALUE_BREAK_WORD) {
+                                    ow = CSS_VALUE_ANYWHERE;
+                                    break;
+                                }
+                            }
+                        }
+                        n = n->parent;
+                    }
+                }
+
                 TextIntrinsicWidths text_widths;
-                if (preserve_spaces) {
-                    // For pre/pre-wrap/break-spaces: newlines create forced line breaks.
+                if (preserve_newlines) {
+                    // For pre/pre-wrap/break-spaces/pre-line: newlines create forced line breaks.
                     // Measure each line separately; max-content = widest line.
                     text_widths = {0, 0};
                     const char* line_start = normalized_buffer;
@@ -1970,7 +2075,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         float line_width = 0;
                         if (line_len > 0) {
                             TextIntrinsicWidths lw = measure_text_intrinsic_widths(
-                                lycon, line_start, line_len, text_transform, font_variant, ws);
+                                lycon, line_start, line_len, text_transform, font_variant, ws, ow, wb);
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
                             if (lw.min_content > text_widths.min_content)
@@ -1993,7 +2098,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 } else {
                     text_widths = measure_text_intrinsic_widths(
-                        lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                        lycon, normalized_buffer, out_pos, text_transform, font_variant,
+                        CSS_VALUE_NORMAL, ow, wb);
                 }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
@@ -2027,6 +2133,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ViewBlock* child_vb = (ViewBlock*)child_elem;
             if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
                 continue;
+            }
+
+            // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal flow
+            // and do not contribute to the containing block's intrinsic size.
+            if (child_vb->position &&
+                (child_vb->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_vb->position->position == CSS_VALUE_FIXED)) {
+                log_debug("  skipping absolute/fixed child %s in intrinsic sizing", child_elem->node_name());
+                continue;
+            }
+            if (!child_vb->position && child_elem->specified_style) {
+                CssDeclaration* pos_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_POSITION);
+                if (pos_decl && pos_decl->value && pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum pos_val = pos_decl->value->data.keyword;
+                    if (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED) {
+                        log_debug("  skipping absolute/fixed child %s in intrinsic sizing (from specified style)", child_elem->node_name());
+                        continue;
+                    }
+                }
             }
 
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);

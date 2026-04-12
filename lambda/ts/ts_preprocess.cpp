@@ -11,7 +11,7 @@
 #include "ts_transpiler.hpp"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Character helpers
@@ -312,7 +312,7 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
     TsPreprocessor pp;
     pp.src = src;
     pp.len = len;
-    pp.out = (char*)malloc(len + 1);
+    pp.out = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
     if (!pp.out) {
         *out_len = 0;
         return NULL;

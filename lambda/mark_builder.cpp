@@ -24,6 +24,8 @@
 #include "mark_reader.hpp"  // for ArrayReader
 #include "../lib/str.h"
 #include "input/input.hpp"
+#include "input/css/dom_node.hpp"      // for DomText, dom_text_to_string
+#include "input/css/dom_element.hpp"   // for DomElement, dom_element_to_element
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/strbuf.h"
@@ -53,6 +55,7 @@ MarkBuilder::MarkBuilder(Input* input)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
     , auto_string_merge_(false)
+    , ui_mode_(input->ui_mode)
 {
     assert(input != nullptr);
     assert(pool_ != nullptr);
@@ -132,6 +135,33 @@ String* MarkBuilder::createString(const char* str, size_t len) {
 String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
     if (!sb || sb->length == 0) return nullptr;
     return createString(sb->str->chars, sb->length);
+}
+
+String* MarkBuilder::createDomTextString(const char* str, size_t len) {
+    if (!str || len == 0) return nullptr;
+
+    // Allocate [DomText][String header][chars...\0] as one contiguous block
+    // Used in ui_mode for text content that becomes DomText nodes in layout
+    size_t total = sizeof(DomText) + sizeof(String) + len + 1;
+    DomText* dt = (DomText*)arena_calloc(arena_, total);  // zeros DomText fields
+    if (!dt) return nullptr;
+    dt->node_type = DOM_NODE_TEXT;
+    dt->content_type = DOM_TEXT_STRING;
+    String* s = dom_text_to_string(dt);
+    s->len = (uint32_t)len;
+    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
+    memcpy(s->chars, str, len);
+    s->chars[len] = '\0';
+    // Set convenience fields for backward compat with DomText consumers
+    dt->native_string = s;
+    dt->text = s->chars;
+    dt->length = s->len;
+    return s;
+}
+
+String* MarkBuilder::createDomTextStringFromBuf(StringBuf* sb) {
+    if (!sb || sb->length == 0) return nullptr;
+    return createDomTextString(sb->str->chars, sb->length);
 }
 
 String* MarkBuilder::emptyString() {
@@ -289,7 +319,20 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     , elmt_(nullptr)
 {
     Input* input = builder_->input();
-    Element* element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
+    Element* element = nullptr;
+
+    if (builder->ui_mode()) {
+        // UI mode: allocate DomElement (contains DomNode + Element + CSS fields)
+        DomElement* dom = (DomElement*)arena_calloc(input->arena, sizeof(DomElement));
+        if (!dom) return;
+        dom->node_type = DOM_NODE_ELEMENT;
+        element = dom_element_to_element(dom);
+        element->type_id = LMD_TYPE_ELEMENT;
+        element->type = &EmptyElmt;
+    } else {
+        element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
+    }
+
     if (element) {
         TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
         if (element_type) {
@@ -369,6 +412,16 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
+    if (builder_->ui_mode() && get_type_id(item) == LMD_TYPE_STRING) {
+        // ui_mode: convert plain String to fat [DomText][String][chars] for unified DOM tree
+        String* s = (String*)item.item;
+        if (s && s->len > 0) {
+            String* fat_s = builder_->createDomTextString(s->chars, s->len);
+            if (fat_s) {
+                item = (Item){.item = s2it(fat_s)};
+            }
+        }
+    }
     array_append((Array*)elmt_, item, builder_->pool(), builder_->arena());
     return *this;
 }

@@ -19,6 +19,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "font_config.h"
+#include "../memtrack.h"
 #include "../mempool.h"
 #include "../arena.h"
 #include "../arraylist.h"
@@ -163,7 +164,11 @@ static const struct {
     const char* generic;
     const char* preferred[8];
 } generic_families[] = {
+#ifdef __APPLE__
+    {"serif", {"Times", "Times New Roman", "Georgia", "DejaVu Serif", NULL}},
+#else
     {"serif", {"Times New Roman", "Times", "Georgia", "DejaVu Serif", NULL}},
+#endif
     {"sans-serif", {"Arial", "Helvetica", "DejaVu Sans", "Liberation Sans", NULL}},
     {"monospace", {"Courier New", "Courier", "Monaco", "DejaVu Sans Mono", NULL}},
     {"cursive", {"Comic Sans MS", "Apple Chancery", "Bradley Hand", NULL}},
@@ -446,13 +451,13 @@ static void add_windows_font_directories(ArrayList *directories) {
 
     // System fonts directory
     if (SHGetFolderPathA(NULL, 0x0014, NULL, 0, windows_fonts) == 0) {  // CSIDL_FONTS, SHGFP_TYPE_CURRENT, S_OK
-        arraylist_append(directories, strdup(windows_fonts));
+        arraylist_append(directories, mem_strdup(windows_fonts, MEM_CAT_FONT);
     }
 
     // User fonts directory
     if (SHGetFolderPathA(NULL, 0x001c, NULL, 0, user_fonts) == 0) {  // CSIDL_LOCAL_APPDATA, SHGFP_TYPE_CURRENT, S_OK
         str_cat(user_fonts, strlen(user_fonts), sizeof(user_fonts), "\\Microsoft\\Windows\\Fonts", 24);
-        arraylist_append(directories, strdup(user_fonts));
+        arraylist_append(directories, mem_strdup(user_fonts, MEM_CAT_FONT);
     }
 }
 
@@ -566,14 +571,14 @@ static FontFormat detect_font_format(const char *file_path) {
 }
 
 static bool read_ttf_table_directory(FILE *file, TTF_Header *header, TTF_Table_Directory **tables) {
-    *tables = calloc(header->num_tables, sizeof(TTF_Table_Directory));
+    *tables = mem_calloc(header->num_tables, sizeof(TTF_Table_Directory), MEM_CAT_FONT);
     if (!*tables) {
         return false;
     }
 
     for (int i = 0; i < header->num_tables; i++) {
         if (fread(&(*tables)[i], sizeof(TTF_Table_Directory), 1, file) != 1) {
-            free(*tables);
+            mem_free(*tables);
             *tables = NULL;
             return false;
         }
@@ -847,7 +852,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
     #endif
 
     // Read offsets to individual fonts
-    uint32_t *font_offsets = calloc(ttc_header.num_fonts, sizeof(uint32_t));
+    uint32_t *font_offsets = mem_calloc(ttc_header.num_fonts, sizeof(uint32_t), MEM_CAT_FONT);
     if (!font_offsets) {
         fclose(file);
         return false;
@@ -855,7 +860,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
 
     if (fread(font_offsets, sizeof(uint32_t), ttc_header.num_fonts, file) != ttc_header.num_fonts) {
         log_warn("Failed to read TTC font offsets: %s", file_path);
-        free(font_offsets);
+        mem_free(font_offsets);
         fclose(file);
         return false;
     }
@@ -942,7 +947,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
             parse_cmap_table(file, cmap_table, entry, arena);
         }
 
-        free(tables);
+        mem_free(tables);
 
         // Set fallback names if needed
         if (!entry->family_name) {
@@ -976,7 +981,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
         }
     }
 
-    free(font_offsets);
+    mem_free(font_offsets);
     fclose(file);
     return success;
 }
@@ -1065,7 +1070,7 @@ static bool parse_font_metadata(const char *file_path, FontEntry *entry, Arena *
         parse_cmap_table(file, cmap_table, entry, arena);  // Non-critical
     }
 
-    free(tables);
+    mem_free(tables);
     fclose(file);
 
     // Fallback to filename if parsing failed

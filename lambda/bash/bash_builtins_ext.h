@@ -53,6 +53,7 @@ Item bash_builtin_hash(Item* args, int argc);
 // Enable/disable builtins.
 // Returns 0 on success, 1 on error.
 Item bash_builtin_enable(Item* args, int argc);
+Item bash_builtin_compgen(Item* args, int argc);
 
 // ============================================================================
 // builtin

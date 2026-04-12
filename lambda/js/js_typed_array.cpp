@@ -7,7 +7,7 @@
 #include "../lambda.hpp"
 #include "../../lib/log.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cmath>
 
 extern void* heap_alloc(int size, TypeId type_id);
@@ -33,14 +33,35 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+// Returns the JS type name for a typed array element type (e.g. "Uint8Array")
+extern "C" const char* js_typed_array_type_name(Item val) {
+    if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
+    Map* m = val.map;
+    if (!m || m->type != (void*)&js_typed_array_type_marker) return NULL;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta) return NULL;
+    switch (ta->element_type) {
+    case JS_TYPED_INT8:          return "Int8Array";
+    case JS_TYPED_UINT8:         return "Uint8Array";
+    case JS_TYPED_UINT8_CLAMPED: return "Uint8ClampedArray";
+    case JS_TYPED_INT16:         return "Int16Array";
+    case JS_TYPED_UINT16:        return "Uint16Array";
+    case JS_TYPED_INT32:         return "Int32Array";
+    case JS_TYPED_UINT32:        return "Uint32Array";
+    case JS_TYPED_FLOAT32:       return "Float32Array";
+    case JS_TYPED_FLOAT64:       return "Float64Array";
+    default:                     return NULL;
+    }
+}
+
 // ============================================================================
 // ArrayBuffer
 // ============================================================================
 
 static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
-    JsArrayBuffer* ab = (JsArrayBuffer*)malloc(sizeof(JsArrayBuffer));
+    JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
-    ab->data = calloc(1, byte_length > 0 ? byte_length : 1);
+    ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
     return ab;
 }
 
@@ -125,12 +146,12 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
 
-    JsTypedArray* ta = (JsTypedArray*)malloc(sizeof(JsTypedArray));
+    JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
     ta->element_type = arr_type;
     ta->length = length;
     ta->byte_length = byte_length;
     ta->byte_offset = 0;
-    ta->data = calloc(length > 0 ? length : 1, elem_size);
+    ta->data = mem_calloc(length > 0 ? length : 1, elem_size, MEM_CAT_JS_RUNTIME);
     ta->buffer = NULL;
     ta->buffer_item = 0;
 
@@ -173,7 +194,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         byte_length = length * elem_size;
     }
 
-    JsTypedArray* ta = (JsTypedArray*)malloc(sizeof(JsTypedArray));
+    JsTypedArray* ta = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
     ta->element_type = arr_type;
     ta->length = length;
     ta->byte_length = byte_length;
@@ -497,7 +518,7 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end) {
     int elem_size = typed_array_element_size(ta->element_type);
     int new_length = end - start;
 
-    JsTypedArray* sub = (JsTypedArray*)malloc(sizeof(JsTypedArray));
+    JsTypedArray* sub = (JsTypedArray*)mem_alloc(sizeof(JsTypedArray), MEM_CAT_JS_RUNTIME);
     sub->element_type = ta->element_type;
     sub->length = new_length;
     sub->byte_length = new_length * elem_size;
@@ -544,7 +565,7 @@ extern "C" Item js_dataview_new(Item buffer, int byte_offset, int byte_length) {
         byte_length = ab->byte_length - byte_offset;
     }
 
-    JsDataView* dv = (JsDataView*)malloc(sizeof(JsDataView));
+    JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);
     dv->buffer = ab;
     dv->byte_offset = byte_offset;
     dv->byte_length = byte_length;

@@ -6,6 +6,7 @@
 #include "shape_pool.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 
 #include <string.h>
@@ -57,8 +58,8 @@ void module_registry_cleanup(void) {
     while (hashmap_iter(registry_map, &iter, &item)) {
         RegistryEntry* entry = (RegistryEntry*)item;
         if (entry->desc) {
-            free((void*)entry->desc->path);
-            free(entry->desc);
+            mem_free((void*)entry->desc->path);
+            mem_free(entry->desc);
         }
     }
     hashmap_free(registry_map);
@@ -81,8 +82,8 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
         return;
     }
 
-    ModuleDescriptor* desc = (ModuleDescriptor*)calloc(1, sizeof(ModuleDescriptor));
-    desc->path = strdup(path);
+    ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
+    desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
     desc->source_lang = lang;  // static string, not owned
     desc->namespace_obj = namespace_obj;
     desc->mir_ctx = mir_ctx;
@@ -118,8 +119,8 @@ ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
         return existing->desc;
     }
 
-    ModuleDescriptor* desc = (ModuleDescriptor*)calloc(1, sizeof(ModuleDescriptor));
-    desc->path = strdup(path);
+    ModuleDescriptor* desc = (ModuleDescriptor*)mem_calloc(1, sizeof(ModuleDescriptor), MEM_CAT_SYSTEM);
+    desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
     desc->source_lang = lang;
     desc->namespace_obj = js_new_object();
     desc->mir_ctx = NULL;
@@ -218,9 +219,9 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
 
     // Create a Script with its own pool
     Pool* pool = pool_create();
-    Script* script = (Script*)calloc(1, sizeof(Script));
+    Script* script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     script->pool = pool;
-    script->reference = strdup(resolved_path);
+    script->reference = mem_strdup(resolved_path, MEM_CAT_SYSTEM);
     script->is_main = false;
     script->is_loading = false;
     script->const_list = arraylist_new(4);

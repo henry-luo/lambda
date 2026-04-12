@@ -17,7 +17,7 @@
 #include <mir-gen.h>
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #ifdef _WIN32
 #include <malloc.h>
 #else
@@ -4759,7 +4759,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     }
 
     // allocate transpiler
-    RbMirTranspiler* mt = (RbMirTranspiler*)malloc(sizeof(RbMirTranspiler));
+    RbMirTranspiler* mt = (RbMirTranspiler*)mem_alloc(sizeof(RbMirTranspiler), MEM_CAT_RB_RUNTIME);
     if (!mt) {
         log_error("rb-mir: failed to allocate RbMirTranspiler");
         MIR_finish(ctx);
@@ -4814,7 +4814,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         for (int i = 0; i <= mt->scope_depth; i++) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
-        free(mt);
+        mem_free(mt);
         MIR_finish(ctx);
         rb_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -4833,7 +4833,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     for (int i = 0; i <= mt->scope_depth; i++) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
-    free(mt);
+    mem_free(mt);
 
     MIR_finish(ctx);
     rb_transpiler_destroy(tp);

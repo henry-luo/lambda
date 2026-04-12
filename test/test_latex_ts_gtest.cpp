@@ -10,9 +10,10 @@
 
 #include <gtest/gtest.h>
 #include <chrono>
+#include "../lambda/input/input.hpp"
+#include "../lambda/lambda-data.hpp"
+
 extern "C" {
-    #include "../lambda/input/input.hpp"
-    #include "../lambda/lambda-data.hpp"
     #include "../lib/strbuf.h"
     #include "../lib/log.h"
 }

@@ -16,6 +16,7 @@
 // FreeType Custom Memory Allocator — routes through Lambda Pool
 // ============================================================================
 
+#ifndef __APPLE__
 static void* ft_pool_alloc(FT_Memory memory, long size) {
     Pool* pool = (Pool*)memory->user;
     return pool_alloc(pool, (size_t)size);
@@ -31,6 +32,7 @@ static void* ft_pool_realloc(FT_Memory memory, long cur_size, long new_size, voi
     Pool* pool = (Pool*)memory->user;
     return pool_realloc(pool, block, (size_t)new_size);
 }
+#endif
 
 // ============================================================================
 // Face cache hashmap callbacks
@@ -145,6 +147,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (ctx->config.pixel_ratio <= 0.0f) ctx->config.pixel_ratio = 1.0f;
 
     // set up FreeType custom memory allocator routing through our pool
+#ifndef __APPLE__
     ctx->ft_memory.user    = pool;
     ctx->ft_memory.alloc   = ft_pool_alloc;
     ctx->ft_memory.free    = ft_pool_free;
@@ -167,12 +170,15 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (ctx->config.enable_lcd_rendering) {
         FT_Library_SetLcdFilter(ctx->ft_library, FT_LCD_FILTER_DEFAULT);
     }
+#endif
 
     // create font database
     ctx->database = font_database_create_internal(pool, arena);
     if (!ctx->database) {
         log_error("font_context_create: failed to create font database");
+#ifndef __APPLE__
         FT_Done_Library(ctx->ft_library);
+#endif
         arena_destroy(ctx->glyph_arena);
         if (owns_arena) arena_destroy(arena);
         if (owns_pool)  pool_destroy(pool);
@@ -235,6 +241,12 @@ void font_context_destroy(FontContext* ctx) {
         ctx->loaded_glyph_cache = NULL;
     }
 
+    // free font file data cache (entries are malloc-allocated, freed via hashmap free callback)
+    if (ctx->file_data_cache) {
+        hashmap_free(ctx->file_data_cache);
+        ctx->file_data_cache = NULL;
+    }
+
     // destroy font database
     if (ctx->database) {
         font_database_destroy_internal(ctx->database);
@@ -242,10 +254,12 @@ void font_context_destroy(FontContext* ctx) {
     }
 
     // shut down FreeType
+#ifndef __APPLE__
     if (ctx->ft_library) {
         FT_Done_Library(ctx->ft_library);
         ctx->ft_library = NULL;
     }
+#endif
 
     // destroy glyph arena
     if (ctx->glyph_arena) {
@@ -267,25 +281,106 @@ void font_context_destroy(FontContext* ctx) {
     if (owns_pool  && pool)  pool_destroy(pool);
 }
 
+// ============================================================================
+// Batch reset: remove document-specific entries from face_cache
+// ============================================================================
+
+// Scan callback to collect document-font cache keys for removal
+typedef struct {
+    const char** keys;
+    int count;
+    int capacity;
+} DocFontScanState;
+
+static bool collect_doc_font_keys(const void* item, void* udata) {
+    const FontCacheKey* entry = (const FontCacheKey*)item;
+    DocFontScanState* state = (DocFontScanState*)udata;
+    if (entry->handle && entry->handle->is_document_font) {
+        if (state->count < state->capacity) {
+            state->keys[state->count++] = entry->key_str;
+        }
+    }
+    return true; // continue scanning
+}
+
 void font_context_reset_document_fonts(FontContext* ctx) {
     if (!ctx) return;
 
     // clear @font-face descriptors from the previous document
     font_face_clear(ctx);
 
-    // clear codepoint fallback cache — entries may reference handles
-    // loaded at a different size for a previous document's @font-face
+    // clear ALL codepoint fallback cache entries between documents.
+    // The cache is keyed by codepoint only, but stores size-specific font
+    // handles. If document A uses font-size 24px for CJK and document B
+    // uses 16px, the cached 24px handle would be returned for 16px lookups,
+    // producing wrong line-height metrics. Clearing all entries is safe
+    // because glyph caches are also cleared between documents.
+    //
+    // IMPORTANT: clear the static platform-fallback handle cache FIRST.
+    // It holds raw (non-retained) pointers to handles owned by the codepoint
+    // cache. Clearing the codepoint cache releases those handles, so the
+    // platform cache must be invalidated beforehand to avoid dangling pointers.
+    font_fallback_reset_platform_cache();
     if (ctx->codepoint_fallback_cache) {
-        hashmap_clear(ctx->codepoint_fallback_cache, false);
+        hashmap_clear(ctx->codepoint_fallback_cache, true);
     }
 
-    // clear face cache — entries may reference @font-face loaded fonts
-    // that are no longer valid for the next document
+    // selectively remove @font-face entries from face_cache;
+    // system font entries survive across documents to avoid re-loading
     if (ctx->face_cache) {
-        hashmap_clear(ctx->face_cache, false);
+        size_t count = hashmap_count(ctx->face_cache);
+        if (count > 0) {
+            // collect keys of document-font entries
+            const char* stack_keys[64];
+            const char** keys = stack_keys;
+            int capacity = 64;
+            if (count > 64) {
+                keys = (const char**)mem_alloc(count * sizeof(const char*), MEM_CAT_FONT);
+                capacity = (int)count;
+            }
+
+            DocFontScanState state = {keys, 0, capacity};
+            hashmap_scan(ctx->face_cache, collect_doc_font_keys, &state);
+
+            // remove collected entries and release their handles
+            // (hashmap_delete does NOT call the free callback, so we must release manually)
+            for (int i = 0; i < state.count; i++) {
+                FontCacheKey search = {.key_str = (char*)state.keys[i], .handle = NULL};
+                const FontCacheKey* removed = (const FontCacheKey*)hashmap_delete(ctx->face_cache, &search);
+                if (removed && removed->handle) {
+                    font_handle_release(removed->handle);
+                }
+            }
+
+            if (keys != stack_keys) mem_free(keys);
+
+            log_info("font_context_reset_document_fonts: removed %d document font entries, kept %zu system entries",
+                     state.count, hashmap_count(ctx->face_cache));
+        }
     }
 
     log_info("font_context_reset_document_fonts: cleared per-document font state");
+}
+
+void font_context_reset_glyph_caches(FontContext* ctx) {
+    if (!ctx) return;
+
+    // clear loaded glyph cache (entries reference glyph_arena bitmap data)
+    if (ctx->loaded_glyph_cache) {
+        hashmap_clear(ctx->loaded_glyph_cache, false);
+    }
+
+    // clear bitmap cache (also references glyph_arena data)
+    if (ctx->bitmap_cache) {
+        hashmap_clear(ctx->bitmap_cache, false);
+    }
+
+    // reset glyph arena to reclaim bitmap memory without destroying it
+    if (ctx->glyph_arena) {
+        arena_reset(ctx->glyph_arena);
+    }
+
+    log_info("font_context_reset_glyph_caches: cleared loaded/bitmap caches and glyph arena");
 }
 
 bool font_context_scan(FontContext* ctx) {
@@ -319,11 +414,21 @@ bool font_context_scan(FontContext* ctx) {
 // ============================================================================
 
 void* font_context_get_ft_library(FontContext* ctx) {
+#ifdef __APPLE__
+    (void)ctx;
+    return NULL;
+#else
     return ctx ? ctx->ft_library : NULL;
+#endif
 }
 
 void* font_handle_get_ft_face(FontHandle* handle) {
+#ifdef __APPLE__
+    (void)handle;
+    return NULL;
+#else
     return handle ? handle->ft_face : NULL;
+#endif
 }
 
 struct FontDatabase* font_context_get_database(FontContext* ctx) {
@@ -335,8 +440,8 @@ struct FontDatabase* font_context_get_database(FontContext* ctx) {
 // ============================================================================
 
 const char* font_handle_get_family_name(FontHandle* handle) {
-    if (!handle || !handle->ft_face) return NULL;
-    return handle->ft_face->family_name;
+    if (!handle) return NULL;
+    return handle->family_name;
 }
 
 float font_handle_get_size_px(FontHandle* handle) {
@@ -363,10 +468,12 @@ void font_handle_release(FontHandle* handle) {
     handle->ref_count--;
     if (handle->ref_count <= 0) {
         // destroy the FreeType face (only if we own it)
+#ifndef __APPLE__
         if (handle->ft_face && !handle->borrowed_face) {
             FT_Done_Face(handle->ft_face);
             handle->ft_face = NULL;
         }
+#endif
         // destroy FontTables
         if (handle->tables && handle->ctx) {
             font_tables_close(handle->tables, handle->ctx->pool);
@@ -383,14 +490,45 @@ void font_handle_release(FontHandle* handle) {
             handle->kern_cache = NULL;
         }
 #ifdef __APPLE__
-        // release CoreText font
+        // release CoreText fonts
         if (handle->ct_font_ref) {
             font_platform_destroy_ct_font(handle->ct_font_ref);
             handle->ct_font_ref = NULL;
         }
+        if (handle->ct_raster_ref) {
+            font_platform_destroy_ct_font(handle->ct_raster_ref);
+            handle->ct_raster_ref = NULL;
+        }
 #endif
-        // memory_buffer is arena-allocated, no individual free needed
-        // family_name is arena-allocated, no individual free needed
+        // free font file data: decrement ref in file_data_cache, or free directly
+        if (handle->file_data_path && handle->ctx->file_data_cache) {
+            FontFileDataEntry search = {.path = handle->file_data_path, .data = NULL, .data_len = 0};
+            FontFileDataEntry* cached = (FontFileDataEntry*)hashmap_get(
+                handle->ctx->file_data_cache, &search);
+            if (cached) {
+                cached->ref_count--;
+                if (cached->ref_count <= 0) {
+                    // remove from cache — hashmap_delete returns copy in spare,
+                    // does NOT call free callback. We must free manually.
+                    const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
+                        handle->ctx->file_data_cache, &search);
+                    if (removed) {
+                        mem_free(removed->data);
+                        mem_free(removed->path);
+                    }
+                }
+            }
+            mem_free(handle->file_data_path);
+            handle->file_data_path = NULL;
+            // memory_buffer points into cached file_data — don't free separately
+        } else {
+            // no file_data_path means memory_buffer was malloc'd independently
+            // (e.g. from data URI or font_load_memory)
+            if (handle->memory_buffer) {
+                mem_free(handle->memory_buffer);
+                handle->memory_buffer = NULL;
+            }
+        }
 
         // free the handle struct via pool
         if (handle->ctx) {
@@ -509,13 +647,14 @@ FontCacheStats font_get_cache_stats(FontContext* ctx) {
 
     stats.face_count = ctx->face_cache ? (int)hashmap_count(ctx->face_cache) : 0;
     stats.glyph_cache_count = ctx->bitmap_cache ? (int)hashmap_count(ctx->bitmap_cache) : 0;
+    stats.loaded_glyph_count = ctx->loaded_glyph_cache ? (int)hashmap_count(ctx->loaded_glyph_cache) : 0;
     stats.database_font_count = font_get_font_count(ctx);
     stats.database_family_count = font_get_family_count(ctx);
 
-    // approximate memory usage
-    stats.memory_usage_bytes = 0;
-    if (ctx->arena)       stats.memory_usage_bytes += arena_total_allocated(ctx->arena);
-    if (ctx->glyph_arena) stats.memory_usage_bytes += arena_total_allocated(ctx->glyph_arena);
+    // approximate memory usage (split by arena)
+    stats.main_arena_bytes = ctx->arena ? arena_total_allocated(ctx->arena) : 0;
+    stats.glyph_arena_bytes = ctx->glyph_arena ? arena_total_allocated(ctx->glyph_arena) : 0;
+    stats.memory_usage_bytes = stats.main_arena_bytes + stats.glyph_arena_bytes;
 
     return stats;
 }
@@ -540,21 +679,29 @@ bool font_cache_save(FontContext* ctx) {
 // ============================================================================
 
 float font_get_x_height_ratio(FontHandle* handle) {
-    if (!handle || !handle->ft_face) return 0.5f; // CSS default
-    FT_Face face = handle->ft_face;
+    if (!handle) return 0.5f; // CSS default
 
-    // try OS/2 sxHeight (most accurate, matches old get_font_x_height_ratio)
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
-        return (float)os2->sxHeight / face->units_per_EM;
+    // primary: FontTables OS/2 sxHeight
+    if (handle->tables) {
+        Os2Table* os2t = font_tables_get_os2(handle->tables);
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (os2t && os2t->sx_height > 0 && head && head->units_per_em > 0) {
+            return (float)os2t->sx_height / head->units_per_em;
+        }
     }
 
-    // fallback: measure 'x' glyph in design units
-    FT_UInt x_index = FT_Get_Char_Index(face, 'x');
-    if (x_index > 0) {
-        FT_Error err = FT_Load_Glyph(face, x_index, FT_LOAD_NO_SCALE);
-        if (!err && face->units_per_EM > 0) {
-            return (float)face->glyph->metrics.height / face->units_per_EM;
+    // secondary: 'x' glyph bbox via FontTables glyf table
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (cmap && head && head->units_per_em > 0) {
+            uint16_t x_gid = cmap_lookup(cmap, 'x');
+            if (x_gid > 0) {
+                int16_t y_min, y_max;
+                if (font_tables_get_glyph_bbox(handle->tables, x_gid, NULL, &y_min, NULL, &y_max)) {
+                    return (float)(y_max - y_min) / head->units_per_em;
+                }
+            }
         }
     }
 
@@ -565,6 +712,7 @@ float font_get_x_height_ratio(FontHandle* handle) {
 // Font handle wrapping — borrow an existing FT_Face
 // ============================================================================
 
+#ifndef __APPLE__
 FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
     if (!ctx || !ft_face_ptr) return NULL;
 
@@ -594,3 +742,9 @@ FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px)
     log_debug("font_handle_wrap: borrowed %s @%.0fpx", face->family_name, size_px);
     return handle;
 }
+#else
+FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
+    (void)ctx; (void)ft_face_ptr; (void)size_px;
+    return NULL; // FreeType not available on macOS
+}
+#endif

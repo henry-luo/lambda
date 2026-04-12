@@ -962,7 +962,8 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
     }
 }
 
-// Count spaces in a text view for justify alignment
+// Count justification opportunities in a text view for justify alignment.
+// CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
 static int count_spaces_in_view(View* view) {
     int count = 0;
     while (view) {
@@ -972,10 +973,8 @@ static int count_spaces_in_view(View* view) {
             if (text_data) {
                 TextRect* rect = text->rect;
                 while (rect) {
-                    const char* str = text_data + rect->start_index;
-                    for (int i = 0; i < rect->length; i++) {
-                        if (str[i] == ' ') count++;
-                    }
+                    count += count_justify_opportunities(
+                        text_data + rect->start_index, rect->length);
                     rect = rect->next;
                 }
             }
@@ -991,7 +990,8 @@ static int count_spaces_in_view(View* view) {
     return count;
 }
 
-// Apply justify alignment by distributing space between words
+// Apply justify alignment by distributing space between words and CJK inter-char gaps.
+// CSS Text 3 §7.3: For auto justification, expand word spaces and CJK inter-character gaps.
 static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* view) {
     float cumulative_offset = 0;
     View* last_view = nullptr;
@@ -1011,18 +1011,13 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
                 rect->x += cumulative_offset;
                 last_rect = rect;
 
-                // Add space after each space character
+                // Count justification opportunities (spaces + CJK inter-char gaps)
                 if (text_data) {
-                    const char* str = text_data + rect->start_index;
-                    int space_count = 0;
-                    for (int i = 0; i < rect->length; i++) {
-                        if (str[i] == ' ') {
-                            space_count++;
-                        }
-                    }
+                    int gap_count = count_justify_opportunities(
+                        text_data + rect->start_index, rect->length);
                     // Expand this rect's width by the space added within it
-                    if (space_count > 0) {
-                        float added_space = space_count * space_per_gap;
+                    if (gap_count > 0) {
+                        float added_space = gap_count * space_per_gap;
                         rect->width += added_space;
                         cumulative_offset += added_space;
                     }
@@ -1030,6 +1025,8 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 
                 rect = rect->next;
             }
+            // Sync text view bounds to reflect expanded rects
+            adjust_text_bounds(text);
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
@@ -1234,16 +1231,61 @@ void line_align(LayoutContext* lycon) {
                     if (is_rtl) {
                         float offset = available_width - line_width;
                         if (offset > 0) {
-                            view_line_align(lycon, offset, view);
+                            // CSS 2.1 §16.2: For wrapped text nodes, only shift rects
+                            // on the current line to avoid corrupting previously justified
+                            // lines' positions. Check if view is a wrapped text continuation.
+                            if (is_wrapped_continuation) {
+                                float line_y = lycon->block.advance_y;
+                                if (view->view_type == RDT_VIEW_TEXT) {
+                                    ViewText* text = (ViewText*)view;
+                                    TextRect* rect = text->rect;
+                                    while (rect) {
+                                        if (rect->y >= line_y - 1.0f) {
+                                            rect->x += offset;
+                                        }
+                                        rect = rect->next;
+                                    }
+                                    adjust_text_bounds(text);
+                                }
+                                // Also shift any sibling views on the current line
+                                View* next = view->next();
+                                if (next) {
+                                    view_line_align(lycon, offset, next);
+                                }
+                            } else {
+                                // CSS 2.1 §16.2: Also check preceding siblings for
+                                // text continuation rects on the current line.
+                                float line_y = lycon->block.advance_y;
+                                View* prev = (View*)((DomNode*)view)->prev_sibling;
+                                while (prev) {
+                                    if (prev->view_type == RDT_VIEW_TEXT) {
+                                        ViewText* text = (ViewText*)prev;
+                                        TextRect* rect = text->rect;
+                                        while (rect) {
+                                            if (rect->y >= line_y - 1.0f) {
+                                                rect->x += offset;
+                                            }
+                                            rect = rect->next;
+                                        }
+                                    } else if (prev->view_type == RDT_VIEW_INLINE) {
+                                        shift_span_current_line_rects(offset, line_y, (ViewSpan*)prev);
+                                    }
+                                    prev = (View*)((DomNode*)prev)->prev_sibling;
+                                }
+                                view_line_align(lycon, offset, view);
+                            }
                         }
                     }
                     return;
                 }
 
                 // Not the last line: distribute extra space across word gaps
+                // CSS Text 3 §7.3: Distribute extra space across word gaps.
+                // Fast path for single text view: only expand the LAST TextRect
+                // (the current line's rect). This correctly handles wrapped text
+                // by not touching rects from previous lines.
                 if (view->view_type == RDT_VIEW_TEXT) {
                     ViewText* text = (ViewText*)view;
-                    // Find the last TextRect (most recently created = current line)
                     TextRect* rect = text->rect;
                     TextRect* last_rect = rect;
                     while (rect) {
@@ -1253,32 +1295,42 @@ void line_align(LayoutContext* lycon) {
 
                     if (last_rect) {
                         const char* text_data = (const char*)text->text_data();
-                        // Count spaces in this specific rect
-                        int num_spaces = 0;
+                        int num_gaps = 0;
                         if (text_data) {
-                            const char* str = text_data + last_rect->start_index;
-                            for (int i = 0; i < last_rect->length; i++) {
-                                if (str[i] == ' ') num_spaces++;
-                            }
+                            num_gaps = count_justify_opportunities(
+                                text_data + last_rect->start_index,
+                                last_rect->length);
                         }
 
                         float extra_width = available_width - line_width;
 
-                        if (num_spaces > 0 && extra_width > 0) {
-                            // Expand the width of this specific TextRect to fill the line
-                            last_rect->width += extra_width;
-                            return;
+                        if (num_gaps > 0 && extra_width > 0) {
+                            // Fast path only when no sibling views need repositioning.
+                            // If sibling views exist (e.g., <br>), fall through to
+                            // multi-view path so they get shifted by cumulative offset.
+                            if (!view->next()) {
+                                last_rect->width += extra_width;
+                                adjust_text_bounds(text);
+                                return;
+                            }
                         }
                     }
+                    // Fall through only if sibling views exist — the line
+                    // may span multiple views (e.g., text + <span>) where
+                    // spaces exist in sibling/nested views. For a lone wrapped
+                    // text view, falling through would corrupt previous lines'
+                    // rects via count_spaces_in_view traversing all rects.
+                    if (!view->next()) return;
                 }
-                else {
-                    // Multi-view line: distribute space across all text views
+
+                // Multi-view path: traverse all views on the line to find and
+                // distribute space across word gaps in sibling/nested views.
+                {
                     int num_spaces = count_spaces_in_view(view);
                     float extra_width = available_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
                         float space_per_gap = extra_width / num_spaces;
                         view_line_justify(lycon, space_per_gap, view);
-                        return;
                     }
                 }
                 return;
@@ -1287,6 +1339,27 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
+    // guard against stack overflow from deeply nested DOM (fuzzer-found)
+    static const int MAX_LAYOUT_DEPTH = 128;
+    if (lycon->depth >= MAX_LAYOUT_DEPTH) {
+        log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
+                  MAX_LAYOUT_DEPTH, node->source_loc());
+        return;
+    }
+
+    // guard against pathological layouts with extreme node counts (fuzzer-found)
+    static const int MAX_LAYOUT_NODES = 50000;
+    lycon->node_count++;
+    if (lycon->node_count > MAX_LAYOUT_NODES) {
+        if (lycon->node_count == MAX_LAYOUT_NODES + 1) {
+            log_error("layout_flow_node: max node count %d exceeded, skipping remaining nodes",
+                      MAX_LAYOUT_NODES);
+        }
+        return;
+    }
+
+    lycon->depth++;
+
     log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
 
     // HTML spec §4.11.1: <details> without the 'open' attribute only renders
@@ -1517,6 +1590,18 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
             layout_block(lycon, node, display);
+            // CSS Text 3 §5.2: Atomic inlines (inline-block, inline-table, replaced
+            // elements) create soft wrap opportunities before and after them.
+            // Record this so subsequent text nodes can wrap at the boundary.
+            // Only set when the parent context allows wrapping (not in pre/nowrap).
+            if (display.outer == CSS_VALUE_INLINE_BLOCK && node->parent && node->parent->is_element()) {
+                DomElement* parent_elem = node->parent->as_element();
+                CssEnum ws = (parent_elem->blk) ? parent_elem->blk->white_space : CSS_VALUE_NORMAL;
+                if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                    ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                    lycon->line.wrap_opportunity_before_nowrap = true;
+                }
+            }
             break;
         case CSS_VALUE_INLINE:
             // CSS 2.1 Section 10.3.2: Inline replaced elements (img, video, etc.)
@@ -1525,6 +1610,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Treat inline replaced elements as inline-block for layout
                 display.outer = CSS_VALUE_INLINE_BLOCK;
                 layout_block(lycon, node, display);
+                if (node->parent && node->parent->is_element()) {
+                    DomElement* pe = node->parent->as_element();
+                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                        lycon->line.wrap_opportunity_before_nowrap = true;
+                    }
+                }
             } else if (display.inner == CSS_VALUE_TABLE) {
                 // CSS 2.1 Section 17.2: inline-table elements
                 // Outer display is inline (participates in inline flow)
@@ -1532,6 +1625,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Treat as inline-block for positioning, with table inner layout
                 display.outer = CSS_VALUE_INLINE_BLOCK;
                 layout_block(lycon, node, display);
+                if (node->parent && node->parent->is_element()) {
+                    DomElement* pe = node->parent->as_element();
+                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                        lycon->line.wrap_opportunity_before_nowrap = true;
+                    }
+                }
             } else {
                 layout_inline(lycon, node, display);
             }
@@ -1600,6 +1701,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // skip the node
     }
     log_debug("%s end flow node, block advance_y: %.0f", node->source_loc(), lycon->block.advance_y);
+    lycon->depth--;
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
@@ -2076,11 +2178,18 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     lycon->counter_context = counter_context_create(doc->arena);
     log_debug("Initialized counter context");
 
+    // Initialize scratch allocator for scoped temporary buffers
+    lycon->pool = doc->view_tree->pool;
+    scratch_init(&lycon->scratch, doc->view_tree->arena);
+
     // BlockContext floats are already initialized to NULL in memset
     log_debug("DEBUG: Layout context initialized");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
+    // Release scratch allocator (safety net for any un-freed temp buffers)
+    scratch_release(&lycon->scratch);
+
     // Clean up counter context
     if (lycon->counter_context) {
         counter_context_destroy(lycon->counter_context);

@@ -22,7 +22,11 @@
 // ============================================================================
 
 static const char* serif_fonts[] = {
+#ifdef __APPLE__
+    "Times", "Times New Roman", "Liberation Serif", "Nimbus Roman",
+#else
     "Times New Roman", "Liberation Serif", "Times", "Nimbus Roman",
+#endif
     "Georgia", "DejaVu Serif", NULL
 };
 static const char* sans_serif_fonts[] = {
@@ -166,11 +170,7 @@ FontHandle* font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style) 
 // Codepoint-specific fallback — find a font that has a given codepoint
 // ============================================================================
 
-// Internal cache: codepoint → FontHandle* (or NULL for negative cache)
-typedef struct CodepointFallbackEntry {
-    uint32_t    codepoint;
-    FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
-} CodepointFallbackEntry;
+// CodepointFallbackEntry is defined in font_internal.h
 
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
@@ -184,15 +184,70 @@ static int cp_fallback_compare(const void* a, const void* b, void* udata) {
     return (ea->codepoint == eb->codepoint) ? 0 : (ea->codepoint < eb->codepoint ? -1 : 1);
 }
 
+static void cp_fallback_free(void* item) {
+    CodepointFallbackEntry* entry = (CodepointFallbackEntry*)item;
+    if (entry && entry->handle) {
+        font_handle_release(entry->handle);
+    }
+}
+
 static struct hashmap* ensure_codepoint_cache(FontContext* ctx) {
     if (!ctx->codepoint_fallback_cache) {
         ctx->codepoint_fallback_cache = hashmap_new(sizeof(CodepointFallbackEntry),
                                                      256, 0, 0,
                                                      cp_fallback_hash,
                                                      cp_fallback_compare,
-                                                     NULL, NULL);
+                                                     cp_fallback_free, NULL);
     }
     return ctx->codepoint_fallback_cache;
+}
+
+// small path-based cache of recently-resolved platform fallback handles,
+// keyed by (file_path, face_index, size_px). Avoids expensive
+// font_load_face_internal for each codepoint when most map to the same fonts.
+#define PLATFORM_FB_CACHE_SIZE 32
+typedef struct {
+    const char* path;       // borrowed from handle->file_data_path
+    int         face_index;
+    float       size_px;
+    FontHandle* handle;
+} PlatformFbEntry;
+
+static PlatformFbEntry s_platform_fb[PLATFORM_FB_CACHE_SIZE];
+static int             s_platform_fb_count = 0;
+
+void font_fallback_reset_platform_cache(void) {
+    s_platform_fb_count = 0;
+}
+
+static FontHandle* platform_fb_lookup(const char* path, int face_index,
+                                       float size_px, uint32_t codepoint) {
+    for (int i = 0; i < s_platform_fb_count; i++) {
+        if (s_platform_fb[i].handle &&
+            s_platform_fb[i].face_index == face_index &&
+            s_platform_fb[i].size_px == size_px &&
+            s_platform_fb[i].path &&
+            strcmp(s_platform_fb[i].path, path) == 0 &&
+            font_has_codepoint(s_platform_fb[i].handle, codepoint)) {
+            return s_platform_fb[i].handle;
+        }
+    }
+    return NULL;
+}
+
+static void platform_fb_insert(FontHandle* handle, int face_index, float size_px) {
+    if (!handle || !handle->file_data_path) return;
+    // check for duplicate
+    for (int i = 0; i < s_platform_fb_count; i++) {
+        if (s_platform_fb[i].handle == handle) return;
+    }
+    if (s_platform_fb_count < PLATFORM_FB_CACHE_SIZE) {
+        s_platform_fb[s_platform_fb_count].path = handle->file_data_path;
+        s_platform_fb[s_platform_fb_count].face_index = face_index;
+        s_platform_fb[s_platform_fb_count].size_px = size_px;
+        s_platform_fb[s_platform_fb_count].handle = handle;
+        s_platform_fb_count++;
+    }
 }
 
 FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
@@ -252,10 +307,25 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     }
 
     // platform-specific codepoint lookup (macOS: CoreText CTFontCreateForString)
+    // Check the platform fallback handle cache first — most codepoints from
+    // the same Unicode block resolve to the same font file.
     {
         int face_index = 0;
         char* font_path = font_platform_find_codepoint_font(codepoint, &face_index);
         if (font_path) {
+            // fast path: reuse an existing handle for this font file
+            FontHandle* reused = platform_fb_lookup(font_path, face_index, style->size_px, codepoint);
+            if (reused) {
+                CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = reused};
+                font_handle_retain(reused);
+                hashmap_set(cache, &entry);
+                font_handle_retain(reused);
+                log_debug("font_fallback: codepoint U+%04X → reused cached handle (face %d)",
+                          codepoint, face_index);
+                mem_free(font_path);
+                return reused;
+            }
+
             FontHandle* handle = font_load_face_internal(
                 ctx, font_path, face_index,
                 style->size_px, physical_size,
@@ -265,6 +335,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
                 font_handle_retain(handle);
                 hashmap_set(cache, &entry);
+                platform_fb_insert(handle, face_index, style->size_px);
                 log_debug("font_fallback: codepoint U+%04X → platform font (face %d)", codepoint, face_index);
                 mem_free(font_path);
                 return handle;
@@ -272,7 +343,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             // TTC fallback: face_index=0 may not have the codepoint even though
             // the collection file does (e.g., Songti.ttc face 0 is "Black" variant
             // which lacks some CJK glyphs). Try other face indices in the collection.
-            long num_faces = (handle && handle->ft_face) ? handle->ft_face->num_faces : 0;
+            long num_faces = (handle && handle->memory_buffer)
+                ? font_tables_get_face_count(handle->memory_buffer, handle->memory_buffer_size)
+                : 0;
             if (handle) font_handle_release(handle);
             if (num_faces > 1) {
                 for (long fi = 1; fi < num_faces; fi++) {
@@ -284,6 +357,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                         CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
                         font_handle_retain(handle);
                         hashmap_set(cache, &entry);
+                        platform_fb_insert(handle, (int)fi, style->size_px);
                         log_debug("font_fallback: codepoint U+%04X → platform font (face %ld of %ld)",
                                   codepoint, fi, num_faces);
                         mem_free(font_path);

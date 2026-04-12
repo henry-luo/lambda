@@ -2,8 +2,9 @@
 #include "rb_transpiler.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/arena.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 #include <cerrno>
@@ -30,8 +31,7 @@ static RbAstNode* build_rb_block_node(RbTranspiler* tp, TSNode block_node);
 // ============================================================================
 
 RbAstNode* alloc_rb_ast_node(RbTranspiler* tp, RbAstNodeType node_type, TSNode node, size_t size) {
-    RbAstNode* ast_node = (RbAstNode*)pool_alloc(tp->ast_pool, size);
-    memset(ast_node, 0, size);
+    RbAstNode* ast_node = (RbAstNode*)arena_calloc(tp->ast_arena, size);
     ast_node->node_type = node_type;
     ast_node->node = node;
     return ast_node;

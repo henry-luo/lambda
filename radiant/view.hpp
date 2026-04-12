@@ -5,6 +5,7 @@
 #include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/mempool.h"
+#include "../lib/arena.h"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -30,7 +31,6 @@
 #define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
 #endif
 
-#include <thorvg_capi.h>
 #endif // LAMBDA_HEADLESS
 
 // Use inline functions instead of macros to avoid conflicts with std::max/min
@@ -361,7 +361,7 @@ typedef struct ImageSurface {
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
 #ifndef LAMBDA_HEADLESS
-    Tvg_Paint pic;        // ThorVG picture for SVG image (Tvg_Paint is already a pointer type in v1.0-pre34)
+    struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
 #endif
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
@@ -547,6 +547,7 @@ typedef struct Margin : Spacing {
 typedef struct Corner {
     struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
     int64_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
+    bool tl_percent, tr_percent, br_percent, bl_percent;  // true if value is a percentage (0-100)
 } Corner;
 
 typedef struct {
@@ -957,6 +958,7 @@ typedef struct BlockProp {
     const CssValue* line_height;
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
+    const CssValue* text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
     CssEnum list_style_type;
@@ -1007,6 +1009,7 @@ typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
+    bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
     TextRect* next;
 } TextRect;
 
@@ -1328,6 +1331,7 @@ inline bool is_quirks_mode(HtmlVersion v) {
 
 struct ViewTree {
     Pool *pool;
+    Arena *arena;  // bump allocator for view allocations (O(1) alloc, bulk free)
     View* root;
     HtmlVersion html_version;
 };
@@ -1372,7 +1376,6 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
-    void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
     struct FontContext* font_ctx; // unified font context
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
@@ -1394,7 +1397,6 @@ typedef struct {
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
-extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);
 #endif // LAMBDA_HEADLESS
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document

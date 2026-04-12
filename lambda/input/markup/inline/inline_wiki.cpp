@@ -11,7 +11,6 @@
  * Extracted from input-markup.cpp wiki parsing functions
  */
 #include "inline_common.hpp"
-#include <cstdlib>
 #include <cstring>
 
 namespace lambda {
@@ -94,7 +93,7 @@ Item parse_wiki_link(MarkupParser* parser, const char** text) {
 
     // Extract link target
     size_t link_len = link_end - link_start;
-    char* link_target = (char*)malloc(link_len + 1);
+    char* link_target = (char*)mem_alloc(link_len + 1, MEM_CAT_INPUT_MARKUP);
     if (link_target) {
         strncpy(link_target, link_start, link_len);
         link_target[link_len] = '\0';
@@ -113,15 +112,15 @@ Item parse_wiki_link(MarkupParser* parser, const char** text) {
     char* display_text;
     if (display_start != nullptr && display_end != nullptr) {
         size_t display_len = display_end - display_start;
-        display_text = (char*)malloc(display_len + 1);
+        display_text = (char*)mem_alloc(display_len + 1, MEM_CAT_INPUT_MARKUP);
         if (display_text) {
             strncpy(display_text, display_start, display_len);
             display_text[display_len] = '\0';
         } else {
-            display_text = strdup(link_target ? link_target : "");
+            display_text = mem_strdup(link_target ? link_target : "", MEM_CAT_INPUT_MARKUP);
         }
     } else {
-        display_text = strdup(link_target ? link_target : "");
+        display_text = mem_strdup(link_target ? link_target : "", MEM_CAT_INPUT_MARKUP);
     }
 
     if (display_text && strlen(display_text) > 0) {
@@ -132,8 +131,8 @@ Item parse_wiki_link(MarkupParser* parser, const char** text) {
         }
     }
 
-    free(link_target);
-    free(display_text);
+    mem_free(link_target);
+    mem_free(display_text);
     *text = pos;
     return Item{.item = (uint64_t)link_elem};
 }
@@ -207,7 +206,7 @@ Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
 
     // Extract URL
     size_t url_len = url_end - url_start;
-    char* url = (char*)malloc(url_len + 1);
+    char* url = (char*)mem_alloc(url_len + 1, MEM_CAT_INPUT_MARKUP);
     if (url) {
         strncpy(url, url_start, url_len);
         url[url_len] = '\0';
@@ -218,15 +217,15 @@ Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
     char* display_text;
     if (display_start != nullptr && display_end != nullptr) {
         size_t display_len = display_end - display_start;
-        display_text = (char*)malloc(display_len + 1);
+        display_text = (char*)mem_alloc(display_len + 1, MEM_CAT_INPUT_MARKUP);
         if (display_text) {
             strncpy(display_text, display_start, display_len);
             display_text[display_len] = '\0';
         } else {
-            display_text = strdup(url ? url : "");
+            display_text = mem_strdup(url ? url : "", MEM_CAT_INPUT_MARKUP);
         }
     } else {
-        display_text = strdup(url ? url : "");
+        display_text = mem_strdup(url ? url : "", MEM_CAT_INPUT_MARKUP);
     }
 
     if (display_text && strlen(display_text) > 0) {
@@ -237,8 +236,8 @@ Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
         }
     }
 
-    free(url);
-    free(display_text);
+    mem_free(url);
+    mem_free(display_text);
     *text = pos;
     return Item{.item = (uint64_t)link_elem};
 }
@@ -317,7 +316,7 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
 
     // Extract content
     size_t content_len = content_end - content_start;
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, content_start, content_len);
         content[content_len] = '\0';
@@ -342,7 +341,7 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
             }
         }
 
-        free(content);
+        mem_free(content);
     }
 
     *text = pos;
@@ -408,7 +407,7 @@ Item parse_wiki_template(MarkupParser* parser, const char** text) {
 
     // Extract template content
     size_t content_len = content_end - template_start;
-    char* content = (char*)malloc(content_len + 1);
+    char* content = (char*)mem_alloc(content_len + 1, MEM_CAT_INPUT_MARKUP);
     if (content) {
         strncpy(content, template_start, content_len);
         content[content_len] = '\0';
@@ -423,7 +422,7 @@ Item parse_wiki_template(MarkupParser* parser, const char** text) {
             add_attribute_to_element(parser, template_elem, "name", content);
         }
 
-        free(content);
+        mem_free(content);
     }
 
     *text = pos;

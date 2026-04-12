@@ -31,6 +31,15 @@ struct EarlyErrorCtx {
     bool in_method;          // class method (non-constructor)
     bool in_static_init;     // class static block
     int  error_count;
+
+    // Label tracking for continue target validation (ContainsUndefinedContinueTarget)
+    // iteration_labels: labels attached to iteration statements (for/while/do-while/for-in/for-of)
+    // non_iteration_labels: labels attached to non-iteration statements
+    const char* iteration_labels[32];
+    int iteration_label_lens[32];
+    int iteration_label_count;
+    bool in_iteration;       // currently inside any iteration statement
+    bool in_switch;          // currently inside switch
 };
 
 // ---- helpers ---------------------------------------------------------------
@@ -771,13 +780,19 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_WHILE_STATEMENT: {
             JsWhileNode* wn = (JsWhileNode*)node;
             walk_expression(ctx, wn->test);
+            bool saved_in_iteration = ctx->in_iteration;
+            ctx->in_iteration = true;
             walk_statement(ctx, wn->body);
+            ctx->in_iteration = saved_in_iteration;
             break;
         }
 
         case JS_AST_NODE_DO_WHILE_STATEMENT: {
             JsDoWhileNode* dn = (JsDoWhileNode*)node;
+            bool saved_in_iteration = ctx->in_iteration;
+            ctx->in_iteration = true;
             walk_statement(ctx, dn->body);
+            ctx->in_iteration = saved_in_iteration;
             walk_expression(ctx, dn->test);
             break;
         }
@@ -788,7 +803,10 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             walk_expression(ctx, fn->init); // may be expression
             walk_expression(ctx, fn->test);
             walk_expression(ctx, fn->update);
+            bool saved_in_iteration = ctx->in_iteration;
+            ctx->in_iteration = true;
             walk_statement(ctx, fn->body);
+            ctx->in_iteration = saved_in_iteration;
             break;
         }
 
@@ -798,7 +816,10 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             walk_statement(ctx, fo->left); // may be var decl
             walk_expression(ctx, fo->left); // may be pattern
             walk_expression(ctx, fo->right);
+            bool saved_in_iteration = ctx->in_iteration;
+            ctx->in_iteration = true;
             walk_statement(ctx, fo->body);
+            ctx->in_iteration = saved_in_iteration;
             break;
         }
 
@@ -873,6 +894,8 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 }
                 hashmap_free(switch_scope);
             }
+            bool saved_in_switch = ctx->in_switch;
+            ctx->in_switch = true;
             for (JsAstNode* c = sw->cases; c; c = c->next) {
                 if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
                     JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
@@ -880,6 +903,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                     walk_statements(ctx, sc->consequent);
                 }
             }
+            ctx->in_switch = saved_in_switch;
             break;
         }
 
@@ -888,8 +912,14 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_gen = ctx->in_generator;
             bool was_async = ctx->in_async;
             bool was_strict = ctx->in_strict;
+            bool was_iteration = ctx->in_iteration;
+            bool was_switch = ctx->in_switch;
+            int was_label_count = ctx->iteration_label_count;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
+            ctx->in_iteration = false;
+            ctx->in_switch = false;
+            ctx->iteration_label_count = 0;
 
             // v17: "use strict" with non-simple params is SyntaxError
             check_strict_non_simple(ctx, fn);
@@ -908,6 +938,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             ctx->in_generator = was_gen;
             ctx->in_async = was_async;
             ctx->in_strict = was_strict;
+            ctx->in_iteration = was_iteration;
+            ctx->in_switch = was_switch;
+            ctx->iteration_label_count = was_label_count;
             break;
         }
 
@@ -956,8 +989,56 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                         ee_error(ctx, node, "Lexical declaration cannot be labelled");
                     }
                 }
+                // Track whether this label is on an iteration statement
+                // (for continue target validation per ContainsUndefinedContinueTarget)
+                bool is_iteration = ls->body->node_type == JS_AST_NODE_FOR_STATEMENT ||
+                                    ls->body->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
+                                    ls->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
+                                    ls->body->node_type == JS_AST_NODE_WHILE_STATEMENT ||
+                                    ls->body->node_type == JS_AST_NODE_DO_WHILE_STATEMENT;
+                int saved_count = ctx->iteration_label_count;
+                if (is_iteration && ls->label && ctx->iteration_label_count < 32) {
+                    ctx->iteration_labels[ctx->iteration_label_count] = ls->label;
+                    ctx->iteration_label_lens[ctx->iteration_label_count] = ls->label_len;
+                    ctx->iteration_label_count++;
+                }
+                walk_statement(ctx, ls->body);
+                ctx->iteration_label_count = saved_count;
             }
-            walk_statement(ctx, ls->body);
+            break;
+        }
+
+        case JS_AST_NODE_CONTINUE_STATEMENT: {
+            // continue without label: must be inside an iteration statement
+            JsBreakContinueNode* cn = (JsBreakContinueNode*)node;
+            if (!cn->label) {
+                if (!ctx->in_iteration) {
+                    ee_error(ctx, node, "Illegal continue statement: no surrounding iteration statement");
+                }
+            } else {
+                // continue with label: label must refer to an iteration statement
+                bool found = false;
+                for (int i = 0; i < ctx->iteration_label_count; i++) {
+                    if (ctx->iteration_label_lens[i] == cn->label_len &&
+                        strncmp(ctx->iteration_labels[i], cn->label, cn->label_len) == 0) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ee_error(ctx, node, "Illegal continue statement: '%.*s' does not denote an iteration statement",
+                        cn->label_len, cn->label);
+                }
+            }
+            break;
+        }
+
+        case JS_AST_NODE_BREAK_STATEMENT: {
+            // break without label: must be inside iteration or switch
+            JsBreakContinueNode* bn = (JsBreakContinueNode*)node;
+            if (!bn->label && !ctx->in_iteration && !ctx->in_switch) {
+                ee_error(ctx, node, "Illegal break statement");
+            }
             break;
         }
 

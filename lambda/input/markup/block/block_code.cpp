@@ -12,7 +12,7 @@
 #include "block_common.hpp"
 #include "../../html_entities.h"
 #include "../../input-utils.h"
-#include <cstdlib>
+#include "../../../../lib/mem.h"
 
 namespace lambda {
 namespace markup {

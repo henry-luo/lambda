@@ -13,6 +13,7 @@ typedef struct Heap {
 } Heap;
 
 void heap_init();
+void heap_init_with_pool(Pool* pool);  // reuse existing pool (batch mode)
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(char* src, int64_t len);  // callable from C code (path.c)
@@ -26,7 +27,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
 void free_item(Item item, bool clear_entry);
-void expand_list(List *list);
+void expand_list(List *list, Arena* arena = nullptr);
 
 extern "C" {
 #ifndef WASM_BUILD
@@ -65,6 +66,15 @@ struct Runtime {
     Heap* heap;
     gc_nursery_t* nursery;
     NamePool* name_pool;
+
+    // Pool reuse for batch mode: when set, heap_init_with_pool() uses this
+    // pool instead of creating a new one. Set by script_runner between files.
+    Pool* reuse_pool;
+
+    // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
+    // allocate fat DomElement/DomText on result_arena instead of the GC heap.
+    bool ui_mode;
+    Arena* result_arena;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)

@@ -232,6 +232,27 @@ int16_t hmtx_get_lsb(HmtxTable* hmtx, uint16_t glyph_id);
 // returns 0 if no kerning pair found.
 int16_t kern_get_pair(KernTable* kern, uint16_t left, uint16_t right);
 
+// get glyph bounding box from glyf table via loca table.
+// returns true on success, false if tables missing or glyph not found.
+// values are in font design units. Any out pointer may be NULL.
+bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
+                                int16_t* out_x_min, int16_t* out_y_min,
+                                int16_t* out_x_max, int16_t* out_y_max);
+
+// ============================================================================
+// TTC (TrueType Collection) helpers
+// ============================================================================
+
+// get number of faces in a TTC collection. Returns 1 for non-TTC fonts.
+// operates on raw font file data (before font_tables_open).
+int font_tables_get_face_count(const uint8_t* data, size_t len);
+
+// open a specific face from raw font data. For TTC collections, navigates
+// to the correct face offset. For non-TTC, face_index is ignored.
+// equivalent to font_tables_open but with TTC face selection.
+FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
+                                   int face_index, void* pool);
+
 // ============================================================================
 // Utility: make a 4-byte tag from characters
 // ============================================================================

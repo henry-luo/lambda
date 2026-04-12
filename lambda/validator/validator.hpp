@@ -384,7 +384,7 @@ void add_validation_warning(ValidationResult* result, ValidationWarning* warning
 /**
  * Merge validation results
  */
-void merge_validation_results(ValidationResult* dest, ValidationResult* src);
+void merge_validation_results(ValidationResult* dest, ValidationResult* src, Pool* pool);
 
 /**
  * Generate validation report

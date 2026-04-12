@@ -12,7 +12,7 @@
 #include "../../lib/uv_loop.h"
 
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 extern Input* js_input;
 
@@ -82,7 +82,7 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     uv_fs_req_cleanup(&stat_req);
 
     // read file contents
-    char* data = (char*)malloc(file_size + 1);
+    char* data = (char*)mem_alloc(file_size + 1, MEM_CAT_JS_RUNTIME);
     if (!data) {
         uv_fs_t close_req;
         uv_fs_close(NULL, &close_req, fd, NULL);
@@ -100,14 +100,14 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     uv_fs_req_cleanup(&close_req);
 
     if (bytes_read < 0) {
-        free(data);
+        mem_free(data);
         log_error("fs: readFileSync: read error for '%s': %s", path, uv_strerror(bytes_read));
         return ItemNull;
     }
 
     data[bytes_read] = '\0';
     Item result = make_string_item(data, bytes_read);
-    free(data);
+    mem_free(data);
     return result;
 }
 
@@ -354,9 +354,9 @@ static void on_fs_read_complete(uv_fs_t* req) {
         }
     }
 
-    if (fsreq->buffer) free(fsreq->buffer);
+    if (fsreq->buffer) mem_free(fsreq->buffer);
     uv_fs_req_cleanup(req);
-    free(fsreq);
+    mem_free(fsreq);
 }
 
 static void on_fs_open_for_read(uv_fs_t* req) {
@@ -370,7 +370,7 @@ static void on_fs_open_for_read(uv_fs_t* req) {
             Item args[2] = {err, ItemNull};
             js_call_function(fsreq->callback, ItemNull, args, 2);
         }
-        free(fsreq);
+        mem_free(fsreq);
         return;
     }
 
@@ -389,20 +389,20 @@ static void on_fs_open_for_read(uv_fs_t* req) {
             Item args[2] = {err, ItemNull};
             js_call_function(fsreq->callback, ItemNull, args, 2);
         }
-        free(fsreq);
+        mem_free(fsreq);
         return;
     }
 
     size_t file_size = (size_t)stat_req.statbuf.st_size;
     uv_fs_req_cleanup(&stat_req);
 
-    fsreq->buffer = (char*)malloc(file_size + 1);
+    fsreq->buffer = (char*)mem_alloc(file_size + 1, MEM_CAT_JS_RUNTIME);
     fsreq->buffer_size = file_size;
     if (!fsreq->buffer) {
         uv_fs_t close_req;
         uv_fs_close(lambda_uv_loop(), &close_req, fd, NULL);
         uv_fs_req_cleanup(&close_req);
-        free(fsreq);
+        mem_free(fsreq);
         return;
     }
 
@@ -417,7 +417,7 @@ extern "C" Item js_fs_readFile(Item path_item, Item callback) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
 
-    JsFsReq* fsreq = (JsFsReq*)calloc(1, sizeof(JsFsReq));
+    JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
 
     fsreq->callback = callback;
@@ -447,9 +447,9 @@ static void on_fs_write_complete(uv_fs_t* req) {
         }
     }
 
-    if (fsreq->buffer) free(fsreq->buffer);
+    if (fsreq->buffer) mem_free(fsreq->buffer);
     uv_fs_req_cleanup(req);
-    free(fsreq);
+    mem_free(fsreq);
 }
 
 static void on_fs_open_for_write(uv_fs_t* req) {
@@ -463,8 +463,8 @@ static void on_fs_open_for_write(uv_fs_t* req) {
             Item args[1] = {err};
             js_call_function(fsreq->callback, ItemNull, args, 1);
         }
-        if (fsreq->buffer) free(fsreq->buffer);
-        free(fsreq);
+        if (fsreq->buffer) mem_free(fsreq->buffer);
+        mem_free(fsreq);
         return;
     }
 
@@ -484,12 +484,12 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
     if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
     String* str = it2s(str_item);
 
-    JsFsReq* fsreq = (JsFsReq*)calloc(1, sizeof(JsFsReq));
+    JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
 
     // copy write data since it may be GC'd during async operation
-    fsreq->buffer = (char*)malloc(str->len);
-    if (!fsreq->buffer) { free(fsreq); return ItemNull; }
+    fsreq->buffer = (char*)mem_alloc(str->len, MEM_CAT_JS_RUNTIME);
+    if (!fsreq->buffer) { mem_free(fsreq); return ItemNull; }
     memcpy(fsreq->buffer, str->chars, str->len);
     fsreq->buffer_size = str->len;
     fsreq->callback = callback;
@@ -541,6 +541,6 @@ extern "C" Item js_get_fs_namespace(void) {
 }
 
 // Reset fs namespace (for re-initialization between runs)
-void js_fs_reset(void) {
+extern "C" void js_fs_reset(void) {
     fs_namespace = (Item){0};
 }

@@ -17,6 +17,11 @@ extern "C" {
 // This roundtrips correctly through map_field_store/map_read_field for INT fields.
 #define JS_DELETED_SENTINEL_VAL (((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL)
 
+// Sentinel value for iterator "done" (returned by js_iterator_step when exhausted).
+// Uses type tag 0x7F (unused) so it cannot collide with any valid JS value
+// including null, undefined, false, 0, or empty string.
+#define JS_ITER_DONE_SENTINEL (0x7F00DEAD00000000ULL)
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -111,6 +116,9 @@ Item js_array_get_int(Item array, int64_t index);
 Item js_array_set_int(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
+void js_array_push_item_direct(Array* arr, Item value);
+Item js_math_pow(Item base, Item exp);
+double js_math_pow_d(double base, double exp);
 int64_t js_get_length(Item object);
 Item js_get_length_item(Item object);
 
@@ -177,6 +185,7 @@ Item js_math_set_property(Item key, Item value);
 Item js_get_math_object_value(void);
 Item js_get_json_object_value(void);
 Item js_get_console_object_value(void);
+Item js_get_reflect_object_value(void);
 
 // =============================================================================
 // v5: Process I/O
@@ -184,8 +193,10 @@ Item js_get_console_object_value(void);
 
 Item js_process_stdout_write(Item str_item);
 Item js_process_hrtime_bigint(void);
+void js_store_process_argv(int argc, const char** argv);
 void js_set_process_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
+Item js_get_process_object_value(void);
 
 // =============================================================================
 // v5: Global Functions
@@ -258,6 +269,7 @@ Item js_object_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
 Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
@@ -287,7 +299,7 @@ Item js_new_string_wrapper(Item arg);
 void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
-Item js_reflect_construct(Item target, Item args_array);
+Item js_reflect_construct(Item target, Item args_array, Item new_target);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -351,6 +363,12 @@ void js_throw_value(Item value);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
+Item js_throw_type_error(const char* message);
+void js_throw_syntax_error(Item message);
+void js_throw_reference_error(Item message);
+
+/** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
+void js_require_object_coercible(Item value);
 
 /**
  * Check if an exception is currently pending.
@@ -384,6 +402,11 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  */
 Item js_new_error_with_name(Item error_name, Item message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
+
+/**
+ * ES2021: Create AggregateError with errors array and message.
+ */
+Item js_new_aggregate_error(Item errors, Item message);
 
 /**
  * ES2022: Extract cause from options object and set on error.
@@ -420,6 +443,7 @@ int js_get_module_var_count(void);
 void js_batch_reset_to(int checkpoint_var_count);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
+void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
 
@@ -437,6 +461,13 @@ Item js_constructor_create_object_shaped(Item callee, const char** prop_names, c
 // js_set_shaped_slot: writes with correct unboxing, updates ShapeEntry type.
 Item js_get_shaped_slot(Item object, int64_t slot);
 void js_set_shaped_slot(Item object, int64_t slot, Item value);
+
+// P1: Type-specific native slot access — bypass boxing/unboxing entirely.
+// byte_offset = slot * 8, pre-computed at compile time by the transpiler.
+double js_get_slot_f(Item object, int64_t byte_offset);
+int64_t js_get_slot_i(Item object, int64_t byte_offset);
+void js_set_slot_f(Item object, int64_t byte_offset, double value);
+void js_set_slot_i(Item object, int64_t byte_offset, int64_t value);
 
 // =============================================================================
 // v12: Language extensions
@@ -459,6 +490,8 @@ Item js_btoa(Item str_item);
 Item js_get_global_this(void);
 Item js_get_global_object(void);
 Item js_get_global_property(Item key);
+Item js_get_global_property_strict(Item key);
+Item js_get_global_builtin_fn(Item name, Item param_count);
 
 // URL constructor
 Item js_url_construct(Item input);
@@ -518,6 +551,16 @@ Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
  * v15: Convert an iterable to an array. Drains generators, passes arrays through.
  */
 Item js_iterable_to_array(Item iterable);
+
+/**
+ * Lazy iteration protocol for for-of loops.
+ * js_get_iterator: Get an iterator object from an iterable.
+ * js_iterator_step: Advance iterator, return next value or JS_ITER_DONE_SENTINEL when done.
+ * js_iterator_close: Call iterator.return() for IteratorClose (on break/return).
+ */
+Item js_get_iterator(Item iterable);
+Item js_iterator_step(Item iterator);
+Item js_iterator_close(Item iterator);
 
 // =============================================================================
 // v14: Promise Runtime

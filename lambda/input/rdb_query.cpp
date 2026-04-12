@@ -12,7 +12,7 @@
 #include "rdb_query.h"
 #include "../../lib/log.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 
 extern "C" {
 
@@ -150,7 +150,7 @@ static int qb_add_param(QueryBuilder* qb, const RdbParam* param) {
     qb->params[qb->param_count] = *param;
     // own a copy of string values so they survive until rdb_query_free
     if (param->type == RDB_TYPE_STRING && param->str_val) {
-        qb->params[qb->param_count].str_val = strdup(param->str_val);
+        qb->params[qb->param_count].str_val = mem_strdup(param->str_val, MEM_CAT_INPUT_OTHER);
     }
     qb->param_count++;
     // append placeholder: ?1, ?2, etc.
@@ -395,14 +395,14 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
 
     // copy SQL string
     size_t sql_len = strlen(qb.sql->str);
-    out_query->sql = (char*)malloc(sql_len + 1);
+    out_query->sql = (char*)mem_alloc(sql_len + 1, MEM_CAT_INPUT_OTHER);
     memcpy(out_query->sql, qb.sql->str, sql_len + 1);
     strbuf_free(qb.sql);
 
     // copy params
     out_query->param_count = qb.param_count;
     if (qb.param_count > 0) {
-        out_query->params = (RdbParam*)malloc((size_t)qb.param_count * sizeof(RdbParam));
+        out_query->params = (RdbParam*)mem_alloc((size_t)qb.param_count * sizeof(RdbParam), MEM_CAT_INPUT_OTHER);
         memcpy(out_query->params, qb.params, (size_t)qb.param_count * sizeof(RdbParam));
     } else {
         out_query->params = NULL;
@@ -460,16 +460,16 @@ int64_t rdb_query_exec(RdbConn* conn, const RdbBuiltQuery* query,
 void rdb_query_free(RdbBuiltQuery* query) {
     if (!query) return;
     if (query->sql) {
-        free(query->sql);
+        mem_free(query->sql);
         query->sql = NULL;
     }
     if (query->params) {
         for (int i = 0; i < query->param_count; i++) {
             if (query->params[i].type == RDB_TYPE_STRING && query->params[i].str_val) {
-                free((void*)query->params[i].str_val);
+                mem_free((void*)query->params[i].str_val);
             }
         }
-        free(query->params);
+        mem_free(query->params);
         query->params = NULL;
     }
     query->param_count = 0;

@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include <stdarg.h>
 #include <time.h>
@@ -956,7 +957,16 @@ Item fn_min2(Item item_a, Item item_b) {
         return ItemError;
     }
 
-    double result = a_val < b_val ? a_val : b_val;
+    double result;
+    if (isnan(a_val) || isnan(b_val)) {
+        result = NAN;
+        is_float = true;
+    } else if (a_val == 0.0 && b_val == 0.0) {
+        result = (signbit(a_val) || signbit(b_val)) ? -0.0 : 0.0;
+        is_float = true;
+    } else {
+        result = a_val < b_val ? a_val : b_val;
+    }
     // Return as integer if both inputs were integers
     if (!is_float) {
         // Convert back to Item int directly to match input type
@@ -1145,7 +1155,16 @@ Item fn_max2(Item item_a, Item item_b) {
         return ItemError;
     }
 
-    double result = a_val > b_val ? a_val : b_val;
+    double result;
+    if (isnan(a_val) || isnan(b_val)) {
+        result = NAN;
+        is_float = true;
+    } else if (a_val == 0.0 && b_val == 0.0) {
+        result = (signbit(a_val) && signbit(b_val)) ? -0.0 : 0.0;
+        is_float = true;
+    } else {
+        result = a_val > b_val ? a_val : b_val;
+    }
     // Return as integer if both inputs were integers
     if (!is_float) {
         // Convert back to Item int directly to match input type
@@ -1769,7 +1788,7 @@ Item fn_decimal(Item item) {
             return ItemError;
         }
         // decimal_from_string needs null-terminated string
-        char* null_term_str = (char*)malloc(len + 1);
+        char* null_term_str = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         if (!null_term_str) {
             log_debug("Failed to allocate string buffer");
             return ItemError;
@@ -1777,7 +1796,7 @@ Item fn_decimal(Item item) {
         memcpy(null_term_str, chars, len);
         null_term_str[len] = '\0';
         Item result = decimal_from_string(null_term_str, context);
-        free(null_term_str);
+        mem_free(null_term_str);
         return result;
     }
     else {
@@ -2083,7 +2102,7 @@ Item fn_float(Item item) {
         }
 
         // Create a null-terminated copy of the string
-        char* buf = (char*)malloc(len + 1);
+        char* buf = (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
         if (!buf) {
             log_debug("Failed to allocate buffer for string conversion");
             return ItemError;
@@ -2107,7 +2126,7 @@ Item fn_float(Item item) {
         double val = strtod(buf, &endptr);
         int saved_errno = errno;
         bool fully_parsed = (*endptr == '\0');
-        free(buf);
+        mem_free(buf);
 
         if (saved_errno != 0 || !fully_parsed) {
             log_debug("Cannot convert string to float: %.*s", (int)len, chars);
@@ -2147,10 +2166,20 @@ extern "C" double fn_pow_u(double base, double exponent) {
 
 // Min/max for two doubles
 extern "C" double fn_min2_u(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) {
+        // -0 < +0 per ES spec for Math.min
+        return (signbit(a) || signbit(b)) ? -0.0 : 0.0;
+    }
     return a < b ? a : b;
 }
 
 extern "C" double fn_max2_u(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) {
+        // +0 > -0 per ES spec for Math.max
+        return (signbit(a) && signbit(b)) ? -0.0 : 0.0;
+    }
     return a > b ? a : b;
 }
 

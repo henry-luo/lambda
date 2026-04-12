@@ -93,6 +93,19 @@ typedef enum MemCategory {
     MEM_CAT_CACHE_LAYOUT,  // Layout cache
     MEM_CAT_CACHE_OTHER,
 
+    // Script engine runtimes
+    MEM_CAT_JS_RUNTIME,    // JavaScript runtime (transpiler, builtins, state)
+    MEM_CAT_PY_RUNTIME,    // Python runtime
+    MEM_CAT_RB_RUNTIME,    // Ruby runtime
+    MEM_CAT_BASH_RUNTIME,  // Bash runtime
+
+    // Network/serve
+    MEM_CAT_NETWORK,       // Network downloads, cache, HTTP
+    MEM_CAT_SERVE,         // HTTP server, ASGI, REST
+
+    // System
+    MEM_CAT_SYSTEM,        // Main runtime, module registry, sysinfo
+
     // Temporary allocations
     MEM_CAT_TEMP,          // Short-lived temporaries
 
@@ -178,8 +191,9 @@ bool memtrack_init(MemtrackMode mode);
 
 /**
  * Shutdown the tracker, reports leaks if in debug mode
+ * @return Number of leaked allocations (0 = clean shutdown)
  */
-void memtrack_shutdown(void);
+size_t memtrack_shutdown(void);
 
 /**
  * Get current tracking mode
@@ -544,6 +558,39 @@ void* memtrack_arena_alloc(Arena* arena, size_t size);
  * Destroy tracked arena
  */
 void memtrack_arena_destroy(Arena* arena);
+
+/**
+ * Get current live pool count (should be 0 at shutdown)
+ */
+int32_t memtrack_get_pool_count(void);
+
+/**
+ * Get current live arena count (should be 0 at shutdown)
+ */
+int32_t memtrack_get_arena_count(void);
+
+// ============================================================================
+// Raw Allocation Escape Hatches
+// ============================================================================
+
+/**
+ * Raw allocation wrappers for documented exceptions where tracked allocation
+ * cannot be used (e.g., GC heap, Container item arrays, utf8proc returns).
+ *
+ * These survive #pragma GCC poison because they are declared before the poison
+ * directive in mem.h and call malloc/free internally from memtrack.c (in lib/,
+ * which is not subject to poison enforcement).
+ *
+ * Usage in lambda/radiant code:
+ *   void* p = raw_malloc(size);    // instead of malloc(size)
+ *   raw_free(p);                   // instead of free(p)
+ *   p = raw_realloc(p, new_size);  // instead of realloc(p, new_size)
+ */
+void* raw_malloc(size_t size);
+void* raw_calloc(size_t count, size_t size);
+void* raw_realloc(void* ptr, size_t new_size);
+void  raw_free(void* ptr);
+char* raw_strdup(const char* str);
 
 #ifdef __cplusplus
 }

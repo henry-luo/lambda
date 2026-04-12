@@ -216,6 +216,10 @@ typedef struct TypeMap : Type {
     // A1: Inline property hash table for O(1) lookup
     ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
     uint8_t field_count;  // number of fields in hash table (0 = not populated)
+    // P1: Slot-indexed array for O(1) shaped property access (used by js_get_slot_fast/js_set_slot_fast).
+    // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
+    ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
+    int slot_count;             // number of slot_entries (0 = not populated)
 } TypeMap;
 
 // A1: FNV-1a hash for property name lookup
@@ -264,7 +268,7 @@ static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int 
         uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
         ShapeEntry* e = tm->field_index[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (e->name && (e->name->str == key ||  // A6: interned pointer match (fast)
+        if (e->name && e->name->str && (e->name->str == key ||  // A6: interned pointer match (fast)
             (e->name->length == (size_t)key_len &&
              memcmp(e->name->str, key, key_len) == 0))) {
             return e;
@@ -547,6 +551,7 @@ typedef struct Input {
     Input* parent;              // parent Input for hierarchical ownership (nullable)
     char* xml_stylesheet_href;  // href from <?xml-stylesheet?> processing instruction (nullable)
     int doc_count;              // number of YAML documents (0 or 1 = single doc, >1 = multi-doc array)
+    bool ui_mode;               // true = allocate DomElement/DomText during parsing (layout/render/view commands)
     // StringBuf* sb;
 
     // member functions

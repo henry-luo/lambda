@@ -12,14 +12,11 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
 #include <string.h>
-#include <stdlib.h>
+#include "../../lib/mem.h"
 #include <ctype.h>
 
-// FreeType for embedded font loading
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_SFNT_NAMES_H
-#include FT_TRUETYPE_IDS_H
+// FontTables for parsing embedded font data (name, OS/2, cmap, hmtx, head)
+#include "../../lib/font/font_tables.h"
 
 /**
  * Map PDF font names to system fonts
@@ -621,7 +618,7 @@ static bool extract_tounicode_cmap(Map* font_dict, PDFFontEntry* entry,
 
     // Free decompressed data if allocated
     if (decompressed) {
-        free(decompressed);  // from pdf_decompress_stream which uses stdlib malloc
+        mem_free(decompressed);  // from pdf_decompress_stream which uses mem_alloc
     }
 
     return result;
@@ -782,33 +779,6 @@ float get_font_baseline_offset(float font_size) {
 // Phase 2: Embedded Font Support
 // ============================================================================
 
-static FT_Library g_ft_library = nullptr;
-
-/**
- * Initialize FreeType library for PDF font loading
- */
-bool pdf_font_init_freetype() {
-    if (g_ft_library) return true;
-
-    FT_Error error = FT_Init_FreeType(&g_ft_library);
-    if (error) {
-        log_error("Failed to initialize FreeType: error %d", error);
-        return false;
-    }
-    log_debug("Initialized FreeType for PDF font loading");
-    return true;
-}
-
-/**
- * Cleanup FreeType library
- */
-void pdf_font_cleanup_freetype() {
-    if (g_ft_library) {
-        FT_Done_FreeType(g_ft_library);
-        g_ft_library = nullptr;
-    }
-}
-
 /**
  * Create a font cache for a document
  */
@@ -820,13 +790,21 @@ PDFFontCache* pdf_font_cache_create(Pool* pool) {
     cache->fonts = nullptr;
     cache->count = 0;
 
-    // Initialize FreeType if needed
-    if (!g_ft_library) {
-        pdf_font_init_freetype();
-    }
-    cache->ft_library = g_ft_library;
-
     return cache;
+}
+
+/**
+ * Destroy font cache — releases FontTables resources
+ */
+void pdf_font_cache_destroy(PDFFontCache* cache) {
+    if (!cache) return;
+
+    for (PDFFontEntry* entry = cache->fonts; entry; entry = entry->next) {
+        if (entry->tables) {
+            font_tables_close(entry->tables, cache->pool);
+            entry->tables = nullptr;
+        }
+    }
 }
 
 /**
@@ -955,57 +933,6 @@ static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
 }
 
 /**
- * Load embedded font into FreeType
- */
-FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data,
-                                size_t font_data_len, PDFFontType font_type) {
-    if (!cache || !font_data || font_data_len == 0) return nullptr;
-    if (!cache->ft_library) {
-        if (!pdf_font_init_freetype()) return nullptr;
-        cache->ft_library = g_ft_library;
-    }
-
-    FT_Face face = nullptr;
-    FT_Error error;
-
-    // Load based on font type
-    switch (font_type) {
-        case PDF_FONT_TRUETYPE:
-        case PDF_FONT_OPENTYPE:
-        case PDF_FONT_CID_TYPE2:
-            // Direct TrueType/OpenType loading
-            error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
-            break;
-
-        case PDF_FONT_TYPE1C:
-        case PDF_FONT_CID_TYPE0C:
-            // CFF font - FreeType can handle directly
-            error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
-            break;
-
-        case PDF_FONT_TYPE1:
-            // Type 1 font - FreeType can handle PFB/PFA
-            error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
-            break;
-
-        default:
-            log_warn("Unsupported font type for embedded loading: %d", font_type);
-            return nullptr;
-    }
-
-    if (error) {
-        log_error("FreeType failed to load embedded font: error %d", error);
-        return nullptr;
-    }
-
-    log_info("Loaded embedded font: %s (%s)",
-             face->family_name ? face->family_name : "unknown",
-             face->style_name ? face->style_name : "");
-
-    return face;
-}
-
-/**
  * Add font to cache from PDF Resources
  */
 PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
@@ -1105,11 +1032,12 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
         entry->font_data = font_data;
         entry->font_data_len = font_data_len;
 
-        // Load into FreeType
-        entry->ft_face = pdf_font_load_embedded(cache, font_data, font_data_len, embed_type);
-        if (entry->ft_face) {
+        // Parse font tables for glyph metrics and metadata (name, OS/2, cmap, hmtx, head)
+        entry->tables = font_tables_open(font_data, font_data_len, cache->pool);
+        if (entry->tables) {
+            NameTable* name = font_tables_get_name(entry->tables);
             log_info("Cached embedded font '%s' -> '%s'", ref_name,
-                    entry->ft_face->family_name ? entry->ft_face->family_name : "unknown");
+                    (name && name->family_name) ? name->family_name : "unknown");
         }
     } else {
         entry->is_embedded = false;
@@ -1195,7 +1123,7 @@ PDFFontEntry* pdf_font_cache_get(PDFFontCache* cache, const char* ref_name) {
 
 /**
  * Create FontProp from cached font entry
- * Uses embedded FreeType face if available, otherwise falls back to system fonts
+ * Uses FontTables metadata if available, otherwise falls back to system fonts
  */
 FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double font_size) {
     if (!pool || !entry) return nullptr;
@@ -1205,25 +1133,30 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
 
     font->font_size = (float)font_size;
 
-    if (entry->ft_face) {
-        // Use embedded font - get family name from FreeType
-        if (entry->ft_face->family_name) {
-            font->family = entry->ft_face->family_name;
+    if (entry->tables) {
+        // Use embedded font — get family name from FontTables name table
+        NameTable* name = font_tables_get_name(entry->tables);
+        if (name && name->family_name) {
+            font->family = (char*)name->family_name;
         } else {
             font->family = (char*)"Arial";
         }
 
-        // Get style from FreeType
-        if (entry->ft_face->style_flags & FT_STYLE_FLAG_BOLD) {
-            font->font_weight = CSS_VALUE_BOLD;
+        // Get style from OS/2 fsSelection (bit 5 = bold, bit 0 = italic)
+        Os2Table* os2 = font_tables_get_os2(entry->tables);
+        if (os2) {
+            font->font_weight = (os2->fs_selection & 0x20) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+            font->font_style = (os2->fs_selection & 0x01) ? CSS_VALUE_ITALIC : CSS_VALUE_NORMAL;
         } else {
-            font->font_weight = CSS_VALUE_NORMAL;
-        }
-
-        if (entry->ft_face->style_flags & FT_STYLE_FLAG_ITALIC) {
-            font->font_style = CSS_VALUE_ITALIC;
-        } else {
-            font->font_style = CSS_VALUE_NORMAL;
+            // Fallback to head.macStyle (bit 0 = bold, bit 1 = italic)
+            HeadTable* head = font_tables_get_head(entry->tables);
+            if (head) {
+                font->font_weight = (head->mac_style & 0x01) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+                font->font_style = (head->mac_style & 0x02) ? CSS_VALUE_ITALIC : CSS_VALUE_NORMAL;
+            } else {
+                font->font_weight = CSS_VALUE_NORMAL;
+                font->font_style = CSS_VALUE_NORMAL;
+            }
         }
 
         log_debug("Using embedded font: %s, size: %.2f", font->family, font->font_size);
@@ -1256,17 +1189,16 @@ float pdf_font_get_glyph_width(PDFFontEntry* entry, int char_code, float font_si
         }
     }
 
-    // Try FreeType if embedded
-    if (entry->ft_face) {
-        FT_Error error = FT_Set_Char_Size(entry->ft_face, 0, (FT_F26Dot6)(font_size * 64), 72, 72);
-        if (!error) {
-            FT_UInt glyph_index = FT_Get_Char_Index(entry->ft_face, char_code);
-            error = FT_Load_Glyph(entry->ft_face, glyph_index, FT_LOAD_NO_SCALE);
-            if (!error) {
-                // Advance width in font units
-                float advance = entry->ft_face->glyph->linearHoriAdvance / 65536.0f;
-                float units_per_em = (float)entry->ft_face->units_per_EM;
-                return advance / units_per_em * font_size;
+    // Try font tables (cmap + hmtx) for glyph width — no FreeType needed
+    if (entry->tables) {
+        CmapTable* cmap = font_tables_get_cmap(entry->tables);
+        HmtxTable* hmtx = font_tables_get_hmtx(entry->tables);
+        HeadTable* head = font_tables_get_head(entry->tables);
+        if (cmap && hmtx && head && head->units_per_em > 0) {
+            uint16_t glyph_id = cmap_lookup(cmap, (uint32_t)char_code);
+            if (glyph_id) {
+                uint16_t advance = hmtx_get_advance(hmtx, glyph_id);
+                return (float)advance / (float)head->units_per_em * font_size;
             }
         }
     }

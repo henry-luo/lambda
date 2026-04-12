@@ -40,6 +40,7 @@ extern "C" {
 #include <tree_sitter/api.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "../lib/memtrack.h"
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
@@ -53,7 +54,7 @@ extern "C" {
 static char* err_strdup(const char* s) {
     if (!s) return NULL;
     size_t len = strlen(s) + 1;
-    char* copy = (char*)malloc(len);
+    char* copy = (char*)mem_alloc(len, MEM_CAT_SYSTEM);
     if (copy) memcpy(copy, s, len);
     return copy;
 }
@@ -246,10 +247,10 @@ void free_debug_info_table(void* debug_info_list) {
     
     DebugInfoList* list = (DebugInfoList*)debug_info_list;
     for (size_t i = 0; i < list->length; i++) {
-        free(list->items[i]);
+        mem_free(list->items[i]);
     }
-    free(list->items);
-    free(list);
+    mem_free(list->items);
+    mem_free(list);
 }
 
 // ============================================================================
@@ -257,7 +258,7 @@ void free_debug_info_table(void* debug_info_list) {
 // ============================================================================
 
 LambdaError* err_create(LambdaErrorCode code, const char* message, SourceLocation* location) {
-    LambdaError* error = (LambdaError*)calloc(1, sizeof(LambdaError));
+    LambdaError* error = (LambdaError*)mem_calloc(1, sizeof(LambdaError), MEM_CAT_SYSTEM);
     if (!error) return NULL;
     
     error->code = code;
@@ -297,7 +298,7 @@ void err_set_location(LambdaError* error, const char* file, uint32_t line, uint3
 
 void err_add_help(LambdaError* error, const char* help) {
     if (!error || !help) return;
-    if (error->help) free(error->help);
+    if (error->help) mem_free(error->help);
     error->help = err_strdup(help);
 }
 
@@ -378,7 +379,7 @@ char* err_get_source_line(const char* source, uint32_t line_number) {
     
     // copy the line
     size_t len = line_end - line_start;
-    char* result = (char*)malloc(len + 1);
+    char* result = (char*)mem_alloc(len + 1, MEM_CAT_SYSTEM);
     if (result) {
         memcpy(result, line_start, len);
         result[len] = '\0';
@@ -531,7 +532,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
             log_debug("err_capture_stack_trace: found Lambda func '%s' at %p",
                       info->lambda_func_name, return_addr);
             
-            StackFrame* frame = (StackFrame*)calloc(1, sizeof(StackFrame));
+            StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
             if (!frame) break;
             
             frame->function_name = info->lambda_func_name;
@@ -569,7 +570,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
                     log_debug("err_capture_stack_trace: found C func '%s' at %p",
                               name, return_addr);
                     
-                    StackFrame* frame = (StackFrame*)calloc(1, sizeof(StackFrame));
+                    StackFrame* frame = (StackFrame*)mem_calloc(1, sizeof(StackFrame), MEM_CAT_SYSTEM);
                     if (!frame) break;
                     
                     frame->function_name = err_strdup(name);
@@ -722,7 +723,7 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
                     line_width, line_num, line_text);
             }
             
-            free(line_text);
+            mem_free(line_text);
         }
     }
     
@@ -758,7 +759,7 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
         pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\nCaused by:\n  ");
         char* cause_str = err_format(error->cause);
         pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s\n", cause_str);
-        free(cause_str);
+        mem_free(cause_str);
     }
     
     return err_strdup(buffer);
@@ -767,7 +768,7 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
 void err_print(LambdaError* error) {
     char* formatted = err_format_with_context(error, 3);
     fprintf(stderr, "%s", formatted);
-    free(formatted);
+    mem_free(formatted);
 }
 
 void err_print_stack_trace(StackFrame* trace) {
@@ -885,7 +886,7 @@ char* err_format_json_array(LambdaError** errors, int count) {
     
     // estimate buffer size needed
     size_t buf_size = 256 + count * 2048;
-    char* buffer = (char*)malloc(buf_size);
+    char* buffer = (char*)mem_alloc(buf_size, MEM_CAT_SYSTEM);
     if (!buffer) return err_strdup("{\"errors\": [], \"errorCount\": 0, \"error\": \"out of memory\"}");
     
     int pos = 0;
@@ -907,7 +908,7 @@ char* err_format_json_array(LambdaError** errors, int count) {
                 line++;
             }
         }
-        free(err_json);
+        mem_free(err_json);
     }
     
     pos += snprintf(buffer + pos, buf_size - pos, "\n  ],\n");
@@ -925,7 +926,7 @@ void err_free_stack_trace(StackFrame* trace) {
     while (trace) {
         StackFrame* next = trace->next;
         // note: function_name may be strdup'd or static, need to track ownership
-        free(trace);
+        mem_free(trace);
         trace = next;
     }
 }
@@ -933,12 +934,12 @@ void err_free_stack_trace(StackFrame* trace) {
 void err_free(LambdaError* error) {
     if (!error) return;
     
-    if (error->message) free(error->message);
-    if (error->help) free(error->help);
+    if (error->message) mem_free(error->message);
+    if (error->help) mem_free(error->help);
     if (error->stack_trace) err_free_stack_trace(error->stack_trace);
     if (error->cause) err_free(error->cause);
     
-    free(error);
+    mem_free(error);
 }
 
 // ============================================================================
@@ -1071,7 +1072,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                                            end.row + 1, end.column + 1);
         vloc.source = source;
         LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &vloc);
-        error->help = strdup(help);
+        error->help = mem_strdup(help, MEM_CAT_TEMP);
         return error;
     }
 
@@ -1092,7 +1093,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
             help = "Use '=>' for expression body:  fn name(a, b) => a + b\n"
                    "          Use '{...}' for statement body:  pn name(a, b) { return a + b }";
             LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-            error->help = strdup(help);
+            error->help = mem_strdup(help, MEM_CAT_TEMP);
             return error;
         }
     }
@@ -1119,7 +1120,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                     "Assignment in condition — did you mean '=='?");
                 help = "Use '==' for comparison. '=' is for 'let' bindings.";
                 LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-                error->help = strdup(help);
+                error->help = mem_strdup(help, MEM_CAT_TEMP);
                 return error;
             }
         }
@@ -1155,7 +1156,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                     snprintf(msg, sizeof(msg), "Unterminated string literal: %s", preview);
                     help = "Add a closing quote to complete the string.";
                     LambdaError* error = err_create(ERR_UNTERMINATED_STRING, msg, &sloc);
-                    error->help = strdup(help);
+                    error->help = mem_strdup(help, MEM_CAT_TEMP);
                     return error;
                 }
             }
@@ -1196,7 +1197,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                 }
                 help = "Symbol literals require a closing single quote: 'name'";
                 LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &sloc);
-                error->help = strdup(help);
+                error->help = mem_strdup(help, MEM_CAT_TEMP);
                 return error;
             }
         }
@@ -1302,7 +1303,7 @@ static LambdaError* diagnose_missing_node(TSNode missing_node, const char* sourc
     }
 
     LambdaError* error = err_create(ERR_MISSING_TOKEN, msg, &loc);
-    if (help) error->help = strdup(help);
+    if (help) error->help = mem_strdup(help, MEM_CAT_TEMP);
     return error;
 }
 

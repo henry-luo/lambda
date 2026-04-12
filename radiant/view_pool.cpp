@@ -342,11 +342,13 @@ void view_pool_init(ViewTree* tree) {
         log_error("Failed to initialize view pool");
     }
     else {
+        tree->arena = arena_create_default(tree->pool);
         log_debug("view pool initialized");
     }
 }
 
 void view_pool_destroy(ViewTree* tree) {
+    if (tree->arena) { arena_destroy(tree->arena); tree->arena = NULL; }
     if (tree->pool) pool_destroy(tree->pool);
     tree->pool = NULL;
 }
@@ -1998,6 +2000,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 // JSON generation for text nodes
 void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
+    if (!rect) return;  // guard against null text rect (fuzzer-found)
 
     NEXT_RECT:
     bool is_last_char_space = false;

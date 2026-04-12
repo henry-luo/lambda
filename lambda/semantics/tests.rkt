@@ -13,6 +13,7 @@
 (require "lambda-eval.rkt")
 (require "lambda-types.rkt")
 (require "c-repr.rkt")
+(require "lambda-object.rkt")
 
 (define ε '())  ; empty environment
 
@@ -307,6 +308,41 @@
   (check-equal? (eval-lambda ε '(to-string #t)) "true")
   (check-equal? (eval-lambda ε '(to-string null)) "null"))
 
+(test-case "Type conversion: to-symbol"
+  (check-equal? (eval-lambda ε '(to-symbol "hello")) '(sym "hello"))
+  (check-equal? (eval-lambda ε '(to-symbol "foo_bar")) '(sym "foo_bar")))
+
+(test-case "Type cast: as-type"
+  ;; Compatible cast succeeds (int is number)
+  (check-equal? (eval-lambda ε '(as-type 42 number-type)) 42)
+  (check-equal? (eval-lambda ε '(as-type 42 int-type)) 42)
+  ;; Incompatible cast → error
+  (check-pred is-error? (eval-lambda ε '(as-type 42 string-type))))
+
+(test-case "Slice expression"
+  ;; Array slicing
+  (define arr-env (list (cons 'a '(array-val 10 20 30 40 50))))
+  (check-equal? (eval-lambda arr-env '(slice a 1 3))
+                '(array-val 20 30))
+  ;; Negative index
+  (check-equal? (eval-lambda arr-env '(slice a 0 -1))
+                '(array-val 10 20 30 40))
+  ;; String slicing
+  (check-equal? (eval-lambda ε '(slice "hello" 1 3)) "el"))
+
+(test-case "Named function definition (def-fn)"
+  ;; def-fn creates a named recursive binding
+  (check-equal?
+   (eval-lambda ε '(def-fn fact (n)
+                     (if (le n 1) 1 (mul n (app fact (sub n 1))))
+                     (app fact 5)))
+   120)
+  ;; Simple non-recursive
+  (check-equal?
+   (eval-lambda ε '(def-fn double (x) (mul x 2)
+                     (app double 7)))
+   14))
+
 (test-case "Vector arithmetic (element-wise)"
   ;; [1,2,3] + [4,5,6] → [5,7,9]
   (check-equal? (eval-lambda ε '(add (array 1 2 3) (array 4 5 6)))
@@ -519,6 +555,11 @@
   (check-equal? (lambda-type->c-type 'decimal-type)  'Decimal*)
   (check-equal? (lambda-type->c-type 'datetime-type) 'DateTime)
   (check-equal? (lambda-type->c-type 'binary-type)   'String*)
+  ;; New types added in Phase 1
+  (check-equal? (lambda-type->c-type 'object-type)      'Object*)
+  (check-equal? (lambda-type->c-type 'num-sized-type)   'uint64_t)
+  (check-equal? (lambda-type->c-type 'uint64-type)      'uint64_t)
+  (check-equal? (lambda-type->c-type 'array-num-type)   'ArrayNum*)
   ;; Specialized arrays
   (check-equal? (lambda-type->c-type 'array-int-type)   'ArrayInt*)
   (check-equal? (lambda-type->c-type 'array-int64-type) 'ArrayInt64*)
@@ -580,15 +621,26 @@
   (check-equal? (unboxing-function 'double)   'it2d)
   (check-equal? (unboxing-function 'bool)     'it2b)
   (check-equal? (unboxing-function 'String*)  'it2s)
-  (check-equal? (unboxing-function 'Symbol*)  'it2sym)
-  (check-equal? (unboxing-function 'DateTime) 'it2dt)
-  (check-equal? (unboxing-function 'Decimal*) 'it2dec))
+  (check-equal? (unboxing-function 'Symbol*)  'it2s)      ; symbol uses it2s per type_box_table
+  (check-equal? (unboxing-function 'DateTime) 'it2k)      ; it2k per type_box_table
+  (check-equal? (unboxing-function 'Decimal*) 'it2c))     ; it2c per type_box_table
 
-(test-case "Unboxing: container types use cast-from-Item"
-  (for ([ct '(Array* List* Map* Element* Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
-    (check-equal? (unboxing-function ct) 'cast-from-Item
-                  (format "~a should unbox via cast-from-Item" ct))))
+(test-case "Unboxing: container types"
+  ;; Containers with specific unboxing functions (per type_box_table)
+  (check-equal? (unboxing-function 'Array*)    'it2arr)
+  (check-equal? (unboxing-function 'Map*)      'it2map)
+  (check-equal? (unboxing-function 'Element*)  'it2elmt)
+  (check-equal? (unboxing-function 'Object*)   'it2obj)
+  (check-equal? (unboxing-function 'Range*)    'it2range)
+  (check-equal? (unboxing-function 'Path*)     'it2path)
+  (check-equal? (unboxing-function 'Function*) 'it2p)
+  ;; Containers that still use generic cast-from-Item
+  (check-equal? (unboxing-function 'List*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'Type*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt*)    'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt64*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayFloat*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayNum*) 'it2arr))
 
 (test-case "Conversion: scalar promotions"
   ;; Only int64 ↔ double conversions remain (no int32_t in Lambda)
@@ -777,8 +829,8 @@
 (test-case "Property: every pointer C-type has unboxing"
   ;; All pointer types must be recoverable from Item
   (for ([ct '(String* Symbol* Array* List* Map* Element* Decimal*
-              Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
+              Object* Range* Path* Function* Type*
+              ArrayNum* ArrayInt* ArrayInt64* ArrayFloat*)])
     (check-not-false (unboxing-function ct)
                      (format "~a must have unboxing fn" ct))))
 
@@ -794,8 +846,8 @@
 
 (test-case "Property: same-type conversion is always #f"
   ;; ∀ C-type ct: required-conversion(ct, ct) == #f
-  (for ([ct '(Item int64_t double bool String* Symbol*
-              Array* List* Map* Element* Decimal* DateTime
+  (for ([ct '(Item int64_t uint64_t double bool String* Symbol*
+              Array* ArrayNum* List* Map* Element* Object* Decimal* DateTime
               Range* Path* Function* Type*)])
     (check-false (required-conversion ct ct)
                  (format "~a → ~a should need no conversion" ct ct))))
@@ -825,7 +877,7 @@
                                 name)))))
 
 (test-case "Property: all container types map to pointer C-types"
-  (for ([τ '(array-type list-type map-type element-type)])
+  (for ([τ '(array-type list-type map-type element-type object-type)])
     (define ct (lambda-type->c-type τ))
     (check-true (pointer-c-type? ct)
                 (format "~a should map to pointer type, got ~a" τ ct))))
@@ -852,7 +904,11 @@
   (check-equal? (semantic-unboxing-function 'int64-type) 'it2l)
   (check-equal? (semantic-unboxing-function 'float-type) 'it2d)
   (check-equal? (semantic-unboxing-function 'bool-type)  'it2b)
-  (check-equal? (semantic-unboxing-function 'string-type) 'it2s))
+  (check-equal? (semantic-unboxing-function 'string-type) 'it2s)
+  ;; symbol/datetime/decimal use the names from type_box_table
+  (check-equal? (semantic-unboxing-function 'symbol-type) 'it2s)
+  (check-equal? (semantic-unboxing-function 'datetime-type) 'it2k)
+  (check-equal? (semantic-unboxing-function 'decimal-type) 'it2c))
 
 (test-case "int and int64 share C-type but differ semantically"
   ;; Both map to int64_t
@@ -866,6 +922,870 @@
   ;; If-else between int and int64 → ok (same C-type)
   (define result (verify-if-branches 'int-type 'int64-type))
   (check-equal? (car result) 'ok))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
+;; PART 6: PROCEDURAL EXTENSION TESTS
+;; ════════════════════════════════════════════════════════════════════════════
+
+(require "lambda-proc.rkt")
+
+;; Helper: run a pn body (list of statements) and return (values val output-string)
+(define (pn-run . stmts)
+  (run-pn-body stmts))
+
+;; ── Mutable Variables ──
+
+(test-case "Proc: var declaration and read"
+  (define-values (v out) (pn-run '(var x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: var assignment"
+  (define-values (v out) (pn-run '(var x 10) '(assign x 99) 'x))
+  (check-equal? v 99))
+
+(test-case "Proc: var null then reassign"
+  (define-values (v out) (pn-run '(var x null) '(assign x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: multiple var declarations"
+  (define-values (v out) (pn-run '(var a 1) '(var b 2) '(var c 3) '(add (add a b) c)))
+  (check-equal? v 6))
+
+(test-case "Proc: var type widening (int → float → string)"
+  (define-values (v out)
+    (pn-run '(var x 42)
+            '(assign x 3.14)
+            '(print x)
+            '(assign x "hello")
+            'x))
+  (check-equal? v "hello")
+  (check-equal? out "3.14"))
+
+;; ── Print Side Effects ──
+
+(test-case "Proc: print output"
+  (define-values (v out) (pn-run '(print "hello") '(print " world")))
+  (check-equal? out "hello world"))
+
+(test-case "Proc: print numbers"
+  (define-values (v out) (pn-run '(print 42) '(print " ") '(print 3.14)))
+  (check-equal? out "42 3.14"))
+
+(test-case "Proc: print null"
+  (define-values (v out) (pn-run '(print null)))
+  (check-equal? out "null"))
+
+;; ── While Loop ──
+
+(test-case "Proc: simple while loop"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 5) (seq (assign x (add x 1))))
+            'x))
+  (check-equal? v 5))
+
+(test-case "Proc: while with accumulator"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 1)
+            '(while (le i 10) (seq
+              (assign sum (add sum i))
+              (assign i (add i 1))))
+            'sum))
+  (check-equal? v 55))
+
+(test-case "Proc: nested while loops"
+  (define-values (v out)
+    (pn-run '(var total 0)
+            '(var i 0)
+            '(while (lt i 3) (seq
+              (var j 0)
+              (while (lt j 3) (seq
+                (assign total (add total 1))
+                (assign j (add j 1))))
+              (assign i (add i 1))))
+            'total))
+  (check-equal? v 9))
+
+;; ── Break and Continue ──
+
+(test-case "Proc: while with break"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while #t (seq
+              (if-proc (ge x 3) (break))
+              (assign x (add x 1))))
+            'x))
+  (check-equal? v 3))
+
+(test-case "Proc: while with continue (skip even)"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 0)
+            '(while (lt i 10) (seq
+              (assign i (add i 1))
+              (if-proc (eq (mod i 2) 0) (continue))
+              (assign sum (add sum i))))
+            'sum))
+  (check-equal? v 25))  ; 1+3+5+7+9
+
+;; ── Return ──
+
+(test-case "Proc: early return"
+  (define-values (v out)
+    (pn-run '(return 42)
+            '(print "unreachable")))
+  (check-equal? v 42)
+  (check-equal? out ""))
+
+(test-case "Proc: return from while"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 100) (seq
+              (assign x (add x 1))
+              (if-proc (eq x 5) (return x))))
+            'x))
+  (check-equal? v 5))
+
+;; ── Procedural Functions (pn) ──
+
+(test-case "Proc: def-pn and call"
+  (define-values (v out)
+    (pn-run '(def-pn double (x) (seq (return (mul x 2))))
+            '(app-proc double 21)))
+  (check-equal? v 42))
+
+(test-case "Proc: pn with while loop"
+  (define-values (v out)
+    (pn-run '(def-pn factorial (n) (seq
+              (var result 1)
+              (var i 1)
+              (while (le i n) (seq
+                (assign result (mul result i))
+                (assign i (add i 1))))
+              result))
+            '(app-proc factorial 5)))
+  (check-equal? v 120))
+
+(test-case "Proc: pn param mutation"
+  (define-values (v out)
+    (pn-run '(def-pn countdown (n) (seq
+              (while (gt n 0) (seq
+                (print n)
+                (print " ")
+                (assign n (sub n 1))))
+              (print "done")))
+            '(app-proc countdown 3)))
+  (check-equal? out "3 2 1 done"))
+
+(test-case "Proc: pn with early return"
+  (define-values (v out)
+    (pn-run '(def-pn find-first-gt (arr threshold) (seq
+              (var i 0)
+              (while (lt i (len-expr arr)) (seq
+                (if-proc (gt (index arr i) threshold)
+                  (return (index arr i)))
+                (assign i (add i 1))))
+              null))
+            '(app-proc find-first-gt (array 1 5 3 8 2) 4)))
+  (check-equal? v 5))
+
+;; ── Array Mutation ──
+
+(test-case "Proc: array element assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 10 20 30 40 50))
+            '(assign-index arr 0 100)
+            '(assign-index arr 2 300)
+            'arr))
+  (check-equal? v '(array-val 100 20 300 40 50)))
+
+(test-case "Proc: array negative index assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 1 2 3 4 5))
+            '(assign-index arr -1 99)
+            'arr))
+  (check-equal? v '(array-val 1 2 3 4 99)))
+
+(test-case "Proc: array assignment in while loop"
+  (define-values (v out)
+    (pn-run '(var arr (array 0 0 0 0 0))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-index arr i (mul i i))
+              (assign i (add i 1))))
+            'arr))
+  (check-equal? v '(array-val 0 1 4 9 16)))
+
+;; ── Map Mutation ──
+
+(test-case "Proc: map field assignment"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 10) (y 20)))
+            '(assign-member obj x 42)
+            'obj))
+  (check-equal? v '(map-val (x 42) (y 20))))
+
+(test-case "Proc: map field in while loop (counter)"
+  (define-values (v out)
+    (pn-run '(var counter (map-expr (value 0)))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-member counter value (add (member counter value) 1))
+              (assign i (add i 1))))
+            '(member counter value)))
+  (check-equal? v 5))
+
+(test-case "Proc: map add new field"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 1)))
+            '(assign-member obj y 2)
+            'obj))
+  (check-equal? v '(map-val (x 1) (y 2))))
+
+;; ── Closure Mutation (shared store) ──
+
+(test-case "Proc: closure counter pattern"
+  (define-values (v out)
+    (pn-run '(var count 0)
+            '(def-pn inc () (seq
+              (assign count (add count 1))
+              count))
+            '(var a (app-proc inc))
+            '(var b (app-proc inc))
+            '(var c (app-proc inc))
+            '(add (add a b) c)))
+  (check-equal? v 6))  ; 1+2+3
+
+;; ── If-else (procedural) ──
+
+(test-case "Proc: if-else with assignment"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var result 0)
+            '(if-proc (gt x 5)
+              (assign result (mul x 2))
+              (assign result (mul x 3)))
+            'result))
+  (check-equal? v 20))
+
+(test-case "Proc: if without else"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var msg "default")
+            '(if-proc (gt x 5) (assign msg "big"))
+            'msg))
+  (check-equal? v "big"))
+
+;; ── Fibonacci (classic proc test) ──
+
+(test-case "Proc: fibonacci via while"
+  (define-values (v out)
+    (pn-run '(def-pn fib (n) (seq
+              (var a 0)
+              (var b 1)
+              (var i 2)
+              (while (le i n) (seq
+                (var temp (add a b))
+                (assign a b)
+                (assign b temp)
+                (assign i (add i 1))))
+              b))
+            '(app-proc fib 10)))
+  (check-equal? v 55))
+
+;; ── Bubble sort pattern ──
+
+(test-case "Proc: swap via temp variable"
+  (define-values (v out)
+    (pn-run '(var a 5)
+            '(var b 3)
+            '(var temp a)
+            '(assign a b)
+            '(assign b temp)
+            '(add (mul a 10) b)))
+  ;; a=3, b=5 → 35
+  (check-equal? v 35))
+
+;; ── Combination: print + while + function ──
+
+(test-case "Proc: print inside while"
+  (define-values (v out)
+    (pn-run '(var i 1)
+            '(while (le i 5) (seq
+              (print i)
+              (if-proc (lt i 5) (print ","))
+              (assign i (add i 1))))))
+  (check-equal? out "1,2,3,4,5"))
+
+;; ── Error handling in proc ──
+
+(test-case "Proc: error propagation"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 0)))
+  (check-pred is-error? v))
+
+(test-case "Proc: error-free path"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 2)))
+  (check-equal? v 5.0))
+
+;; ── Property: pn return always unwraps at call boundary ──
+
+(test-case "Property: return unwraps at call boundary"
+  (define-values (v out)
+    (pn-run '(def-pn inner () (seq (return 42)))
+            '(def-pn outer () (seq
+              (var x (app-proc inner))
+              (return (add x 1))))
+            '(app-proc outer)))
+  (check-equal? v 43))
+
+;; ── Property: break does not escape function ──
+
+(test-case "Property: break contained in while"
+  (define-values (v out)
+    (pn-run '(def-pn f () (seq
+              (var x 0)
+              (while #t (seq
+                (assign x (add x 1))
+                (if-proc (eq x 3) (break))))
+              x))
+            '(app-proc f)))
+  (check-equal? v 3))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
+;; PART 7: OBJECT TYPE SYSTEM TESTS
+;; ════════════════════════════════════════════════════════════════════════════
+
+;; Helper: register types, then run procedural statements
+(define (pn-obj-run . args)
+  ;; All thunks come first (procedures that register types), rest are statements
+  (clear-type-registry!)
+  (define thunks (takef args procedure?))
+  (define stmts (dropf args procedure?))
+  (for ([thunk thunks]) (thunk))
+  (run-pn-body stmts))
+
+;; ── Type registration helpers ──
+(define (reg-point!)
+  (register-type! 'Point #f
+    (list (field-spec 'x 'int-type 'no-default 'no-constraint)
+          (field-spec 'y 'int-type 'no-default 'no-constraint))
+    '() '()))
+
+(define (reg-counter!)
+  (register-type! 'Counter #f
+    (list (field-spec 'value 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'double 'fn '() '(mul value 2))
+          (method-spec 'add 'fn '(n) '(add value n)))
+    '()))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.1 Basic object: construction, field access, type checking
+;; Corresponds to: test/lambda/object.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: basic construction and field access"
+  ;; type Point { x: int, y: int }
+  ;; let p = <Point x: 3, y: 4>
+  (clear-type-registry!) (reg-point!)
+  (define p (eval-lambda ε '(make-object Point (x 3) (y 4))))
+  (check-equal? p '(object-val Point (x 3) (y 4))))
+
+(test-case "Object: field access via member"
+  ;; p.x → 3, p.y → 4
+  (clear-type-registry!) (reg-point!)
+  (define p '(object-val Point (x 3) (y 4)))
+  (check-equal? (eval-lambda `((p . ,p)) '(member p x)) 3)
+  (check-equal? (eval-lambda `((p . ,p)) '(member p y)) 4))
+
+(test-case "Object: fn method — zero args"
+  ;; type Counter { value: int; fn double() => value * 2 }
+  ;; let c = <Counter value: 5>; c.double() → 10
+  (clear-type-registry!) (reg-counter!)
+  (define c '(object-val Counter (value 5)))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c double)) 10))
+
+(test-case "Object: fn method — one arg"
+  ;; c.add(3) → 8
+  (clear-type-registry!) (reg-counter!)
+  (define c '(object-val Counter (value 5)))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c add 3)) 8))
+
+(test-case "Object: is-type with nominal type"
+  ;; p is Point → true; p is object → true; 5 is Point → false
+  (clear-type-registry!) (reg-point!)
+  (define p '(object-val Point (x 3) (y 4)))
+  (check-equal? (eval-lambda `((p . ,p)) '(is-type p Point)) #t)
+  (check-equal? (eval-lambda `((p . ,p)) '(is-type p object-type)) #t)
+  (check-equal? (eval-lambda ε '(is-type 5 Point)) #f))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.2 Default field values
+;; Corresponds to: test/lambda/object_default.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-config!)
+  (register-type! 'Config #f
+    (list (field-spec 'host 'string-type "localhost" 'no-constraint)
+          (field-spec 'port 'int-type 8080 'no-constraint)
+          (field-spec 'debug 'bool-type #f 'no-constraint))  ; default=#f (false)
+    '() '()))
+
+(test-case "Object: partial override with defaults"
+  ;; let c1 = <Config host: "example.com">
+  ;; c1.host → "example.com", c1.port → 8080, c1.debug → false
+  (clear-type-registry!) (reg-config!)
+  (define c1 (eval-lambda ε '(make-object Config (host "example.com"))))
+  (check-equal? (object-field-ref c1 'host) "example.com")
+  (check-equal? (object-field-ref c1 'port) 8080)
+  (check-equal? (object-field-ref c1 'debug) #f))
+
+(test-case "Object: full override"
+  ;; let c2 = <Config host: "api.io", port: 443, debug: true>
+  (clear-type-registry!) (reg-config!)
+  (define c2 (eval-lambda ε '(make-object Config (host "api.io") (port 443) (debug #t))))
+  (check-equal? (object-field-ref c2 'host) "api.io")
+  (check-equal? (object-field-ref c2 'port) 443)
+  (check-equal? (object-field-ref c2 'debug) #t))
+
+(test-case "Object: inherited defaults"
+  ;; type Shape { color: string = "black" }
+  ;; type Circle : Shape { radius: int = 10 }
+  ;; let c3 = <Circle color: "red">; c3.color → "red", c3.radius → 10
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 10 'no-constraint))
+    '() '())
+  (define c3 (eval-lambda ε '(make-object Circle (color "red"))))
+  (check-equal? (object-field-ref c3 'color) "red")
+  (check-equal? (object-field-ref c3 'radius) 10))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.3 Inheritance: fields, methods, type checking, overrides
+;; Corresponds to: test/lambda/object_inherit.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-shape-hierarchy!)
+  ;; type Shape { color: string; fn describe() => "Shape: " ++ color }
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'describe 'fn '() '(concat "Shape: " color)))
+    '())
+  ;; type Circle : Shape { radius: int; fn area() => radius * radius * 3 }
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'area 'fn '() '(mul (mul radius radius) 3)))
+    '()))
+
+(test-case "Object: inherited field access"
+  ;; let c = <Circle color: "red", radius: 5>
+  ;; c.color → "red", c.radius → 5
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define ρ `((c . ,c)))
+  (check-equal? (eval-lambda ρ '(member c color)) "red")
+  (check-equal? (eval-lambda ρ '(member c radius)) 5))
+
+(test-case "Object: inherited method call"
+  ;; c.describe() → "Shape: red"
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c describe)) "Shape: red"))
+
+(test-case "Object: own method call"
+  ;; c.area() → 75
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c area)) 75))
+
+(test-case "Object: type checking with inheritance"
+  ;; c is Circle → true; c is Shape → true; c is object → true; 5 is Circle → false
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define ρ `((c . ,c)))
+  (check-equal? (eval-lambda ρ '(is-type c Circle)) #t)
+  (check-equal? (eval-lambda ρ '(is-type c Shape)) #t)
+  (check-equal? (eval-lambda ρ '(is-type c object-type)) #t)
+  (check-equal? (eval-lambda ε '(is-type 5 Circle)) #f))
+
+(test-case "Object: method override"
+  ;; type Animal { name: string; fn speak() => name ++ " says ..." }
+  ;; type Dog : Animal { breed: string; fn speak() => name ++ " says woof!" }
+  ;; d.speak() → "Rex says woof!"
+  (clear-type-registry!)
+  (register-type! 'Animal #f
+    (list (field-spec 'name 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'speak 'fn '() '(concat name " says ...")))
+    '())
+  (register-type! 'Dog 'Animal
+    (list (field-spec 'breed 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'speak 'fn '() '(concat name " says woof!")))
+    '())
+  (define d (eval-lambda ε '(make-object Dog (name "Rex") (breed "Lab"))))
+  (define ρ `((d . ,d)))
+  (check-equal? (eval-lambda ρ '(method-call d speak)) "Rex says woof!")
+  (check-equal? (eval-lambda ρ '(member d name)) "Rex")
+  (check-equal? (eval-lambda ρ '(member d breed)) "Lab")
+  (check-equal? (eval-lambda ρ '(is-type d Dog)) #t)
+  (check-equal? (eval-lambda ρ '(is-type d Animal)) #t))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.4 Object update/spread
+;; Corresponds to: test/lambda/object_update.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-fpoint!)
+  (register-type! 'FPoint #f
+    (list (field-spec 'x 'float-type 'no-default 'no-constraint)
+          (field-spec 'y 'float-type 'no-default 'no-constraint))
+    '() '()))
+
+(test-case "Object: update — override one field"
+  ;; let p = <FPoint x: 1.0, y: 2.0>
+  ;; let q = <FPoint *:p, x: 10.0>; q.x → 10.0, q.y → 2.0
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define q (eval-lambda `((p . ,p)) '(object-update FPoint p (x 10.0))))
+  (check-equal? (object-field-ref q 'x) 10.0)
+  (check-equal? (object-field-ref q 'y) 2.0))
+
+(test-case "Object: update — override all fields"
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define r (eval-lambda `((p . ,p)) '(object-update FPoint p (x 100.0) (y 200.0))))
+  (check-equal? (object-field-ref r 'x) 100.0)
+  (check-equal? (object-field-ref r 'y) 200.0))
+
+(test-case "Object: update — copy all (no overrides)"
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define s (eval-lambda `((p . ,p)) '(object-update FPoint p)))
+  (check-equal? (object-field-ref s 'x) 1.0)
+  (check-equal? (object-field-ref s 'y) 2.0))
+
+(test-case "Object: update with inheritance"
+  ;; type Shape { color: string = "black" }
+  ;; type Circle : Shape { radius: int }
+  ;; let c2 = <Circle *:c1, radius: 10>
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 'no-default 'no-constraint))
+    '() '())
+  (define c1 (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define c2 (eval-lambda `((c1 . ,c1)) '(object-update Circle c1 (radius 10))))
+  (check-equal? (object-field-ref c2 'color) "red")
+  (check-equal? (object-field-ref c2 'radius) 10))
+
+(test-case "Object: update with ~ self-reference in method"
+  ;; type Vec { x: float, y: float;
+  ;;   fn translate(dx, dy) => <Vec *:~, x: x + dx, y: y + dy> }
+  (clear-type-registry!)
+  (register-type! 'Vec #f
+    (list (field-spec 'x 'float-type 'no-default 'no-constraint)
+          (field-spec 'y 'float-type 'no-default 'no-constraint))
+    (list (method-spec 'translate 'fn '(dx dy)
+            '(object-update Vec ~ (x (add x dx)) (y (add y dy))))
+          (method-spec 'scale 'fn '(factor)
+            '(object-update Vec ~ (x (mul x factor)) (y (mul y factor)))))
+    '())
+  (define v (eval-lambda ε '(make-object Vec (x 3.0) (y 4.0))))
+  (define ρ `((v . ,v)))
+  ;; v.translate(1.0, -1.0) → Vec(x: 4.0, y: 3.0)
+  (define v2 (eval-lambda ρ '(method-call v translate 1.0 -1.0)))
+  (check-equal? (object-field-ref v2 'x) 4.0)
+  (check-equal? (object-field-ref v2 'y) 3.0)
+  ;; v.scale(2.0) → Vec(x: 6.0, y: 8.0)
+  (define v3 (eval-lambda ρ '(method-call v scale 2.0)))
+  (check-equal? (object-field-ref v3 'x) 6.0)
+  (check-equal? (object-field-ref v3 'y) 8.0))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.5 Constraints: field-level and object-level
+;; Corresponds to: test/lambda/object_constraint.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-user!)
+  ;; type User { name: string that (len(~) > 0), age: int that (0 <= ~ and ~ <= 150), email: string }
+  (register-type! 'User #f
+    (list (field-spec 'name 'string-type 'no-default '(gt (len-expr ~) 0))
+          (field-spec 'age 'int-type 'no-default '(l-and (le 0 ~) (le ~ 150)))
+          (field-spec 'email 'string-type 'no-default 'no-constraint))
+    '() '()))
+
+(test-case "Object: field constraint — valid"
+  ;; let alice = <User name: "Alice", age: 30, email: "a@x.com">; alice is User → true
+  (clear-type-registry!) (reg-user!)
+  (define alice (eval-lambda ε '(make-object User (name "Alice") (age 30) (email "a@x.com"))))
+  (check-pred object-val? alice))
+
+(test-case "Object: field constraint — empty name fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "") (age 30) (email "b@x.com"))))
+  (check-pred is-error? bad))
+
+(test-case "Object: field constraint — negative age fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "Bob") (age -5) (email "b@x.com"))))
+  (check-pred is-error? bad))
+
+(test-case "Object: field constraint — age > 150 fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "Carol") (age 200) (email "c@x.com"))))
+  (check-pred is-error? bad))
+
+(define (reg-daterange!)
+  ;; type DateRange { start: int, end: int; that (~.end > ~.start) }
+  (register-type! 'DateRange #f
+    (list (field-spec 'start 'int-type 'no-default 'no-constraint)
+          (field-spec 'end 'int-type 'no-default 'no-constraint))
+    '()
+    (list '(gt (member ~ end) (member ~ start)))))
+
+(test-case "Object: object constraint — valid"
+  (clear-type-registry!) (reg-daterange!)
+  (define dr (eval-lambda ε '(make-object DateRange (start 1) (end 10))))
+  (check-pred object-val? dr))
+
+(test-case "Object: object constraint — invalid (end < start)"
+  (clear-type-registry!) (reg-daterange!)
+  (define bad (eval-lambda ε '(make-object DateRange (start 10) (end 1))))
+  (check-pred is-error? bad))
+
+(test-case "Object: combined field + object constraints"
+  ;; type Config { min: int that (~ >= 0), max: int that (~ >= 0); that (~.max > ~.min) }
+  (clear-type-registry!)
+  (register-type! 'CConfig #f
+    (list (field-spec 'min 'int-type 'no-default '(ge ~ 0))
+          (field-spec 'max 'int-type 'no-default '(ge ~ 0)))
+    '()
+    (list '(gt (member ~ max) (member ~ min))))
+  ;; valid
+  (define good (eval-lambda ε '(make-object CConfig (min 1) (max 10))))
+  (check-pred object-val? good)
+  ;; field constraint fails (negative min)
+  (define bad1 (eval-lambda ε '(make-object CConfig (min -1) (max 10))))
+  (check-pred is-error? bad1)
+  ;; object constraint fails (max <= min)
+  (define bad2 (eval-lambda ε '(make-object CConfig (min 5) (max 3))))
+  (check-pred is-error? bad2))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.6 Pattern matching with object types
+;; Corresponds to: test/lambda/object_pattern.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: match on nominal type"
+  ;; match c { case Circle: "circle" case Rect: "rect" case Shape: "shape" default: "unknown" }
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'float-type 'no-default 'no-constraint))
+    '() '())
+  (register-type! 'Rect 'Shape
+    (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+          (field-spec 'height 'float-type 'no-default 'no-constraint))
+    '() '())
+  (define circle-obj (eval-lambda ε '(make-object Circle (color "red") (radius 5.0))))
+  (define rect-obj (eval-lambda ε '(make-object Rect (color "blue") (width 3.0) (height 4.0))))
+  ;; describe function via match
+  (define describe-match
+    '(match s (case-type Circle "circle")
+              (case-type Rect "rect")
+              (case-type Shape "shape")
+              (default-case "unknown")))
+  ;; circle matches Circle first
+  (check-equal? (eval-lambda `((s . ,circle-obj)) describe-match) "circle")
+  ;; rect matches Rect
+  (check-equal? (eval-lambda `((s . ,rect-obj)) describe-match) "rect")
+  ;; non-object → "unknown"
+  (check-equal? (eval-lambda `((s . 42)) describe-match) "unknown"))
+
+(test-case "Object: match with inheritance (Circle is also Shape)"
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'float-type 'no-default 'no-constraint))
+    '() '())
+  (register-type! 'Rect 'Shape
+    (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+          (field-spec 'height 'float-type 'no-default 'no-constraint))
+    '() '())
+  (define circle-obj (eval-lambda ε '(make-object Circle (color "red") (radius 5.0))))
+  (define rect-obj (eval-lambda ε '(make-object Rect (color "blue") (width 3.0) (height 4.0))))
+  ;; is_shape: match s { case Shape: true default: false }
+  (define is-shape-match
+    '(match s (case-type Shape #t) (default-case #f)))
+  (check-equal? (eval-lambda `((s . ,circle-obj)) is-shape-match) #t)
+  (check-equal? (eval-lambda `((s . ,rect-obj)) is-shape-match) #t)
+  (check-equal? (eval-lambda `((s . "hello")) is-shape-match) #f))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.7 pn mutation methods
+;; Corresponds to: test/lambda/object_mutation.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-mut-counter!)
+  ;; type Counter { count: int = 0;
+  ;;   pn increment() { count = count + 1 }
+  ;;   pn add(n) { count = count + n }
+  ;;   pn reset() { count = 0 } }
+  (register-type! 'MCounter #f
+    (list (field-spec 'count 'int-type 0 'no-constraint))
+    (list (method-spec 'increment 'pn '()
+            '(seq (assign count (add count 1))))
+          (method-spec 'add-n 'pn '(n)
+            '(seq (assign count (add count n))))
+          (method-spec 'reset 'pn '()
+            '(seq (assign count 0))))
+    '()))
+
+(test-case "Object: pn method — basic increment"
+  ;; let c = <MCounter count: 0>
+  ;; c.count → 0; c.increment(); c.count → 1; c.increment(); c.count → 2
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 0)))
+      '(print (member c count))          ;; 0
+      '(pn-method-call c increment)
+      '(print (member c count))          ;; 1
+      '(pn-method-call c increment)
+      '(print (member c count))))        ;; 2
+  (check-equal? out "012"))
+
+(test-case "Object: pn method — with parameter"
+  ;; c.add(10); c.count → 12
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 2)))
+      '(pn-method-call c add-n 10)
+      '(print (member c count))))
+  (check-equal? out "12"))
+
+(test-case "Object: pn method — reset"
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 5)))
+      '(pn-method-call c reset)
+      '(print (member c count))))
+  (check-equal? out "0"))
+
+(test-case "Object: pn method — multiple fields"
+  ;; type Rect { width: float, height: float;
+  ;;   pn scale(factor) { width = width * factor; height = height * factor }
+  ;;   fn area() => width * height }
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'MRect #f
+              (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+                    (field-spec 'height 'float-type 'no-default 'no-constraint))
+              (list (method-spec 'scale 'pn '(factor)
+                      '(seq (assign width (mul width factor))
+                            (assign height (mul height factor))))
+                    (method-spec 'area 'fn '() '(mul width height)))
+              '()))
+      '(var r (make-object MRect (width 3.0) (height 4.0)))
+      '(print (method-call r area))       ;; 12.0
+      '(pn-method-call r scale 2.0)
+      '(print (method-call r area))       ;; 48.0
+      '(print (member r width))))         ;; 6.0
+  (check-equal? out "12486"))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.8 Additional: object_direct_access patterns
+;; Corresponds to: test/lambda/object_direct_access.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: fn method with param combining fields and args"
+  ;; type Adder { base: int; fn add(n) => base + n; fn mul(n) => base * n }
+  (clear-type-registry!)
+  (register-type! 'Adder #f
+    (list (field-spec 'base 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'add 'fn '(n) '(add base n))
+          (method-spec 'mul 'fn '(n) '(mul base n)))
+    '())
+  (define a (eval-lambda ε '(make-object Adder (base 10))))
+  (check-equal? (eval-lambda `((a . ,a)) '(method-call a add 5)) 15)
+  (check-equal? (eval-lambda `((a . ,a)) '(method-call a mul 3)) 30))
+
+(test-case "Object: fn method with bool field"
+  ;; type Gate { open: bool; fn status() => if (open) "open" else "closed" }
+  (clear-type-registry!)
+  (register-type! 'Gate #f
+    (list (field-spec 'open 'bool-type 'no-default 'no-constraint))
+    (list (method-spec 'status 'fn '() '(if open "open" "closed")))
+    '())
+  (define g1 (eval-lambda ε '(make-object Gate (open #t))))
+  (define g2 (eval-lambda ε '(make-object Gate (open #f))))
+  (check-equal? (eval-lambda `((g1 . ,g1)) '(method-call g1 status)) "open")
+  (check-equal? (eval-lambda `((g2 . ,g2)) '(method-call g2 status)) "closed"))
+
+(test-case "Object: pn write-back then fn read"
+  ;; type Toggle { on: bool = false; pn enable() { on = true } fn state() => on }
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'Toggle #f
+              (list (field-spec 'on 'bool-type 'no-default 'no-constraint))
+              (list (method-spec 'enable 'pn '()
+                      '(seq (assign on #t)))
+                    (method-spec 'disable 'pn '()
+                      '(seq (assign on #f)))
+                    (method-spec 'state 'fn '() 'on))
+              '()))
+      '(var tog (make-object Toggle (on #f)))
+      '(print (method-call tog state))     ;; "false"
+      '(pn-method-call tog enable)
+      '(print (method-call tog state))     ;; "true"
+      '(pn-method-call tog disable)
+      '(print (method-call tog state))))   ;; "false"
+  (check-equal? out "falsetruefalse"))
+
+(test-case "Object: pn deposit/withdraw pattern"
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'Wallet #f
+              (list (field-spec 'balance 'int-type 0 'no-constraint))
+              (list (method-spec 'deposit 'pn '(amt)
+                      '(seq (assign balance (add balance amt))))
+                    (method-spec 'withdraw 'pn '(amt)
+                      '(seq (assign balance (sub balance amt))))
+                    (method-spec 'check 'fn '() 'balance))
+              '()))
+      '(var w (make-object Wallet (balance 0)))
+      '(pn-method-call w deposit 100)
+      '(print (method-call w check))       ;; 100
+      '(pn-method-call w withdraw 30)
+      '(print (method-call w check))       ;; 70
+      '(pn-method-call w deposit 50)
+      '(print (method-call w check))))     ;; 120
+  (check-equal? out "10070120"))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════

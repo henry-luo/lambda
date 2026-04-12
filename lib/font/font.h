@@ -119,6 +119,8 @@ typedef struct FontMetrics {
     float em_size;              // units per em (typically 1000 or 2048)
     float underline_position;   // underline position below baseline (positive = down)
     float underline_thickness;  // underline stroke thickness
+    float strikeout_position;   // strikeout position above baseline (in CSS pixels)
+    float strikeout_size;       // strikeout line thickness (in CSS pixels)
 
     bool has_kerning;           // font contains kerning data
     bool use_typo_metrics;      // OS/2 fsSelection bit 7 (USE_TYPO_METRICS) is set
@@ -215,6 +217,12 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering);
 
+// Like font_load_glyph but skips the primary font and forces codepoint
+// fallback to an emoji font. Used when VS16 (U+FE0F) follows a dual-
+// presentation codepoint to force emoji/color rendering.
+LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* style,
+                                    uint32_t codepoint, bool for_rendering);
+
 // ============================================================================
 // Text Measurement — convenience for layout
 // ============================================================================
@@ -275,6 +283,11 @@ float font_get_x_height_ratio(FontHandle* handle);
 // Returns the line-height in CSS pixels.
 float font_calc_normal_line_height(FontHandle* handle);
 
+// Get the system CJK font's normal line-height at a given font size.
+// Chrome blends CJK system font metrics for lines containing CJK characters.
+// Returns the CJK line-height, or 0 if not available (non-macOS or no CJK font).
+float get_cjk_system_line_height(float font_size);
+
 // Get the normal line-height split into ascender and descender components.
 // Chrome/Blink splits the normal line-height as:
 //   ascender = asc + desc (content height above baseline)
@@ -288,6 +301,11 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 // For Apple's classic fonts (Times/Helvetica/Courier), uses CoreText with 15% hack.
 // For all other fonts, returns FreeType metrics.height (ascent + descent).
 float font_get_cell_height(FontHandle* handle);
+
+// Get the raw content-area ascender for rendering glyph baseline positioning.
+// On macOS, returns CoreText ascent (matching the CT rasterizer's coordinate system).
+// Fallback: hhea_ascender. Returns value in CSS pixels (positive).
+float font_get_rendering_ascender(FontHandle* handle);
 
 // ============================================================================
 // Font Face Management — register, query, and load font face descriptors
@@ -344,6 +362,10 @@ void font_face_clear(FontContext* ctx);
 // and codepoint fallback cache. Keeps system font database intact.
 // Call between documents in batch mode.
 void font_context_reset_document_fonts(FontContext* ctx);
+
+// reset glyph caches (loaded_glyph_cache, bitmap_cache, glyph_arena).
+// Call between documents in batch mode to reclaim memory.
+void font_context_reset_glyph_caches(FontContext* ctx);
 
 // ============================================================================
 // Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)
@@ -417,8 +439,11 @@ void font_cache_trim(FontContext* ctx);
 typedef struct FontCacheStats {
     int    face_count;             // currently loaded faces
     int    glyph_cache_count;      // cached glyph entries
+    int    loaded_glyph_count;     // cached loaded-glyph entries
     int    glyph_cache_hit_rate;   // percentage (0-100)
-    size_t memory_usage_bytes;     // approximate memory footprint
+    size_t memory_usage_bytes;     // approximate memory footprint (both arenas)
+    size_t glyph_arena_bytes;      // glyph arena allocated bytes
+    size_t main_arena_bytes;       // main arena allocated bytes
     int    database_font_count;    // fonts in database
     int    database_family_count;  // font families
 } FontCacheStats;

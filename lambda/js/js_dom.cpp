@@ -30,6 +30,7 @@
 
 #include <cstring>
 #include <cctype>
+#include "../../lib/mem.h"
 
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
@@ -1304,13 +1305,13 @@ static String* uppercase_tag_name(const char* tag_name) {
     size_t len = strlen(tag_name);
     // allocate temp on stack for short names
     char buf[64];
-    char* upper = (len < sizeof(buf)) ? buf : (char*)malloc(len + 1);
+    char* upper = (len < sizeof(buf)) ? buf : (char*)mem_alloc(len + 1, MEM_CAT_JS_RUNTIME);
     for (size_t i = 0; i < len; i++) {
         upper[i] = (char)toupper((unsigned char)tag_name[i]);
     }
     upper[len] = '\0';
     String* result = heap_create_name(upper);
-    if (upper != buf) free(upper);
+    if (upper != buf) mem_free(upper);
     return result;
 }
 
@@ -2523,11 +2524,12 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
 // ============================================================================
 
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc) {
-    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
-    if (!elem) {
+    DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    if (!node) {
         log_error("js_dom_element_method: not a DOM element");
         return ItemNull;
     }
+    DomElement* elem = node->as_element(); // may be nullptr for text/comment nodes
 
     const char* method = fn_to_cstr(method_name);
     if (!method) {
@@ -2536,7 +2538,27 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     }
 
     log_debug("js_dom_element_method: '%s' on <%s>", method,
-              elem->tag_name ? elem->tag_name : "?");
+              node->node_name() ? node->node_name() : "?");
+
+    // v12b: remove() — self-removal from parent (works on any node type)
+    if (strcmp(method, "remove") == 0) {
+        if (node->parent) {
+            node->parent->remove_child(node);
+        }
+        return ItemNull;
+    }
+
+    // v12: contains(other) → boolean (works on any node type)
+    if (strcmp(method, "contains") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        return js_dom_contains(elem_item, args[0]);
+    }
+
+    // All remaining methods require an element node
+    if (!elem) {
+        log_debug("js_dom_element_method: '%s' called on non-element node, ignored", method);
+        return ItemNull;
+    }
 
     // getAttribute(name) → string or null
     if (strcmp(method, "getAttribute") == 0) {
@@ -2736,12 +2758,6 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
-    // v12: contains(other) → boolean (subtree containment check)
-    if (strcmp(method, "contains") == 0) {
-        if (argc < 1) return (Item){.item = ITEM_FALSE};
-        return js_dom_contains(elem_item, args[0]);
-    }
-
     // normalize() — merge adjacent text nodes
     if (strcmp(method, "normalize") == 0) {
         DomNode* child = elem->first_child;
@@ -2811,15 +2827,6 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             }
         }
         return js_dom_wrap_element(clone);
-    }
-
-    // v12b: remove() — self-removal from parent
-    if (strcmp(method, "remove") == 0) {
-        DomNode* node = (DomNode*)elem;
-        if (node->parent) {
-            node->parent->remove_child(node);
-        }
-        return ItemNull;
     }
 
     // v12b: replaceChild(newChild, oldChild)

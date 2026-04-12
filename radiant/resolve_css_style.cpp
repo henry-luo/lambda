@@ -1232,6 +1232,105 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
 }
 
 /**
+ * Evaluate a calc() expression list with operator precedence and parentheses.
+ * Items are: values (LENGTH, NUMBER, PERCENTAGE...), operators (CUSTOM with +, -, *, /),
+ * and parentheses (KEYWORD with keyword=0, produced by CSS_TOKEN_LEFT/RIGHT_PAREN).
+ * Uses two accumulators for * / precedence over + -, and recursion for parentheses.
+ * @param pos  Current index in the list; updated on return to point past consumed items.
+ * @param depth  Recursion depth for parenthesized sub-expressions.
+ */
+static float evaluate_calc_expression(LayoutContext* lycon, uintptr_t raw_prop,
+                                      CssValue** items, int count, int* pos, int depth) {
+    float result_sum = 0;
+    float term = 0;
+    int term_sign = 1;
+    bool first_value = true;
+    char pending_op = '+';
+    bool expect_value = true;  // true when next non-operator token should be a value (or LPAREN)
+
+    while (*pos < count) {
+        CssValue* item = items[*pos];
+        if (!item) { (*pos)++; continue; }
+
+        // classify item as: arithmetic operator, no-op keyword (LPAREN/RPAREN), or value
+        bool is_arith_op = false;
+        bool is_noop_keyword = false;
+        char op_char = 0;
+
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* op_info = css_enum_info(item->data.keyword);
+            const char* name = op_info ? op_info->name : "";
+            if (name[0] == '+' || name[0] == '-' || name[0] == '*' || name[0] == '/') {
+                is_arith_op = true;
+                op_char = name[0];
+            } else {
+                is_noop_keyword = true;
+            }
+        } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+            const char* name = item->data.custom_property.name;
+            if (strlen(name) == 1 && (name[0] == '+' || name[0] == '-' ||
+                                      name[0] == '*' || name[0] == '/')) {
+                is_arith_op = true;
+                op_char = name[0];
+            } else {
+                is_noop_keyword = true;
+            }
+        }
+
+        if (is_arith_op) {
+            pending_op = op_char;
+            expect_value = true;
+            (*pos)++;
+        } else if (is_noop_keyword) {
+            if (expect_value) {
+                // left parenthesis — recursively evaluate the sub-expression
+                (*pos)++;
+                float sub = evaluate_calc_expression(lycon, raw_prop, items, count, pos, depth + 1);
+                // apply sub-expression result as a value
+                if (first_value) {
+                    term = sub; first_value = false;
+                } else if (pending_op == '*') {
+                    term *= sub;
+                } else if (pending_op == '/') {
+                    if (sub != 0) term /= sub;
+                } else {
+                    result_sum += term_sign * term;
+                    term = sub;
+                    term_sign = (pending_op == '-') ? -1 : 1;
+                }
+                expect_value = false;
+            } else {
+                // right parenthesis — end this sub-expression
+                (*pos)++;
+                break;
+            }
+        } else {
+            // regular value
+            float val = resolve_length_value(lycon, raw_prop, item);
+            (*pos)++;
+            if (!std::isnan(val)) {
+                if (first_value) {
+                    term = val; first_value = false;
+                } else if (pending_op == '*') {
+                    term *= val;
+                } else if (pending_op == '/') {
+                    if (val != 0) term /= val;
+                } else {
+                    result_sum += term_sign * term;
+                    term = val;
+                    term_sign = (pending_op == '-') ? -1 : 1;
+                }
+                expect_value = false;
+            }
+        }
+    }
+    if (!first_value) {
+        result_sum += term_sign * term;
+    }
+    return result_sum;
+}
+
+/**
  * Resolve length/percentage value to pixels using Lambda CSS value structures
  *
  * @param lycon Layout context for font size, viewport, and parent dimensions
@@ -1532,50 +1631,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                         result = NAN;
                     }
                 } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
-                    // Try to evaluate as a simple expression with alternating values and operators
-                    // Parse through the list: value op value op value ...
-                    result = 0;
-                    char pending_op = '+';  // Start with implicit + 0
-
-                    for (int i = 0; i < arg->data.list.count; i++) {
-                        CssValue* item = arg->data.list.values[i];
-                        if (!item) continue;
-
-                        bool is_operator = false;
-                        const char* op_name = NULL;
-
-                        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-                            const CssEnumInfo* op_info = css_enum_info(item->data.keyword);
-                            op_name = op_info ? op_info->name : "";
-                            is_operator = true;
-                        } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
-                            op_name = item->data.custom_property.name;
-                            // Check if this looks like an operator
-                            if (strlen(op_name) == 1 && (op_name[0] == '+' || op_name[0] == '-' ||
-                                                         op_name[0] == '*' || op_name[0] == '/')) {
-                                is_operator = true;
-                            }
-                        }
-
-                        if (is_operator && op_name) {
-                            if (strcmp(op_name, "+") == 0) pending_op = '+';
-                            else if (strcmp(op_name, "-") == 0) pending_op = '-';
-                            else if (strcmp(op_name, "*") == 0) pending_op = '*';
-                            else if (strcmp(op_name, "/") == 0) pending_op = '/';
-                        } else {
-                            // This is a value - resolve with raw_prop for correct percentage base
-                            float val = resolve_length_value(lycon, raw_prop, item);
-                            if (!std::isnan(val)) {
-                                switch (pending_op) {
-                                    case '+': result += val; break;
-                                    case '-': result -= val; break;
-                                    case '*': result *= val; break;
-                                    case '/': result = val != 0 ? result / val : result; break;
-                                }
-                            }
-                            pending_op = '+';  // Reset to + for next value
-                        }
-                    }
+                    // Evaluate calc() list with operator precedence (* / before + -)
+                    // and parenthesized sub-expressions (CSS parser flattens parens to
+                    // KEYWORD(0) items which we handle via recursive evaluation).
+                    int pos = 0;
+                    result = evaluate_calc_expression(lycon, raw_prop,
+                                arg->data.list.values, arg->data.list.count, &pos, 0);
                     log_debug("calc list expression result: %.2f", result);
                 } else {
                     // Single value in calc - resolve with raw_prop for correct percentage base
@@ -2449,7 +2510,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
-    // Set up FreeType font face if a font-family was specified for this element
+    // Set up font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
     if (font_processed > 0) {
         ViewSpan* span = (ViewSpan*)lycon->view;
@@ -3581,12 +3642,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 else if (align_value == CSS_VALUE_MATCH_PARENT) {
-                    // match-parent: inherit parent's text-align, but resolve start/end
-                    // against parent's direction value
+                    // match-parent: inherit parent's text-align value as-is.
+                    // CSS Text 3 §7.1: Logical keywords (start/end) are inherited
+                    // without resolution — the layout code resolves them against
+                    // the element's own direction at layout time (line_align()).
                     DomElement* dom_elem = static_cast<DomElement*>(lycon->view);
                     DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
                     CssEnum inherited_align = CSS_VALUE_START;
-                    CssEnum parent_dir = CSS_VALUE_LTR;
 
                     // Find parent's computed text-align
                     for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
@@ -3598,23 +3660,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
 
-                    // Find parent's direction
-                    for (DomElement* p = parent; p; p = p->parent ? static_cast<DomElement*>(p->parent) : nullptr) {
-                        if (p->blk && (p->blk->direction == CSS_VALUE_LTR || p->blk->direction == CSS_VALUE_RTL)) {
-                            parent_dir = p->blk->direction;
-                            break;
-                        }
-                    }
-
-                    // Resolve start/end against parent's direction
-                    if (inherited_align == CSS_VALUE_START) {
-                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
-                    } else if (inherited_align == CSS_VALUE_END) {
-                        block->blk->text_align = (parent_dir == CSS_VALUE_RTL) ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
-                    } else {
-                        block->blk->text_align = inherited_align;
-                    }
-                    log_debug("[CSS] Text-align: match-parent resolved to %d (parent dir=%d)", block->blk->text_align, parent_dir);
+                    block->blk->text_align = inherited_align;
+                    log_debug("[CSS] Text-align: match-parent inherited %d from parent", inherited_align);
                 }
                 else if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
@@ -3719,9 +3766,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
                 if (parent && parent->blk) {
                     block->blk->text_indent = parent->blk->text_indent;
-                    block->blk->text_indent_percent = parent->blk->text_indent_percent;  // also inherit percentage
+                    block->blk->text_indent_percent = parent->blk->text_indent_percent;
+                    block->blk->text_indent_calc = parent->blk->text_indent_calc;
                     log_debug("[CSS] Text-indent: inherit -> %.1fpx", block->blk->text_indent);
                 }
+            }
+            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                // calc() expression - may contain percentages that need deferred resolution
+                // Store the CssValue for resolution at layout time when content_width is known
+                block->blk->text_indent = 0;
+                block->blk->text_indent_percent = NAN;
+                block->blk->text_indent_calc = value;
+                log_debug("[CSS] Text-indent: calc() (deferred resolution)");
             }
             break;
         }
@@ -3738,6 +3794,38 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->font->text_deco = deco_value;
                     const CssEnumInfo* info = css_enum_info(deco_value);
                     log_debug("[CSS] Text-decoration: %s -> 0x%04X", info ? info->name : "unknown", deco_value);
+                }
+            }
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // text-decoration shorthand: <line> || <style> || <color>
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* val = values[i];
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = val->data.keyword;
+                        const CssEnumInfo* info = css_enum_info(kw);
+                        if (info) {
+                            if (info->group == CSS_VALUE_GROUP_TEXT_DECO_LINE) {
+                                span->font->text_deco = kw;
+                                log_debug("[CSS] text-decoration line: %s", info->name);
+                            } else if (info->group == CSS_VALUE_GROUP_TEXT_DECO_STYLE ||
+                                       ((info->group == CSS_VALUE_GROUP_BORDER_STYLE) &&
+                                        (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOUBLE ||
+                                         kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED))) {
+                                span->font->text_deco_style = kw;
+                                log_debug("[CSS] text-decoration style: %s", info->name);
+                            } else if (info->group == CSS_VALUE_GROUP_COLOR ||
+                                       info->group == CSS_VALUE_GROUP_SYSTEM_COLOR) {
+                                span->font->text_deco_color = color_name_to_rgb(kw);
+                                log_debug("[CSS] text-decoration color keyword: %s", info->name);
+                            }
+                        }
+                    }
+                    else if (val->type == CSS_VALUE_TYPE_COLOR || val->type == CSS_VALUE_TYPE_FUNCTION) {
+                        span->font->text_deco_color = resolve_color_value(lycon, val);
+                        log_debug("[CSS] text-decoration color: #%08x", span->font->text_deco_color.c);
+                    }
                 }
             }
             break;
@@ -4557,6 +4645,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         }
                     }
+                } else if (func && func->name &&
+                           (strcmp(func->name, "linear-gradient") == 0 ||
+                            strcmp(func->name, "repeating-linear-gradient") == 0 ||
+                            strcmp(func->name, "radial-gradient") == 0 ||
+                            strcmp(func->name, "repeating-radial-gradient") == 0 ||
+                            strcmp(func->name, "conic-gradient") == 0)) {
+                    // Delegate gradient functions to the background shorthand handler
+                    log_debug("[CSS] background-image: delegating %s to background handler", func->name);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, decl, lycon);
                 }
             } else if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
                 // Direct URL/string value (non-function form)
@@ -5621,9 +5718,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     filter->params.drop_shadow.color.a = 255;
 
                     // Parse drop-shadow arguments: <offset-x> <offset-y> [<blur-radius>] [<color>]
+                    // drop-shadow() uses space-separated args, so the parser may pack
+                    // them into a single CSS_VALUE_TYPE_LIST — unwrap if needed
+                    int ds_count = func->arg_count;
+                    CssValue** ds_values = func->args;
+                    if (ds_count == 1 && ds_values[0] && ds_values[0]->type == CSS_VALUE_TYPE_LIST) {
+                        ds_count = ds_values[0]->data.list.count;
+                        ds_values = ds_values[0]->data.list.values;
+                    }
                     int len_idx = 0;
-                    for (int i = 0; i < func->arg_count; i++) {
-                        CssValue* a = func->args[i];
+                    for (int i = 0; i < ds_count; i++) {
+                        CssValue* a = ds_values[i];
                         if (!a) continue;
                         if (a->type == CSS_VALUE_TYPE_LENGTH) {
                             float val = resolve_length_value(lycon, prop_id, a);
@@ -5636,6 +5741,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             filter->params.drop_shadow.color.g = a->data.color.data.rgba.g;
                             filter->params.drop_shadow.color.b = a->data.color.data.rgba.b;
                             filter->params.drop_shadow.color.a = a->data.color.data.rgba.a;
+                        } else if (a->type == CSS_VALUE_TYPE_FUNCTION && a->data.function) {
+                            // Nested color function like rgba(0,0,0,0.5) — resolve it
+                            Color c = resolve_color_value(lycon, a);
+                            filter->params.drop_shadow.color = c;
                         }
                     }
                     log_debug("[CSS] filter: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
@@ -7060,28 +7169,56 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // 3 values: top-left, top-right/bottom-left, bottom-right
             // 4 values: top-left, top-right, bottom-right, bottom-left
 
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single value - all corners get same radius
                 float radius = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, value);
 
                 // Check specificity before setting each corner
                 if (specificity >= span->bound->border->radius.tl_specificity) {
                     span->bound->border->radius.top_left = radius;
+                    span->bound->border->radius.tl_percent = false;
                     span->bound->border->radius.tl_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.tr_specificity) {
                     span->bound->border->radius.top_right = radius;
+                    span->bound->border->radius.tr_percent = false;
                     span->bound->border->radius.tr_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.br_specificity) {
                     span->bound->border->radius.bottom_right = radius;
+                    span->bound->border->radius.br_percent = false;
                     span->bound->border->radius.br_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.bl_specificity) {
                     span->bound->border->radius.bottom_left = radius;
+                    span->bound->border->radius.bl_percent = false;
                     span->bound->border->radius.bl_specificity = specificity;
                 }
                 log_debug("[CSS] Border-radius (all): %.2f px", radius);
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // Single percentage value - store raw percentage, resolve at render time
+                float pct = (float)value->data.percentage.value;
+                if (specificity >= span->bound->border->radius.tl_specificity) {
+                    span->bound->border->radius.top_left = pct;
+                    span->bound->border->radius.tl_percent = true;
+                    span->bound->border->radius.tl_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.tr_specificity) {
+                    span->bound->border->radius.top_right = pct;
+                    span->bound->border->radius.tr_percent = true;
+                    span->bound->border->radius.tr_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.br_specificity) {
+                    span->bound->border->radius.bottom_right = pct;
+                    span->bound->border->radius.br_percent = true;
+                    span->bound->border->radius.br_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.bl_specificity) {
+                    span->bound->border->radius.bottom_left = pct;
+                    span->bound->border->radius.bl_percent = true;
+                    span->bound->border->radius.bl_specificity = specificity;
+                }
+                log_debug("[CSS] Border-radius (all): %.2f%%", pct);
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-radius
                 size_t count = value->data.list.count;
@@ -7177,8 +7314,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.tl_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.top_left = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.top_left = (float)value->data.percentage.value;
+                    span->bound->border->radius.tl_percent = true;
+                } else {
+                    span->bound->border->radius.top_left = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.tl_percent = false;
+                }
                 span->bound->border->radius.tl_specificity = specificity;
             }
             break;
@@ -7192,8 +7334,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.tr_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.top_right = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.top_right = (float)value->data.percentage.value;
+                    span->bound->border->radius.tr_percent = true;
+                } else {
+                    span->bound->border->radius.top_right = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.tr_percent = false;
+                }
                 span->bound->border->radius.tr_specificity = specificity;
             }
             break;
@@ -7207,8 +7354,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.br_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.bottom_right = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.bottom_right = (float)value->data.percentage.value;
+                    span->bound->border->radius.br_percent = true;
+                } else {
+                    span->bound->border->radius.bottom_right = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.br_percent = false;
+                }
                 span->bound->border->radius.br_specificity = specificity;
             }
             break;
@@ -7222,8 +7374,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.bl_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.bottom_left = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.bottom_left = (float)value->data.percentage.value;
+                    span->bound->border->radius.bl_percent = true;
+                } else {
+                    span->bound->border->radius.bottom_left = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.bl_percent = false;
+                }
+                span->bound->border->radius.bl_specificity = specificity;
                 span->bound->border->radius.bl_specificity = specificity;
             }
             break;
@@ -8609,7 +8767,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // CSS format: "header header header" "sidebar main aside" "footer footer footer"
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 log_debug("[CSS] grid-template-areas: string value '%s'", value->data.string);
-                parse_grid_template_areas(grid, value->data.string);
+                parse_grid_template_areas(grid, value->data.string, &lycon->scratch);
                 log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
             }
             // Handle list of strings (each row is a separate string)
@@ -8625,7 +8783,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 if (total_len > 0) {
-                    char* combined = (char*)mem_alloc(total_len + 1, MEM_CAT_LAYOUT);
+                    char* combined = (char*)scratch_alloc(&lycon->scratch, total_len + 1);
                     combined[0] = '\0';
                     size_t combined_len = 0;
                     for (int i = 0; i < value->data.list.count; i++) {
@@ -8638,8 +8796,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                     log_debug("[CSS] grid-template-areas: combined string '%s'", combined);
-                    parse_grid_template_areas(grid, combined);
-                    mem_free(combined);
+                    parse_grid_template_areas(grid, combined, &lycon->scratch);
+                    scratch_free(&lycon->scratch, combined);
                     log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
                 }
             }

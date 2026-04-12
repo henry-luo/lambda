@@ -2061,8 +2061,13 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // CSS 2.1 §10.4: When max-width constrains a box, the overflow is
             // the element's own styling choice. The parent's shrink-to-fit
             // should use the constrained width, not the internal overflow.
+            // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal
+            // flow and their overflow should not propagate to the parent's
+            // shrink-to-fit width calculation.
             bool is_max_width_overflow = block->blk && block->blk->given_max_width >= 0;
-            if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && lycon->block.parent) {
+            bool is_abs_pos = block->position &&
+                (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED);
+            if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && !is_abs_pos && lycon->block.parent) {
                 lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
             }
         }
@@ -3611,7 +3616,23 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // Resolve text-indent: percentage needs containing block width (now available)
     float resolved_text_indent = 0.0f;
     if (block->blk) {
-        if (!isnan(block->blk->text_indent_percent)) {
+        if (block->blk->text_indent_calc) {
+            // calc() expression with potential percentage - resolve now with correct basis
+            // CSS Text 3: text-indent percentage resolves against the block's own content width
+            // Temporarily set parent content_width so resolve_length_value uses the right basis
+            float saved_parent_width = 0;
+            bool has_parent = lycon->block.parent != nullptr;
+            if (has_parent) {
+                saved_parent_width = lycon->block.parent->content_width;
+                lycon->block.parent->content_width = content_width;
+            }
+            resolved_text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, block->blk->text_indent_calc);
+            if (has_parent) {
+                lycon->block.parent->content_width = saved_parent_width;
+            }
+            log_debug("setup_inline: resolved text-indent calc() -> %.1fpx (content_width=%.1f)",
+                     resolved_text_indent, content_width);
+        } else if (!isnan(block->blk->text_indent_percent)) {
             // Percentage text-indent: resolve against containing block width
             resolved_text_indent = content_width * block->blk->text_indent_percent / 100.0f;
             log_debug("setup_inline: resolved text-indent %.1f%% -> %.1fpx (content_width=%.1f)",
@@ -3682,6 +3703,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
+    // CSS Text 3 §4.2: save the block container's font for tab-size calculation.
+    // Tab stops use "the advance width of the space character as rendered by the
+    // block's font", not the inline element's font.
+    lycon->block.block_container_font = lycon->font.style;
     // CSS 2.1 §10.8.1: Update line_start_font to the block's own font, since
     // line_reset() was called before setup_font() and captured the parent's font.
     // The strut baseline detection needs the block's font, not the parent's.
@@ -3720,7 +3745,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    float font_height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 0;
+    const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+    float font_height = fm ? fm->hhea_line_height : 0;
     log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, font_height,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
@@ -3839,87 +3865,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
     // CSS 2.2 9.5.1: Float positioning relative to preceding content
-    // When a float appears after inline content, CSS rules determine its Y position:
-    // - If there's inline content AFTER the float (float is mid-line), position at current line top
-    // - If float is the last content (or followed only by block elements), position below current line
+    // When a float appears after inline content on the current line, it must be
+    // positioned below the current line. The preceding inline content has already
+    // been committed to the current line and cannot reflow around the float.
+    // Placing the float at the current line's Y would cause overlap.
     bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
 
     if (is_float && !pa_line->is_line_start) {
-        // Float appears after inline content
-        // Check if there's more inline content after this float in the parent
-        // ViewBlock extends DomElement which extends DomNode, so block can be used as DomNode*
-        DomNode* float_node = (DomNode*)block;
-        bool has_inline_after = false;
-        if (float_node) {
-            for (DomNode* sib = float_node->next_sibling; sib; sib = sib->next_sibling) {
-                if (sib->is_text()) {
-                    // Check if it's non-whitespace text
-                    const char* text = (const char*)sib->text_data();
-                    if (text) {
-                        for (const char* p = text; *p; p++) {
-                            unsigned char c = (unsigned char)*p;
-                            if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                has_inline_after = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (has_inline_after) break;
-                } else if (sib->is_element()) {
-                    DomElement* elem = sib->as_element();
-                    ViewBlock* view = (ViewBlock*)elem;
-
-                    // First check if this sibling is also a float - floats don't count as inline
-                    bool sib_is_float = view->position &&
-                        (view->position->float_prop == CSS_VALUE_LEFT ||
-                         view->position->float_prop == CSS_VALUE_RIGHT);
-
-                    if (sib_is_float) {
-                        // Skip other floats - they don't count as inline content after
-                        continue;
-                    }
-
-                    // Check if it's an inline element (not positioned)
-                    bool is_inline_elem = (view->display.outer == CSS_VALUE_INLINE ||
-                                          view->display.outer == CSS_VALUE_INLINE_BLOCK);
-
-                    // If display is unresolved (0), check the tag name for common inline elements
-                    if (view->display.outer == 0) {
-                        const char* tag = elem->node_name();
-                        if (tag && (strcmp(tag, "span") == 0 || strcmp(tag, "a") == 0 ||
-                                   strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 ||
-                                   strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0)) {
-                            is_inline_elem = true;
-                        }
-                    }
-
-                    if (is_inline_elem) {
-                        has_inline_after = true;
-                        break;
-                    } else if (view->display.outer == CSS_VALUE_BLOCK ||
-                               view->display.outer == CSS_VALUE_LIST_ITEM ||
-                               view->display.outer == 0) {
-                        // Block element (or unresolved block-like element like div) follows
-                        // Float should be below current line
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!has_inline_after) {
-            // Float is the last inline content or followed by block - position below current line
-            // Lambda processes text before the float sequentially (no mid-line reflow),
-            // so the float must go below the current line to avoid overlapping placed text.
-            float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
-            block->y = pa_block->advance_y + line_height;
-            log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
-                      block->y, pa_block->advance_y, line_height);
-        } else {
-            // Float has inline content after it - position at current line top
-            log_debug("%s Float positioned at current line top: y=%.1f (has inline content after)", block->source_loc(),
-                      block->y);
-        }
+        // Float appears after inline content - position below current line
+        float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
+        block->y = pa_block->advance_y + line_height;
+        log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
+                  block->y, pa_block->advance_y, line_height);
     } else if (is_float) {
         log_debug("%s Float positioned at line start: y=%.1f", block->source_loc(), block->y);
     }
@@ -6159,19 +6116,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_TOP) {
-                    // CSS 2.1 10.8.1: vertical-align:top aligns element's top with line box top
-                    // The line box top is at init_ascender above the baseline
-                    // Element contributes (block_flow_height - init_ascender) below the baseline
-                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
-                    // The strut always contributes its ascender to the line box
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->block.init_ascender);
+                    // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+                    // in the first-pass baseline-relative line box height calculation.
+                    // Their height is tracked separately and used in a second pass to
+                    // expand the line box if needed.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
-                    // CSS 2.1 10.8.1: vertical-align:bottom aligns element's bottom with line box bottom
-                    // Similar calculation but relative to init_descender
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
-                    // The strut always contributes its descender to the line box
-                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                    // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else {
                     // For other vertical-align values (sub, super, middle, etc.)

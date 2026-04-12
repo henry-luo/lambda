@@ -4,19 +4,19 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arena.h"
 #include "../tree-sitter-ruby/bindings/c/tree_sitter/tree-sitter-ruby.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
+#include "../../lib/mem.h"
 
 // ============================================================================
 // Scope management
 // ============================================================================
 
 RbScope* rb_scope_create(RbTranspiler* tp, RbScopeType scope_type, RbScope* parent) {
-    RbScope* scope = (RbScope*)pool_alloc(tp->ast_pool, sizeof(RbScope));
-    memset(scope, 0, sizeof(RbScope));
+    RbScope* scope = (RbScope*)arena_calloc(tp->ast_arena, sizeof(RbScope));
     scope->scope_type = scope_type;
     scope->parent = parent;
     scope->method = NULL;
@@ -93,8 +93,7 @@ void rb_scope_define(RbTranspiler* tp, String* name, RbAstNode* node, RbVarKind 
     }
 
     // create new name entry
-    NameEntry* new_entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
-    memset(new_entry, 0, sizeof(NameEntry));
+    NameEntry* new_entry = (NameEntry*)arena_calloc(tp->ast_arena, sizeof(NameEntry));
     new_entry->name = name;
     new_entry->node = (AstNode*)node;
     new_entry->next = NULL;
@@ -158,11 +157,12 @@ void rb_warning(RbTranspiler* tp, TSNode node, const char* format, ...) {
 // ============================================================================
 
 RbTranspiler* rb_transpiler_create(Runtime* runtime) {
-    RbTranspiler* tp = (RbTranspiler*)malloc(sizeof(RbTranspiler));
+    RbTranspiler* tp = (RbTranspiler*)mem_alloc(sizeof(RbTranspiler), MEM_CAT_RB_RUNTIME);
     memset(tp, 0, sizeof(RbTranspiler));
 
     // initialize memory pools
     tp->ast_pool = pool_create();
+    tp->ast_arena = arena_create_default(tp->ast_pool);
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
@@ -197,6 +197,9 @@ void rb_transpiler_destroy(RbTranspiler* tp) {
     if (tp->name_pool) {
         name_pool_release(tp->name_pool);
     }
+    if (tp->ast_arena) {
+        arena_destroy(tp->ast_arena);
+    }
     if (tp->ast_pool) {
         pool_destroy(tp->ast_pool);
     }
@@ -207,7 +210,7 @@ void rb_transpiler_destroy(RbTranspiler* tp) {
         strbuf_free(tp->error_buf);
     }
 
-    free(tp);
+    mem_free(tp);
 }
 
 bool rb_transpiler_parse(RbTranspiler* tp, const char* source, size_t length) {

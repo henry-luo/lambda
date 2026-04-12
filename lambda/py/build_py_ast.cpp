@@ -1,8 +1,9 @@
 #include "py_transpiler.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/arena.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cstdint>
 #include <cerrno>
@@ -35,10 +36,9 @@ PyAstNode* build_py_slice(PyTranspiler* tp, TSNode slice_node);
 PyAstNode* build_py_decorated_definition(PyTranspiler* tp, TSNode dec_node);
 PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node);
 
-// Allocate a Python AST node from the pool
+// Allocate a Python AST node from the arena
 PyAstNode* alloc_py_ast_node(PyTranspiler* tp, PyAstNodeType node_type, TSNode node, size_t size) {
-    PyAstNode* ast_node = (PyAstNode*)pool_alloc(tp->ast_pool, size);
-    memset(ast_node, 0, size);
+    PyAstNode* ast_node = (PyAstNode*)arena_calloc(tp->ast_arena, size);
     ast_node->node_type = node_type;
     ast_node->node = node;
     return ast_node;
@@ -118,7 +118,7 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
     literal->bigint_literal_str = NULL;
 
     StrView source = py_node_source(tp, int_node);
-    char* temp_str = (char*)malloc(source.length + 1);
+    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
     if (temp_str) {
         memcpy(temp_str, source.str, source.length);
         temp_str[source.length] = '\0';
@@ -144,12 +144,12 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
             if (errno == ERANGE) {
                 // literal exceeds int64 range — record as bigint
                 literal->is_bigint_literal = true;
-                literal->bigint_literal_str = strdup(temp_str);
+                literal->bigint_literal_str = mem_strdup(temp_str, MEM_CAT_PY_RUNTIME);
                 literal->value.int_value = 0;
                 log_debug("py-ast: bigint literal '%s'", temp_str);
             }
         }
-        free(temp_str);
+        mem_free(temp_str);
     }
 
     literal->base.type = &TYPE_INT;
@@ -162,12 +162,12 @@ static PyAstNode* build_py_float(PyTranspiler* tp, TSNode float_node) {
     literal->literal_type = PY_LITERAL_FLOAT;
 
     StrView source = py_node_source(tp, float_node);
-    char* temp_str = (char*)malloc(source.length + 1);
+    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
     if (temp_str) {
         memcpy(temp_str, source.str, source.length);
         temp_str[source.length] = '\0';
         literal->value.float_value = strtod(temp_str, NULL);
-        free(temp_str);
+        mem_free(temp_str);
     }
 
     literal->base.type = &TYPE_FLOAT;
@@ -201,13 +201,13 @@ static PyAstNode* build_py_identifier(PyTranspiler* tp, TSNode id_node) {
     StrView source = py_node_source(tp, id_node);
     if (source.length == 0) return NULL;
 
-    char* temp_str = (char*)malloc(source.length + 1);
+    char* temp_str = (char*)mem_alloc(source.length + 1, MEM_CAT_PY_RUNTIME);
     if (!temp_str) return NULL;
     memcpy(temp_str, source.str, source.length);
     temp_str[source.length] = '\0';
 
     id->name = name_pool_create_len(tp->name_pool, temp_str, source.length);
-    free(temp_str);
+    mem_free(temp_str);
     if (!id->name) return NULL;
 
     // scope lookup
@@ -525,8 +525,8 @@ PyAstNode* build_py_comparison(PyTranspiler* tp, TSNode comp_node) {
     cmp->op_count = num_ops;
 
     if (num_ops > 0) {
-        cmp->ops = (PyOperator*)pool_alloc(tp->ast_pool, sizeof(PyOperator) * num_ops);
-        cmp->comparators = (PyAstNode**)pool_alloc(tp->ast_pool, sizeof(PyAstNode*) * num_ops);
+        cmp->ops = (PyOperator*)arena_alloc(tp->ast_arena, sizeof(PyOperator) * num_ops);
+        cmp->comparators = (PyAstNode**)arena_alloc(tp->ast_arena, sizeof(PyAstNode*) * num_ops);
 
         // build comparator expressions
         for (int i = 0; i < num_ops; i++) {
@@ -1467,7 +1467,7 @@ static PyAstNode* build_py_global_nonlocal(PyTranspiler* tp, TSNode gn_node, PyA
     gn->name_count = child_count;
 
     if (child_count > 0) {
-        gn->names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * child_count);
+        gn->names = (String**)arena_alloc(tp->ast_arena, sizeof(String*) * child_count);
 
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_named_child(gn_node, i);
@@ -1956,9 +1956,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 2) {
             TSNode alias_node = ts_node_named_child(node, nc - 1);
             StrView sv = py_node_source(tp, alias_node);
-            char* tmp = (char*)malloc(sv.length + 1);
+            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
             if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
         }
         return (PyAstNode*)p;
     }
@@ -1971,9 +1971,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 1) {
             TSNode attr = ts_node_named_child(node, 0);
             StrView sv = py_node_source(tp, attr);
-            char* tmp = (char*)malloc(sv.length + 1);
+            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
             if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
         }
         if (nc >= 2) {
             p->literal = build_py_pattern(tp, ts_node_named_child(node, 1));
@@ -2029,9 +2029,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
             // identifier node (could be "_" text)
             StrView sv = py_node_source(tp, child);
             if (!(sv.length == 1 && sv.str[0] == '_')) {
-                char* tmp = (char*)malloc(sv.length + 1);
+                char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
                 if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                    p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                    p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
             }
         } else {
             // anonymous '_' child (not a named identifier)
@@ -2058,9 +2058,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
                     TSNode id = ts_node_named_child(child, 0);
                     StrView sv = py_node_source(tp, id);
                     if (!(sv.length == 1 && sv.str[0] == '_')) {
-                        char* tmp = (char*)malloc(sv.length + 1);
+                        char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
                         if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                            p->rest_name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                            p->rest_name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
                     }
                 }
                 continue;
@@ -2094,9 +2094,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
         if (nc >= 1) {
             TSNode cls_name_node = ts_node_named_child(node, 0);
             StrView sv = py_node_source(tp, cls_name_node);
-            char* tmp = (char*)malloc(sv.length + 1);
+            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
             if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
         }
         PyAstNode* prev_pos = NULL;
         PyAstNode* prev_kw = NULL;
@@ -2145,17 +2145,17 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
                 return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
             }
             PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
-            char* tmp = (char*)malloc(sv.length + 1);
+            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
             if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
             return (PyAstNode*)p;
         } else {
             // dotted name like Status.OK → VALUE pattern
             PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_VALUE, node);
             StrView sv = py_node_source(tp, node); // full dotted text "Status.OK"
-            char* tmp = (char*)malloc(sv.length + 1);
+            char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
             if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
             return (PyAstNode*)p;
         }
     }
@@ -2167,9 +2167,9 @@ static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
             return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
         }
         PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
-        char* tmp = (char*)malloc(sv.length + 1);
+        char* tmp = (char*)mem_alloc(sv.length + 1, MEM_CAT_PY_RUNTIME);
         if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
-            p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+            p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); mem_free(tmp); }
         return (PyAstNode*)p;
     }
 

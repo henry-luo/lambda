@@ -21,7 +21,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
-#include <cstdlib>
+#include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <cctype>
@@ -36,6 +36,11 @@
 // ============================================================================
 
 static int bash_last_exit_code = 0;
+
+// PIPESTATUS array: per-stage exit codes of last pipeline
+#define BASH_PIPESTATUS_MAX 256
+static int bash_pipestatus[BASH_PIPESTATUS_MAX];
+static int bash_pipestatus_count = 0;
 
 // $0 — script name, used in bash_get_var which is earlier in file
 static const char* bash_script_name = "";
@@ -66,6 +71,9 @@ static bool bash_opt_extglob = true;     // shopt -s extglob (on by default in b
 // errexit suppression depth: >0 means we're inside a context where set -e is suppressed
 // (if/while/until condition, && / || chain, ! negation)
 static int bash_errexit_depth = 0;
+
+// flag: set by ! negation to suppress the NEXT errexit check (consumed on read)
+static bool bash_errexit_suppressed = false;
 
 // non-static: shared with bash_errors.cpp
 int bash_current_lineno = 0;
@@ -174,6 +182,14 @@ static void bash_grow_list(List* list) {
     list->items = new_items;
     list->capacity = new_cap;
 }
+
+// forward declaration for bash_item_is_array (defined later with bash arrays)
+static inline bool bash_item_is_array(Item arr);
+
+// forward declarations for assoc array functions (defined later)
+typedef struct BashAssocArray BashAssocArray;
+static BashAssocArray* bash_item_to_assoc(Item map);
+extern "C" Item bash_assoc_set(Item map, Item key, Item value);
 
 // ============================================================================
 // Type conversion (Bash string-first semantics)
@@ -658,6 +674,27 @@ extern "C" Item bash_test_str_eq_noescape(Item left, Item right) {
     return (Item){.item = b2it(result)};
 }
 
+// literal string comparison: for quoted RHS in [[ $x = 'literal' ]]
+// quotes have been stripped at AST build time so this is a pure strcmp
+extern "C" Item bash_test_str_eq_literal(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (strcmp(l, r) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+// literal string not-equal: for quoted RHS in [[ $x != 'literal' ]]
+extern "C" Item bash_test_str_ne_literal(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (strcmp(l, r) != 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 extern "C" Item bash_test_str_ne(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
@@ -698,6 +735,36 @@ extern "C" Item bash_test_regex(Item left, Item right) {
     }
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
+}
+
+// escape glob metacharacters in a string so it matches literally in patterns
+// used for quoted portions of case patterns: "..." parts should not be glob-expanded
+extern "C" Item bash_glob_quote_str(Item str) {
+    char buf[256];
+    const char* s = bash_item_cstr(str, buf, sizeof(buf));
+    if (!s || !*s) return str;
+    // check if escaping is needed
+    bool needs_escape = false;
+    for (const char* p = s; *p; p++) {
+        if (*p == '\\' || *p == '*' || *p == '?' || *p == '[') {
+            needs_escape = true;
+            break;
+        }
+    }
+    if (!needs_escape) return str;
+    // build escaped string
+    size_t slen = strlen(s);
+    size_t cap = slen * 2 + 1;
+    char* out = (char*)alloca(cap);
+    size_t j = 0;
+    for (size_t i = 0; i < slen; i++) {
+        if (s[i] == '\\' || s[i] == '*' || s[i] == '?' || s[i] == '[') {
+            out[j++] = '\\';
+        }
+        out[j++] = s[i];
+    }
+    out[j] = '\0';
+    return (Item){.item = s2it(heap_create_name(out, (int)j))};
 }
 
 extern "C" Item bash_test_glob(Item left, Item right) {
@@ -935,11 +1002,12 @@ extern "C" Item bash_expand_trim_suffix(Item val, Item pat) {
     const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
     const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
     size_t slen = strlen(str);
-    // try shortest suffix (from end)
-    for (size_t i = slen; i > 0; i--) {
+    // try shortest suffix (from end toward start, including full string)
+    for (size_t i = slen; ; i--) {
         if (fnmatch(pattern, str + i, 0) == 0) {
             return bash_make_string(str, i);
         }
+        if (i == 0) break;
     }
     return val;
 }
@@ -959,57 +1027,227 @@ extern "C" Item bash_expand_trim_suffix_long(Item val, Item pat) {
     return val;
 }
 
-// ${var/pattern/replacement} — replace first occurrence
+// forward declaration for glob matching used by replace
+static bool bash_glob_match(const char* str, const char* pat);
+
+// check if a pattern contains glob metacharacters
+static bool has_glob_chars(const char* pat) {
+    for (; *pat; pat++) {
+        if (*pat == '*' || *pat == '?' || *pat == '[') return true;
+        if (*pat == '\\' && pat[1]) pat++; // skip escaped chars
+    }
+    return false;
+}
+
+// ${var/pattern/replacement} — replace first occurrence (supports glob patterns)
 extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
     char buf_v[512], buf_p[256], buf_r[256];
     const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
     const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
     const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
-    // simple substring match for non-glob patterns
-    const char* found = strstr(str, pattern);
-    if (!found) return val;
-    size_t plen = strlen(pattern);
-    size_t rlen = strlen(replacement);
     size_t slen = strlen(str);
-    size_t new_len = slen - plen + rlen;
-    StrBuf* sb = strbuf_new_cap(new_len + 1);
-    size_t prefix = found - str;
-    strbuf_append_str_n(sb, str, prefix);
-    strbuf_append_str_n(sb, replacement, rlen);
-    strbuf_append_str_n(sb, found + plen, slen - prefix - plen);
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // fast path: literal substring match
+        const char* found = strstr(str, pattern);
+        if (!found) return val;
+        size_t plen = strlen(pattern);
+        size_t new_len = slen - plen + rlen;
+        StrBuf* sb = strbuf_new_cap(new_len + 1);
+        size_t prefix = found - str;
+        strbuf_append_str_n(sb, str, prefix);
+        strbuf_append_str_n(sb, replacement, rlen);
+        strbuf_append_str_n(sb, found + plen, slen - prefix - plen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match at each position
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
+    memcpy(tmp, str, slen + 1);
+    for (size_t i = 0; i <= slen; i++) {
+        // try longest match first at position i
+        for (size_t end = slen; end >= i; end--) {
+            char saved = tmp[end];
+            tmp[end] = '\0';
+            if (bash_glob_match(tmp + i, pattern)) {
+                tmp[end] = saved;
+                StrBuf* sb = strbuf_new_cap(slen + rlen + 1);
+                strbuf_append_str_n(sb, str, i);
+                strbuf_append_str_n(sb, replacement, rlen);
+                strbuf_append_str_n(sb, str + end, slen - end);
+                Item result = bash_make_string(sb->str, sb->length);
+                strbuf_free(sb);
+                mem_free(tmp);
+                return result;
+            }
+            tmp[end] = saved;
+            if (end == i) break; // avoid underflow
+        }
+    }
+    mem_free(tmp);
+    return val;
 }
 
-// ${var//pattern/replacement} — replace all occurrences
+// ${var//pattern/replacement} — replace all occurrences (supports glob patterns)
 extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
     char buf_v[512], buf_p[256], buf_r[256];
     const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
     const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
     const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
-    size_t plen = strlen(pattern);
-    if (plen == 0) return val;
+    size_t slen = strlen(str);
     size_t rlen = strlen(replacement);
-    StrBuf* sb = strbuf_new_cap(strlen(str) + 64);
-    const char* p = str;
-    while (*p) {
-        const char* found = strstr(p, pattern);
-        if (!found) {
-            strbuf_append_str(sb, p);
-            break;
+
+    if (!has_glob_chars(pattern)) {
+        // fast path: literal substring match
+        size_t plen = strlen(pattern);
+        if (plen == 0) return val;
+        StrBuf* sb = strbuf_new_cap(slen + 64);
+        const char* p = str;
+        while (*p) {
+            const char* found = strstr(p, pattern);
+            if (!found) {
+                strbuf_append_str(sb, p);
+                break;
+            }
+            strbuf_append_str_n(sb, p, found - p);
+            strbuf_append_str_n(sb, replacement, rlen);
+            p = found + plen;
         }
-        strbuf_append_str_n(sb, p, found - p);
-        strbuf_append_str_n(sb, replacement, rlen);
-        p = found + plen;
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match at each position
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
+    memcpy(tmp, str, slen + 1);
+    StrBuf* sb = strbuf_new_cap(slen + 64);
+    size_t i = 0;
+    while (i <= slen) {
+        bool matched = false;
+        // try longest match first at position i
+        for (size_t end = slen; end >= i; end--) {
+            char saved = tmp[end];
+            tmp[end] = '\0';
+            if (bash_glob_match(tmp + i, pattern)) {
+                tmp[end] = saved;
+                strbuf_append_str_n(sb, replacement, rlen);
+                if (end == i) {
+                    i++; // avoid infinite loop on zero-length match
+                } else {
+                    i = end;
+                }
+                matched = true;
+                break;
+            }
+            tmp[end] = saved;
+            if (end == i) break;
+        }
+        if (!matched) {
+            if (i < slen) {
+                strbuf_append_str_n(sb, str + i, 1);
+            }
+            i++;
+        }
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
+    mem_free(tmp);
     return result;
+}
+
+// ${var/#pattern/replacement} — replace prefix match only
+extern "C" Item bash_expand_replace_prefix(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    size_t slen = strlen(str);
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // literal prefix match
+        size_t plen = strlen(pattern);
+        if (plen > slen || memcmp(str, pattern, plen) != 0) return val;
+        StrBuf* sb = strbuf_new_cap(rlen + slen - plen + 1);
+        strbuf_append_str_n(sb, replacement, rlen);
+        strbuf_append_str_n(sb, str + plen, slen - plen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match first at position 0
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
+    memcpy(tmp, str, slen + 1);
+    for (size_t end = slen; ; end--) {
+        char saved = tmp[end];
+        tmp[end] = '\0';
+        if (bash_glob_match(tmp, pattern)) {
+            tmp[end] = saved;
+            StrBuf* sb = strbuf_new_cap(rlen + slen - end + 1);
+            strbuf_append_str_n(sb, replacement, rlen);
+            strbuf_append_str_n(sb, str + end, slen - end);
+            Item result = bash_make_string(sb->str, sb->length);
+            strbuf_free(sb);
+            mem_free(tmp);
+            return result;
+        }
+        tmp[end] = saved;
+        if (end == 0) break;
+    }
+    mem_free(tmp);
+    return val;
+}
+
+// ${var/%pattern/replacement} — replace suffix match only
+extern "C" Item bash_expand_replace_suffix(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    size_t slen = strlen(str);
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // literal suffix match
+        size_t plen = strlen(pattern);
+        if (plen > slen || memcmp(str + slen - plen, pattern, plen) != 0) return val;
+        StrBuf* sb = strbuf_new_cap(slen - plen + rlen + 1);
+        strbuf_append_str_n(sb, str, slen - plen);
+        strbuf_append_str_n(sb, replacement, rlen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match first starting from position 0
+    char* tmp = (char*)mem_alloc(slen + 1, MEM_CAT_BASH_RUNTIME);
+    memcpy(tmp, str, slen + 1);
+    for (size_t start = 0; start <= slen; start++) {
+        if (bash_glob_match(tmp + start, pattern)) {
+            StrBuf* sb = strbuf_new_cap(start + rlen + 1);
+            strbuf_append_str_n(sb, str, start);
+            strbuf_append_str_n(sb, replacement, rlen);
+            Item result = bash_make_string(sb->str, sb->length);
+            strbuf_free(sb);
+            mem_free(tmp);
+            return result;
+        }
+    }
+    mem_free(tmp);
+    return val;
 }
 
 // ${var:offset:length} — substring extraction
 extern "C" Item bash_expand_substring(Item val, Item offset_item, Item len_item) {
+    // if value is an array, use element [0] (bash: ${arr:0:4} == ${arr[0]:0:4})
+    if (bash_item_is_array(val)) {
+        val = bash_array_get(val, (Item){.item = i2it(0)});
+    }
     char buf[512];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
     size_t slen = strlen(str);
@@ -1024,14 +1262,44 @@ extern "C" Item bash_expand_substring(Item val, Item offset_item, Item len_item)
     return bash_make_string(str + offset, length);
 }
 
+// helper: check if a single character matches a glob-style pattern
+// supports: ? (any char), [abc] (char class), [a-z] (range), [!...] (negation), literal char
+static bool casemod_char_matches(char c, const char* pat) {
+    if (!pat || !pat[0]) return true; // no pattern = match all
+    if (pat[0] == '?' && pat[1] == '\0') return true;
+    if (pat[0] == '[') {
+        const char* p = pat + 1;
+        bool negate = false;
+        if (*p == '!' || *p == '^') { negate = true; p++; }
+        bool found = false;
+        while (*p && *p != ']') {
+            if (p[1] == '-' && p[2] && p[2] != ']') {
+                if ((unsigned char)c >= (unsigned char)p[0] && (unsigned char)c <= (unsigned char)p[2])
+                    found = true;
+                p += 3;
+            } else {
+                if (c == *p) found = true;
+                p++;
+            }
+        }
+        return negate ? !found : found;
+    }
+    return c == pat[0]; // literal single char
+}
+
 // ${var^} — uppercase first char
-extern "C" Item bash_expand_upper_first(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_upper_first(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     if (slen == 0) return val;
     StrBuf* sb = strbuf_new_cap(slen + 1);
-    strbuf_append_char(sb, (char)toupper((unsigned char)str[0]));
+    if (casemod_char_matches(str[0], pat))
+        strbuf_append_char(sb, (char)toupper((unsigned char)str[0]));
+    else
+        strbuf_append_char(sb, str[0]);
     if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1039,13 +1307,18 @@ extern "C" Item bash_expand_upper_first(Item val) {
 }
 
 // ${var^^} — uppercase all
-extern "C" Item bash_expand_upper_all(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_upper_all(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     StrBuf* sb = strbuf_new_cap(slen + 1);
     for (size_t i = 0; i < slen; i++) {
-        strbuf_append_char(sb, (char)toupper((unsigned char)str[i]));
+        if (casemod_char_matches(str[i], pat))
+            strbuf_append_char(sb, (char)toupper((unsigned char)str[i]));
+        else
+            strbuf_append_char(sb, str[i]);
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1053,13 +1326,18 @@ extern "C" Item bash_expand_upper_all(Item val) {
 }
 
 // ${var,} — lowercase first char
-extern "C" Item bash_expand_lower_first(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_lower_first(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     if (slen == 0) return val;
     StrBuf* sb = strbuf_new_cap(slen + 1);
-    strbuf_append_char(sb, (char)tolower((unsigned char)str[0]));
+    if (casemod_char_matches(str[0], pat))
+        strbuf_append_char(sb, (char)tolower((unsigned char)str[0]));
+    else
+        strbuf_append_char(sb, str[0]);
     if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1067,13 +1345,18 @@ extern "C" Item bash_expand_lower_first(Item val) {
 }
 
 // ${var,,} — lowercase all
-extern "C" Item bash_expand_lower_all(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_lower_all(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     StrBuf* sb = strbuf_new_cap(slen + 1);
     for (size_t i = 0; i < slen; i++) {
-        strbuf_append_char(sb, (char)tolower((unsigned char)str[i]));
+        if (casemod_char_matches(str[i], pat))
+            strbuf_append_char(sb, (char)tolower((unsigned char)str[i]));
+        else
+            strbuf_append_char(sb, str[i]);
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1081,16 +1364,22 @@ extern "C" Item bash_expand_lower_all(Item val) {
 }
 
 // ${var~} — toggle case of first character
-extern "C" Item bash_expand_toggle_first(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_toggle_first(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     if (slen == 0) return val;
     StrBuf* sb = strbuf_new_cap(slen + 1);
     unsigned char c = (unsigned char)str[0];
-    if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
-    else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
-    else strbuf_append_char(sb, (char)c);
+    if (casemod_char_matches(str[0], pat)) {
+        if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
+        else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
+        else strbuf_append_char(sb, (char)c);
+    } else {
+        strbuf_append_char(sb, (char)c);
+    }
     if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1098,16 +1387,67 @@ extern "C" Item bash_expand_toggle_first(Item val) {
 }
 
 // ${var~~} — toggle case of all characters
-extern "C" Item bash_expand_toggle_all(Item val) {
-    char buf[512];
+extern "C" Item bash_expand_toggle_all(Item val, Item pat_item) {
+    char buf[512], pbuf[128];
     const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    const char* pat = bash_item_cstr(pat_item, pbuf, sizeof(pbuf));
+    if (!pat[0]) pat = "?"; // default pattern: match any
     size_t slen = strlen(str);
     StrBuf* sb = strbuf_new_cap(slen + 1);
     for (size_t i = 0; i < slen; i++) {
         unsigned char c = (unsigned char)str[i];
-        if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
-        else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
-        else strbuf_append_char(sb, (char)c);
+        if (casemod_char_matches(str[i], pat)) {
+            if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
+            else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
+            else strbuf_append_char(sb, (char)c);
+        } else {
+            strbuf_append_char(sb, (char)c);
+        }
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// apply case modification to each element of an array, return space-joined result
+// mode: 0=^, 1=^^, 2=,, 3=,,, 4=~, 5=~~
+static Item apply_casemod_single(Item elem, Item pat_item, int64_t mode) {
+    switch (mode) {
+    case 0: return bash_expand_upper_first(elem, pat_item);
+    case 1: return bash_expand_upper_all(elem, pat_item);
+    case 2: return bash_expand_lower_first(elem, pat_item);
+    case 3: return bash_expand_lower_all(elem, pat_item);
+    case 4: return bash_expand_toggle_first(elem, pat_item);
+    case 5: return bash_expand_toggle_all(elem, pat_item);
+    default: return elem;
+    }
+}
+
+extern "C" Item bash_array_casemod(Item arr, Item pat_item, int64_t mode) {
+    if (!bash_item_is_array(arr)) {
+        // check if it's an assoc array by type_id in first bytes
+        // (BashAssocArray has type_id as first field, == LMD_TYPE_MAP)
+        if (arr.item != 0) {
+            TypeId* tid = (TypeId*)(uintptr_t)arr.item;
+            if (*tid == LMD_TYPE_MAP) {
+                // defer to assoc-aware version defined later
+                extern Item bash_array_casemod_assoc(Item arr, Item pat_item, int64_t mode);
+                return bash_array_casemod_assoc(arr, pat_item, mode);
+            }
+        }
+        // regular scalar: apply directly
+        return apply_casemod_single(arr, pat_item, mode);
+    }
+    List* list = (List*)(uintptr_t)arr.item;
+    if (!list || list->length == 0) return bash_make_string("", 0);
+    StrBuf* sb = strbuf_new_cap(256);
+    for (int i = 0; i < list->length; i++) {
+        Item elem = list->items[i];
+        Item modified = apply_casemod_single(elem, pat_item, mode);
+        if (i > 0) strbuf_append_char(sb, ' ');
+        char buf[512];
+        const char* s = bash_item_cstr(modified, buf, sizeof(buf));
+        strbuf_append_str(sb, s);
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
@@ -1231,6 +1571,20 @@ extern "C" Item bash_string_concat(Item left, Item right) {
 extern "C" Item bash_var_append(Item var_name, Item old_val, Item append_val) {
     int attrs = bash_get_var_attrs(var_name);
     if (attrs & BASH_ATTR_INTEGER) {
+        // if the variable holds an array, +=scalar means arr[0] += scalar
+        if (bash_item_is_array(old_val)) {
+            List* list = (List*)(uintptr_t)old_val.item;
+            Item elem0 = (list->length > 0) ? list->items[0] : (Item){.item = i2it(0)};
+            Item old_int = bash_arith_eval_value(elem0);
+            Item new_int = bash_arith_eval_value(append_val);
+            long long sum = it2i(old_int) + it2i(new_int);
+            char buf[32];
+            int len = snprintf(buf, sizeof(buf), "%lld", sum);
+            Item result = (Item){.item = s2it(heap_create_name(buf, len))};
+            if (list->length > 0) list->items[0] = result;
+            else bash_array_append(old_val, result);
+            return old_val;
+        }
         // arithmetic addition: evaluate both sides as arithmetic expressions
         Item old_int = bash_arith_eval_value(old_val);
         Item new_int = bash_arith_eval_value(append_val);
@@ -1238,6 +1592,16 @@ extern "C" Item bash_var_append(Item var_name, Item old_val, Item append_val) {
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%lld", sum);
         return (Item){.item = s2it(heap_create_name(buf, len))};
+    }
+    // if old_val is an assoc array, += scalar sets key "0"
+    uintptr_t ptr = (uintptr_t)old_val.item;
+    if (ptr != 0 && (ptr >> 48) == 0) {
+        BashAssocArray* aa = bash_item_to_assoc(old_val);
+        if (aa) {
+            Item key_zero = (Item){.item = s2it(heap_create_name("0", 1))};
+            bash_assoc_set(old_val, key_zero, append_val);
+            return old_val;
+        }
     }
     return bash_string_concat(old_val, append_val);
 }
@@ -1627,8 +1991,12 @@ static bool expand_brace_range(const char* inside, int ilen, const char* prefix,
     char* step_dot = strstr(end_buf, "..");
     if (step_dot) {
         *step_dot = '\0';
-        step = atoi(step_dot + 2);
-        if (step == 0) step = 1;
+        const char* step_str = step_dot + 2;
+        // validate step is a valid integer (must parse completely)
+        char* step_endp = NULL;
+        long step_val = strtol(step_str, &step_endp, 10);
+        if (!step_endp || *step_endp != '\0' || step_val == 0) return false;
+        step = (int)step_val;
     }
 
     char* endp1 = NULL;
@@ -1669,10 +2037,17 @@ static bool expand_brace_range(const char* inside, int ilen, const char* prefix,
         return true;
     }
 
-    // character range
+    // character range: both must be single chars and same class (both alpha or both digit)
     if (start_len == 1 && (int)strlen(end_buf) == 1) {
         char sc = start_buf[0];
         char ec = end_buf[0];
+        // reject mixed alpha/digit ranges (bash keeps them literal)
+        bool sc_alpha = (sc >= 'a' && sc <= 'z') || (sc >= 'A' && sc <= 'Z');
+        bool ec_alpha = (ec >= 'a' && ec <= 'z') || (ec >= 'A' && ec <= 'Z');
+        bool sc_digit = (sc >= '0' && sc <= '9');
+        bool ec_digit = (ec >= '0' && ec <= '9');
+        if ((sc_alpha && ec_digit) || (sc_digit && ec_alpha)) return false;
+        if (step < 0) step = -step;
         if (sc <= ec) {
             for (char c = sc; c <= ec; c += (char)step) {
                 if (sb->length > 0) strbuf_append_char(sb, ' ');
@@ -1720,7 +2095,8 @@ static void expand_brace_word(const char* w, int len, StrBuf* sb) {
     const char* starts[256];
     int lengths[256];
     int count = split_brace_alternatives(inside, ilen, starts, lengths, 256);
-    if (count <= 0) {
+    if (count <= 1) {
+        // no commas found — brace range also failed → keep literal with braces
         if (sb->length > 0) strbuf_append_char(sb, ' ');
         strbuf_append_str_n(sb, w, len);
         return;
@@ -2208,6 +2584,31 @@ extern "C" Item bash_ifs_split_into(Item arr, Item val) {
     return arr;
 }
 
+// ${undef-"$@"}: if var unset, push each positional arg to arr; else IFS-split var value
+extern "C" Item bash_ifs_split_default_at(Item arr, Item var_val) {
+    if (get_type_id(var_val) == LMD_TYPE_NULL) {
+        // var is unset → expand "$@": each positional arg becomes a separate word
+        extern Item* bash_positional_args;
+        extern int bash_positional_count;
+        for (int i = 0; i < bash_positional_count; i++) {
+            bash_array_append(arr, bash_positional_args[i]);
+        }
+        return arr;
+    }
+    return bash_ifs_split_into(arr, var_val);
+}
+
+// ${undef-"$*"}: if var unset, push joined $* as single element; else IFS-split var value
+extern "C" Item bash_ifs_split_default_star(Item arr, Item var_val) {
+    if (get_type_id(var_val) == LMD_TYPE_NULL) {
+        // var is unset → expand "$*": join positional args with first char of IFS
+        Item star_val = bash_get_all_args_string();
+        bash_array_append(arr, star_val);
+        return arr;
+    }
+    return bash_ifs_split_into(arr, var_val);
+}
+
 // Set positional parameters from an array (used for IFS-aware 'set' command)
 // Forward-declared here; bash_positional_args/count are defined later.
 // We use a static buffer that gets reused/reallocated each call.
@@ -2227,8 +2628,8 @@ extern "C" void bash_set_positional_from_array(Item arr) {
     }
     // grow buffer if needed
     if (count > bash_set_pos_buf_cap) {
-        free(bash_set_pos_buf);
-        bash_set_pos_buf = (Item*)malloc(count * sizeof(Item));
+        mem_free(bash_set_pos_buf);
+        bash_set_pos_buf = (Item*)mem_alloc(count * sizeof(Item), MEM_CAT_BASH_RUNTIME);
         bash_set_pos_buf_cap = count;
     }
     for (int i = 0; i < count; i++) {
@@ -2352,6 +2753,74 @@ extern "C" Item bash_return_with_code(Item val) {
 }
 
 // ============================================================================
+// PIPESTATUS array
+// ============================================================================
+
+extern "C" void bash_pipestatus_reset(int count) {
+    bash_pipestatus_count = (count > BASH_PIPESTATUS_MAX) ? BASH_PIPESTATUS_MAX : count;
+    for (int i = 0; i < bash_pipestatus_count; i++) bash_pipestatus[i] = 0;
+}
+
+extern "C" void bash_pipestatus_set(int index, int code) {
+    if (index >= 0 && index < BASH_PIPESTATUS_MAX) {
+        bash_pipestatus[index] = code & 0xFF;
+        if (index >= bash_pipestatus_count) bash_pipestatus_count = index + 1;
+    }
+}
+
+extern "C" int bash_pipestatus_get_count(void) {
+    return bash_pipestatus_count;
+}
+
+extern "C" int bash_pipestatus_get(int index) {
+    if (index >= 0 && index < bash_pipestatus_count) return bash_pipestatus[index];
+    return 0;
+}
+
+extern "C" void bash_pipestatus_apply_simple(void) {
+    // for non-pipeline commands, PIPESTATUS has a single element = $?
+    bash_pipestatus_count = 1;
+    bash_pipestatus[0] = bash_last_exit_code;
+}
+
+extern "C" void bash_pipestatus_apply_pipefail(void) {
+    // pipefail: $? = rightmost non-zero exit code, or 0 if all succeeded
+    int result = 0;
+    for (int i = 0; i < bash_pipestatus_count; i++) {
+        if (bash_pipestatus[i] != 0) result = bash_pipestatus[i];
+    }
+    bash_last_exit_code = result;
+}
+
+extern "C" Item bash_get_pipestatus(Item index) {
+    int idx = (int)bash_coerce_int(index);
+    if (idx >= 0 && idx < bash_pipestatus_count) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", bash_pipestatus[idx]);
+        return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+    }
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_get_pipestatus_all(void) {
+    // return all PIPESTATUS elements as a Lambda array
+    Item arr = bash_array_new();
+    for (int i = 0; i < bash_pipestatus_count; i++) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", bash_pipestatus[i]);
+        Item val = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+        bash_array_append(arr, val);
+    }
+    return arr;
+}
+
+extern "C" Item bash_get_pipestatus_count_item(void) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d", bash_pipestatus_count);
+    return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+}
+
+// ============================================================================
 // File redirect runtime
 // ============================================================================
 
@@ -2456,6 +2925,76 @@ extern "C" Item bash_redirect_read(Item filename) {
 
 extern char** environ;
 
+// ============================================================================
+// Prefix assignment env management for 'VAR=val cmd'
+// When a command has prefix assignments, those vars must be visible in the
+// child process's environment (via setenv/unsetenv before posix_spawn).
+// We save the old OS env value to restore after the command.
+// ============================================================================
+
+#define BASH_PREFIX_ENV_MAX 16
+typedef struct BashPrefixEnvSave {
+    char name[256];
+    char old_val[4096];
+    bool was_set;  // true if getenv() had a value before
+} BashPrefixEnvSave;
+
+static BashPrefixEnvSave bash_prefix_env_stack[BASH_PREFIX_ENV_MAX];
+static int bash_prefix_env_depth = 0;
+
+// Call before each prefix assignment: saves old OS env value, sets new one in env
+extern "C" void bash_set_cmd_env_var(Item name, Item value) {
+    bash_set_var(name, value);
+    char name_buf[256], val_buf[4096];
+    const char* n = bash_item_cstr(name, name_buf, sizeof(name_buf));
+    const char* v = bash_item_cstr(value, val_buf, sizeof(val_buf));
+    if (!n || !v) return;
+
+    if (bash_prefix_env_depth < BASH_PREFIX_ENV_MAX) {
+        BashPrefixEnvSave* save = &bash_prefix_env_stack[bash_prefix_env_depth++];
+        strncpy(save->name, n, sizeof(save->name) - 1);
+        save->name[sizeof(save->name) - 1] = '\0';
+        const char* old = getenv(n);
+        if (old) {
+            strncpy(save->old_val, old, sizeof(save->old_val) - 1);
+            save->old_val[sizeof(save->old_val) - 1] = '\0';
+            save->was_set = true;
+        } else {
+            save->old_val[0] = '\0';
+            save->was_set = false;
+        }
+    }
+    setenv(n, v, 1);
+}
+
+// Call after the command to restore OS env and bash var for one prefix assignment
+extern "C" void bash_restore_cmd_env_var(Item name, Item old_val) {
+    bash_set_var(name, old_val);
+    char name_buf[256];
+    const char* n = bash_item_cstr(name, name_buf, sizeof(name_buf));
+    if (!n) return;
+
+    // pop from the save stack (innermost first)
+    for (int i = bash_prefix_env_depth - 1; i >= 0; i--) {
+        if (strcmp(bash_prefix_env_stack[i].name, n) == 0) {
+            BashPrefixEnvSave* save = &bash_prefix_env_stack[i];
+            if (save->was_set) {
+                setenv(n, save->old_val, 1);
+            } else {
+                unsetenv(n);
+            }
+            // remove from stack by shifting
+            for (int j = i; j < bash_prefix_env_depth - 1; j++) {
+                bash_prefix_env_stack[j] = bash_prefix_env_stack[j + 1];
+            }
+            bash_prefix_env_depth--;
+            return;
+        }
+    }
+    // not found in stack — just unsetenv as fallback
+    unsetenv(n);
+}
+
 // forward declarations (defined in capture section below)
 static Item bash_stdin_item;
 static bool bash_stdin_item_set;
@@ -2500,7 +3039,7 @@ extern "C" Item bash_exec_cmd_with_array(Item cmd_name_item, Item arr) {
         List* list = (List*)(uintptr_t)arr.item;
         argc = list->length;
         if (argc > 0) {
-            argv = (Item*)malloc(argc * sizeof(Item));
+            argv = (Item*)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME);
             for (int i = 0; i < argc; i++) {
                 argv[i] = list->items[i];
             }
@@ -2549,15 +3088,15 @@ extern "C" Item bash_exec_cmd_with_array(Item cmd_name_item, Item arr) {
     // external exec expects cmd name + args in a single argv
     {
         int ext_argc = argc + 1;
-        Item* ext_argv = (Item*)malloc(ext_argc * sizeof(Item));
+        Item* ext_argv = (Item*)mem_alloc(ext_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME);
         ext_argv[0] = cmd_name_item;
         for (int i = 0; i < argc; i++) ext_argv[i + 1] = argv[i];
         result = bash_exec_external(ext_argv, ext_argc);
-        free(ext_argv);
+        mem_free(ext_argv);
     }
 
 done:
-    if (argv) free(argv);
+    if (argv) mem_free(argv);
     return result;
 }
 
@@ -2573,7 +3112,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     }
 
     // convert Item argv to char* argv
-    const char** c_argv = (const char**)calloc(argc + 1, sizeof(char*));
+    const char** c_argv = (const char**)mem_calloc(argc + 1, sizeof(char*), MEM_CAT_BASH_RUNTIME);
     if (!c_argv) {
         bash_last_exit_code = 127;
         return (Item){.item = i2it(127)};
@@ -2616,7 +3155,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (!found) {
             log_debug("bash: %s: command not found", cmd_name);
             bash_err_not_found(cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
         }
@@ -2625,7 +3164,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (access(cmd_name, X_OK) != 0) {
             log_debug("bash: %s: No such file or directory", cmd_name);
             bash_err_no_such_file("", cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
         }
@@ -2639,7 +3178,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     if (need_capture) {
         if (pipe(stdout_pipe) != 0) {
             log_error("bash: pipe failed for command '%s'", cmd_name);
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 1;
             return (Item){.item = i2it(1)};
         }
@@ -2652,7 +3191,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         if (pipe(stdin_pipe) != 0) {
             log_error("bash: stdin pipe failed for command '%s'", cmd_name);
             if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
-            free(c_argv);
+            mem_free(c_argv);
             bash_last_exit_code = 1;
             return (Item){.item = i2it(1)};
         }
@@ -2689,7 +3228,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
         if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
         if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = 127;
         return (Item){.item = i2it(127)};
     }
@@ -2737,7 +3276,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         }
 
         strbuf_free(buf);
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = exit_code;
         return (Item){.item = i2it(exit_code)};
     } else {
@@ -2752,7 +3291,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
             exit_code = 128;
         }
 
-        free(c_argv);
+        mem_free(c_argv);
         bash_last_exit_code = exit_code;
         return (Item){.item = i2it(exit_code)};
     }
@@ -2872,6 +3411,10 @@ extern "C" void bash_clear_stdin_item(void) {
     bash_stdin_item_set = false;
 }
 
+extern "C" int bash_stdin_item_is_set(void) {
+    return bash_stdin_item_set ? 1 : 0;
+}
+
 // ============================================================================
 // Output
 // ============================================================================
@@ -2891,6 +3434,20 @@ extern "C" void bash_write_heredoc(Item content, int is_herestring) {
         }
     }
     bash_raw_putc('\n');
+}
+
+extern "C" Item bash_append_newline(Item value) {
+    Item str = bash_to_string(value);
+    String* s = it2s(str);
+    if (s && s->len > 0) {
+        StrBuf* buf = strbuf_new_cap((size_t)(s->len + 2));
+        strbuf_append_str_n(buf, s->chars, s->len);
+        strbuf_append_char(buf, '\n');
+        Item ret = (Item){.item = s2it(heap_create_name(buf->str, (int)buf->length))};
+        strbuf_free(buf);
+        return ret;
+    }
+    return (Item){.item = s2it(heap_create_name("\n", 1))};
 }
 
 extern "C" void bash_write_stdout(Item value) {
@@ -2926,6 +3483,7 @@ extern "C" void bash_runtime_init(void) {
     bash_opt_extdebug = false;
     bash_opt_functrace = false;
     bash_errexit_depth = 0;
+    bash_errexit_suppressed = false;
     bash_current_lineno = 0;
     bash_debug_trap_lineno = 0;
     bash_debug_trap_base_depth = 0;
@@ -2968,7 +3526,7 @@ extern "C" void bash_runtime_cleanup(void) {
     static const int os_signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
     for (int i = 0; i < BASH_TRAP_NUM; i++) {
         if (bash_trap_handlers[i]) {
-            free(bash_trap_handlers[i]);
+            mem_free(bash_trap_handlers[i]);
             bash_trap_handlers[i] = NULL;
         }
         bash_trap_fired[i] = 0;
@@ -3114,6 +3672,16 @@ extern "C" void bash_set_var(Item name, Item value) {
                        .value = final_value, .is_export = was_export,
                        .attributes = attrs};
     hashmap_set(bash_var_table, &entry);
+}
+
+// restore var only if POSIXLY_CORRECT is NOT set (for eval prefix assignments)
+extern "C" void bash_restore_var_if_not_posix(Item name, Item old_val) {
+    static const char POSIX_VAR[] = "POSIXLY_CORRECT";
+    Item posix_name = (Item){.item = s2it(heap_create_name(POSIX_VAR))};
+    Item posix_val = bash_get_var(posix_name);
+    const char* pv = bash_item_to_cstr(posix_val);
+    if (pv && *pv) return;  // POSIXLY_CORRECT is set: keep the modified value
+    bash_set_var(name, old_val);  // restore
 }
 
 extern "C" Item bash_get_var(Item name) {
@@ -3421,8 +3989,13 @@ typedef struct BashAssocArray {
 } BashAssocArray;
 
 static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    // use bash's DJB hash (hash * 33 + c) for matching iteration order
     const BashAssocEntry* e = (const BashAssocEntry*)item;
-    return hashmap_sip(e->key, e->key_len, seed0, seed1);
+    (void)seed0; (void)seed1;
+    unsigned int hash = 0;
+    for (size_t i = 0; i < e->key_len; i++)
+        hash = hash * 33 + (unsigned char)e->key[i];
+    return (uint64_t)hash;
 }
 
 static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
@@ -3437,6 +4010,71 @@ static BashAssocArray* bash_item_to_assoc(Item map) {
     BashAssocArray* aa = (BashAssocArray*)(uintptr_t)map.item;
     if (!aa || aa->type_id != LMD_TYPE_MAP) return NULL;
     return aa;
+}
+
+Item bash_array_casemod_assoc(Item arr, Item pat_item, int64_t mode) {
+    BashAssocArray* aa = bash_item_to_assoc(arr);
+    if (!aa || !aa->map || hashmap_count(aa->map) == 0) return bash_make_string("", 0);
+    StrBuf* sb = strbuf_new_cap(256);
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(aa->map, &iter, &item)) {
+        const BashAssocEntry* e = (const BashAssocEntry*)item;
+        Item modified = apply_casemod_single(e->value, pat_item, mode);
+        if (sb->length > 0) strbuf_append_char(sb, ' ');
+        char buf[512];
+        const char* s = bash_item_cstr(modified, buf, sizeof(buf));
+        strbuf_append_str(sb, s);
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// helper: check if string needs $'...' ANSI-C quoting (contains control chars)
+static bool bash_needs_dollar_quote(const char* str, int len) {
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if (c < 0x20 || c == 0x7f || c == '\\' || c == '\'') return true;
+    }
+    return false;
+}
+
+// helper: write ANSI-C quoted string $'...' to buffer, returns chars written
+static int bash_dollar_quote(char* buf, int bufsize, const char* str, int len) {
+    int pos = 0;
+    pos += snprintf(buf + pos, bufsize - pos, "$'");
+    for (int i = 0; i < len && pos < bufsize - 10; i++) {
+        unsigned char c = (unsigned char)str[i];
+        switch (c) {
+        case '\n': pos += snprintf(buf + pos, bufsize - pos, "\\n"); break;
+        case '\t': pos += snprintf(buf + pos, bufsize - pos, "\\t"); break;
+        case '\r': pos += snprintf(buf + pos, bufsize - pos, "\\r"); break;
+        case '\a': pos += snprintf(buf + pos, bufsize - pos, "\\a"); break;
+        case '\b': pos += snprintf(buf + pos, bufsize - pos, "\\b"); break;
+        case '\f': pos += snprintf(buf + pos, bufsize - pos, "\\f"); break;
+        case '\v': pos += snprintf(buf + pos, bufsize - pos, "\\v"); break;
+        case '\\': pos += snprintf(buf + pos, bufsize - pos, "\\\\"); break;
+        case '\'': pos += snprintf(buf + pos, bufsize - pos, "\\'"); break;
+        default:
+            if (c < 0x20 || c == 0x7f) {
+                pos += snprintf(buf + pos, bufsize - pos, "\\x%02x", c);
+            } else {
+                buf[pos++] = c;
+            }
+            break;
+        }
+    }
+    pos += snprintf(buf + pos, bufsize - pos, "'");
+    return pos;
+}
+
+// helper: write value with proper quoting for declare output
+static int bash_declare_format_value(char* buf, int bufsize, const char* str, int len) {
+    if (bash_needs_dollar_quote(str, len)) {
+        return bash_dollar_quote(buf, bufsize, str, len);
+    }
+    return snprintf(buf, bufsize, "\"%.*s\"", len, str);
 }
 
 // declare -p: print variable with attributes
@@ -3478,6 +4116,7 @@ extern "C" void bash_declare_print_var(Item name) {
     if (attrs & BASH_ATTR_LOWERCASE)      flags[fi++] = 'l';
     if (attrs & BASH_ATTR_READONLY)       flags[fi++] = 'r';
     if (attrs & BASH_ATTR_UPPERCASE)      flags[fi++] = 'u';
+    if (attrs & BASH_ATTR_CAPITALIZE)     flags[fi++] = 'c';
     if (found && found->is_export)        flags[fi++] = 'x';
     if (fi == 1) flags[fi++] = '-'; // no flags: "declare --"
     flags[fi] = '\0';
@@ -3496,9 +4135,10 @@ extern "C" void bash_declare_print_var(Item name) {
             while (hashmap_iter(aa->map, &iter, &item)) {
                 const BashAssocEntry* e = (const BashAssocEntry*)item;
                 String* vs = it2s(bash_to_string(e->value));
-                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%.*s]=\"%.*s\" ",
-                               (int)e->key_len, e->key,
-                               vs ? vs->len : 0, vs ? vs->chars : "");
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%.*s]=", (int)e->key_len, e->key);
+                pos += bash_declare_format_value(buf + pos, sizeof(buf) - pos,
+                    vs ? vs->chars : "", vs ? vs->len : 0);
+                pos += snprintf(buf + pos, sizeof(buf) - pos, " ");
             }
             pos += snprintf(buf + pos, sizeof(buf) - pos, ")");
         } else if (aa) {
@@ -3508,24 +4148,29 @@ extern "C" void bash_declare_print_var(Item name) {
         buf[pos++] = '\n';
         n = pos;
     } else if ((attrs & BASH_ATTR_INDEXED_ARRAY) || bash_item_is_array(value)) {
-        // indexed array: declare -a name=([0]="val0" [1]="val1" )
+        // indexed array: declare -a name=([0]="val0" [1]="val1")
         int pos = snprintf(buf, sizeof(buf), "declare %s %.*s=(", flags, s->len, s->chars);
         if (bash_item_is_array(value)) {
             List* list = (List*)(uintptr_t)value.item;
             for (int j = 0; j < list->length && pos < (int)sizeof(buf) - 64; j++) {
                 Item elem = list->items[j];
                 String* es = it2s(bash_to_string(elem));
-                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=\"%.*s\" ",
-                               j, es ? es->len : 0, es ? es->chars : "");
+                if (j > 0) pos += snprintf(buf + pos, sizeof(buf) - pos, " ");
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=", j);
+                pos += bash_declare_format_value(buf + pos, sizeof(buf) - pos,
+                    es ? es->chars : "", es ? es->len : 0);
             }
         }
         pos += snprintf(buf + pos, sizeof(buf) - pos, ")\n");
         n = pos;
     } else {
         String* val_str = it2s(bash_to_string(value));
-        n = snprintf(buf, sizeof(buf), "declare %s %.*s=\"%.*s\"\n",
-                     flags, s->len, s->chars,
-                     val_str ? val_str->len : 0, val_str ? val_str->chars : "");
+        int vlen = val_str ? val_str->len : 0;
+        const char* vchars = val_str ? val_str->chars : "";
+        int pos = snprintf(buf, sizeof(buf), "declare %s %.*s=", flags, s->len, s->chars);
+        pos += bash_declare_format_value(buf + pos, sizeof(buf) - pos, vchars, vlen);
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
+        n = pos;
     }
     bash_raw_write(buf, n);
 }
@@ -3548,9 +4193,24 @@ static const BashRtVar* bash_lookup_var_entry(const char* name, int name_len) {
 // apply attribute transformations to a value: INTEGER → arith eval, LOWERCASE, UPPERCASE
 extern "C" Item bash_apply_attrs(Item value, int attrs) {
     Item result = value;
+    // arrays and assoc arrays are never coerced (they hold typed values directly)
+    // check: only untagged pointers (ptr >> 48 == 0) can be array/assoc
+    uintptr_t ptr = (uintptr_t)value.item;
+    if (ptr != 0 && (ptr >> 48) == 0) {
+        // could be array or assoc — skip coercion for those
+        if (bash_item_is_array(value)) return result;
+        BashAssocArray* aa = bash_item_to_assoc(value);
+        if (aa) return result;
+    }
     if (attrs & BASH_ATTR_INTEGER)   result = bash_arith_eval_value(result);
     if (attrs & BASH_ATTR_LOWERCASE) result = bash_string_lower(bash_to_string(result), true);
     if (attrs & BASH_ATTR_UPPERCASE) result = bash_string_upper(bash_to_string(result), true);
+    if (attrs & BASH_ATTR_CAPITALIZE) {
+        // capitalize: lowercase everything, then uppercase first char
+        result = bash_string_lower(bash_to_string(result), true);
+        Item question_pat = bash_make_string("?", 1);
+        result = bash_expand_upper_first(result, question_pat);
+    }
     return result;
 }
 
@@ -3691,7 +4351,7 @@ extern "C" Item bash_assoc_new(void) {
     BashAssocArray* aa = (BashAssocArray*)heap_calloc(sizeof(BashAssocArray), LMD_TYPE_RAW_POINTER);
     aa->type_id = LMD_TYPE_MAP;
     aa->flags = 0;
-    aa->map = hashmap_new(sizeof(BashAssocEntry), 16, 0, 0,
+    aa->map = hashmap_new(sizeof(BashAssocEntry), 128, 0, 0,
                           bash_assoc_entry_hash, bash_assoc_entry_cmp, NULL, NULL);
     return (Item){.item = (uint64_t)(uintptr_t)aa};
 }
@@ -3717,6 +4377,87 @@ extern "C" Item bash_assoc_set(Item map, Item key, Item value) {
     BashAssocEntry entry = {.key = k->chars, .key_len = (size_t)k->len, .value = value};
     hashmap_set(aa->map, &entry);
     return map;
+}
+
+// parse [key]=value word from array literal into assoc array
+// handles: [key]=value → sets key→value; bare scalar or `key` without '[]' → sets [0]=value
+extern "C" void bash_assoc_init_word(Item map, Item word) {
+    const char* s = bash_item_to_cstr(word);
+    if (!s || !*s) return;
+    if (s[0] == '[') {
+        // find closing ]= separator
+        const char* bracket_end = strchr(s + 1, ']');
+        if (bracket_end && bracket_end[1] == '=') {
+            int key_len = (int)(bracket_end - s - 1);
+            const char* key = s + 1;
+            const char* val = bracket_end + 2;
+            Item key_item = (Item){.item = s2it(heap_create_name(key, key_len))};
+            Item val_item = (Item){.item = s2it(heap_create_name(val))};
+            bash_assoc_set(map, key_item, val_item);
+            return;
+        }
+    }
+    // no [key]= prefix: ignore (plain values in assoc array init are not standard)
+}
+
+// parse [idx]=value word for indexed array with var name for integer coercion
+// handles: [idx]=value → sets arr[idx]=value (with arithmetic if var is integer-typed)
+// also handles [idx]+=value → arr[idx] = arr[idx] + value (arithmetic)
+// if arr is an assoc array, dispatch to bash_assoc_init_word instead
+extern "C" void bash_array_init_word(Item arr, Item var_name, Item word) {
+    // dispatch to assoc handling if arr is an assoc array
+    {
+        uintptr_t ptr = (uintptr_t)arr.item;
+        if (ptr != 0 && (ptr >> 48) == 0 && bash_item_to_assoc(arr)) {
+            bash_assoc_init_word(arr, word);
+            return;
+        }
+    }
+    const char* s = bash_item_to_cstr(word);
+    if (!s || !*s) return;
+    if (s[0] == '[') {
+        const char* bracket_end = strchr(s + 1, ']');
+        if (bracket_end) {
+            bool is_append_elem = (bracket_end[1] == '+' && bracket_end[2] == '=');
+            bool is_assign_elem = (bracket_end[1] == '=');
+            if (is_assign_elem || is_append_elem) {
+                int idx_len = (int)(bracket_end - s - 1);
+                char idx_buf[32];
+                if (idx_len <= 0 || idx_len >= (int)sizeof(idx_buf)) return;
+                memcpy(idx_buf, s + 1, idx_len);
+                idx_buf[idx_len] = '\0';
+                long long idx = atoll(idx_buf);
+                const char* val_str = bracket_end + (is_append_elem ? 3 : 2);
+                Item val_item = (Item){.item = s2it(heap_create_name(val_str))};
+                // check integer attribute for arithmetic eval
+                int attrs = bash_get_var_attrs(var_name);
+                if (attrs & BASH_ATTR_INTEGER) {
+                    val_item = bash_arith_eval_value(val_item);
+                }
+                Item idx_item = (Item){.item = i2it(idx)};
+                if (is_append_elem) {
+                    // [idx]+=val: add to existing element
+                    Item existing = bash_array_get(arr, idx_item);
+                    if (attrs & BASH_ATTR_INTEGER) {
+                        long long old_v = it2i(bash_arith_eval_value(existing));
+                        long long add_v = it2i(val_item);
+                        char buf[32];
+                        int len = snprintf(buf, sizeof(buf), "%lld", old_v + add_v);
+                        val_item = (Item){.item = s2it(heap_create_name(buf, len))};
+                    } else {
+                        val_item = bash_string_concat(existing, val_item);
+                    }
+                }
+                bash_array_set(arr, idx_item, val_item);
+                return;
+            }
+        }
+    }
+    // no [idx]= prefix: plain append with coercion
+    Item val_item = word;
+    int attrs = bash_get_var_attrs(var_name);
+    if (attrs & BASH_ATTR_INTEGER) val_item = bash_arith_eval_value(val_item);
+    bash_array_append(arr, val_item);
 }
 
 extern "C" Item bash_assoc_get(Item map, Item key) {
@@ -3820,6 +4561,33 @@ static const char** pending_argv = NULL;
 static int pending_argc = 0;
 static bool pending_skip_arg0 = false;
 
+// deferred CLI option flags (set before bash_runtime_init resets them)
+static bool pending_opt_errexit = false;
+static bool pending_opt_nounset = false;
+static bool pending_opt_xtrace = false;
+static bool pending_has_flags = false;
+
+extern "C" void bash_set_pending_option(char flag, bool enable) {
+    pending_has_flags = true;
+    switch (flag) {
+        case 'e': pending_opt_errexit = enable; break;
+        case 'u': pending_opt_nounset = enable; break;
+        case 'x': pending_opt_xtrace = enable; break;
+        default: break;
+    }
+}
+
+extern "C" void bash_apply_pending_options(void) {
+    if (!pending_has_flags) return;
+    if (pending_opt_errexit) bash_opt_errexit = true;
+    if (pending_opt_nounset) bash_opt_nounset = true;
+    if (pending_opt_xtrace) bash_opt_xtrace = true;
+    pending_has_flags = false;
+    pending_opt_errexit = false;
+    pending_opt_nounset = false;
+    pending_opt_xtrace = false;
+}
+
 extern "C" void bash_set_pending_args(const char** argv, int argc, bool skip_arg0) {
     pending_argv = argv;
     pending_argc = argc;
@@ -3831,7 +4599,7 @@ extern "C" void bash_apply_pending_args(void) {
     int start = pending_skip_arg0 ? 1 : 0;
     int count = pending_argc - start;
     if (count <= 0) { pending_argv = NULL; return; }
-    Item* params = (Item*)calloc(count, sizeof(Item));
+    Item* params = (Item*)mem_calloc(count, sizeof(Item), MEM_CAT_BASH_RUNTIME);
     for (int i = 0; i < count; i++) {
         String* s = heap_create_name(pending_argv[start + i], (int)strlen(pending_argv[start + i]));
         params[i] = (Item){.item = s2it(s)};
@@ -3878,6 +4646,80 @@ extern "C" Item bash_get_all_args_string(void) {
     return (Item){.item = s2it(result)};
 }
 
+extern "C" Item bash_positional_slice(Item offset_item, Item length_item) {
+    // ${*:offset} / ${*:offset:length} — array-style slicing of positional params
+    int64_t offset = bash_coerce_int(offset_item);
+    int64_t length = bash_coerce_int(length_item);
+    int start, count;
+    if (offset >= 0) {
+        if (offset == 0) {
+            // ${*:0} includes $0 — approximate by starting at index 0
+            start = 0;
+        } else {
+            start = (int)offset - 1; // ${*:1} = first arg = index 0
+        }
+    } else {
+        // negative offset counts from end
+        start = bash_positional_count + (int)offset;
+    }
+    if (start < 0) start = 0;
+    if (start >= bash_positional_count) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    int avail = bash_positional_count - start;
+    count = (length < 0) ? avail : (int)length;
+    if (count > avail) count = avail;
+    if (count <= 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    // join selected positional params with IFS first char (default: space)
+    StrBuf* sb = strbuf_new();
+    for (int i = 0; i < count; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        Item str_val = bash_to_string(bash_positional_args[start + i]);
+        String* s = it2s(str_val);
+        if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// return positional slice as an array (for splatting in command args)
+extern "C" Item bash_positional_slice_array(Item offset_item, Item length_item) {
+    int64_t offset = bash_coerce_int(offset_item);
+    int64_t length = bash_coerce_int(length_item);
+    int start, count;
+    if (offset >= 0) {
+        if (offset == 0) start = 0;
+        else start = (int)offset - 1;
+    } else {
+        start = bash_positional_count + (int)offset;
+    }
+    if (start < 0) start = 0;
+    if (start >= bash_positional_count) return bash_array_new();
+    int avail = bash_positional_count - start;
+    count = (length < 0) ? avail : (int)length;
+    if (count > avail) count = avail;
+    if (count <= 0) return bash_array_new();
+
+    Item arr = bash_array_new();
+    for (int i = 0; i < count; i++) {
+        bash_array_append(arr, bash_positional_args[start + i]);
+    }
+    return arr;
+}
+
+extern "C" Item bash_get_positional_array(void) {
+    // return positional params as a bash array for per-element operations
+    Item arr = bash_array_new();
+    for (int i = 0; i < bash_positional_count; i++) {
+        bash_array_append(arr, bash_positional_args[i]);
+    }
+    return arr;
+}
+
 extern "C" Item bash_shift_args(int n) {
     if (n < 1) n = 1;
     if (n > bash_positional_count) n = bash_positional_count;
@@ -3910,6 +4752,55 @@ extern "C" void bash_arg_builder_push_at(void) {
         if (bash_arg_builder_count < 256)
             bash_arg_builder_buf[bash_arg_builder_count++] = bash_positional_args[i];
     }
+}
+
+// ${var-"$@"}: if var is unset, push positional args (like push_at); else push var
+extern "C" void bash_arg_builder_push_default_at(Item var_val) {
+    if (bash_item_is_unset(var_val)) {
+        for (int i = 0; i < bash_positional_count; i++) {
+            if (bash_arg_builder_count < 256)
+                bash_arg_builder_buf[bash_arg_builder_count++] = bash_positional_args[i];
+        }
+    } else {
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = var_val;
+    }
+}
+
+// ${var-"$*"}: if var is unset, push joined $* as single arg; else push var
+extern "C" void bash_arg_builder_push_default_star(Item var_val) {
+    if (bash_item_is_unset(var_val)) {
+        extern Item bash_get_all_args_string(void);
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = bash_get_all_args_string();
+    } else {
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = var_val;
+    }
+}
+
+// push all elements of an array into the arg builder (for ${arr[@]:0:N} splatting)
+extern "C" void bash_arg_builder_push_array(Item arr) {
+    if (!bash_item_is_array(arr)) {
+        // scalar: push as single arg
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = arr;
+        return;
+    }
+    List* list = (List*)(uintptr_t)arr.item;
+    for (int i = 0; i < list->length; i++) {
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = list->items[i];
+    }
+}
+
+// append all positional args ($@) to an existing array
+extern "C" Item bash_array_concat_positional(Item arr) {
+    if (!bash_item_is_array(arr)) return arr;
+    for (int i = 0; i < bash_positional_count; i++) {
+        bash_array_append(arr, bash_positional_args[i]);
+    }
+    return arr;
 }
 
 extern "C" Item bash_arg_builder_get_ptr(void) {
@@ -4044,6 +4935,17 @@ extern "C" void bash_scope_pop_subshell(void) {
     }
 }
 
+extern "C" void bash_reset_errexit(void) {
+    bash_opt_errexit = false;
+}
+
+extern "C" void bash_comsub_reset_errexit(void) {
+    // in POSIX mode, command substitutions inherit errexit
+    if (!bash_posix_mode) {
+        bash_opt_errexit = false;
+    }
+}
+
 // ============================================================================
 // POSIX compatibility mode
 // ============================================================================
@@ -4127,6 +5029,8 @@ typedef struct BashRtFuncEntry {
     char name[128];
     size_t name_len;
     BashRtFuncPtr ptr;
+    char* source_text;    // bash-formatted function body (heap allocated)
+    size_t source_len;
 } BashRtFuncEntry;
 
 static uint64_t bash_rt_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
@@ -4158,8 +5062,33 @@ extern "C" void bash_register_rt_func(const char* name, BashRtFuncPtr ptr) {
     memcpy(entry.name, name, len);
     entry.name_len = len;
     entry.ptr = ptr;
+    entry.source_text = NULL;
+    entry.source_len = 0;
     hashmap_set(bash_rt_func_table, &entry);
     log_debug("bash: registered runtime function '%.*s'", (int)len, name);
+}
+
+extern "C" void bash_register_rt_func_with_source(const char* name, BashRtFuncPtr ptr,
+                                                    const char* source, int source_len) {
+    bash_ensure_rt_func_table();
+    BashRtFuncEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    size_t len = strlen(name);
+    if (len >= sizeof(entry.name)) len = sizeof(entry.name) - 1;
+    memcpy(entry.name, name, len);
+    entry.name_len = len;
+    entry.ptr = ptr;
+    if (source && source_len > 0) {
+        entry.source_text = (char*)mem_alloc(source_len + 1, MEM_CAT_BASH_RUNTIME);
+        memcpy(entry.source_text, source, source_len);
+        entry.source_text[source_len] = '\0';
+        entry.source_len = source_len;
+    } else {
+        entry.source_text = NULL;
+        entry.source_len = 0;
+    }
+    hashmap_set(bash_rt_func_table, &entry);
+    log_debug("bash: registered runtime function '%.*s' with source (%d bytes)", (int)len, name, source_len);
 }
 
 extern "C" BashRtFuncPtr bash_lookup_rt_func(const char* name) {
@@ -4171,6 +5100,64 @@ extern "C" BashRtFuncPtr bash_lookup_rt_func(const char* name) {
     memcpy(key.name, name, key.name_len);
     const BashRtFuncEntry* found = (const BashRtFuncEntry*)hashmap_get(bash_rt_func_table, &key);
     return found ? found->ptr : NULL;
+}
+
+extern "C" const char* bash_get_func_source(const char* name, int* out_len) {
+    if (!bash_rt_func_table) return NULL;
+    BashRtFuncEntry key;
+    memset(&key, 0, sizeof(key));
+    key.name_len = strlen(name);
+    if (key.name_len >= sizeof(key.name)) key.name_len = sizeof(key.name) - 1;
+    memcpy(key.name, name, key.name_len);
+    const BashRtFuncEntry* found = (const BashRtFuncEntry*)hashmap_get(bash_rt_func_table, &key);
+    if (found && found->source_text) {
+        if (out_len) *out_len = (int)found->source_len;
+        return found->source_text;
+    }
+    return NULL;
+}
+
+extern "C" void bash_print_all_functions(void) {
+    if (!bash_rt_func_table) return;
+    // collect all function entries that have source text
+    size_t count = hashmap_count(bash_rt_func_table);
+    if (count == 0) return;
+    const BashRtFuncEntry** entries = (const BashRtFuncEntry**)mem_alloc(count * sizeof(BashRtFuncEntry*), MEM_CAT_BASH_RUNTIME);
+    size_t n = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(bash_rt_func_table, &iter, &item)) {
+        const BashRtFuncEntry* e = (const BashRtFuncEntry*)item;
+        if (e->source_text && e->source_len > 0) {
+            entries[n++] = e;
+        }
+    }
+    // sort by function name (alphabetical, matching bash behavior)
+    for (size_t i = 1; i < n; i++) {
+        for (size_t j = i; j > 0; j--) {
+            if (strcmp(entries[j-1]->name, entries[j]->name) > 0) {
+                const BashRtFuncEntry* tmp = entries[j-1];
+                entries[j-1] = entries[j];
+                entries[j] = tmp;
+            } else break;
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        bash_raw_write(entries[i]->source_text, entries[i]->source_len);
+        bash_raw_write("\n", 1);
+    }
+    mem_free(entries);
+}
+
+extern "C" void bash_declare_print_func(Item name_item) {
+    String* s = it2s(bash_to_string(name_item));
+    if (!s) return;
+    int src_len = 0;
+    const char* src = bash_get_func_source(s->chars, &src_len);
+    if (src && src_len > 0) {
+        bash_raw_write(src, src_len);
+        bash_raw_write("\n", 1);
+    }
 }
 
 extern "C" Item bash_call_rt_func(Item name_item, Item* args, int argc) {
@@ -4213,6 +5200,207 @@ extern "C" void bash_set_option_flag(char flag, bool enable) {
         case 'T': bash_opt_functrace = enable; break;
         default: log_debug("bash: set_option_flag: unknown flag '%c'", flag); break;
     }
+}
+
+// ============================================================================
+// set (no args) — dump all shell variables
+// ============================================================================
+
+// bash-style quoting for set output: quote if value contains chars that need it
+static bool bash_set_needs_quoting(const char* s, int len) {
+    if (len == 0) return false;
+    // leading # or ~ require quoting
+    if (s[0] == '#' || s[0] == '~') return true;
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        // characters that need quoting in bash set output
+        if (c == ' ' || c == '\t' || c == '\n' || c == '|' || c == '&' ||
+            c == ';' || c == '(' || c == ')' || c == '<' || c == '>' ||
+            c == '$' || c == '`' || c == '\\' || c == '"' || c == '!' ||
+            c == '{' || c == '}' || c == '[' || c == ']' || c == '*' ||
+            c == '?' || c == '~') return true;
+    }
+    return false;
+}
+
+// write a variable value in bash set quoting format
+static void bash_set_write_quoted(char* buf, int* pos, int bufsize, const char* val, int vlen) {
+    // special case: contains single quotes → use $'...' or backslash quoting
+    bool has_squote = false;
+    for (int i = 0; i < vlen; i++) {
+        if (val[i] == '\'') { has_squote = true; break; }
+    }
+
+    if (has_squote && !bash_set_needs_quoting(val, vlen)) {
+        // only single quotes, no other special chars — use backslash escaping
+        for (int i = 0; i < vlen && *pos < bufsize - 4; i++) {
+            if (val[i] == '\'') {
+                buf[(*pos)++] = '\\';
+                buf[(*pos)++] = '\'';
+            } else {
+                buf[(*pos)++] = val[i];
+            }
+        }
+    } else if (has_squote) {
+        // has squotes AND other special chars — use $'...' quoting
+        buf[(*pos)++] = '$';
+        buf[(*pos)++] = '\'';
+        for (int i = 0; i < vlen && *pos < bufsize - 4; i++) {
+            if (val[i] == '\'') {
+                buf[(*pos)++] = '\\';
+                buf[(*pos)++] = '\'';
+            } else if (val[i] == '\\') {
+                buf[(*pos)++] = '\\';
+                buf[(*pos)++] = '\\';
+            } else {
+                buf[(*pos)++] = val[i];
+            }
+        }
+        buf[(*pos)++] = '\'';
+    } else if (bash_set_needs_quoting(val, vlen)) {
+        // needs quoting, no single quotes — use single quotes
+        buf[(*pos)++] = '\'';
+        for (int i = 0; i < vlen && *pos < bufsize - 2; i++) {
+            buf[(*pos)++] = val[i];
+        }
+        buf[(*pos)++] = '\'';
+    } else {
+        // no quoting needed
+        for (int i = 0; i < vlen && *pos < bufsize - 2; i++) {
+            buf[(*pos)++] = val[i];
+        }
+    }
+}
+
+struct BashSetEntry {
+    const char* name;
+    int name_len;
+    const char* value;
+    int value_len;
+    bool is_array;
+    bool is_assoc;
+    Item raw_value;
+    int attributes;
+};
+
+static int bash_set_entry_cmp(const void* a, const void* b) {
+    const BashSetEntry* ea = (const BashSetEntry*)a;
+    const BashSetEntry* eb = (const BashSetEntry*)b;
+    int min_len = ea->name_len < eb->name_len ? ea->name_len : eb->name_len;
+    int cmp = memcmp(ea->name, eb->name, min_len);
+    if (cmp != 0) return cmp;
+    return ea->name_len - eb->name_len;
+}
+
+extern "C" void bash_builtin_set_dump(void) {
+    bash_ensure_var_table();
+
+    // collect all variables from global table + scope stack
+    // use a temporary hashmap to merge (scoped vars override globals)
+    struct hashmap* merged = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
+                                         bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    // global vars first
+    {
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(bash_var_table, &iter, &item)) {
+            hashmap_set(merged, item);
+        }
+    }
+    // scope stack overrides (inner scopes later so they override)
+    for (int i = 0; i < bash_func_scope_depth; i++) {
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(bash_func_scope_stack[i], &iter, &item)) {
+            hashmap_set(merged, item);
+        }
+    }
+
+    // count and collect entries
+    size_t count = hashmap_count(merged);
+    if (count == 0) { hashmap_free(merged); return; }
+
+    BashSetEntry* entries = (BashSetEntry*)mem_calloc(count, sizeof(BashSetEntry), MEM_CAT_BASH_RUNTIME);
+    size_t idx = 0;
+    {
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(merged, &iter, &item)) {
+            const BashRtVar* v = (const BashRtVar*)item;
+            BashSetEntry* e = &entries[idx++];
+            e->name = v->name;
+            e->name_len = (int)v->name_len;
+            e->raw_value = v->value;
+            e->attributes = v->attributes;
+            e->is_assoc = (v->attributes & BASH_ATTR_ASSOC_ARRAY) != 0;
+            e->is_array = e->is_assoc || (v->attributes & BASH_ATTR_INDEXED_ARRAY) || bash_item_is_array(v->value);
+
+            if (!e->is_array && !e->is_assoc) {
+                String* vs = it2s(bash_to_string(v->value));
+                e->value = vs ? vs->chars : "";
+                e->value_len = vs ? vs->len : 0;
+            }
+        }
+    }
+
+    // sort alphabetically by name
+    qsort(entries, idx, sizeof(BashSetEntry), bash_set_entry_cmp);
+
+    // output each variable
+    char buf[8192];
+    for (size_t i = 0; i < idx; i++) {
+        BashSetEntry* e = &entries[i];
+        int pos = 0;
+
+        // skip internal variables that bash doesn't show
+        // skip BASH_ARGC, BASH_ARGV, etc. if they're special
+        // For now, output all variables
+
+        // write name=
+        for (int j = 0; j < e->name_len && pos < (int)sizeof(buf) - 256; j++) {
+            buf[pos++] = e->name[j];
+        }
+        buf[pos++] = '=';
+
+        if (e->is_assoc) {
+            // assoc arrays shown as: name=([key1]="val1" [key2]="val2" )
+            BashAssocArray* aa = bash_item_to_assoc(e->raw_value);
+            buf[pos++] = '(';
+            if (aa) {
+                size_t aiter = 0;
+                void* aitem;
+                while (hashmap_iter(aa->map, &aiter, &aitem)) {
+                    const BashAssocEntry* ae = (const BashAssocEntry*)aitem;
+                    String* vs = it2s(bash_to_string(ae->value));
+                    pos += snprintf(buf + pos, sizeof(buf) - pos, "[%.*s]=\"%.*s\" ",
+                                   (int)ae->key_len, ae->key,
+                                   vs ? vs->len : 0, vs ? vs->chars : "");
+                }
+            }
+            buf[pos++] = ')';
+        } else if (e->is_array) {
+            // indexed arrays shown as: name=([0]="val0" [1]="val1")
+            buf[pos++] = '(';
+            if (bash_item_is_array(e->raw_value)) {
+                List* list = (List*)(uintptr_t)e->raw_value.item;
+                for (int j = 0; j < list->length && pos < (int)sizeof(buf) - 64; j++) {
+                    String* es = it2s(bash_to_string(list->items[j]));
+                    if (j > 0) buf[pos++] = ' ';
+                    pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=\"%.*s\"",
+                                   j, es ? es->len : 0, es ? es->chars : "");
+                }
+            }
+            buf[pos++] = ')';
+        } else {
+            // scalar value with bash quoting
+            bash_set_write_quoted(buf, &pos, sizeof(buf), e->value, e->value_len);
+        }
+        buf[pos++] = '\n';
+        bash_raw_write(buf, pos);
+    }
+
+    mem_free(entries);
+    hashmap_free(merged);
 }
 
 extern "C" void bash_set_option(Item option, bool enable) {
@@ -4291,8 +5479,18 @@ extern "C" void bash_errexit_pop(void) {
     if (bash_errexit_depth > 0) bash_errexit_depth--;
 }
 
+// mark that the next errexit check should be skipped (set by ! negation)
+extern "C" void bash_set_errexit_suppressed(void) {
+    bash_errexit_suppressed = true;
+}
+
 // check errexit: if set -e is active and last exit code != 0 and not suppressed, return 1
 extern "C" int bash_check_errexit(void) {
+    // ! negation suppresses the next errexit check
+    if (bash_errexit_suppressed) {
+        bash_errexit_suppressed = false;
+        return 0;
+    }
     if (bash_opt_errexit && bash_last_exit_code != 0 && bash_errexit_depth == 0) {
         log_debug("bash: errexit: should exit with code %d", bash_last_exit_code);
         return 1;
@@ -4582,7 +5780,7 @@ extern "C" void bash_trap_set(Item handler, Item signal_name) {
 
     // free existing handler
     if (bash_trap_handlers[idx]) {
-        free(bash_trap_handlers[idx]);
+        mem_free(bash_trap_handlers[idx]);
         bash_trap_handlers[idx] = NULL;
     }
 
@@ -4603,7 +5801,7 @@ extern "C" void bash_trap_set(Item handler, Item signal_name) {
     }
 
     // store handler code (null-terminated copy)
-    bash_trap_handlers[idx] = (char*)malloc(h->len + 1);
+    bash_trap_handlers[idx] = (char*)mem_alloc(h->len + 1, MEM_CAT_BASH_RUNTIME);
     memcpy(bash_trap_handlers[idx], h->chars, h->len);
     bash_trap_handlers[idx][h->len] = '\0';
 
@@ -4627,7 +5825,7 @@ extern "C" void bash_trap_run_exit(void) {
     if (!bash_trap_handlers[BASH_TRAP_IDX_EXIT]) return;
     if (bash_trap_handlers[BASH_TRAP_IDX_EXIT][0] == '\0') {
         // ignore (empty handler)
-        free(bash_trap_handlers[BASH_TRAP_IDX_EXIT]);
+        mem_free(bash_trap_handlers[BASH_TRAP_IDX_EXIT]);
         bash_trap_handlers[BASH_TRAP_IDX_EXIT] = NULL;
         return;
     }
@@ -4638,7 +5836,7 @@ extern "C" void bash_trap_run_exit(void) {
     String* code_str = heap_create_name(code, (int)strlen(code));
     Item code_item = {.item = s2it(code_str)};
     bash_eval_string(code_item);
-    free(code);
+    mem_free(code);
 }
 
 extern "C" Item bash_run_debug_trap(void) {

@@ -1,16 +1,17 @@
 #pragma once
 /**
- * render_svg_inline.hpp - Inline SVG Rendering via ThorVG
+ * render_svg_inline.hpp - Inline SVG Rendering via RdtVector
  *
- * Renders SVG elements embedded in HTML documents by building ThorVG
- * scene graphs directly from parsed SVG element trees.
+ * Renders SVG elements embedded in HTML documents by converting SVG
+ * element trees directly to RdtVector draw calls.
  *
  * Key functions:
- * - build_svg_scene(): Convert SVG Element tree to ThorVG scene
+ * - render_svg_to_vec(): Convert SVG Element tree to rdt_ draw calls
  * - render_inline_svg(): Render SVG block in document context
  */
 
 #include "view.hpp"
+#include "rdt_vector.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
 
@@ -46,6 +47,8 @@ struct SvgRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
+    RdtVector* vec;              // target vector renderer for direct drawing
+    RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
     
     // pixel ratio for text sizing - text font sizes need to be divided by this
     // because the entire SVG scene is scaled by pixel_ratio after building
@@ -60,13 +63,14 @@ struct SvgRenderContext {
     // inherited style state
     Color fill_color;
     Color stroke_color;
+    Color current_color;         // CSS 'color' property for currentColor keyword
     float stroke_width;
     float opacity;
     bool fill_none;
     bool stroke_none;
     
     // gradient/pattern definitions from <defs>
-    HashMap* defs;               // id → Tvg_Gradient* or Tvg_Paint*
+    HashMap* defs;               // id → SvgDefTable*
 };
 
 // ============================================================================
@@ -94,17 +98,23 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
 /**
- * Build ThorVG scene graph from SVG element tree
- * Recursively converts SVG elements to ThorVG shapes/scenes.
+ * Render SVG element tree directly to an RdtVector using rdt_ draw calls.
+ * No ThorVG scene tree is constructed — shapes are drawn immediately.
  *
+ * @param vec Target vector renderer
  * @param svg_element The <svg> Element from HTML5 parser
  * @param viewport_width Target rendering width (CSS pixels)
  * @param viewport_height Target rendering height (CSS pixels)
  * @param pool Memory pool for allocations
  * @param pixel_ratio Device pixel ratio (for text size adjustment)
- * @return ThorVG scene containing all SVG content (caller must manage lifecycle)
+ * @param font_ctx Font context for SVG text rendering (may be nullptr)
+ * @param base_transform Optional transform to apply to the entire SVG
  */
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio = 1.0f, FontContext* font_ctx = nullptr);
+void render_svg_to_vec(RdtVector* vec, Element* svg_element,
+                      float viewport_width, float viewport_height,
+                      Pool* pool, float pixel_ratio = 1.0f,
+                      FontContext* font_ctx = nullptr,
+                      const RdtMatrix* base_transform = nullptr);
 
 /**
  * Render inline SVG element in document context

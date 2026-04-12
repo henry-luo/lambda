@@ -19,11 +19,15 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/time.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #endif
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
+#include "emit_sexpr.h"  // For --emit-sexpr command
 
 // Error handling with stack traces
 #include "lambda-error.h"
@@ -246,7 +250,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
     while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
         // Skip empty lines when not in multi-line mode
         if (strlen(line) == 0 && pending_input->length == 0) {
-            free(line);
+            mem_free(line);
             continue;
         }
 
@@ -258,13 +262,13 @@ void run_repl(Runtime *runtime, bool use_mir) {
         // Handle REPL commands (only when not in multi-line mode)
         if (pending_input->length == 0) {
             if (strcmp(line, "quit") == 0 || strcmp(line, "q") == 0 || strcmp(line, "exit") == 0) {
-                free(line);
+                mem_free(line);
                 break;
             }
 
             if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
                 print_help();
-                free(line);
+                mem_free(line);
                 continue;
             }
 
@@ -272,7 +276,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
                 strbuf_reset(repl_history);
                 strbuf_reset(last_output);
                 printf("REPL history cleared\n");
-                free(line);
+                mem_free(line);
                 continue;
             }
         }
@@ -282,7 +286,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
             strbuf_append_str(pending_input, "\n");
         }
         strbuf_append_str(pending_input, line);
-        free(line);
+        mem_free(line);
 
         // Check if statement is complete using Tree-sitter
         StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
@@ -589,7 +593,7 @@ int exec_convert(int argc, char* argv[]) {
         // Relative path
         snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, input_file);
     }
-    free(cwd_path);
+    mem_free(cwd_path);
 
     // Create URL string
     String* url_string = create_string(temp_pool, file_url);
@@ -813,7 +817,7 @@ int exec_convert(int argc, char* argv[]) {
 
 #ifndef _WIN32
 // per-script timeout support for test-batch mode
-static jmp_buf batch_timeout_jmp;
+static sigjmp_buf batch_timeout_jmp;
 static volatile sig_atomic_t batch_timeout_active = 0;
 
 // MIR error recovery for batch mode: longjmp instead of exit(1)
@@ -853,8 +857,27 @@ static void batch_alarm_handler(int sig) {
     (void)sig;
     if (batch_timeout_active) {
         batch_timeout_active = 0;
-        longjmp(batch_timeout_jmp, 1);
+        siglongjmp(batch_timeout_jmp, 1);
     }
+}
+
+// get current resident set size in bytes (for memory profiling)
+static size_t get_rss_bytes() {
+#ifdef __APPLE__
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        return info.resident_size;
+#elif defined(__linux__)
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        unsigned long pages = 0;
+        fscanf(f, "%*u %lu", &pages); // second field = resident pages
+        fclose(f);
+        return pages * 4096;
+    }
+#endif
+    return 0;
 }
 #endif
 
@@ -933,7 +956,7 @@ int main(int argc, char *argv[]) {
         mode = MEMTRACK_MODE_OFF;
     }
     memtrack_init(mode);
-    atexit(memtrack_shutdown);  // Ensure shutdown is called on exit
+    atexit([]{ memtrack_shutdown(); });  // Ensure shutdown is called on exit
     run_assertions();
     log_debug("Assertions completed");
 
@@ -1078,19 +1101,19 @@ int main(int argc, char *argv[]) {
                 char* html_content = read_text_file(html_file);
                 if (!html_content) {
                     printf("Error: Could not read HTML file '%s'\n", html_file);
-                    free(js_source);
+                    mem_free(js_source);
                     runtime_cleanup(&runtime);
                     log_finish();
                     return 1;
                 }
 
                 // Use heap-allocated String* for type param (flexible array member)
-                String* html_type = (String*)malloc(sizeof(String) + 5);
+                String* html_type = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_SYSTEM);
                 html_type->len = 4;
                 memcpy(html_type->chars, "html", 5);  // includes null terminator
                 Input* input = input_from_source(html_content, NULL, html_type, NULL);
-                free(html_content);
-                free(html_type);
+                mem_free(html_content);
+                mem_free(html_type);
 
                 if (input) {
                     Element* html_root = get_html_root_element(input);
@@ -1125,6 +1148,24 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            // Set up process.argv C-level storage (actual Lambda array built lazily)
+            {
+                static const char* js_argv_store[64];
+                static int js_argc_store = 0;
+                js_argc_store = 0;
+                js_argv_store[js_argc_store++] = argv[0]; // lambda.exe
+                js_argv_store[js_argc_store++] = js_file; // script path
+                // Pass remaining non-option arguments
+                for (int i = 2; i < argc && js_argc_store < 64; i++) {
+                    if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
+                    if (strcmp(argv[i], "--mir-interp") == 0) continue;
+                    if (argv[i] == js_file) continue; // already added
+                    if (argv[i][0] == '-') continue;
+                    js_argv_store[js_argc_store++] = argv[i];
+                }
+                js_store_process_argv(js_argc_store, js_argv_store);
+            }
+
             Item result = transpile_js_to_mir(&runtime, js_source, js_file);
 
             // JS mode: no REPL printing of last expression value
@@ -1141,7 +1182,7 @@ int main(int argc, char *argv[]) {
                 js_clear_exception();
             }
 
-            free(js_source);
+            mem_free(js_source);
         }
 
         runtime_cleanup(&runtime);
@@ -1204,7 +1245,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            free(py_source);
+            mem_free(py_source);
         }
 
         runtime_cleanup(&runtime);
@@ -1268,7 +1309,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            free(rb_source);
+            mem_free(rb_source);
         }
 
         runtime_cleanup(&runtime);
@@ -1337,10 +1378,10 @@ int main(int argc, char *argv[]) {
                 bool enable = (argv[i][0] == '-');
                 i++;
                 if (strcmp(argv[i], "posix") == 0) bash_posix = enable;
-                else if (strcmp(argv[i], "errexit") == 0) bash_set_option_flag('e', enable);
-                else if (strcmp(argv[i], "nounset") == 0) bash_set_option_flag('u', enable);
-                else if (strcmp(argv[i], "xtrace") == 0) bash_set_option_flag('x', enable);
-                else if (strcmp(argv[i], "pipefail") == 0) { /* bash_set_option_flag('p', enable); */ }
+                else if (strcmp(argv[i], "errexit") == 0) bash_set_pending_option('e', enable);
+                else if (strcmp(argv[i], "nounset") == 0) bash_set_pending_option('u', enable);
+                else if (strcmp(argv[i], "xtrace") == 0) bash_set_pending_option('x', enable);
+                else if (strcmp(argv[i], "pipefail") == 0) { /* bash_set_pending_option('p', enable); */ }
             } else if ((strcmp(argv[i], "-O") == 0 || strcmp(argv[i], "+O") == 0) && i + 1 < argc) {
                 // -O shopt_option / +O shopt_option: set/unset shopt option (ignore for now)
                 i++; // skip option name
@@ -1355,9 +1396,9 @@ int main(int argc, char *argv[]) {
                 // combined flags like -ce, -xc, -ec: extract non-c flags and set them
                 const char* flags = argv[i] + 1; // skip leading -
                 for (const char* f = flags; *f; f++) {
-                    if (*f == 'e') bash_set_option_flag('e', true);
-                    else if (*f == 'x') bash_set_option_flag('x', true);
-                    else if (*f == 'u') bash_set_option_flag('u', true);
+                    if (*f == 'e') bash_set_pending_option('e', true);
+                    else if (*f == 'x') bash_set_pending_option('x', true);
+                    else if (*f == 'u') bash_set_pending_option('u', true);
                     // 'c' is handled by taking the next arg as inline cmd
                 }
                 bash_inline_cmd = argv[++i];
@@ -1367,9 +1408,9 @@ int main(int argc, char *argv[]) {
                 // single-char flag(s) without 'c': -e, -x, -u, etc.
                 const char* flags = argv[i] + 1;
                 for (const char* f = flags; *f; f++) {
-                    if (*f == 'e') bash_set_option_flag('e', true);
-                    else if (*f == 'x') bash_set_option_flag('x', true);
-                    else if (*f == 'u') bash_set_option_flag('u', true);
+                    if (*f == 'e') bash_set_pending_option('e', true);
+                    else if (*f == 'x') bash_set_pending_option('x', true);
+                    else if (*f == 'u') bash_set_pending_option('u', true);
                 }
             } else if (bash_inline_cmd == NULL && bash_file == NULL) {
                 bash_file = argv[i];
@@ -1399,13 +1440,13 @@ int main(int argc, char *argv[]) {
             // -c 'command string' — run inline command string
             // set BASH_COMMAND to the full -c string (real bash sets it to current command)
             setenv("BASH_COMMAND", bash_inline_cmd, 1);
-            char* bash_source = strdup(bash_inline_cmd);
+            char* bash_source = mem_strdup(bash_inline_cmd, MEM_CAT_SYSTEM);
             // if arg0 is provided ($0), use it as the script name; otherwise use the actual executable
             const char* script_name = (bash_args_start >= 0 && bash_args_start < argc)
                 ? argv[bash_args_start] : argv[0];
             Item result = transpile_bash_to_mir(&runtime, bash_source, script_name);
             (void)result;
-            free(bash_source);
+            mem_free(bash_source);
         } else if (bash_file) {
             char* bash_source = read_text_file(bash_file);
             if (!bash_source) {
@@ -1430,7 +1471,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            free(bash_source);
+            mem_free(bash_source);
         }
 
         int bash_exit = bash_exit_code(bash_get_exit_code());
@@ -1495,7 +1536,7 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            free(ts_source);
+            mem_free(ts_source);
         }
 
         runtime_cleanup(&runtime);
@@ -1824,7 +1865,7 @@ int main(int argc, char *argv[]) {
             Input* input = InputManager::create_input(nullptr);
             if (!input) {
                 printf("Error: Failed to create input for graph parsing\n");
-                free(graph_content);
+                mem_free(graph_content);
                 log_finish();
                 return 1;
             }
@@ -1841,7 +1882,7 @@ int main(int argc, char *argv[]) {
                 log_debug("Parsing DOT graph");
                 parse_graph_dot(input, graph_content);
             }
-            free(graph_content);
+            mem_free(graph_content);
             log_debug("Graph parsed, checking result...");
 
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
@@ -1863,7 +1904,7 @@ int main(int argc, char *argv[]) {
             if (theme_name) {
                 SvgGeneratorOptions* opts = create_themed_svg_options(theme_name);
                 svg_item = graph_to_svg_with_options(input->root.element, layout, opts, input);
-                free(opts);
+                mem_free(opts);
                 log_info("Using theme '%s' for graph rendering", theme_name);
             } else {
                 svg_item = graph_to_svg(input->root.element, layout, input);
@@ -2138,7 +2179,7 @@ int main(int argc, char *argv[]) {
                     fwrite(response->data, 1, response->size, f);
                 }
                 fclose(f);
-                temp_file_path = strdup(temp_path);
+                temp_file_path = mem_strdup(temp_path, MEM_CAT_TEMP);
                 filename = temp_file_path;
                 log_debug("Saved HTTP content to: %s (%zu bytes)", temp_file_path, response->size);
             } else {
@@ -2175,7 +2216,7 @@ int main(int argc, char *argv[]) {
             Input* input = InputManager::create_input(nullptr);
             if (!input) {
                 printf("Error: Failed to create input for graph parsing\n");
-                free(graph_content);
+                mem_free(graph_content);
                 log_finish();
                 return 1;
             }
@@ -2191,7 +2232,7 @@ int main(int argc, char *argv[]) {
                 log_debug("Parsing DOT graph");
                 parse_graph_dot(input, graph_content);
             }
-            free(graph_content);
+            mem_free(graph_content);
 
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to parse graph file '%s'\n", filename);
@@ -2264,7 +2305,7 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
-            if (temp_file_path) { file_delete(temp_file_path); free(temp_file_path); }
+            if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
             log_finish();
             return 1;
         }
@@ -2272,7 +2313,7 @@ int main(int argc, char *argv[]) {
         // Cleanup temp file if we created one from HTTP URL
         if (temp_file_path) {
             file_delete(temp_file_path);
-            free(temp_file_path);
+            mem_free(temp_file_path);
         }
 
         fprintf(stderr, "view command completed with result: %d\n", exit_code);
@@ -2443,7 +2484,7 @@ int main(int argc, char *argv[]) {
 
         // Create a NetworkResource for the download
         NetworkResource res = {0};
-        res.url = strdup(url);
+        res.url = mem_strdup(url, MEM_CAT_TEMP);
         res.timeout_ms = timeout_ms;
         res.state = STATE_PENDING;
         res.type = RESOURCE_HTML;  // Treat as generic content
@@ -2471,19 +2512,19 @@ int main(int argc, char *argv[]) {
                     char* content = read_text_file(res.local_path);
                     if (content) {
                         write_text_file(output_file, content);
-                        free(content);
+                        mem_free(content);
                         if (verbose) {
                             printf("   Saved to: %s\n", output_file);
                         }
                     } else {
                         printf("Error: Failed to read cached content\n");
-                        free(res.url);
+                        mem_free(res.url);
                         log_finish();
                         return 1;
                     }
                 } else {
                     printf("Error: No content available\n");
-                    free(res.url);
+                    mem_free(res.url);
                     log_finish();
                     return 1;
                 }
@@ -2493,12 +2534,12 @@ int main(int argc, char *argv[]) {
                     char* content = read_text_file(res.local_path);
                     if (content) {
                         printf("%s", content);
-                        free(content);
+                        mem_free(content);
                     }
                 }
             }
 
-            free(res.url);
+            mem_free(res.url);
             log_finish();
             return 0;
         } else {
@@ -2511,7 +2552,7 @@ int main(int argc, char *argv[]) {
             printf("   Retryable: %s\n", is_http_error_retryable(res.http_status_code) ? "yes" : "no");
             printf("   Time: %.2f ms\n", elapsed_ms);
 
-            free(res.url);
+            mem_free(res.url);
             log_finish();
             return 1;
         }
@@ -2575,7 +2616,7 @@ int main(int argc, char *argv[]) {
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
                 batch_timeout_active = 1;
-                if (setjmp(batch_timeout_jmp) == 0) {
+                if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                     alarm(batch_timeout);
                     result = run_script_file(&runtime, script_path, use_mir, false, run_main);
                     alarm(0);
@@ -2614,13 +2655,13 @@ int main(int argc, char *argv[]) {
             if (runtime.scripts) {
                 for (int i = 0; i < runtime.scripts->length; i++) {
                     Script *script = (Script*)runtime.scripts->data[i];
-                    if (script->source) free((void*)script->source);
+                    if (script->source) mem_free((void*)script->source);
                     if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
                     if (script->pool) pool_destroy(script->pool);
                     if (script->type_list) arraylist_free(script->type_list);
                     if (script->jit_context) jit_cleanup(script->jit_context);
                     script->decimal_ctx = NULL;
-                    free(script);
+                    mem_free(script);
                 }
                 runtime.scripts->length = 0;
             }
@@ -2675,6 +2716,7 @@ int main(int argc, char *argv[]) {
         memset(&preamble, 0, sizeof(preamble));
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
+        int batch_crash_count = 0;
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
 
         char line[4096];
@@ -2690,7 +2732,7 @@ int main(int argc, char *argv[]) {
             if (strncmp(line, "harness:", 8) == 0) {
                 size_t harness_len = (size_t)atol(line + 8);
                 if (harness_len == 0 || harness_len > 10 * 1024 * 1024) continue;
-                char* harness_src = (char*)malloc(harness_len + 1);
+                char* harness_src = (char*)mem_alloc(harness_len + 1, MEM_CAT_SYSTEM);
                 if (!harness_src) continue;
                 size_t total_read = 0;
                 while (total_read < harness_len) {
@@ -2708,15 +2750,14 @@ int main(int argc, char *argv[]) {
                     has_preamble = false;
                 }
 
-                // Compile and execute harness as preamble
                 memset(&preamble, 0, sizeof(preamble));
                 Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
 
                 // Save harness source for recompilation after crash recovery
-                if (saved_harness_src) free(saved_harness_src);
+                if (saved_harness_src) mem_free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
 
-                if (pres.item != ITEM_ERROR) {
+                if (preamble.mir_ctx) {
                     has_preamble = true;
                     preamble_var_checkpoint = preamble.module_var_count;
                 }
@@ -2739,7 +2780,7 @@ int main(int argc, char *argv[]) {
                 script_path = name_start;
                 size_t source_len = (size_t)atol(colon + 1);
                 if (source_len == 0 || source_len > 10 * 1024 * 1024) continue; // sanity check
-                js_source = (char*)malloc(source_len + 1);
+                js_source = (char*)mem_alloc(source_len + 1, MEM_CAT_SYSTEM);
                 if (!js_source) continue;
                 size_t total_read = 0;
                 while (total_read < source_len) {
@@ -2757,6 +2798,7 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
+            size_t rss_before = get_rss_bytes();
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
 
@@ -2810,7 +2852,7 @@ int main(int argc, char *argv[]) {
                 batch_timeout_active = 1;
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
-                    if (setjmp(batch_timeout_jmp) == 0) {
+                    if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
                         Item res = has_preamble
                             ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
@@ -2866,7 +2908,7 @@ int main(int argc, char *argv[]) {
                 result = 1;
             }
 #endif
-            free(js_source);
+            mem_free(js_source);
             fflush(stdout);
 
             // Print uncaught exception to stdout for batch capture
@@ -2879,15 +2921,29 @@ int main(int argc, char *argv[]) {
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
-            printf("\x01" "BATCH_END %d %ld\n", result, elapsed_us);
+            size_t rss_after = get_rss_bytes();
+            printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
             fflush(stdout);
+
+            // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
+            // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).
+            // After too many crashes, exit the batch to prevent OOM.
+            // Also exit if RSS exceeds the limit (from cumulative leaks).
+            static const size_t RSS_LIMIT = 512UL * 1024 * 1024; // 512 MB
+            static const int MAX_CRASH_COUNT = 3;
 
             if (hot_reload) {
                 // Restore context (longjmp on timeout/crash may leave it dangling)
                 context = &batch_context;
 
                 if (result == 124 || result >= 128) {
-                    // Timeout or crash — longjmp may have left heap in inconsistent state.
+                    // Crash or timeout recovery: reset heap and continue, but
+                    // track crash count to cap memory leaks from longjmp.
+                    batch_crash_count++;
+                    if (batch_crash_count >= MAX_CRASH_COUNT || rss_after > RSS_LIMIT) {
+                        // Too many crashes or RSS too high — exit batch.
+                        break;
+                    }
                     js_batch_reset();
                     heap_destroy();
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
@@ -2898,8 +2954,8 @@ int main(int argc, char *argv[]) {
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
-                    // Crash destroyed heap — preamble function objects are gone.
-                    // Recompile preamble from saved source so subsequent tests still have harness.
+
+                    // Heap destroyed — recompile preamble for subsequent tests.
                     if (has_preamble) {
                         preamble_state_destroy(&preamble);
                         has_preamble = false;
@@ -2912,8 +2968,10 @@ int main(int argc, char *argv[]) {
                             preamble_var_checkpoint = preamble.module_var_count;
                         }
                     }
+                } else if (rss_after > RSS_LIMIT) {
+                    // Normal test but RSS too high — exit to prevent OOM.
+                    break;
                 } else if (has_preamble) {
-                    // Partial reset: preserve harness module vars, clear test state
                     js_batch_reset_to(preamble_var_checkpoint);
                 } else {
                     js_batch_reset();
@@ -2931,7 +2989,7 @@ int main(int argc, char *argv[]) {
             preamble_state_destroy(&preamble);
             has_preamble = false;
         }
-        if (saved_harness_src) { free(saved_harness_src); saved_harness_src = NULL; }
+        if (saved_harness_src) { mem_free(saved_harness_src); saved_harness_src = NULL; }
 
         // tear down persistent heap (hot reload mode only)
         if (hot_reload) {
@@ -2943,6 +3001,15 @@ int main(int argc, char *argv[]) {
 
         runtime_cleanup(&runtime);
         return 0;
+    }
+
+    // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
+    if (argc >= 3 && strcmp(argv[1], "--emit-sexpr") == 0) {
+        const char* sexpr_path = argv[2];
+        log_debug("Emitting s-expressions for '%s'", sexpr_path);
+        int result = emit_sexpr_file(sexpr_path);
+        log_finish();
+        return result;
     }
 
     // Handle run command
@@ -3165,8 +3232,8 @@ int main(int argc, char *argv[]) {
 
     // Note: memtrack_shutdown is called via atexit handler
 
-    // Note: rpmalloc cleanup is handled automatically when process exits
-    // since it's only used within mempool (not as global malloc replacement)
+    // Clean up rpmalloc (release thread and global state)
+    mempool_cleanup();
 
     log_finish();
     return ret_code;

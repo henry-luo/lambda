@@ -53,7 +53,7 @@ static size_t normalize_whitespace_for_flex(const char* text, size_t length, cha
 }
 
 // Forward declaration for recursive function
-static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon);
+static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth);
 
 // Helper to get explicit CSS width from DOM element's specified_style
 // Returns -1 if no explicit width is set, otherwise returns the width in pixels
@@ -145,8 +145,10 @@ static float get_child_vertical_margins(LayoutContext* lycon, ViewElement* elem)
 // ============================================================================
 // This function recursively traverses the DOM tree to find the content-based
 // height of nested flex containers before their Views are fully initialized.
-static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon) {
+static const int MAX_MEASURE_DEPTH = 32;
+static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth) {
     if (!node || !node->is_element()) return 0;
+    if (depth > MAX_MEASURE_DEPTH) return 0;
 
     // Check if the View is already set with an explicit height
     ViewElement* elem = (ViewElement*)node->as_element();
@@ -222,7 +224,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     DomNode* child = dom_elem->first_child;
     while (child) {
         if (child->is_element()) {
-            float child_height = measure_content_height_recursive(child, lycon);
+            float child_height = measure_content_height_recursive(child, lycon, depth + 1);
 
             // If recursive measurement returned 0, try other measurement methods
             if (child_height == 0.0f && lycon) {
@@ -425,7 +427,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         }
 
         // Calculate actual line height using the font's metrics (Chrome-compatible)
-        // This requires setting up the font first to get accurate FT_Face metrics
+        // This requires setting up the font first to get accurate font metrics
         int text_line_height = elem_font_size;  // fallback
         if (lycon->ui_context && view_elem && view_elem->font) {
             // Set up font at the element's font size
@@ -658,7 +660,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 log_debug("Nested flex container: empty, height=0");
                             } else if (has_children_with_explicit_height) {
                                 // Children have explicit heights - use recursive measurement
-                                float content_height = measure_content_height_recursive((DomNode*)elem, lycon);
+                                float content_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
                                 if (content_height > 0) {
                                     elem_height = (int)content_height;
                                     has_explicit_height_css = true;  // Reliable measured height
@@ -672,7 +674,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             } else {
                                 // Has content (text or elements) but no explicit heights
                                 // Try recursive measurement first for accurate sizing
-                                float recursive_height = measure_content_height_recursive((DomNode*)elem, lycon);
+                                float recursive_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
                                 if (recursive_height > 0) {
                                     elem_height = (int)recursive_height;
                                     has_explicit_height_css = true;  // Measured height is reliable
@@ -1067,8 +1069,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     store_in_measurement_cache(child, measured_width, measured_height,
                               content_width, content_height);
 
-    // Restore original context
+    // Restore original context, but preserve depth and node_count guards
+    int current_depth = lycon->depth;
+    int current_node_count = lycon->node_count;
     *lycon = saved_context;
+    lycon->depth = current_depth;
+    lycon->node_count = current_node_count;
 
     log_debug("Content measurement complete for %s", child->node_name());
 }
@@ -2108,7 +2114,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                       child_display.inner, child_display.outer);
                             if (child_display.inner == CSS_VALUE_FLEX) {
                                 // For flex containers, use recursive DOM-based measurement
-                                child_height = measure_content_height_recursive(c, lycon);
+                                child_height = measure_content_height_recursive(c, lycon, 0);
                                 log_debug("Nested flex child height from recursive measurement: %.1f", child_height);
                                 // Fallback: if recursive returned 0 (e.g., text-only flex container),
                                 // use calculate_max_content_height with parent's cross-axis size
