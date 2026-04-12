@@ -98,6 +98,8 @@ static void mmap_pool_grow(Pool* pool, size_t min_size) {
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {
         log_error("mmap_pool_grow: mmap failed for %zu bytes", chunk_size);
+        pool->cursor = NULL;
+        pool->limit = NULL;
         return;
     }
     MmapChunk* chunk = (MmapChunk*)malloc(sizeof(MmapChunk));
@@ -206,8 +208,9 @@ void* pool_alloc(Pool* pool, size_t size) {
     }
     // mmap mode: bump allocate (16-byte aligned)
     size = (size + 15) & ~15;
-    if (pool->cursor + size > pool->limit) {
+    if (!pool->cursor || pool->cursor + size > pool->limit) {
         mmap_pool_grow(pool, size);
+        if (!pool->cursor) return NULL;  // mmap failed
     }
     void* ptr = pool->cursor;
     pool->cursor += size;
@@ -231,8 +234,9 @@ void* pool_calloc(Pool* pool, size_t size) {
     }
     // mmap mode: bump allocate (pages are pre-zeroed by mmap)
     size = (size + 15) & ~15;
-    if (pool->cursor + size > pool->limit) {
+    if (!pool->cursor || pool->cursor + size > pool->limit) {
         mmap_pool_grow(pool, size);
+        if (!pool->cursor) return NULL;  // mmap failed
     }
     void* ptr = pool->cursor;
     pool->cursor += size;
@@ -271,9 +275,12 @@ void* pool_realloc(Pool* pool, void* ptr, size_t size) {
     if (size == 0) return NULL;
     void* new_ptr = pool_alloc(pool, size);
     if (new_ptr && ptr) {
-        // copy min(old_size, new_size) — we don't track old sizes,
-        // so copy new_size (caller ensures size >= needed data)
-        memcpy(new_ptr, ptr, size);
+        // SAFETY: old_size is unknown in mmap mode. We cannot copy `size` bytes
+        // from old ptr when growing — that would read past the old allocation.
+        // Only safe approach: caller must re-populate the new buffer after growing.
+        // We zero the new buffer (via pool_calloc-like behavior from MAP_ANONYMOUS)
+        // but do NOT copy old data since we can't determine the safe copy length.
+        log_debug("pool_realloc: mmap mode cannot safely copy data (old_size unknown)");
     }
     return new_ptr;
 }

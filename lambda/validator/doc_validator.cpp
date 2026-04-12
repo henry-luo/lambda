@@ -487,7 +487,7 @@ const char* type_to_string(Type* type) {
     }
 }
 
-void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
+void merge_validation_results(ValidationResult* dest, ValidationResult* src, Pool* pool) {
     if (!dest || !src) return;
 
     // If source has errors, merge them into destination
@@ -502,7 +502,7 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
                 src_error->code,
                 src_error->message ? src_error->message->chars : "Unknown error",
                 src_error->path,
-                nullptr);
+                pool);
             if (copied_error) {
                 add_validation_error(dest, copied_error);
             }

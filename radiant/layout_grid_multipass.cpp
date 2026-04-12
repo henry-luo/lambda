@@ -228,7 +228,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
         if (rows_changed) {
-            position_grid_items(gl, grid_container);
+            position_grid_items(gl, grid_container, &lycon->scratch);
         }
     }
 

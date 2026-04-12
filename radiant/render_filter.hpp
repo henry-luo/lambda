@@ -19,7 +19,7 @@
  * @param rect The rectangular region to apply filters to
  * @param clip The clipping bounds
  */
-void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip);
+void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip);
 
 /**
  * Individual filter effect functions

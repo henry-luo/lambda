@@ -204,7 +204,7 @@ struct ClipMask {
     uint32_t* saved;          // saved pixel data (w * h)
 };
 
-static ClipMask* save_clip_region(ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
+static ClipMask* save_clip_region(ScratchArena* sa, ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
     if (!surface || !surface->pixels) return nullptr;
     int x0 = (int)fx0, y0 = (int)fy0;
     int x1 = (int)(fx0 + fw + 0.5f), y1 = (int)(fy0 + fh + 0.5f);
@@ -214,9 +214,9 @@ static ClipMask* save_clip_region(ImageSurface* surface, float fx0, float fy0, f
     int w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return nullptr;
 
-    ClipMask* mask = (ClipMask*)malloc(sizeof(ClipMask));
+    ClipMask* mask = (ClipMask*)scratch_alloc(sa, sizeof(ClipMask));
     mask->x0 = x0; mask->y0 = y0; mask->w = w; mask->h = h;
-    mask->saved = (uint32_t*)malloc(w * h * sizeof(uint32_t));
+    mask->saved = (uint32_t*)scratch_alloc(sa, (size_t)w * h * sizeof(uint32_t));
     for (int row = 0; row < h; row++) {
         uint32_t* src = (uint32_t*)((uint8_t*)surface->pixels + (y0 + row) * surface->pitch) + x0;
         memcpy(mask->saved + row * w, src, w * sizeof(uint32_t));
@@ -332,22 +332,22 @@ static void apply_clip_mask(ImageSurface* surface, ClipMask* mask, ClipShape* sh
     }
 }
 
-static void free_clip_mask(ClipMask* mask) {
-    if (mask) { free(mask->saved); free(mask); }
+static void free_clip_mask(ScratchArena* sa, ClipMask* mask) {
+    if (mask) { scratch_free(sa, mask->saved); scratch_free(sa, mask); }
 }
 
-static void free_clip_shape(ClipShape* shape) {
+static void free_clip_shape(ScratchArena* sa, ClipShape* shape) {
     if (shape) {
         if (shape->type == CLIP_SHAPE_POLYGON) {
-            free(shape->polygon.vx);
-            free(shape->polygon.vy);
+            scratch_free(sa, shape->polygon.vy);
+            scratch_free(sa, shape->polygon.vx);
         }
-        free(shape);
+        scratch_free(sa, shape);
     }
 }
 
 // Parse CSS clip-path value and return a ClipShape
-static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float elem_h,
+static ClipShape* parse_css_clip_shape(ScratchArena* sa, const char* value, float elem_w, float elem_h,
                                         float abs_x, float abs_y) {
     if (!value || strncmp(value, "none", 4) == 0) return nullptr;
 
@@ -383,7 +383,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             rx = parse_len(s, elem_w);
             ry = rx;
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         if (rx > 0 || ry > 0) {
             cs->type = CLIP_SHAPE_ROUNDED_RECT;
             cs->rounded_rect = {abs_x + left_v, abs_y + top,
@@ -408,7 +408,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             cx = abs_x + parse_len(s, elem_w);
             cy = abs_y + parse_len(s, elem_h);
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_CIRCLE;
         cs->circle = {cx, cy, r};
         return cs;
@@ -425,7 +425,7 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
             cx = abs_x + parse_len(s, elem_w);
             cy = abs_y + parse_len(s, elem_h);
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_ELLIPSE;
         cs->ellipse = {cx, cy, rx, ry};
         return cs;
@@ -452,13 +452,13 @@ static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float el
         }
         if (count < 3) return nullptr;
 
-        float* vx = (float*)malloc(count * sizeof(float));
-        float* vy = (float*)malloc(count * sizeof(float));
+        float* vx = (float*)scratch_alloc(sa, count * sizeof(float));
+        float* vy = (float*)scratch_alloc(sa, count * sizeof(float));
         for (int i = 0; i < count; i++) {
             vx[i] = parse_len(s, elem_w) + abs_x;
             vy[i] = parse_len(s, elem_h) + abs_y;
         }
-        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        ClipShape* cs = (ClipShape*)scratch_calloc(sa, sizeof(ClipShape));
         cs->type = CLIP_SHAPE_POLYGON;
         cs->polygon = {vx, vy, count};
         return cs;
@@ -1094,7 +1094,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
                 int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
                 int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
-                box_blur_region(rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
+                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
                 log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d)", max_shadow_blur, bx, by, bw, bh);
             }
         }
@@ -2137,9 +2137,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 float elem_h = block->height * s;
                 float abs_x = pa_block.x + block->x * s;
                 float abs_y = pa_block.y + block->y * s;
-                css_clip_shape = parse_css_clip_shape(clip_str, elem_w, elem_h, abs_x, abs_y);
+                css_clip_shape = parse_css_clip_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
                 if (css_clip_shape) {
-                    css_clip_mask = save_clip_region(rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
+                    css_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
                     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
                 }
             }
@@ -2167,7 +2167,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             mbw = mx1 - mbx0;
             mbh = my1 - mby0;
             if (mbw > 0 && mbh > 0) {
-                mix_blend_backdrop = (uint32_t*)mem_alloc((size_t)mbw * mbh * sizeof(uint32_t), MEM_CAT_RENDER);
+                mix_blend_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)mbw * mbh * sizeof(uint32_t));
                 if (mix_blend_backdrop) {
                     uint32_t* px = (uint32_t*)surface->pixels;
                     int pitch = surface->pitch / 4;
@@ -2247,9 +2247,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             float cw = clip->right - clip->left;
             float ch = clip->bottom - clip->top;
             if (cw > 0 && ch > 0) {
-                overflow_clip_mask = save_clip_region(rdcon->ui_context->surface,
+                overflow_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface,
                     clip->left, clip->top, cw, ch);
-                overflow_clip_shape = (ClipShape*)calloc(1, sizeof(ClipShape));
+                overflow_clip_shape = (ClipShape*)scratch_calloc(&rdcon->scratch, sizeof(ClipShape));
                 overflow_clip_shape->type = CLIP_SHAPE_ROUNDED_RECT;
                 overflow_clip_shape->rounded_rect = {clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
@@ -2296,8 +2296,8 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // Apply rounded overflow clip mask
         if (overflow_clip_mask && overflow_clip_shape) {
             apply_clip_mask(rdcon->ui_context->surface, overflow_clip_mask, overflow_clip_shape);
-            free_clip_mask(overflow_clip_mask);
-            free_clip_shape(overflow_clip_shape);
+            free_clip_mask(&rdcon->scratch, overflow_clip_mask);
+            free_clip_shape(&rdcon->scratch, overflow_clip_shape);
         }
     }
     else {
@@ -2329,7 +2329,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                   block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
 
         // Apply the filter chain to the rendered pixels
-        apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+        apply_css_filters(&rdcon->scratch, rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
     }
 
     // Apply CSS opacity: multiply alpha of all pixels in the element's region
@@ -2375,15 +2375,15 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                     composite_blend_pixel(backdrop, source, mix_blend);
             }
         }
-        mem_free(mix_blend_backdrop);
+        scratch_free(&rdcon->scratch, mix_blend_backdrop);
         log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
     }
 
     // Apply CSS clip-path mask (pixel-level masking)
     if (css_clip_mask && css_clip_shape) {
         apply_clip_mask(rdcon->ui_context->surface, css_clip_mask, css_clip_shape);
-        free_clip_mask(css_clip_mask);
-        free_clip_shape(css_clip_shape);
+        free_clip_mask(&rdcon->scratch, css_clip_mask);
+        free_clip_shape(&rdcon->scratch, css_clip_shape);
     }
 
     // Restore transform state
@@ -3018,6 +3018,9 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
 
+    // Initialize scratch allocator for scoped temporary buffers
+    scratch_init(&rdcon->scratch, view_tree->arena);
+
     // initialize vector renderer (owns the ThorVG canvas internally)
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
@@ -3048,6 +3051,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
 }
 
 void render_clean_up(RenderContext* rdcon) {
+    scratch_release(&rdcon->scratch);
     rdt_vector_destroy(&rdcon->vec);
 }
 

@@ -1,6 +1,7 @@
 #include "grid.hpp"
 #include "view.hpp"
 #include "layout_alignment.hpp"
+#include "../lib/scratch_arena.h"
 #include "../lambda/input/css/css_style_node.hpp"
 
 extern "C" {
@@ -12,7 +13,7 @@ extern "C" {
 }
 
 // Position grid items based on computed track sizes
-void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container) {
+void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ScratchArena* sa) {
     if (!grid_layout || !container) return;
 
     log_debug(" Positioning grid items - container: %.0fx%.0f at (%.0f,%.0f)\n",
@@ -24,8 +25,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     log_debug("Positioning grid items\n");
 
     // Calculate track positions
-    int* row_positions = (int*)mem_calloc(grid_layout->computed_row_count + 1, sizeof(int), MEM_CAT_LAYOUT);
-    int* column_positions = (int*)mem_calloc(grid_layout->computed_column_count + 1, sizeof(int), MEM_CAT_LAYOUT);
+    int* row_positions = (int*)scratch_calloc(sa, (grid_layout->computed_row_count + 1) * sizeof(int));
+    int* column_positions = (int*)scratch_calloc(sa, (grid_layout->computed_column_count + 1) * sizeof(int));
 
     // First, calculate the total grid content size (all tracks + gaps)
     int total_row_size = 0;
@@ -293,8 +294,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
                   row_start + 1, row_end, col_start + 1, col_end);
     }
 
-    mem_free(row_positions);
-    mem_free(column_positions);
+    scratch_free(sa, column_positions);
+    scratch_free(sa, row_positions);
 
     log_debug("Grid items positioned\n");
 }
@@ -387,8 +388,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
     if (has_baseline_alignment && grid_layout->computed_row_count > 0) {
         int row_count = grid_layout->computed_row_count;
-        float* row_max_baseline = (float*)calloc(row_count, sizeof(float));
-        float* row_max_below = (float*)calloc(row_count, sizeof(float));
+        ScratchArena* sa = &grid_layout->lycon->scratch;
+        float* row_max_baseline = (float*)scratch_calloc(sa, row_count * sizeof(float));
+        float* row_max_below = (float*)scratch_calloc(sa, row_count * sizeof(float));
 
         // First pass: compute baselines and find per-row max above/below baseline
         for (int i = 0; i < grid_layout->item_count; i++) {
@@ -492,8 +494,8 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             }
         }
 
-        free(row_max_baseline);
-        free(row_max_below);
+        scratch_free(sa, row_max_below);
+        scratch_free(sa, row_max_baseline);
     }
 
     for (int i = 0; i < grid_layout->item_count; i++) {

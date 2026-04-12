@@ -8767,7 +8767,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // CSS format: "header header header" "sidebar main aside" "footer footer footer"
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 log_debug("[CSS] grid-template-areas: string value '%s'", value->data.string);
-                parse_grid_template_areas(grid, value->data.string);
+                parse_grid_template_areas(grid, value->data.string, &lycon->scratch);
                 log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
             }
             // Handle list of strings (each row is a separate string)
@@ -8783,7 +8783,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 if (total_len > 0) {
-                    char* combined = (char*)mem_alloc(total_len + 1, MEM_CAT_LAYOUT);
+                    char* combined = (char*)scratch_alloc(&lycon->scratch, total_len + 1);
                     combined[0] = '\0';
                     size_t combined_len = 0;
                     for (int i = 0; i < value->data.list.count; i++) {
@@ -8796,8 +8796,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
                     log_debug("[CSS] grid-template-areas: combined string '%s'", combined);
-                    parse_grid_template_areas(grid, combined);
-                    mem_free(combined);
+                    parse_grid_template_areas(grid, combined, &lycon->scratch);
+                    scratch_free(&lycon->scratch, combined);
                     log_debug("[CSS] grid-template-areas: parsed %d areas", grid->area_count);
                 }
             }

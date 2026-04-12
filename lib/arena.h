@@ -163,6 +163,14 @@ size_t arena_chunk_count(Arena* arena);
 bool arena_owns(Arena* arena, const void* ptr);
 
 /**
+ * Get the underlying pool backing this arena
+ * Useful when external APIs require Pool* but most work goes through Arena.
+ * @param arena Arena to query
+ * @return The backing Pool, or NULL if arena is invalid
+ */
+Pool* arena_pool(Arena* arena);
+
+/**
  * Reallocate memory in arena with free-list support
  * Similar to realloc() but works within arena memory management
  * - If ptr is NULL, allocates new memory (like arena_alloc)

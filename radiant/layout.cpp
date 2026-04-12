@@ -2156,11 +2156,18 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     lycon->counter_context = counter_context_create(doc->arena);
     log_debug("Initialized counter context");
 
+    // Initialize scratch allocator for scoped temporary buffers
+    lycon->pool = doc->view_tree->pool;
+    scratch_init(&lycon->scratch, doc->view_tree->arena);
+
     // BlockContext floats are already initialized to NULL in memset
     log_debug("DEBUG: Layout context initialized");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
+    // Release scratch allocator (safety net for any un-freed temp buffers)
+    scratch_release(&lycon->scratch);
+
     // Clean up counter context
     if (lycon->counter_context) {
         counter_context_destroy(lycon->counter_context);
