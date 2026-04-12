@@ -1350,7 +1350,7 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
                 }
                 elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items — heap-allocated, freed by free_container
                 if (!new_items) {
                     log_error("elmt_insert_child: realloc failed");
                     return ItemError;
@@ -1453,7 +1453,7 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
                 }
                 elmt->items = new_items;
             } else {
-                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                 if (!new_items) return ItemError;
                 elmt->items = new_items;
             }
@@ -1778,7 +1778,7 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
                     }
                     arr->items = new_items;
                 } else {
-                    Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
+                    Item* new_items = (Item*)raw_realloc(arr->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
                     if (!new_items) return ItemError;
                     arr->items = new_items;
                 }

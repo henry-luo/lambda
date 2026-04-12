@@ -257,7 +257,7 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
             // Check if it starts with "/" (plain file path) or "file://" (URL)
             if (stylesheet->origin_url[0] == '/') {
                 // Plain file path - use directly
-                stylesheet_path = strdup(stylesheet->origin_url);  // must use strdup to match url_to_local_path
+                stylesheet_path = mem_strdup(stylesheet->origin_url, MEM_CAT_FONT);  // must use mem_strdup to match url_to_local_path
                 if (stylesheet_path) {
                     base_path = stylesheet_path;
                     clog_debug(font_log, "Using stylesheet origin_url (plain path) for font resolution: %s", base_path);

@@ -5,6 +5,7 @@
 #include "edit_bridge.h"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
+#include "../lib/memtrack.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,7 +17,7 @@ TemplateRegistry* g_template_registry = NULL;
 // ============================================================================
 
 TemplateRegistry* template_registry_new(void) {
-    TemplateRegistry* reg = (TemplateRegistry*)calloc(1, sizeof(TemplateRegistry));
+    TemplateRegistry* reg = (TemplateRegistry*)mem_calloc(1, sizeof(TemplateRegistry), MEM_CAT_SYSTEM);
     reg->first = NULL;
     reg->last = NULL;
     reg->count = 0;
@@ -33,7 +34,7 @@ void template_registry_add(TemplateRegistry* registry,
                            int match_field_count) {
     if (!registry) return;
 
-    TemplateEntry* entry = (TemplateEntry*)calloc(1, sizeof(TemplateEntry));
+    TemplateEntry* entry = (TemplateEntry*)mem_calloc(1, sizeof(TemplateEntry), MEM_CAT_SYSTEM);
     entry->name = name;
     entry->is_edit = is_edit;
     entry->body_func = body_func;
@@ -65,7 +66,7 @@ void template_entry_add_handler(TemplateEntry* entry,
                                 fn_ptr handler_func) {
     if (!entry || !event_name || !handler_func) return;
 
-    TemplateHandlerEntry* h = (TemplateHandlerEntry*)calloc(1, sizeof(TemplateHandlerEntry));
+    TemplateHandlerEntry* h = (TemplateHandlerEntry*)mem_calloc(1, sizeof(TemplateHandlerEntry), MEM_CAT_SYSTEM);
     h->event_name = event_name;
     h->handler_func = handler_func;
     h->next = entry->handlers;

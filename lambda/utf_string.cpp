@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 
 void init_utf8proc_support(void) {
     // utf8proc is initialized automatically, no setup needed
@@ -126,8 +127,8 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
     char* fold2 = normalize_utf8proc_casefold(str2, len2, &fold2_len);
 
     if (!fold1 || !fold2) {
-        if (fold1) free(fold1);
-        if (fold2) free(fold2);
+        if (fold1) raw_free(fold1);  // RAWALLOC_OK: utf8proc internal allocation
+        if (fold2) raw_free(fold2);  // RAWALLOC_OK: utf8proc internal allocation
         return UTF8PROC_COMPARE_ERROR;
     }
     log_debug("fold1: origin %s vs. %s", str1, fold1);
@@ -152,7 +153,7 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
         result = UTF8PROC_COMPARE_GREATER;
     }
 
-    free(fold1);  free(fold2);
+    raw_free(fold1);  raw_free(fold2);  // RAWALLOC_OK: utf8proc internal allocation
     return result;
 }
 

@@ -16,10 +16,14 @@
 // tracked allocation API
 #include "memtrack.h"
 
-// re-export non-allocation stdlib functions (strtol, atoi, abs, getenv, qsort, exit, etc.)
+// re-export non-allocation stdlib/string functions before poisoning
 #include <stdlib.h>
+#include <string.h>
 
 // poison raw allocation functions so lambda/radiant code cannot use them directly
+// NOTE: #pragma GCC poison is incompatible with C++ standard library headers
+// (e.g., <locale>, <cstdlib>) that use malloc/free in template implementations.
+// Use `make check-raw-alloc` for enforcement instead.
 #if defined(MEMTRACK_POISON_RAW_ALLOC)
 #pragma GCC poison malloc calloc realloc free strdup strndup
 #endif

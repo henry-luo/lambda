@@ -1072,7 +1072,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                                            end.row + 1, end.column + 1);
         vloc.source = source;
         LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &vloc);
-        error->help = strdup(help);
+        error->help = mem_strdup(help, MEM_CAT_TEMP);
         return error;
     }
 
@@ -1093,7 +1093,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
             help = "Use '=>' for expression body:  fn name(a, b) => a + b\n"
                    "          Use '{...}' for statement body:  pn name(a, b) { return a + b }";
             LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-            error->help = strdup(help);
+            error->help = mem_strdup(help, MEM_CAT_TEMP);
             return error;
         }
     }
@@ -1120,7 +1120,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                     "Assignment in condition — did you mean '=='?");
                 help = "Use '==' for comparison. '=' is for 'let' bindings.";
                 LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &loc);
-                error->help = strdup(help);
+                error->help = mem_strdup(help, MEM_CAT_TEMP);
                 return error;
             }
         }
@@ -1156,7 +1156,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                     snprintf(msg, sizeof(msg), "Unterminated string literal: %s", preview);
                     help = "Add a closing quote to complete the string.";
                     LambdaError* error = err_create(ERR_UNTERMINATED_STRING, msg, &sloc);
-                    error->help = strdup(help);
+                    error->help = mem_strdup(help, MEM_CAT_TEMP);
                     return error;
                 }
             }
@@ -1197,7 +1197,7 @@ static LambdaError* diagnose_error_node(TSNode error_node, const char* source, c
                 }
                 help = "Symbol literals require a closing single quote: 'name'";
                 LambdaError* error = err_create(ERR_SYNTAX_ERROR, msg, &sloc);
-                error->help = strdup(help);
+                error->help = mem_strdup(help, MEM_CAT_TEMP);
                 return error;
             }
         }
@@ -1303,7 +1303,7 @@ static LambdaError* diagnose_missing_node(TSNode missing_node, const char* sourc
     }
 
     LambdaError* error = err_create(ERR_MISSING_TOKEN, msg, &loc);
-    if (help) error->help = strdup(help);
+    if (help) error->help = mem_strdup(help, MEM_CAT_TEMP);
     return error;
 }
 

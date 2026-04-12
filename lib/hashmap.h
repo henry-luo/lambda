@@ -15,9 +15,9 @@ extern "C" {
 
 // hashmap is an open addressed hash map using robinhood hashing.
 struct hashmap {
-    void *(*malloc)(size_t);
-    void *(*realloc)(void *, size_t);
-    void (*free)(void *);
+    void *(*_malloc)(size_t);
+    void *(*_realloc)(void *, size_t);
+    void (*_free)(void *);
     size_t elsize;
     size_t cap;
     uint64_t seed0;
@@ -49,8 +49,8 @@ struct hashmap *hashmap_new(size_t elsize, size_t cap, uint64_t seed0,
     void (*elfree)(void *item),
     void *udata);
 
-struct hashmap *hashmap_new_with_allocator(void *(*malloc)(size_t), 
-    void *(*realloc)(void *, size_t), void (*free)(void*), size_t elsize, 
+struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t), 
+    void *(*_realloc)(void *, size_t), void (*_free)(void*), size_t elsize, 
     size_t cap, uint64_t seed0, uint64_t seed1,
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1),
     int (*compare)(const void *a, const void *b, void *udata),
@@ -81,7 +81,7 @@ void hashmap_set_load_factor(struct hashmap *map, double load_factor);
 
 
 // DEPRECATED: use `hashmap_new_with_allocator`
-void hashmap_set_allocator(void *(*malloc)(size_t), void (*free)(void*));
+void hashmap_set_allocator(void *(*_malloc)(size_t), void (*_free)(void*));
 
 #ifdef __cplusplus
 }
