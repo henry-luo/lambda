@@ -186,8 +186,23 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
+                // Skip VS16 (U+FE0F) — zero-width variation selector
+                if (codepoint == 0xFE0F) continue;
+
                 FontStyleDesc _sd = font_style_desc_from_prop(ctx->font.style);
-                LoadedGlyph* glyph = font_load_glyph(ctx->font.font_handle, &_sd, codepoint, false);
+                // Use emoji font for codepoints that default to emoji presentation
+                bool emoji_pres = false;
+                if (scan < content_end) {
+                    uint32_t peek_cp;
+                    int peek_bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &peek_cp);
+                    if (peek_bytes > 0 && peek_cp == 0xFE0F) emoji_pres = true;
+                }
+                // SVG text is rendered by the viewer, which handles emoji presentation.
+                // Use regular font for advance metrics to match layout dimensions.
+                // VS16-preceded codepoints use emoji font for correct advance.
+                LoadedGlyph* glyph = emoji_pres
+                    ? font_load_glyph_emoji(ctx->font.font_handle, &_sd, codepoint, false)
+                    : font_load_glyph(ctx->font.font_handle, &_sd, codepoint, false);
                 if (glyph) {
                     natural_width += glyph->advance_x;
                 } else {

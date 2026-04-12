@@ -1,7 +1,7 @@
 # Radiant Markdown Rendering Issues
 
 **Date:** April 12, 2026
-**Last Updated:** April 12, 2026
+**Last Updated:** April 13, 2026
 **Source:** Visual comparison of all 58 markdown test pages (`test/layout/data/markdown/*.html`) — Lambda render vs Chrome browser at 1200px viewport width.
 
 ---
@@ -24,37 +24,19 @@
 ### ~~4. Italic text (`<em>`) not rendering in nested contexts~~ (VERIFIED WORKING)
 - **Verification:** SVG output confirmed `font-style="italic"` is correctly applied in all contexts: inside `<li>`, inside `<td>`, and top-level. The layout engine and view tree correctly propagate italic style. The original report may have been a raster-renderer-specific issue that has since been resolved.
 
+### ~~3. Color emoji rendered as monochrome glyphs~~ (FIXED)
+- **Fix:** The raster renderer (`render.cpp`) now forces `font_load_glyph_emoji` for codepoints with `Emoji_Presentation=Yes` (Unicode 15.0, UTS #51), using a precise lookup table of ~95 BMP codepoints plus the SMP range (U+1F000–U+1FFFF). This routes them to Apple Color Emoji via `font_platform_find_emoji_font()` (CoreText `CTFontCreateForString` with VS16 appended). Layout metrics (`layout_text.cpp`) continue using the regular font path to match browser layout dimensions. SVG output (`render_svg.cpp`) also uses regular font advances since the SVG viewer handles emoji rendering.
+- **Root cause:** The font database (`font_config.c`) only stores U+0020–U+007E in `unicode_ranges` for all fonts, causing `font_find_codepoint_fallback` to disqualify Apple Color Emoji for non-ASCII codepoints. Without VS16, the platform fallback picked text-presentation fonts (ZapfDingbats, Hiragino Mincho, STIXTwoMath) instead of Apple Color Emoji.
+- **Files:** `render.cpp` (emoji rendering), `layout_text.cpp` (removed unused function), `render_svg.cpp` (VS16-only emoji)
+
+### ~~5. External images show as blank~~ (VERIFIED WORKING)
+- **Verification:** Tested with external badge URL (`https://img.shields.io/badge/test-passing-green`). HTTP download via `download_http_content()` (libcurl, 30s timeout, SSL) completed successfully (1091 bytes, HTTP 200). SVG output correctly included `<image>` element with base64-encoded PNG data. The external image pipeline (`surface.cpp` → `input_http.cpp` → libcurl) is fully functional.
+
 All fixes verified against Radiant baseline test suite (4705 passed, 0 failed).
 
 ---
 
 ## Open Issues
-
-### P1 — Medium Priority (Visual Correctness)
-
-#### 3. Color emoji rendered as monochrome glyphs
-- **Severity:** Medium
-- **Pages:** `md_sequelize-readme`, `md_test-emoji`, and any page with emoji
-- **Description:** Emoji characters that should display in color (using color font tables like COLR, CBLC, or sbix) render as black/monochrome text glyphs. The font fallback selects a text-presentation font instead of a color emoji font.
-- **Examples:**
-  - `❤️` (red heart) → renders as black heart ❤ (`md_sequelize-readme`)
-  - `⬆️` (blue up arrow in box) → renders as plain black arrow ⬆ (`md_test-emoji`, "Dependency bump")
-  - `⏭` (next track button) → renders as monochrome ⏭ (`md_test-emoji`, "Skipped" in table)
-  - `⏳` (hourglass) → renders as monochrome (`md_test-emoji`, "Pending" in table)
-  - `⏪` (rewind) → renders as monochrome (`md_test-emoji`, "Revert")
-- **Note:** Some emoji do render with color (✅, ❌, 🐛, 📝, ⚡, 🔒, 🚀, 🎨, etc.) — these likely come from an Apple Color Emoji or similar font. The issue is specifically with emoji codepoints that have both text and emoji presentation forms and where the variation selector (VS16 `U+FE0F`) is not being honored to select emoji presentation.
-
----
-
-### P1 — Medium Priority (continued)
-
-#### 5. External images show as blank
-- **Severity:** Medium
-- **Pages:** `md_vue-readme` (sponsor logos), any page with remote `<img src="https://...">`
-- **Description:** Images referencing external URLs (sponsor logos, some badges) render as empty/blank space. Radiant should load external images via HTTP and cache them.
-- **Root cause:** TBD — external resource loading code exists but may not be wired up correctly.
-
----
 
 ### P3 — Cosmetic (Minor Visual Differences)
 
@@ -101,16 +83,16 @@ All fixes verified against Radiant baseline test suite (4705 passed, 0 failed).
 
 ## Summary Table
 
-| # | Issue | Priority | Category | Status |
-|---|-------|----------|----------|--------|
-| ~~1~~ | ~~`<ol>` renders as `<ul>` (no numbers)~~ | ~~P0~~ | List rendering | **FIXED** |
-| ~~2~~ | ~~`<details>`/`<summary>` no triangle~~ | ~~P0~~ | Element support | **FIXED** |
-| 3 | Color emoji rendered monochrome | P1 | Font/glyph | Open |
-| ~~4~~ | ~~`<em>` italic missing in nested contexts~~ | ~~P1~~ | Font/style | **VERIFIED** |
-| 5 | External images blank | P1 | Resource loading | Open |
-| ~~6~~ | ~~Thai combining marks~~ | Future | Text shaping | Deferred |
-| ~~7~~ | ~~Devanagari conjunct differences~~ | Future | Text shaping | Deferred |
-| 8 | Table cell wrapping differences | P3 | Layout | Open |
-| 9 | Line height accumulation drift | P3 | Layout | Open |
-| 10 | Minor vertical offset at top | P3 | Layout | Open |
-| 11 | Line wrapping position drift | P3 | Layout | Open |
+| #     | Issue                                        | Priority | Category         | Status       |
+| ----- | -------------------------------------------- | -------- | ---------------- | ------------ |
+| ~~1~~ | ~~`<ol>` renders as `<ul>` (no numbers)~~    | ~~P0~~   | List rendering   | **FIXED**    |
+| ~~2~~ | ~~`<details>`/`<summary>` no triangle~~      | ~~P0~~   | Element support  | **FIXED**    |
+| ~~3~~ | ~~Color emoji rendered monochrome~~           | ~~P1~~   | Font/glyph       | **FIXED**    |
+| ~~4~~ | ~~`<em>` italic missing in nested contexts~~ | ~~P1~~   | Font/style       | **VERIFIED** |
+| ~~5~~ | ~~External images blank~~                    | ~~P1~~   | Resource loading | **VERIFIED** |
+| ~~6~~ | ~~Thai combining marks~~                     | Future   | Text shaping     | Deferred     |
+| ~~7~~ | ~~Devanagari conjunct differences~~          | Future   | Text shaping     | Deferred     |
+| 8     | Table cell wrapping differences              | P3       | Layout           | Open         |
+| 9     | Line height accumulation drift               | P3       | Layout           | Open         |
+| 10    | Minor vertical offset at top                 | P3       | Layout           | Open         |
+| 11    | Line wrapping position drift                 | P3       | Layout           | Open         |
