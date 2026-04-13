@@ -6957,9 +6957,9 @@ static void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, M
             prop_key = jm_transpile_box_item(mt, member->property);
             if (need_spill) {
                 obj = jm_new_reg(mt, "_dstr_obj_r", MIR_T_I64);
-                jm_gen_spill_load(mt, obj_spill, obj);
+                jm_gen_spill_load(mt, obj, obj_spill);
                 val = jm_new_reg(mt, "_dstr_val_r", MIR_T_I64);
-                jm_gen_spill_load(mt, val_spill, val);
+                jm_gen_spill_load(mt, val, val_spill);
             }
         } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
@@ -7862,6 +7862,13 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
 
         // General member assignment
         MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
+
+        // Generator spill: if computed key contains yield, obj reg will be stale after resume
+        int asgn_obj_spill = -1;
+        if (mt->in_generator && member->computed && jm_has_yield(member->property)) {
+            asgn_obj_spill = jm_gen_spill_save(mt, obj);
+        }
+
         MIR_reg_t key;
         if (member->computed) {
             key = jm_transpile_box_item(mt, member->property);
@@ -7870,6 +7877,10 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
         } else {
             key = jm_transpile_box_item(mt, member->property);
+        }
+
+        if (asgn_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, asgn_obj_spill);
         }
 
         MIR_reg_t new_val;
@@ -12162,6 +12173,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
 
+    // Generator spill: if computed key contains yield, obj reg will be stale after resume
+    int mem_obj_spill = -1;
+    if (mt->in_generator && mem->computed && jm_has_yield(mem->property)) {
+        mem_obj_spill = jm_gen_spill_save(mt, obj);
+    }
+
     // Optional chaining: obj?.prop → return undefined if obj is null/undefined
     if (mem->optional) {
         MIR_label_t l_skip = jm_new_label(mt);
@@ -12199,6 +12216,9 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         } else {
             key = jm_transpile_box_item(mt, mem->property);
         }
+        if (mem_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, mem_obj_spill);
+        }
         MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -12216,6 +12236,10 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
     } else {
         key = jm_transpile_box_item(mt, mem->property);
+    }
+
+    if (mem_obj_spill >= 0) {
+        jm_gen_spill_load(mt, obj, mem_obj_spill);
     }
 
     return jm_call_2(mt, "js_property_access", MIR_T_I64,
@@ -17532,6 +17556,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
         gen_env_total_slots += 1;
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+        int gen_spill_start = gen_env_total_slots;  // spill slots start here
         gen_env_total_slots += 16;  // padding for generator yield spill slots (temporaries across yields)
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17582,7 +17607,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_param_offset = param_offset;
         mt->gen_local_offset = local_offset;
         mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-        mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+        mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
         jm_push_scope(mt);
 
@@ -17871,6 +17896,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
             gen_env_total_slots += 1;
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+            int gen_spill_start = gen_env_total_slots;  // spill slots start here
             gen_env_total_slots += 16;  // padding for async yield spill slots
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17922,7 +17948,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_param_offset = param_offset_sm;
             mt->gen_local_offset = local_offset;
             mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-            mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+            mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
             jm_push_scope(mt);
 

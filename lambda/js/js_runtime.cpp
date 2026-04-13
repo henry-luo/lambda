@@ -372,6 +372,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         js_module_vars[i] = (Item){0};
     }
     js_module_var_count = checkpoint_var_count;
+    // reset strict mode — prevents strict-mode test from poisoning subsequent non-strict tests
+    js_strict_mode = false;
     // clear module registry (frees strdup/calloc per registered module)
     module_registry_cleanup();
     // clear JS module cache counter
@@ -411,6 +413,15 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
+    // reset globalThis, constructor cache, process object — stale heap pointers
+    extern void js_globals_batch_reset(void);
+    js_globals_batch_reset();
+    // reset DOM state — stale document proxy and document pointer
+    extern void js_dom_batch_reset(void);
+    js_dom_batch_reset();
+    // reset microtask queue and timers — callbacks referencing old heap
+    extern void js_event_loop_init(void);
+    js_event_loop_init();
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -8519,13 +8530,20 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 // copyWithin(target, start, end?)
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 int len = ta->length;
-                int target = argc > 0 ? (int)it2i(args[0]) : 0;
-                int start = argc > 1 ? (int)it2i(args[1]) : 0;
-                int end = argc > 2 ? (int)it2i(args[2]) : len;
-                if (target < 0) target += len;
-                if (start < 0) start += len;
-                if (end < 0) end += len;
+                // Use double to handle -Infinity/Infinity/NaN safely before clamping to int
+                double d_target = argc > 0 ? js_get_number(args[0]) : 0;
+                double d_start = argc > 1 ? js_get_number(args[1]) : 0;
+                double d_end = argc > 2 ? js_get_number(args[2]) : (double)len;
+                if (d_target != d_target) d_target = 0; // NaN → 0
+                if (d_start != d_start) d_start = 0;
+                if (d_end != d_end) d_end = 0;
+                int target = (d_target < 0) ? (int)fmax(len + d_target, 0) : (int)fmin(d_target, len);
+                int start = (d_start < 0) ? (int)fmax(len + d_start, 0) : (int)fmin(d_start, len);
+                int end = (d_end < 0) ? (int)fmax(len + d_end, 0) : (int)fmin(d_end, len);
                 int count = end - start;
+                if (count <= 0) return obj;
+                if (target + count > len) count = len - target;
+                if (start + count > len) count = len - start;
                 if (count <= 0) return obj;
                 int elem_size = 1;
                 switch (ta->element_type) {
