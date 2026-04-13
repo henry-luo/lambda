@@ -223,6 +223,12 @@ void font_context_destroy(FontContext* ctx) {
     // clear @font-face descriptors (handles are released via face_cache cleanup)
     font_face_clear(ctx);
 
+    // release cached emoji handle before face cache teardown
+    if (ctx->cached_emoji_handle) {
+        font_handle_release(ctx->cached_emoji_handle);
+        ctx->cached_emoji_handle = NULL;
+    }
+
     // free face cache (calls face_cache_free which releases handles)
     if (ctx->face_cache) {
         hashmap_free(ctx->face_cache);
