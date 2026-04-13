@@ -83,7 +83,20 @@ extern "C" bool js_is_arraybuffer(Item val) {
     TypeId type = get_type_id(val);
     if (type != LMD_TYPE_MAP) return false;
     Map* m = val.map;
-    return m && m->type == (void*)&js_arraybuffer_type_marker;
+    return m && m->map_kind == MAP_KIND_ARRAYBUFFER;
+}
+
+// Get the JsArrayBuffer* from a Map, handling both original and upgraded layouts.
+// Original: m->data holds JsArrayBuffer* directly (m->type == &js_arraybuffer_type_marker).
+// Upgraded: JsArrayBuffer* is stored as __ab__ int64 property (after first user property write).
+static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
+    if (m->type == (void*)&js_arraybuffer_type_marker)
+        return (JsArrayBuffer*)m->data;
+    // Upgraded: retrieve from __ab__ internal property
+    bool found = false;
+    Item ab_val = js_map_get_fast_ext(m, "__ab__", 6, &found);
+    if (found) return (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
+    return NULL;
 }
 
 // Wrap an existing JsArrayBuffer* in a Map Item (for .buffer property access)
@@ -100,13 +113,15 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
 
 extern "C" int js_arraybuffer_byte_length(Item val) {
     if (!js_is_arraybuffer(val)) return 0;
-    JsArrayBuffer* ab = (JsArrayBuffer*)val.map->data;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return 0;
     return ab->byte_length;
 }
 
 extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
-    JsArrayBuffer* ab = (JsArrayBuffer*)val.map->data;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return (Item){.item = ITEM_NULL};
 
     if (begin < 0) begin = ab->byte_length + begin;
     if (end < 0) end = ab->byte_length + end;
@@ -173,7 +188,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         log_error("js_typed_array_new_from_buffer: argument is not an ArrayBuffer");
         return js_typed_array_new(type_id, 0);
     }
-    JsArrayBuffer* ab = (JsArrayBuffer*)buffer_item.map->data;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_item.map);
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = typed_array_element_size(arr_type);
 
@@ -548,7 +563,17 @@ extern "C" bool js_is_dataview(Item val) {
     TypeId type = get_type_id(val);
     if (type != LMD_TYPE_MAP) return false;
     Map* m = val.map;
-    return m && m->type == (void*)&js_dataview_type_marker;
+    return m && m->map_kind == MAP_KIND_DATAVIEW;
+}
+
+// Get JsDataView* from a Map, handling both original and upgraded layouts.
+static JsDataView* js_get_dataview_ptr(Map* m) {
+    if (m->type == (void*)&js_dataview_type_marker)
+        return (JsDataView*)m->data;
+    bool found = false;
+    Item dv_val = js_map_get_fast_ext(m, "__dv__", 6, &found);
+    if (found) return (JsDataView*)(uintptr_t)it2i(dv_val);
+    return NULL;
 }
 
 extern "C" Item js_dataview_new(Item buffer, int byte_offset, int byte_length) {
@@ -556,7 +581,7 @@ extern "C" Item js_dataview_new(Item buffer, int byte_offset, int byte_length) {
         log_error("DataView: first argument must be an ArrayBuffer");
         return (Item){.item = ITEM_NULL};
     }
-    JsArrayBuffer* ab = (JsArrayBuffer*)buffer.map->data;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
 
     if (byte_offset < 0) byte_offset = 0;
     if (byte_offset > ab->byte_length) byte_offset = ab->byte_length;
@@ -610,7 +635,8 @@ static bool is_little_endian_system() {
 // DataView method dispatch
 extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, int argc) {
     if (!js_is_dataview(dv_item)) return (Item){.item = ITEM_NULL};
-    JsDataView* dv = (JsDataView*)dv_item.map->data;
+    JsDataView* dv = js_get_dataview_ptr(dv_item.map);
+    if (!dv) return (Item){.item = ITEM_NULL};
 
     String* mname = it2s(method_name);
     if (!mname) return (Item){.item = ITEM_NULL};

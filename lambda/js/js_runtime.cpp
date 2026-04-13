@@ -2947,26 +2947,42 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
                         return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
                     }
+                    // check own properties on upgraded maps (data_cap > 0 means upgraded)
+                    if (object.map->data_cap > 0) {
+                        Item own_result = map_get(object.map, key);
+                        if (own_result.item != ITEM_NULL) return own_result;
+                    }
                 }
                 return (Item){.item = ITEM_NULL};
             }
             case MAP_KIND_DATAVIEW: {
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* str_key = it2s(key);
+                    // get native DataView pointer (direct or from upgraded __dv__ property)
+                    JsDataView* dv = NULL;
+                    if (object.map->data_cap == 0) {
+                        dv = (JsDataView*)object.map->data;
+                    } else {
+                        bool found = false;
+                        Item dv_val = js_map_get_fast(object.map, "__dv__", 6, &found);
+                        if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
+                    }
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                        JsDataView* dv = (JsDataView*)object.map->data;
-                        return (Item){.item = i2it(dv->byte_length)};
+                        return dv ? (Item){.item = i2it(dv->byte_length)} : (Item){.item = ITEM_NULL};
                     }
                     if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                        JsDataView* dv = (JsDataView*)object.map->data;
-                        return (Item){.item = i2it(dv->byte_offset)};
+                        return dv ? (Item){.item = i2it(dv->byte_offset)} : (Item){.item = ITEM_NULL};
                     }
                     if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
-                        JsDataView* dv = (JsDataView*)object.map->data;
-                        if (dv->buffer) {
+                        if (dv && dv->buffer) {
                             return js_arraybuffer_wrap(dv->buffer);
                         }
                         return (Item){.item = ITEM_NULL};
+                    }
+                    // check own properties on upgraded maps
+                    if (object.map->data_cap > 0) {
+                        Item own_result = map_get(object.map, key);
+                        if (own_result.item != ITEM_NULL) return own_result;
                     }
                 }
                 return (Item){.item = ITEM_NULL};
@@ -3886,8 +3902,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             case MAP_KIND_CSSOM:
                 if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
                 return js_cssom_rule_decl_set_property(object, key, value);
+            case MAP_KIND_ARRAYBUFFER:
+            case MAP_KIND_DATAVIEW:
+                // upgrade map for property storage: convert native-pointer layout
+                // to a regular map on first user-property write.
+                // Save the native pointer as an __ab__ (or __dv__) int64 property.
+                if (m->data_cap == 0 && js_input) {
+                    void* native_ptr = m->data;
+                    const char* tag = (m->map_kind == MAP_KIND_ARRAYBUFFER) ? "__ab__" : "__dv__";
+                    m->type = (void*)&EmptyMap;
+                    m->data = NULL;
+                    m->data_cap = 0;
+                    // map_put will allocate proper data storage since type == &EmptyMap
+                    String* tag_key = heap_create_name(tag, 6);
+                    map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
+                }
+                break;  // fall through to regular property set
             default:
-                break;  // typed arrays/arraybuffers fall through to regular set
+                break;  // typed arrays fall through to regular set
             }
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
