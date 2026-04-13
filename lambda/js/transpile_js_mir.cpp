@@ -19062,6 +19062,8 @@ static bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double*
 // (exported functions have JIT-compiled pointers that must remain valid)
 #define MAX_MODULE_CONTEXTS 256
 static MIR_context_t module_mir_contexts[MAX_MODULE_CONTEXTS];
+static NamePool* module_mir_name_pools[MAX_MODULE_CONTEXTS];
+static Pool* module_mir_ast_pools[MAX_MODULE_CONTEXTS];
 static int module_mir_context_count = 0;
 
 // Runtime context saved for use by js_new_function_from_string (new Function(...) support)
@@ -19070,6 +19072,8 @@ static int js_dynamic_func_counter = 0;
 
 static void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
+        module_mir_name_pools[module_mir_context_count] = NULL;
+        module_mir_ast_pools[module_mir_context_count] = NULL;
         module_mir_contexts[module_mir_context_count++] = ctx;
     } else {
         log_error("module: exceeded max deferred MIR contexts (%d)", MAX_MODULE_CONTEXTS);
@@ -19080,8 +19084,28 @@ static void jm_defer_mir_cleanup(MIR_context_t ctx) {
 static void jm_cleanup_deferred_mir() {
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
+        if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);
+        if (module_mir_ast_pools[i]) pool_destroy(module_mir_ast_pools[i]);
     }
     module_mir_context_count = 0;
+}
+
+// Finish and remove the most recently deferred MIR context.
+// Used by eval() to eagerly free MIR contexts for one-shot compiled code
+// that is called once and then discarded.
+static void jm_finish_last_deferred_mir() {
+    if (module_mir_context_count > 0) {
+        module_mir_context_count--;
+        MIR_finish(module_mir_contexts[module_mir_context_count]);
+        if (module_mir_name_pools[module_mir_context_count]) {
+            name_pool_release(module_mir_name_pools[module_mir_context_count]);
+            module_mir_name_pools[module_mir_context_count] = NULL;
+        }
+        if (module_mir_ast_pools[module_mir_context_count]) {
+            pool_destroy(module_mir_ast_pools[module_mir_context_count]);
+            module_mir_ast_pools[module_mir_context_count] = NULL;
+        }
+    }
 }
 
 // Resolve a module specifier relative to the importing file's directory
@@ -22818,8 +22842,13 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     }
     mem_free(mt);
     jm_defer_mir_cleanup(ctx);
-    // Detach name_pool and ast_pool so they survive transpiler cleanup.
-    // JIT code holds raw String* pointers into the name pool.
+    // Attach name_pool and ast_pool to the deferred entry so they are freed
+    // when the deferred context is cleaned up.
+    if (module_mir_context_count > 0) {
+        module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
+        module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+    }
+    // Detach from transpiler so js_transpiler_destroy doesn't free them.
     tp->name_pool = NULL;
     tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
@@ -23081,8 +23110,13 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     }
     mem_free(mt);
     jm_defer_mir_cleanup(ctx);
-    // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
-    // These leak intentionally — their lifetime must match the JIT code.
+    // Attach name_pool and ast_pool to the deferred entry so they are freed
+    // together with the MIR context (e.g., when eval() calls jm_finish_last_deferred_mir).
+    if (module_mir_context_count > 0) {
+        module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
+        module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+    }
+    // Detach from transpiler so js_transpiler_destroy doesn't free them.
     tp->name_pool = NULL;
     tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
@@ -23275,7 +23309,12 @@ extern "C" Item js_builtin_eval(Item code_item) {
 
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-        return js_call_function(fn_item, ItemNull, NULL, 0);
+        Item result = js_call_function(fn_item, ItemNull, NULL, 0);
+        // Eagerly free the MIR context deferred by js_new_function_from_string.
+        // The compiled function was called once and its result captured — the
+        // generated code is no longer reachable.
+        jm_finish_last_deferred_mir();
+        return result;
     }
 
     // Try statement form with "return" inserted before last expression statement
@@ -23287,7 +23326,9 @@ extern "C" Item js_builtin_eval(Item code_item) {
             mem_free(modified);
             fn_item = js_new_function_from_string(&body_item, 1);
             if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-                return js_call_function(fn_item, ItemNull, NULL, 0);
+                Item result = js_call_function(fn_item, ItemNull, NULL, 0);
+                jm_finish_last_deferred_mir();
+                return result;
             }
         }
     }
@@ -23414,9 +23455,10 @@ extern "C" Item js_builtin_eval(Item code_item) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
         mem_free(mt);
-        jm_defer_mir_cleanup(eval_ctx);
-        tp->name_pool = NULL;
-        tp->ast_pool = NULL;
+        // Eagerly finish the MIR context — eval() direct-script code is executed
+        // once and the result captured, so generated code is no longer reachable.
+        MIR_finish(eval_ctx);
+        // Also free name_pool and ast_pool eagerly (no live code references them)
         js_transpiler_destroy(tp);
 
         return result;
