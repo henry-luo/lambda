@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
+#include "clip_shape.h"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
@@ -333,7 +334,8 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     // else src_a == 0: fully transparent, don't draw anything
 }
 
-void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip) {
+void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
+                       ClipShape** clip_shapes, int clip_depth) {
     Rect r;
     if (!surface || !surface->pixels) return;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
@@ -345,9 +347,35 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     int top = (int)std::max(clip->top, rect->y);
     int bottom = (int)std::min(clip->bottom, rect->y + rect->height);
     if (left >= right || top >= bottom) return; // rect outside clip
+
+    // Fast path: no clip shapes active
+    if (clip_depth <= 0) {
+        for (int i = top; i < bottom; i++) {
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
+            _fill_row(row_pixels, left, right - left, color);
+        }
+        return;
+    }
+
+    // Check if rect is entirely inside all clip shapes
+    if (clip_shapes_rect_inside(clip_shapes, clip_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1))) {
+        for (int i = top; i < bottom; i++) {
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
+            _fill_row(row_pixels, left, right - left, color);
+        }
+        return;
+    }
+
+    // Per-row scanline clipping
     for (int i = top; i < bottom; i++) {
+        float py = (float)i + 0.5f;
+        int rl = left, rr = right;
+        clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &rl, &rr);
+        if (rl >= rr) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
-        _fill_row(row_pixels, left, right - left, color);
+        _fill_row(row_pixels, rl, rr - rl, color);
     }
 }
 
@@ -439,7 +467,8 @@ static uint32_t area_average(ImageSurface* src, float x0, float y0, float x1, fl
 }
 
 // Enhanced blit function with support for different scaling modes
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode) {
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
+                         ClipShape** clip_shapes, int clip_depth) {
     Rect rect;
     if (!src || !dst || !dst_rect || !clip) return;
     if (!src->pixels) {
@@ -467,9 +496,21 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
     int bottom = (int)std::min(clip->bottom, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return; // dst_rect outside the dst surface
 
+    // Check if clip shape clipping is needed
+    bool need_shape_clip = (clip_depth > 0) &&
+        !clip_shapes_rect_inside(clip_shapes, clip_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1));
+
     for (int i = top; i < bottom; i++) {
+        int row_left = left, row_right = right;
+        if (need_shape_clip) {
+            float py = (float)i + 0.5f;
+            clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &row_left, &row_right);
+            if (row_left >= row_right) continue;
+        }
         uint8_t* row_pixels = (uint8_t*)dst->pixels + i * dst->pitch;
-        for (int j = left; j < right; j++) {
+        for (int j = row_left; j < row_right; j++) {
             float src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
             float src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
 

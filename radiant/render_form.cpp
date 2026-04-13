@@ -26,7 +26,8 @@ static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255)
 // Helper to draw a filled rectangle
 static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
-    fill_surface_rect(rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip);
+    fill_surface_rect(rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
+                      rdcon->clip_shapes, rdcon->clip_shape_depth);
 }
 
 // Helper to draw a filled circle using RdtVector

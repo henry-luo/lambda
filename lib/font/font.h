@@ -97,6 +97,11 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style);
 FontHandle* font_handle_retain(FontHandle* handle);
 void        font_handle_release(FontHandle* handle);
 
+// get the resolved style identity of a font handle (for comparison/reuse checks)
+// returns false if handle is NULL, true otherwise
+bool font_handle_get_style(FontHandle* handle, const char** out_family,
+                           float* out_size_px, FontWeight* out_weight, FontSlant* out_slant);
+
 // ============================================================================
 // Font Metrics — per-face, per-size metrics
 // ============================================================================

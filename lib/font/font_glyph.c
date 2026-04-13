@@ -158,6 +158,17 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     GlyphInfo info = {0};
     if (!handle) return info;
 
+    // Font5 §4.2: fast path for ASCII codepoints (32–126)
+    // Direct array lookup — no hash computation needed.
+    if (codepoint >= 32 && codepoint <= 126 && handle->ascii_advance_ready) {
+        uint32_t idx = codepoint - 32;
+        if (handle->ascii_glyph_id[idx] != 0) {
+            info.id = handle->ascii_glyph_id[idx];
+            info.advance_x = handle->ascii_advance[idx];
+            return info;
+        }
+    }
+
     float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                             ? handle->ctx->config.pixel_ratio : 1.0f;
 
@@ -275,6 +286,13 @@ apply_overrides:
         hashmap_set(cache, &entry);
     }
 
+    // Font5 §4.2: populate ASCII advance table entry
+    if (codepoint >= 32 && codepoint <= 126 && char_index != 0) {
+        uint32_t idx = codepoint - 32;
+        handle->ascii_advance[idx] = info.advance_x;
+        handle->ascii_glyph_id[idx] = char_index;
+    }
+
     return info;
 }
 
@@ -330,6 +348,10 @@ static float font_get_kerning_coretext(FontHandle* handle, uint32_t left, uint32
 
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     if (!handle) return 0;
+
+    // Font5 §4.5: skip kerning entirely for fonts with no kern data
+    const FontMetrics* m = font_get_metrics(handle);
+    if (m && !m->has_kerning) return 0.0f;
 
     // FontTables kern table
     if (handle->tables) {
