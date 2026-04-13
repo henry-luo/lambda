@@ -7862,6 +7862,13 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
 
         // General member assignment
         MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
+
+        // Generator spill: if computed key contains yield, obj reg will be stale after resume
+        int asgn_obj_spill = -1;
+        if (mt->in_generator && member->computed && jm_has_yield(member->property)) {
+            asgn_obj_spill = jm_gen_spill_save(mt, obj);
+        }
+
         MIR_reg_t key;
         if (member->computed) {
             key = jm_transpile_box_item(mt, member->property);
@@ -7870,6 +7877,10 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
         } else {
             key = jm_transpile_box_item(mt, member->property);
+        }
+
+        if (asgn_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, asgn_obj_spill);
         }
 
         MIR_reg_t new_val;
@@ -12162,6 +12173,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
 
+    // Generator spill: if computed key contains yield, obj reg will be stale after resume
+    int mem_obj_spill = -1;
+    if (mt->in_generator && mem->computed && jm_has_yield(mem->property)) {
+        mem_obj_spill = jm_gen_spill_save(mt, obj);
+    }
+
     // Optional chaining: obj?.prop → return undefined if obj is null/undefined
     if (mem->optional) {
         MIR_label_t l_skip = jm_new_label(mt);
@@ -12199,6 +12216,9 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         } else {
             key = jm_transpile_box_item(mt, mem->property);
         }
+        if (mem_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, mem_obj_spill);
+        }
         MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -12216,6 +12236,10 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
     } else {
         key = jm_transpile_box_item(mt, mem->property);
+    }
+
+    if (mem_obj_spill >= 0) {
+        jm_gen_spill_load(mt, obj, mem_obj_spill);
     }
 
     return jm_call_2(mt, "js_property_access", MIR_T_I64,
