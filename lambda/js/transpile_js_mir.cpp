@@ -6957,9 +6957,9 @@ static void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, M
             prop_key = jm_transpile_box_item(mt, member->property);
             if (need_spill) {
                 obj = jm_new_reg(mt, "_dstr_obj_r", MIR_T_I64);
-                jm_gen_spill_load(mt, obj_spill, obj);
+                jm_gen_spill_load(mt, obj, obj_spill);
                 val = jm_new_reg(mt, "_dstr_val_r", MIR_T_I64);
-                jm_gen_spill_load(mt, val_spill, val);
+                jm_gen_spill_load(mt, val, val_spill);
             }
         } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
@@ -17532,6 +17532,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
         gen_env_total_slots += 1;
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+        int gen_spill_start = gen_env_total_slots;  // spill slots start here
         gen_env_total_slots += 16;  // padding for generator yield spill slots (temporaries across yields)
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17582,7 +17583,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_param_offset = param_offset;
         mt->gen_local_offset = local_offset;
         mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-        mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+        mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
         jm_push_scope(mt);
 
@@ -17871,6 +17872,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
             gen_env_total_slots += 1;
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+            int gen_spill_start = gen_env_total_slots;  // spill slots start here
             gen_env_total_slots += 16;  // padding for async yield spill slots
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17922,7 +17924,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_param_offset = param_offset_sm;
             mt->gen_local_offset = local_offset;
             mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-            mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+            mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
             jm_push_scope(mt);
 
