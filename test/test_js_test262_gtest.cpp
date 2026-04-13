@@ -1216,6 +1216,10 @@ static void run_t262_sub_batch(
                     }
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after};
                     in_script = false;
+                } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
+                           strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
+                    // Diagnostic from child process: log to parent stderr
+                    fprintf(stderr, "[test262] Child diagnostic: %s", buffer + 1);
                 }
             } else if (in_script) {
                 current_output += buffer;
@@ -1228,6 +1232,16 @@ static void run_t262_sub_batch(
 
     int wstatus;
     waitpid(pid, &wstatus, 0);
+    // Log if the batch process exited abnormally (helps diagnose killed batches)
+    if (WIFSIGNALED(wstatus)) {
+        int sig = WTERMSIG(wstatus);
+        fprintf(stderr, "[test262] Batch worker PID %d killed by signal %d (%s), collected %zu results\n",
+                pid, sig, strsignal(sig), results.size());
+    } else if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) != 0) {
+        // Normal exit with non-zero status (e.g., from MAX_CRASH_COUNT break)
+        fprintf(stderr, "[test262] Batch worker PID %d exited with status %d, collected %zu results\n",
+                pid, WEXITSTATUS(wstatus), results.size());
+    }
     worker_done.store(true, std::memory_order_relaxed);
     watchdog.join();
 }
@@ -1557,6 +1571,68 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
             exec_secs, batch_results.size());
 
+    // Diagnostic: identify which clean batches lost tests and the crash points.
+    // Crash-point tests kill the batch process in a way the signal handler can't
+    // catch (stack overflow, double fault, etc.). They'll be added to quarantine
+    // as BATCH_KILL entries to prevent collateral damage in future runs.
+    std::unordered_set<std::string> batch_kill_tests;
+    {
+        // Reconstruct native/js split to match actual sub-batch composition
+        std::vector<size_t> native_clean, js_clean;
+        for (size_t idx : clean_indices) {
+            if (prepared[idx].native_harness)
+                native_clean.push_back(idx);
+            else
+                js_clean.push_back(idx);
+        }
+
+        auto analyze_group = [&](const std::vector<size_t>& group_indices, const char* label) {
+            size_t total_lost = 0;
+            size_t killed_batches = 0;
+            for (size_t start = 0; start < group_indices.size(); start += T262_BATCH_CHUNK_SIZE) {
+                size_t end = std::min(start + T262_BATCH_CHUNK_SIZE, group_indices.size());
+                // Find first missing test in this sub-batch
+                size_t completed = 0;
+                size_t lost_in_batch = 0;
+                std::string first_lost_name;
+                std::string last_ok_name;
+                for (size_t i = start; i < end; i++) {
+                    const auto& name = prepared[group_indices[i]].test_name;
+                    if (batch_results.count(name)) {
+                        completed++;
+                        last_ok_name = name;
+                    } else {
+                        if (first_lost_name.empty()) first_lost_name = name;
+                        lost_in_batch++;
+                    }
+                }
+                if (lost_in_batch > 0) {
+                    size_t batch_num = start / T262_BATCH_CHUNK_SIZE;
+                    fprintf(stderr, "[test262] KILLED %s-batch[%zu]: %zu/%zu completed, %zu lost, "
+                            "crash-point: '%s' (after '%s')\n",
+                            label, batch_num, completed, end - start, lost_in_batch,
+                            first_lost_name.c_str(),
+                            last_ok_name.empty() ? "(batch start)" : last_ok_name.c_str());
+                    total_lost += lost_in_batch;
+                    killed_batches++;
+                    // Queue the crash-point test for quarantine
+                    if (!first_lost_name.empty()) {
+                        batch_kill_tests.insert(first_lost_name);
+                    }
+                }
+            }
+            if (killed_batches > 0)
+                fprintf(stderr, "[test262] %s group: %zu killed batches, %zu total lost tests\n",
+                        label, killed_batches, total_lost);
+        };
+
+        analyze_group(native_clean, "native");
+        analyze_group(js_clean, "js");
+        if (!batch_kill_tests.empty())
+            fprintf(stderr, "[test262] Detected %zu batch-kill crash-point tests (will quarantine for next run)\n",
+                    batch_kill_tests.size());
+    }
+
     // Phase 2a: execute non-batch tests individually (batch size = 1).
     // These tests include harnesses (e.g. propertyHelper.js) that destructively
     // mutate global built-in state, so they cannot safely share a process.
@@ -1808,10 +1884,52 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     still_lost++;
                 }
             }
+
+            // Add batch-kill crash-point tests to quarantine.
+            // These tests kill the batch process in a way the signal handler can't
+            // catch (e.g. stack overflow, double fault). They pass individually but
+            // crash the process when run in batch context. Quarantining forces them
+            // to run individually, preventing collateral loss of co-batched tests.
+            // Unlike CRASH entries (sticky), BATCH_KILL entries are re-verified each
+            // run: if the test no longer appears as a crash-point, it's removed.
+            size_t batch_kill_count = 0;
+            for (auto& bk_name : batch_kill_tests) {
+                if (written.count(bk_name)) continue;
+                const char* path = "";
+                for (size_t idx : clean_indices) {
+                    if (prepared[idx].test_name == bk_name) {
+                        path = prepared[idx].test_path.c_str();
+                        break;
+                    }
+                }
+                fprintf(crasher_log, "BATCH_KILL\t%s\t%s\n", bk_name.c_str(), path);
+                written.insert(bk_name);
+                batch_kill_count++;
+            }
+            // Also re-emit previously known BATCH_KILL entries that are still
+            // quarantined — they stay quarantined for one extra run to verify
+            // they're no longer crash-points. (If they don't re-appear as crash-points,
+            // they'll be dropped next run because known_crasher_tags won't match CRASH.)
+            for (size_t idx : crasher_indices) {
+                const auto& p = prepared[idx];
+                if (written.count(p.test_name)) continue;
+                if (known_crasher_tags.count(p.test_name) &&
+                    known_crasher_tags[p.test_name] == "BATCH_KILL") {
+                    // Re-emit only if still a crash-point this run
+                    if (batch_kill_tests.count(p.test_name)) {
+                        fprintf(crasher_log, "BATCH_KILL\t%s\t%s\n",
+                                p.test_name.c_str(), p.test_path.c_str());
+                        written.insert(p.test_name);
+                        batch_kill_count++;
+                    }
+                    // else: no longer a crash-point → drop from quarantine
+                }
+            }
+
             fclose(crasher_log);
-            if (still_lost + crash_exit + slow_count > 0) {
-                fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit + %zu slow (>3s) → temp/_t262_crashers.txt\n",
-                        still_lost, crash_exit, slow_count);
+            if (still_lost + crash_exit + slow_count + batch_kill_count > 0) {
+                fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → temp/_t262_crashers.txt\n",
+                        still_lost, crash_exit, slow_count, batch_kill_count);
             }
         }
     }
@@ -1943,6 +2061,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     for (size_t idx : lost_indices)     phase2b_set.insert(prepared[idx].test_name);
 
     // Phase 3: evaluate results and cache, applying partial-pass classification
+    size_t pp_crasher = 0, pp_batch_lost = 0, pp_slow = 0;
     for (size_t i = 0; i < prepared.size(); i++) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
 
@@ -1953,12 +2072,15 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             const auto& name = prepared[i].test_name;
             if (crasher_name_set.count(name)) {
                 result = {T262_PARTIAL_PASS, "partial: quarantined crasher, passed individually only"};
+                pp_crasher++;
             } else if (clean_set.count(name) && phase2b_set.count(name)) {
                 result = {T262_PARTIAL_PASS, "partial: batch-lost, passed only in individual retry"};
+                pp_batch_lost++;
             } else if (clean_set.count(name)) {
                 auto br_it = batch_results.find(name);
                 if (br_it != batch_results.end() && br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
                     result = {T262_PARTIAL_PASS, "partial: slow (>= 3s in batch)"};
+                    pp_slow++;
                 }
             }
             // non-batch tests and fast clean-batch passes remain T262_PASS
@@ -1966,6 +2088,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
         std::lock_guard<std::mutex> lock(g_results_mutex);
         g_cached_results[prepared[i].test_name] = result;
+    }
+    if (pp_crasher + pp_batch_lost + pp_slow > 0) {
+        fprintf(stderr, "[test262] Phase 3 partial passes: %zu quarantined-crasher + %zu batch-lost + %zu slow (>= 3s)\n",
+                pp_crasher, pp_batch_lost, pp_slow);
     }
 
     auto total_time = std::chrono::steady_clock::now();

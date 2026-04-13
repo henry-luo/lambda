@@ -2697,6 +2697,20 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
         lambda_stack_init();
 
+#ifndef _WIN32
+        // Set up alternate signal stack for SIGSEGV/SIGBUS recovery.
+        // Without this, stack overflow crashes kill the process because the
+        // signal handler tries to run on the same overflowed stack and triggers
+        // a double fault. With sigaltstack, the handler runs on a separate
+        // allocation and can safely siglongjmp back to the recovery point.
+        static char alt_stack_mem[SIGSTKSZ + 65536];  // generous alt stack
+        stack_t alt_stack;
+        alt_stack.ss_sp = alt_stack_mem;
+        alt_stack.ss_size = sizeof(alt_stack_mem);
+        alt_stack.ss_flags = 0;
+        sigaltstack(&alt_stack, NULL);
+#endif
+
         // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
         // Enables the reusing_context fast-path in transpile_js_to_mir,
         // avoiding heap/nursery/name_pool teardown+recreation between tests.
@@ -2717,7 +2731,24 @@ int main(int argc, char *argv[]) {
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
         int batch_crash_count = 0;
+        int batch_test_count = 0;  // diagnostic: track how many tests processed
+        bool batch_in_test = false; // true between BATCH_START and BATCH_END (for crash recovery)
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
+
+#ifndef _WIN32
+        // Install signal handlers ONCE for the entire batch loop.
+        // Catches SIGSEGV, SIGBUS, SIGABRT, and SIGTRAP.
+        extern MIR_error_func_t g_batch_mir_error_handler;
+        g_batch_mir_error_handler = batch_mir_error_handler;
+        struct sigaction crash_sa, old_segv_sa, old_bus_sa, old_abrt_sa, old_trap_sa;
+        crash_sa.sa_handler = batch_crash_handler;
+        sigemptyset(&crash_sa.sa_mask);
+        crash_sa.sa_flags = SA_ONSTACK;
+        sigaction(SIGSEGV, &crash_sa, &old_segv_sa);
+        sigaction(SIGBUS, &crash_sa, &old_bus_sa);
+        sigaction(SIGABRT, &crash_sa, &old_abrt_sa);
+        sigaction(SIGTRAP, &crash_sa, &old_trap_sa);
+#endif
 
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
@@ -2795,6 +2826,8 @@ int main(int argc, char *argv[]) {
                 inline_source = true;
             }
 
+            batch_test_count++;
+            batch_in_test = true;
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
@@ -2821,27 +2854,28 @@ int main(int argc, char *argv[]) {
 
             int result = 0;
 #ifndef _WIN32
-            // Set MIR error handler to recover from MIR compilation errors
-            extern MIR_error_func_t g_batch_mir_error_handler;
-            g_batch_mir_error_handler = batch_mir_error_handler;
-
-            // Install SIGSEGV/SIGBUS handler to catch runtime crashes in JIT code
-            struct sigaction crash_sa, old_segv_sa, old_bus_sa;
-            crash_sa.sa_handler = batch_crash_handler;
-            sigemptyset(&crash_sa.sa_mask);
-            crash_sa.sa_flags = 0;
-            sigaction(SIGSEGV, &crash_sa, &old_segv_sa);
-            sigaction(SIGBUS, &crash_sa, &old_bus_sa);
+            // Per-test crash recovery via sigsetjmp.
+            // Signal handlers are installed once before the while loop.
+            // batch_crash_active remains 1 throughout the loop for
+            // between-test crash protection.
             batch_crash_active = 1;
 
             int crash_sig = sigsetjmp(batch_crash_jmp, 1);
             if (crash_sig != 0) {
-                // Recovered from SIGSEGV/SIGBUS
+                // Recovered from crash signal (handler set batch_crash_active=0; re-enable)
+                batch_crash_active = 1;
+                if (!batch_in_test) {
+                    // Crash happened between tests (in cleanup code).
+                    // Exit the batch — remaining tests will be retried individually.
+                    printf("\x01" "BATCH_EXIT between_test_crash signal=%d tests=%d\n",
+                            crash_sig, batch_test_count);
+                    fflush(stdout);
+                    break;
+                }
                 fprintf(stderr, "Crash: script '%s' caught signal %d (recovered)\n", script_path, crash_sig);
                 alarm(0);
                 batch_timeout_active = 0;
                 mir_error_active = 0;
-                batch_crash_active = 0;
                 result = 128 + crash_sig;
             } else if (batch_timeout > 0) {
                 struct sigaction sa, old_sa;
@@ -2860,14 +2894,12 @@ int main(int argc, char *argv[]) {
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
-                        batch_crash_active = 0;
                         if (res.item == ITEM_ERROR || js_check_exception()) {
                             result = 1;
                         }
                     } else {
                         // timed out
                         mir_error_active = 0;
-                        batch_crash_active = 0;
                         fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
                         result = 124;
                     }
@@ -2875,7 +2907,6 @@ int main(int argc, char *argv[]) {
                     // MIR error recovery
                     alarm(0);
                     batch_timeout_active = 0;
-                    batch_crash_active = 0;
                     result = 1;
                 }
                 sigaction(SIGALRM, &old_sa, NULL);
@@ -2886,20 +2917,14 @@ int main(int argc, char *argv[]) {
                         ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
                         : transpile_js_to_mir(&runtime, js_source, script_path);
                     mir_error_active = 0;
-                    batch_crash_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
                     }
                 } else {
                     // MIR error recovery
-                    batch_crash_active = 0;
                     result = 1;
                 }
             }
-
-            // Restore signal handlers
-            sigaction(SIGSEGV, &old_segv_sa, NULL);
-            sigaction(SIGBUS, &old_bus_sa, NULL);
 #else
             Item res = has_preamble
                 ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
@@ -2924,13 +2949,19 @@ int main(int argc, char *argv[]) {
             size_t rss_after = get_rss_bytes();
             printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
             fflush(stdout);
+            batch_in_test = false;
 
             // Memory management: each SIGSEGV/SIGBUS crash recovery via longjmp
             // leaks ~55MB (MIR code pages, AST, temporaries that skip cleanup).
             // After too many crashes, exit the batch to prevent OOM.
             // Also exit if RSS exceeds the limit (from cumulative leaks).
-            static const size_t RSS_LIMIT = 512UL * 1024 * 1024; // 512 MB
-            static const int MAX_CRASH_COUNT = 3;
+            // Raised from 3/512MB to 10/4GB to reduce batch-lost partial passes:
+            // batches with 3-9 crashers now survive instead of dying early.
+            // 4GB per worker is safe: 12 workers × 4GB = 48GB theoretical max,
+            // but memory-hungry tests (like RegExp CharacterClassEscapes) only
+            // exist in a few batches, so actual peak is much lower.
+            static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
+            static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {
                 // Restore context (longjmp on timeout/crash may leave it dangling)
@@ -2942,6 +2973,11 @@ int main(int argc, char *argv[]) {
                     batch_crash_count++;
                     if (batch_crash_count >= MAX_CRASH_COUNT || rss_after > RSS_LIMIT) {
                         // Too many crashes or RSS too high — exit batch.
+                        // Use \x01 protocol so the parent can capture this diagnostic.
+                        printf("\x01" "BATCH_EXIT crash_count=%d limit=%d RSS=%zuMB limit=%zuMB tests=%d\n",
+                                batch_crash_count, MAX_CRASH_COUNT,
+                                rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
+                        fflush(stdout);
                         break;
                     }
                     js_batch_reset();
@@ -2970,6 +3006,9 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (rss_after > RSS_LIMIT) {
                     // Normal test but RSS too high — exit to prevent OOM.
+                    printf("\x01" "BATCH_EXIT rss_exceeded RSS=%zuMB limit=%zuMB tests=%d\n",
+                            rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
+                    fflush(stdout);
                     break;
                 } else if (has_preamble) {
                     js_batch_reset_to(preamble_var_checkpoint);
@@ -2982,6 +3021,26 @@ int main(int argc, char *argv[]) {
                 js_batch_reset();
                 runtime_reset_heap(&runtime);
             }
+        }
+
+#ifndef _WIN32
+        // Restore signal handlers after loop exit
+        batch_crash_active = 0;
+        sigaction(SIGSEGV, &old_segv_sa, NULL);
+        sigaction(SIGBUS, &old_bus_sa, NULL);
+        sigaction(SIGABRT, &old_abrt_sa, NULL);
+        sigaction(SIGTRAP, &old_trap_sa, NULL);
+#endif
+
+        // Diagnostic: log if the batch exited the while loop unexpectedly
+        if (feof(stdin)) {
+            // Normal completion — stdin fully consumed
+        } else if (ferror(stdin)) {
+            printf("\x01" "BATCH_DIAG stdin_error=%d tests=%d\n", ferror(stdin), batch_test_count);
+            fflush(stdout);
+        } else {
+            printf("\x01" "BATCH_DIAG unexpected_exit tests=%d\n", batch_test_count);
+            fflush(stdout);
         }
 
         // Clean up preamble MIR context (must happen before heap teardown)
