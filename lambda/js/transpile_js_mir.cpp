@@ -11972,6 +11972,16 @@ static MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
 static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
     MIR_reg_t object = jm_call_0(mt, "js_new_object", MIR_T_I64);
 
+    // Generator spill: if any property value/key/spread contains yield, save object ref to env
+    int obj_spill_slot = -1;
+    if (mt->in_generator) {
+        JsAstNode* cy = obj->properties;
+        while (cy) {
+            if (jm_has_yield(cy)) { obj_spill_slot = jm_gen_spill_save(mt, object); break; }
+            cy = cy->next;
+        }
+    }
+
     JsAstNode* prop = obj->properties;
     while (prop) {
         if (prop->node_type == JS_AST_NODE_PROPERTY) {
@@ -11979,6 +11989,10 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             // Skip getter/setter properties with null key (get key() { ... })
             if (!p->key) { prop = prop->next; continue; }
             MIR_reg_t key;
+            // Generator spill: if value contains yield, we need to spill key too
+            // since key is evaluated before value which may yield
+            int key_spill_slot = -1;
+            bool val_has_yield = obj_spill_slot >= 0 && p->value && jm_has_yield(p->value);
             if (p->computed) {
                 key = jm_transpile_box_item(mt, p->key);
                 // computed getter/setter: wrap key with __get_/__set_ prefix at runtime
@@ -11995,7 +12009,18 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             } else {
                 key = jm_transpile_box_item(mt, p->key);
             }
+            if (val_has_yield) {
+                key_spill_slot = jm_gen_spill_save(mt, key);
+            }
             MIR_reg_t val = jm_transpile_box_item(mt, p->value);
+            // Generator spill: restore object and key refs after yield-containing property value
+            if (val_has_yield) {
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+                jm_gen_spill_load(mt, key, key_spill_slot);
+            } else if (obj_spill_slot >= 0 && jm_has_yield(prop)) {
+                // key itself contained yield (computed key case)
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+            }
             // function name inference from object property key
             if (!p->computed && p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER &&
                 p->value && (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
@@ -12027,6 +12052,10 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             // Object spread: { ...source } — copy all own properties from source into target
             JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
             MIR_reg_t source = jm_transpile_box_item(mt, sp->argument);
+            // Generator spill: restore object ref after yield-containing spread
+            if (obj_spill_slot >= 0 && jm_has_yield(prop)) {
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+            }
             jm_call_2(mt, "js_object_spread_into", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, source));
