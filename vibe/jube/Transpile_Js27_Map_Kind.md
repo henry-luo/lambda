@@ -578,3 +578,46 @@ Log verification:
 2. **Foundation for P4b boxed reads**: Shape guard can replace the map_kind guard + function call
 3. **Correctness guarantee**: Shape pointer match proves ALL field types are correct — no per-field type check needed
 4. **Future inline caching**: The shape cache slot pattern matches V8/SpiderMonkey hidden class IC design
+
+### 7.11 P4b Shape Guard Extension
+
+**Status:** Complete (2026-04-13)
+
+Extended the §7 inline shape guard from P1 native reads to P4b boxed reads. When `shape_cache_ptr` is available, the P4b path now emits:
+- **Shape guard**: load `obj->type` (offset 8), compare against `*shape_cache_ptr`
+- **Fast path**: direct memory load from `obj->data[byte_offset]` + inline boxing (`jm_box_int_reg` / `jm_box_float`) — **zero function calls**
+- **Slow path**: `js_property_get(obj, key)` for exotic objects
+
+When no `shape_cache_ptr` is available (class without constructor property tracking), falls back to the existing map_kind guard + `js_get_slot_i`/`js_get_slot_f` function call path.
+
+**Key insight:** The shape guard subsumes the map_kind guard — if the shape matches, the object is guaranteed to be a plain object with the expected layout, so no additional map_kind check is needed.
+
+**What changed in P4b fast path:**
+
+| Before (§7) | After (§7.11) |
+|---|---|
+| map_kind guard (load flags, AND 0xF0, EQ 0) | shape guard (load obj->type, compare *cache) |
+| `js_get_slot_f(obj, offset)` function call | direct `obj->data[offset]` memory load |
+| + `jm_box_float` / `jm_box_int_reg` | + `jm_box_float` / `jm_box_int_reg` |
+
+**Tests:** All 78/78 JS GTest pass, 565/566 Lambda baseline (1 intermittent fs_basic failure unrelated).
+
+**Files changed:** Only `lambda/js/transpile_js_mir.cpp` — restructured the P4b INT/FLOAT block to use shape guard when available, falling back to map_kind guard otherwise.
+
+**Benchmark results (M3 MacBook Air, release build, 36,000 advance steps):**
+
+Class-based nbody (`temp/bench_nbody_p4b.js` — exercises P4b shape guard on 7 float fields):
+
+| Engine | Time | vs Node |
+|--------|------|---------|
+| Node.js (V8) | **9 ms** | 1.0x |
+| Lambda JS | **~975 ms** | ~108x slower |
+
+Object-literal nbody (`test/benchmark/beng/js/nbody.js` — no P4b, array-of-objects):
+
+| Engine | Time | vs Node |
+|--------|------|---------|
+| Node.js (V8) | **38 ms** | 1.0x |
+| Lambda JS | **~2113 ms** | ~56x slower |
+
+**Analysis:** The class-based variant is ~2x faster than the object-literal variant in Lambda (975 vs 2113ms), confirming P4b shape guard + direct loads provide significant benefit over generic property access. However, the dominant remaining cost is **float boxing via `push_d`** — every boxed float read allocates in the GC nursery. V8 avoids this entirely with NaN-boxing (doubles stored inline in 64-bit values). Eliminating `push_d` allocation is the next major optimization target.

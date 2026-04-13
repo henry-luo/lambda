@@ -11921,55 +11921,118 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 TypeId field_type = p1_ce->constructor->fc->ctor_prop_types[p4_slot];
                 int64_t byte_offset = (int64_t)p4_slot * (int64_t)sizeof(void*);
 
-                // P4b: Type-specialized slot read with inline map_kind guard.
-                // For INT/FLOAT fields, emits native slot read + inline boxing,
-                // skipping _map_read_field's type switch and js_get_shaped_slot's validation.
-                // map_kind guard ensures exotic objects fall back to js_property_get.
+                // P4b: Type-specialized slot read with guard.
+                // When shape_cache_ptr available: §7 inline shape guard → direct memory load + boxing.
+                // Otherwise: map_kind guard → js_get_slot_i/f + boxing.
+                // Both fall back to js_property_get for exotic objects.
                 if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_FLOAT) {
                     MIR_label_t l_fast = jm_new_label(mt);
                     MIR_label_t l_slow = jm_new_label(mt);
                     MIR_label_t l_end = jm_new_label(mt);
                     MIR_reg_t result = jm_new_reg(mt, "p4r", MIR_T_I64);
 
-                    // Inline map_kind guard: load flags byte (offset 1), check upper 4 bits == 0
-                    MIR_reg_t flags_reg = jm_new_reg(mt, "p4f", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, flags_reg),
-                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, obj_reg, 0, 1)));
-                    MIR_reg_t kind_reg = jm_new_reg(mt, "p4k", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-                        MIR_new_reg_op(mt->ctx, kind_reg),
-                        MIR_new_reg_op(mt->ctx, flags_reg),
-                        MIR_new_int_op(mt->ctx, 0xF0)));
-                    MIR_reg_t is_plain = jm_new_reg(mt, "p4p", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                        MIR_new_reg_op(mt->ctx, is_plain),
-                        MIR_new_reg_op(mt->ctx, kind_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                        MIR_new_label_op(mt->ctx, l_fast),
-                        MIR_new_reg_op(mt->ctx, is_plain)));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, l_slow)));
+                    if (p1_ce->shape_cache_ptr) {
+                        // §7: Inline shape guard — shape match implies plain object
+                        // Load obj->type (offset 8)
+                        MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, shape_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
+                        // Load expected shape from cache slot
+                        MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, cache_addr_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
+                        MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, expected_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
+                        // Compare shape pointers
+                        MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                            MIR_new_reg_op(mt->ctx, match_reg),
+                            MIR_new_reg_op(mt->ctx, shape_reg),
+                            MIR_new_reg_op(mt->ctx, expected_reg)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, l_fast),
+                            MIR_new_reg_op(mt->ctx, match_reg)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, l_slow)));
 
-                    // Fast path: type-specialized native slot read + boxing
-                    jm_emit_label(mt, l_fast);
-                    if (field_type == LMD_TYPE_INT) {
-                        MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                        MIR_reg_t boxed = jm_box_int_reg(mt, native_i);
+                        // Fast path: direct memory load + inline boxing — zero function calls
+                        jm_emit_label(mt, l_fast);
+                        MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, result),
-                            MIR_new_reg_op(mt->ctx, boxed)));
+                            MIR_new_reg_op(mt->ctx, data_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
+                        if (field_type == LMD_TYPE_INT) {
+                            MIR_reg_t native_i = jm_new_reg(mt, "s7i", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, native_i),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t boxed = jm_box_int_reg(mt, native_i);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                        } else {
+                            MIR_reg_t native_f = jm_new_reg(mt, "s7v", MIR_T_D);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                MIR_new_reg_op(mt->ctx, native_f),
+                                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t boxed = jm_box_float(mt, native_f);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                        }
+                        log_debug("P4b§7: shape guard + direct load %.*s.%.*s → slot %d type %s",
+                                  (int)p4_obj->name->len, p4_obj->name->chars,
+                                  (int)p4_prop->name->len, p4_prop->name->chars,
+                                  p4_slot, get_type_name(field_type));
                     } else {
-                        MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                        MIR_reg_t boxed = jm_box_float(mt, native_f);
+                        // Fallback: map_kind guard + native slot read via function call
+                        MIR_reg_t flags_reg = jm_new_reg(mt, "p4f", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, result),
-                            MIR_new_reg_op(mt->ctx, boxed)));
+                            MIR_new_reg_op(mt->ctx, flags_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, obj_reg, 0, 1)));
+                        MIR_reg_t kind_reg = jm_new_reg(mt, "p4k", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                            MIR_new_reg_op(mt->ctx, kind_reg),
+                            MIR_new_reg_op(mt->ctx, flags_reg),
+                            MIR_new_int_op(mt->ctx, 0xF0)));
+                        MIR_reg_t is_plain = jm_new_reg(mt, "p4p", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                            MIR_new_reg_op(mt->ctx, is_plain),
+                            MIR_new_reg_op(mt->ctx, kind_reg),
+                            MIR_new_int_op(mt->ctx, 0)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, l_fast),
+                            MIR_new_reg_op(mt->ctx, is_plain)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, l_slow)));
+
+                        // Fast path: type-specialized native slot read + boxing
+                        jm_emit_label(mt, l_fast);
+                        if (field_type == LMD_TYPE_INT) {
+                            MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            MIR_reg_t boxed = jm_box_int_reg(mt, native_i);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                        } else {
+                            MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            MIR_reg_t boxed = jm_box_float(mt, native_f);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                        }
+                        log_debug("P4b: typed slot load %.*s.%.*s → slot %d type %s (map_kind guarded)",
+                                  (int)p4_obj->name->len, p4_obj->name->chars,
+                                  (int)p4_prop->name->len, p4_prop->name->chars,
+                                  p4_slot, get_type_name(field_type));
                     }
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                         MIR_new_label_op(mt->ctx, l_end)));
@@ -11986,10 +12049,6 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                         MIR_new_reg_op(mt->ctx, slow)));
 
                     jm_emit_label(mt, l_end);
-                    log_debug("P4b: typed slot load %.*s.%.*s → slot %d type %s (map_kind guarded)",
-                              (int)p4_obj->name->len, p4_obj->name->chars,
-                              (int)p4_prop->name->len, p4_prop->name->chars,
-                              p4_slot, get_type_name(field_type));
                     return result;
                 }
 
