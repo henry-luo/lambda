@@ -174,14 +174,19 @@ FontHandle* font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style) 
 
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
-    return hashmap_xxhash3(&e->codepoint, sizeof(uint32_t), seed0, seed1);
+    // hash on (codepoint, size_px) — same codepoint at different sizes needs separate entries
+    // to avoid returning a wrong-size fallback handle (e.g., 36px first-letter vs 16px body)
+    struct { uint32_t cp; float sz; } key = { e->codepoint, e->size_px };
+    return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
 }
 
 static int cp_fallback_compare(const void* a, const void* b, void* udata) {
     (void)udata;
     const CodepointFallbackEntry* ea = (const CodepointFallbackEntry*)a;
     const CodepointFallbackEntry* eb = (const CodepointFallbackEntry*)b;
-    return (ea->codepoint == eb->codepoint) ? 0 : (ea->codepoint < eb->codepoint ? -1 : 1);
+    if (ea->codepoint != eb->codepoint) return (ea->codepoint < eb->codepoint ? -1 : 1);
+    if (ea->size_px != eb->size_px) return (ea->size_px < eb->size_px ? -1 : 1);
+    return 0;
 }
 
 static void cp_fallback_free(void* item) {
@@ -257,7 +262,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     // check codepoint fallback cache
     struct hashmap* cache = ensure_codepoint_cache(ctx);
     if (cache) {
-        CodepointFallbackEntry key = {.codepoint = codepoint, .handle = NULL};
+        CodepointFallbackEntry key = {.codepoint = codepoint, .size_px = style->size_px, .handle = NULL};
         CodepointFallbackEntry* cached = (CodepointFallbackEntry*)hashmap_get(cache, &key);
         if (cached) {
             if (cached->handle) {
@@ -294,7 +299,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                     style->weight, style->slant);
                 if (handle && font_has_codepoint(handle, codepoint)) {
                     // cache positive result
-                    CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
+                    CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
                     font_handle_retain(handle);
                     hashmap_set(cache, &entry);
                     log_debug("font_fallback: codepoint U+%04X → '%s'",
@@ -316,7 +321,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             // fast path: reuse an existing handle for this font file
             FontHandle* reused = platform_fb_lookup(font_path, face_index, style->size_px, codepoint);
             if (reused) {
-                CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = reused};
+                CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = reused};
                 font_handle_retain(reused);
                 hashmap_set(cache, &entry);
                 font_handle_retain(reused);
@@ -332,7 +337,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 style->weight, style->slant);
             if (handle && font_has_codepoint(handle, codepoint)) {
                 // cache positive result
-                CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
+                CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
                 font_handle_retain(handle);
                 hashmap_set(cache, &entry);
                 platform_fb_insert(handle, face_index, style->size_px);
@@ -354,7 +359,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                         style->size_px, physical_size,
                         style->weight, style->slant);
                     if (handle && font_has_codepoint(handle, codepoint)) {
-                        CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
+                        CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
                         font_handle_retain(handle);
                         hashmap_set(cache, &entry);
                         platform_fb_insert(handle, (int)fi, style->size_px);
@@ -371,7 +376,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     }
 
     // negative cache — no fallback has this codepoint
-    CodepointFallbackEntry neg = {.codepoint = codepoint, .handle = NULL};
+    CodepointFallbackEntry neg = {.codepoint = codepoint, .size_px = style->size_px, .handle = NULL};
     hashmap_set(cache, &neg);
     log_debug("font_fallback: no fallback for codepoint U+%04X", codepoint);
     return NULL;

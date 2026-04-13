@@ -1089,6 +1089,103 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 log_debug("[ABS IMG] bottom-positioned Y recalc: y=%.1f (cb_pad_h=%.1f, bottom=%.1f, height=%.1f)",
                           block->y, cb_padding_height, block->position->bottom, block->height);
             }
+
+            // CSS 2.1 §10.6.5: Re-resolve vertical auto margins for replaced elements
+            // now that we know the intrinsic height. calculate_absolute_position
+            // skipped this because has_height was false (given_height=-1 for images).
+            if (block->position->has_top && block->position->has_bottom && block->bound) {
+                bool has_auto_mt = block->bound->margin.top_type == CSS_VALUE_AUTO;
+                bool has_auto_mb = block->bound->margin.bottom_type == CSS_VALUE_AUTO;
+                if (has_auto_mt || has_auto_mb) {
+                    float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
+                    float cb_border_bottom = (cb->bound && cb->bound->border) ? cb->bound->border->width.bottom : 0;
+                    float cb_pad_height = cb->height - cb_border_top - cb_border_bottom;
+                    float v_bp = block->bound->padding.top + block->bound->padding.bottom;
+                    if (block->bound->border) {
+                        v_bp += block->bound->border->width.top + block->bound->border->width.bottom;
+                    }
+                    float used_height = block->height + v_bp;
+                    float remaining = cb_pad_height - block->position->top - block->position->bottom - used_height;
+                    if (has_auto_mt && has_auto_mb) {
+                        float each = remaining / 2.0f;
+                        block->bound->margin.top = each;
+                        block->bound->margin.bottom = each;
+                        log_debug("[ABS IMG] vertical auto margin centering: remaining=%.1f, each=%.1f", remaining, each);
+                    } else if (has_auto_mt) {
+                        float auto_margin = remaining - block->bound->margin.bottom;
+                        block->bound->margin.top = auto_margin;
+                        log_debug("[ABS IMG] auto margin-top=%.1f", auto_margin);
+                    } else {
+                        float auto_margin = remaining - block->bound->margin.top;
+                        block->bound->margin.bottom = auto_margin;
+                        log_debug("[ABS IMG] auto margin-bottom=%.1f", auto_margin);
+                    }
+                    // Recalculate y with the resolved margins
+                    block->y = cb_border_top + block->position->top + block->bound->margin.top;
+                    log_debug("[ABS IMG] y after margin resolution: %.1f", block->y);
+                }
+            }
+
+            // CSS 2.1 §10.3.8: Re-resolve horizontal auto margins for replaced elements
+            if (block->position->has_left && block->position->has_right && block->bound) {
+                bool has_auto_ml = block->bound->margin.left_type == CSS_VALUE_AUTO;
+                bool has_auto_mr = block->bound->margin.right_type == CSS_VALUE_AUTO;
+                if (has_auto_ml || has_auto_mr) {
+                    float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
+                    float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
+                    float cb_pad_width = cb->width - cb_border_left - cb_border_right;
+                    float h_bp = block->bound->padding.left + block->bound->padding.right;
+                    if (block->bound->border) {
+                        h_bp += block->bound->border->width.left + block->bound->border->width.right;
+                    }
+                    float used_width = block->width + h_bp;
+                    float remaining = cb_pad_width - block->position->left - block->position->right - used_width;
+                    // Determine containing block direction for negative margin handling
+                    TextDirection cb_dir = TD_LTR;
+                    if (cb->blk && cb->blk->direction == CSS_VALUE_RTL) {
+                        cb_dir = TD_RTL;
+                    } else if (cb->specified_style) {
+                        CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
+                            cb->specified_style, CSS_PROPERTY_DIRECTION,
+                            cb->parent && cb->parent->is_element() ?
+                                ((DomElement*)cb->parent)->specified_style : NULL);
+                        if (dir_val && dir_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                            dir_val->data.keyword == CSS_VALUE_RTL) {
+                            cb_dir = TD_RTL;
+                        }
+                    }
+                    if (has_auto_ml && has_auto_mr) {
+                        // CSS 2.1 §10.3.8: Both auto → equal, unless negative
+                        float each = remaining / 2.0f;
+                        if (each < 0) {
+                            if (cb_dir == TD_RTL) {
+                                block->bound->margin.right = 0;
+                                block->bound->margin.left = remaining;
+                            } else {
+                                block->bound->margin.left = 0;
+                                block->bound->margin.right = remaining;
+                            }
+                            log_debug("[ABS IMG] horizontal auto margins negative (%s): ml=%.1f, mr=%.1f",
+                                      cb_dir == TD_RTL ? "RTL" : "LTR",
+                                      block->bound->margin.left, block->bound->margin.right);
+                        } else {
+                            block->bound->margin.left = each;
+                            block->bound->margin.right = each;
+                            log_debug("[ABS IMG] horizontal auto margin centering: remaining=%.1f, each=%.1f", remaining, each);
+                        }
+                    } else if (has_auto_ml) {
+                        float auto_margin = remaining - block->bound->margin.right;
+                        block->bound->margin.left = auto_margin;
+                        log_debug("[ABS IMG] auto margin-left=%.1f", auto_margin);
+                    } else {
+                        float auto_margin = remaining - block->bound->margin.left;
+                        block->bound->margin.right = auto_margin;
+                        log_debug("[ABS IMG] auto margin-right=%.1f", auto_margin);
+                    }
+                    block->x = cb_border_left + block->position->left + block->bound->margin.left;
+                    log_debug("[ABS IMG] x after margin resolution: %.1f", block->x);
+                }
+            }
         } else {
             // Failed to load image - use placeholder
             if (lycon->block.given_width <= 0) lycon->block.given_width = 40;
@@ -1567,6 +1664,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // CRITICAL: Skip auto-sizing for flex/grid containers - they calculate their own height
     bool has_flex_calculated_height = is_flex_container && block->height > 0;
     bool has_grid_calculated_height = is_grid_container && block->height > 0;
+    // CSS 2.1 §10.6.5: Replaced elements (img, iframe) use intrinsic height
+    // for auto height. The image-loading code above already set block->height
+    // from intrinsic dimensions; don't overwrite it with flow-based auto-sizing.
+    bool has_replaced_intrinsic_height = (block->display.inner == RDT_DISPLAY_REPLACED) && block->height > 0;
 
     // CRITICAL: Use block->blk->given_height (canonical CSS value) instead of lycon->block.given_height
     // here, because lycon->block.given_height can be corrupted by child CSS style resolution
@@ -1577,9 +1678,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     float abs_block_given_height = (block->blk && block->blk->given_height >= 0) ? block->blk->given_height : -1;
     if (!(abs_block_given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
         // Don't override flex/grid calculated height with flow-based auto-sizing
-        if (has_flex_calculated_height || has_grid_calculated_height) {
-            log_debug("auto-sizing height: SKIPPED - %s container already has calculated height %.1f",
-                      is_flex_container ? "flex" : "grid", block->height);
+        if (has_flex_calculated_height || has_grid_calculated_height || has_replaced_intrinsic_height) {
+            log_debug("auto-sizing height: SKIPPED - %s already has calculated height %.1f",
+                      is_flex_container ? "flex" : (is_grid_container ? "grid" : "replaced"), block->height);
         } else {
             float flow_height = lycon->block.advance_y;
             // Note: advance_y already includes top border + top padding from setup_inline

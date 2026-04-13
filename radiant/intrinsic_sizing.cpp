@@ -353,6 +353,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 if (lycon->font.style) {
                     advance += lycon->font.style->letter_spacing;
                 }
+                // CSS 2.1 §16.4: word-spacing applies to U+00A0 (non-breaking space)
+                if (codepoint == 0x00A0 && lycon->font.style) {
+                    advance += lycon->font.style->word_spacing;
+                    is_word_start = true;
+                }
                 current_word += advance;
                 total_width += advance;
             } else {
@@ -390,6 +395,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             // Apply letter-spacing (CSS 2.1 §16.4: after every character including last)
             if (lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
+            }
+            // CSS 2.1 §16.4: word-spacing applies to U+00A0 (non-breaking space)
+            if (codepoint == 0x00A0 && lycon->font.style) {
+                advance += lycon->font.style->word_spacing;
+                is_word_start = true;
             }
 
             current_word += advance;
@@ -1527,8 +1537,23 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // min/max-content width is the maximum of cell min/max-content
             // widths across all rows in that column.
 
-            // Helper: count cells in a row
-            auto count_cells = [](DomElement* row_elem) -> int {
+            // Helper: get colspan for a cell element
+            auto get_cell_colspan = [](DomElement* cell_elem, ViewBlock* cell_view) -> int {
+                // Prefer the resolved td->col_span (set during view pool creation)
+                if (cell_view->td && cell_view->td->col_span > 1) {
+                    return cell_view->td->col_span;
+                }
+                // Fallback: read from HTML attribute
+                const char* cs = cell_elem->get_attribute("colspan");
+                if (cs && *cs) {
+                    int csv = (int)str_to_int64_default(cs, strlen(cs), 0); // INT_CAST_OK: span count
+                    if (csv > 1) return csv;
+                }
+                return 1;
+            };
+
+            // Helper: count columns in a row (accounting for colspan)
+            auto count_cells = [&get_cell_colspan](DomElement* row_elem) -> int {
                 int n = 0;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
@@ -1536,7 +1561,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     ViewBlock* cell_view = (ViewBlock*)cell_elem;
                     bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
-                    if (is_cell) n++;
+                    if (is_cell) n += get_cell_colspan(cell_elem, cell_view);
                 }
                 return n;
             };
@@ -1605,7 +1630,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 col_max[i] = 0;
             }
 
-            // Pass 2: measure cells, update per-column min/max
+            // Pass 2: measure single-span cells, update per-column min/max
+            // CSS 2.1 §17.5.2.2: First process cells that span a single column,
+            // then distribute multi-span cells across their spanned columns.
             for_each_row([&](DomElement* row_elem) {
                 int col = 0;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
@@ -1615,31 +1642,88 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
                     if (!is_cell) continue;
-                    if (col >= num_columns) break;
-                    IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                    // Add cell padding+border if not already included in bound.
-                    // When bound is not resolved yet, check if CSS explicitly sets
-                    // padding (e.g., "td { padding: 0 }"). If so, don't add UA
-                    // fallback. If CSS doesn't set padding, apply HTML/UA defaults
-                    // (1px padding + 1px border if parent table has border attr).
-                    float extra = 0;
-                    if (!cell_view->bound) {
-                        bool css_sets_padding = false;
-                        if (cell_elem->specified_style) {
-                            css_sets_padding =
-                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
-                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
-                                style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                    int span = get_cell_colspan(cell_elem, cell_view);
+                    if (col + span > num_columns) break;
+                    if (span == 1) {
+                        IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
+                        float extra = 0;
+                        if (!cell_view->bound) {
+                            bool css_sets_padding = false;
+                            if (cell_elem->specified_style) {
+                                css_sets_padding =
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                            }
+                            if (!css_sets_padding) {
+                                extra = cell_padding_h + cell_border_h;
+                            }
                         }
-                        if (!css_sets_padding) {
-                            extra = cell_padding_h + cell_border_h;
+                        float cmin = ceilf(cell_sizes.min_content + extra);
+                        float cmax = ceilf(cell_sizes.max_content + extra);
+                        if (cmin > col_min[col]) col_min[col] = cmin;
+                        if (cmax > col_max[col]) col_max[col] = cmax;
+                    }
+                    col += span;
+                }
+            });
+
+            // Pass 3: distribute multi-span cell widths across spanned columns
+            // CSS 2.1 §17.5.2.2: If the sum of column widths spanned by a multi-span
+            // cell is less than the cell's intrinsic width, distribute the deficit evenly.
+            for_each_row([&](DomElement* row_elem) {
+                int col = 0;
+                for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
+                    if (!cell->is_element()) continue;
+                    DomElement* cell_elem = cell->as_element();
+                    ViewBlock* cell_view = (ViewBlock*)cell_elem;
+                    bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
+                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    if (!is_cell) continue;
+                    int span = get_cell_colspan(cell_elem, cell_view);
+                    if (col + span > num_columns) break;
+                    if (span > 1) {
+                        IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
+                        float extra = 0;
+                        if (!cell_view->bound) {
+                            bool css_sets_padding = false;
+                            if (cell_elem->specified_style) {
+                                css_sets_padding =
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
+                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                            }
+                            if (!css_sets_padding) {
+                                extra = cell_padding_h + cell_border_h;
+                            }
+                        }
+                        float cmin = ceilf(cell_sizes.min_content + extra);
+                        float cmax = ceilf(cell_sizes.max_content + extra);
+
+                        // Sum current column widths + inter-column border-spacing
+                        float current_min = 0, current_max = 0;
+                        for (int j = 0; j < span; j++) {
+                            current_min += col_min[col + j];
+                            current_max += col_max[col + j];
+                        }
+                        current_min += border_spacing * (span - 1);
+                        current_max += border_spacing * (span - 1);
+
+                        // Distribute deficit evenly across spanned columns
+                        if (cmin > current_min) {
+                            float per_col = (cmin - current_min) / span;
+                            for (int j = 0; j < span; j++) {
+                                col_min[col + j] += per_col;
+                            }
+                        }
+                        if (cmax > current_max) {
+                            float per_col = (cmax - current_max) / span;
+                            for (int j = 0; j < span; j++) {
+                                col_max[col + j] += per_col;
+                            }
                         }
                     }
-                    float cmin = ceilf(cell_sizes.min_content + extra);
-                    float cmax = ceilf(cell_sizes.max_content + extra);
-                    if (cmin > col_min[col]) col_min[col] = cmin;
-                    if (cmax > col_max[col]) col_max[col] = cmax;
-                    col++;
+                    col += span;
                 }
             });
 
@@ -2489,6 +2573,22 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (child_sizes.has_forced_break) {
                 // Add first line to current inline run
                 inline_max_sum += child_sizes.first_line_max;
+                // CSS 2.1 §16.1: Apply text-indent to the first line before
+                // flushing at the forced break. Text-indent only affects the
+                // first formatted line, so only apply when this is the first
+                // forced break encountered.
+                if (!inline_has_forced_break && text_indent != 0) {
+                    inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
+                    // For min-content: apply indent to first segment
+                    float first_seg = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
+                    if (text_indent > 0) {
+                        float first_line_min = first_seg + text_indent;
+                        inline_min_sum = fmaxf(first_line_min, inline_min_sum);
+                    } else {
+                        float first_line_min = fmaxf(first_seg + text_indent, 0.0f);
+                        inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
+                    }
+                }
                 // Record inline_max_sum at the first forced break for parent propagation
                 if (!inline_has_forced_break) {
                     first_inline_break_sum = inline_max_sum;

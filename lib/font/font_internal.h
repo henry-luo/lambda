@@ -323,6 +323,7 @@ typedef struct KernPairEntry {
 
 typedef struct CodepointFallbackEntry {
     uint32_t    codepoint;
+    float       size_px;    // requested font size — same codepoint at different sizes needs different handles
     FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
 } CodepointFallbackEntry;
 
