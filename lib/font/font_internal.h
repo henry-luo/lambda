@@ -79,6 +79,10 @@ struct FontHandle {
     FontMetrics metrics;
     bool        metrics_ready;
 
+    // cached rendering ascender (from platform font, lazily computed)
+    float       cached_rendering_ascender;
+    bool        cached_rendering_ascender_ready;
+
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
     // FreeType requires the buffer to outlive the face.
     uint8_t*    memory_buffer;
@@ -87,6 +91,12 @@ struct FontHandle {
 
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
+
+    // Font5 §4.2: direct-mapped ASCII advance table (codepoints 32–126)
+    // Eliminates hashmap overhead for ~95% of glyph lookups in English text.
+    float ascii_advance[95];            // advance_x for codepoints 32–126
+    uint32_t ascii_glyph_id[95];        // glyph IDs for codepoints 32–126
+    bool  ascii_advance_ready;          // lazy init flag
 
     // per-face CoreText kerning cache: (left_cp, right_cp) → kerning value
     struct hashmap* kern_cache;
@@ -265,6 +275,13 @@ struct FontContext {
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;
 
+    // cached emoji font handle (reused across font_load_glyph_emoji calls)
+    FontHandle*     cached_emoji_handle;
+    float           cached_emoji_size_px;
+    float           cached_emoji_physical_size;
+    FontWeight      cached_emoji_weight;
+    FontSlant       cached_emoji_slant;
+
     // registered @font-face descriptors
     FontFaceEntry** face_descriptors;
     int             face_descriptor_count;
@@ -323,6 +340,7 @@ typedef struct KernPairEntry {
 
 typedef struct CodepointFallbackEntry {
     uint32_t    codepoint;
+    float       size_px;    // requested font size — same codepoint at different sizes needs different handles
     FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
 } CodepointFallbackEntry;
 

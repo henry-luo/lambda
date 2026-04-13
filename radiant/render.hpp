@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "state_store.hpp"
 #include "rdt_vector.hpp"
+#include "clip_shape.h"
 #include "../lib/scratch_arena.h"
 
 // format to SDL_PIXELFORMAT_ARGB8888
@@ -31,6 +32,10 @@ typedef struct {
 
     // LIFO scratch allocator for scoped temporary buffers (pixel buffers, clip masks, etc.)
     ScratchArena scratch;
+
+    // Vector clip shape stack for overflow:hidden with border-radius and CSS clip-path
+    ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];
+    int clip_shape_depth;
 } RenderContext;
 
 // Function declarations

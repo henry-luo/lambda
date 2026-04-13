@@ -5636,7 +5636,51 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     table->width = table->blk->given_width + bp_left + bp_right;
                 }
             } else {
-                table->width = bp_left + bp_right;
+                // CSS 2.1 §17.5.2: A block-level table with 'width: auto' uses the
+                // containing block width when it contains floated children that it must
+                // enclose as a BFC. Tables with no in-flow or floated content use only
+                // padding+border (shrink-to-fit to zero content).
+                bool has_float_children = false;
+                for (View* ch = table->first_child; ch; ch = ch->next_sibling) {
+                    if (ch->node_type != DOM_NODE_ELEMENT) continue;
+                    ViewBlock* vb = (ViewBlock*)ch;
+                    if (vb->position &&
+                        (vb->position->float_prop == CSS_VALUE_LEFT ||
+                         vb->position->float_prop == CSS_VALUE_RIGHT)) {
+                        has_float_children = true;
+                        break;
+                    }
+                }
+                bool is_floated = table->position &&
+                    (table->position->float_prop == CSS_VALUE_LEFT ||
+                     table->position->float_prop == CSS_VALUE_RIGHT);
+                bool is_inline_table = (table->display.outer == CSS_VALUE_INLINE);
+                bool is_abspos = table->position &&
+                    (table->position->position == CSS_VALUE_ABSOLUTE ||
+                     table->position->position == CSS_VALUE_FIXED);
+                if (has_float_children && !is_floated && !is_inline_table && !is_abspos) {
+                    // Block-level table in normal flow with float children: use containing block width
+                    float container_width = lycon->block.content_width;
+                    if (container_width <= 0) {
+                        ViewBlock* parent = (ViewBlock*)table->parent;
+                        if (parent && parent->width > 0) {
+                            container_width = parent->width;
+                            if (parent->bound) {
+                                if (parent->bound->border)
+                                    container_width -= (parent->bound->border->width.left + parent->bound->border->width.right);
+                                container_width -= parent->bound->padding.left + parent->bound->padding.right;
+                            }
+                        }
+                    }
+                    if (container_width > 0) {
+                        table->width = container_width;
+                        log_debug("Empty block-level table with floats: using containing block width %.1fpx", container_width);
+                    } else {
+                        table->width = bp_left + bp_right;
+                    }
+                } else {
+                    table->width = bp_left + bp_right;
+                }
             }
             table->height = bp_top + bp_bottom;
             if (table->blk && table->blk->given_height > 0) {

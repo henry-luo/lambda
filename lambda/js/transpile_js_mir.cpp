@@ -800,6 +800,19 @@ static int jm_count_yields(JsAstNode* node) {
         JsThrowNode* thr = (JsThrowNode*)node;
         return jm_count_yields(thr->argument);
     }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        // Count yields in computed property names of class members (they're in outer generator scope)
+        JsClassNode* cls = (JsClassNode*)node;
+        int count = jm_count_yields(cls->superclass);
+        JsAstNode* m = cls->body;
+        while (m) { count += jm_count_yields(m); m = m->next; }
+        return count;
+    }
+    case JS_AST_NODE_METHOD_DEFINITION: {
+        JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)node;
+        // Only count yields in computed key (value is a nested function, excluded by recursion)
+        return md->computed ? jm_count_yields(md->key) : 0;
+    }
     default:
         return 0;
     }
@@ -1013,6 +1026,17 @@ static int jm_count_awaits(JsAstNode* node) {
     case JS_AST_NODE_THROW_STATEMENT: {
         JsThrowNode* thr = (JsThrowNode*)node;
         return jm_count_awaits(thr->argument);
+    }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        JsClassNode* cls = (JsClassNode*)node;
+        int count = jm_count_awaits(cls->superclass);
+        JsAstNode* m = cls->body;
+        while (m) { count += jm_count_awaits(m); m = m->next; }
+        return count;
+    }
+    case JS_AST_NODE_METHOD_DEFINITION: {
+        JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)node;
+        return md->computed ? jm_count_awaits(md->key) : 0;
     }
     default:
         return 0;
@@ -5486,11 +5510,22 @@ static MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* firs
     MIR_reg_t array = jm_call_1(mt, "js_array_new", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
 
+    // Generator spill: if any argument contains yield, save array ref to env
+    int arr_spill_slot = -1;
+    if (mt->in_generator) {
+        JsAstNode* cy = first_arg;
+        while (cy) { if (jm_has_yield(cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
+    }
+
     JsAstNode* arg = first_arg;
     while (arg) {
         if (arg->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
             JsSpreadElementNode* spread = (JsSpreadElementNode*)arg;
             MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
+            // Generator spill: restore array after yield in spread argument
+            if (arr_spill_slot >= 0 && jm_has_yield(spread->argument)) {
+                jm_gen_spill_load(mt, array, arr_spill_slot);
+            }
             // Convert any iterable to array first
             MIR_reg_t src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src_raw));
@@ -5524,6 +5559,10 @@ static MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* firs
             jm_emit_label(mt, l_end);
         } else {
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
+            // Generator spill: restore array after yield in argument
+            if (arr_spill_slot >= 0 && jm_has_yield(arg)) {
+                jm_gen_spill_load(mt, array, arr_spill_slot);
+            }
             jm_call_2(mt, "js_array_push", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -6945,9 +6984,9 @@ static void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, M
             prop_key = jm_transpile_box_item(mt, member->property);
             if (need_spill) {
                 obj = jm_new_reg(mt, "_dstr_obj_r", MIR_T_I64);
-                jm_gen_spill_load(mt, obj_spill, obj);
+                jm_gen_spill_load(mt, obj, obj_spill);
                 val = jm_new_reg(mt, "_dstr_val_r", MIR_T_I64);
-                jm_gen_spill_load(mt, val_spill, val);
+                jm_gen_spill_load(mt, val, val_spill);
             }
         } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
@@ -7829,8 +7868,37 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             }
         }
 
+        // super.x = val — use js_super_property_set for correct receiver binding
+        if (member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
+            if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
+                MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                MIR_reg_t key;
+                if (member->computed) {
+                    key = jm_transpile_box_item(mt, member->property);
+                } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+                    key = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
+                } else {
+                    key = jm_transpile_box_item(mt, member->property);
+                }
+                MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                return jm_call_3(mt, "js_super_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+            }
+        }
+
         // General member assignment
         MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
+
+        // Generator spill: if computed key contains yield, obj reg will be stale after resume
+        int asgn_obj_spill = -1;
+        if (mt->in_generator && member->computed && jm_has_yield(member->property)) {
+            asgn_obj_spill = jm_gen_spill_save(mt, obj);
+        }
+
         MIR_reg_t key;
         if (member->computed) {
             key = jm_transpile_box_item(mt, member->property);
@@ -7839,6 +7907,10 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
         } else {
             key = jm_transpile_box_item(mt, member->property);
+        }
+
+        if (asgn_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, asgn_obj_spill);
         }
 
         MIR_reg_t new_val;
@@ -8869,6 +8941,21 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         log_debug("js-mir: super.%.*s not found in parent class",
                             (int)prop->name->len, prop->name->chars);
                     }
+                }
+                // Fallback for super.method(args) outside class context (e.g., object literal methods):
+                // use js_super_property_get to resolve on prototype, then call with this as receiver
+                if (!mt->current_class || !mt->current_class->superclass) {
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_reg_t key_reg = jm_box_string_literal(mt, prop->name->chars, (int)prop->name->len);
+                    MIR_reg_t fn_item = jm_call_2(mt, "js_super_property_get", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                    return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 }
             }
         }
@@ -12100,8 +12187,34 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         }
     }
 
+    // super.x property access — use js_super_property_get for correct receiver binding
+    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
+        if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
+            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+            MIR_reg_t key;
+            if (mem->computed) {
+                key = jm_transpile_box_item(mt, mem->property);
+            } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+                key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+            } else {
+                key = jm_transpile_box_item(mt, mem->property);
+            }
+            return jm_call_2(mt, "js_super_property_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+        }
+    }
+
     // General property access: js_property_access(obj, key)
     MIR_reg_t obj = jm_transpile_box_item(mt, mem->object);
+
+    // Generator spill: if computed key contains yield, obj reg will be stale after resume
+    int mem_obj_spill = -1;
+    if (mt->in_generator && mem->computed && jm_has_yield(mem->property)) {
+        mem_obj_spill = jm_gen_spill_save(mt, obj);
+    }
 
     // Optional chaining: obj?.prop → return undefined if obj is null/undefined
     if (mem->optional) {
@@ -12140,6 +12253,9 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         } else {
             key = jm_transpile_box_item(mt, mem->property);
         }
+        if (mem_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, mem_obj_spill);
+        }
         MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -12157,6 +12273,10 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
     } else {
         key = jm_transpile_box_item(mt, mem->property);
+    }
+
+    if (mem_obj_spill >= 0) {
+        jm_gen_spill_load(mt, obj, mem_obj_spill);
     }
 
     return jm_call_2(mt, "js_property_access", MIR_T_I64,
@@ -12193,6 +12313,11 @@ static MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
                 // Spread element: convert to array (handles Map, Set, generators, strings) then iterate
                 JsSpreadElementNode* spread = (JsSpreadElementNode*)elem;
                 MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
+
+                // Generator spill: restore array reg after evaluating spread argument that may yield
+                if (arr_spill_slot_s >= 0 && jm_has_yield(spread->argument)) {
+                    jm_gen_spill_load(mt, array, arr_spill_slot_s);
+                }
                 
                 // Convert any iterable to an array first
                 MIR_reg_t src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
@@ -12475,7 +12600,15 @@ static MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLi
         // Interpolated expression
         if (expr && quasi->node_type == JS_AST_NODE_TEMPLATE_ELEMENT &&
             !((JsTemplateElementNode*)quasi)->tail) {
+            // Generator spill: save StringBuf across yield in expression
+            int sb_spill = -1;
+            if (mt->in_generator && jm_has_yield(expr)) {
+                sb_spill = jm_gen_spill_save(mt, sb);
+            }
             MIR_reg_t eval = jm_transpile_box_item(mt, expr);
+            if (sb_spill >= 0) {
+                jm_gen_spill_load(mt, sb, sb_spill);
+            }
             // Convert to string: js_to_string(value)
             MIR_reg_t str_item = jm_call_1(mt, "js_to_string", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
@@ -12527,14 +12660,12 @@ static MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTempl
     for (JsAstNode* e = tmpl->expressions; e; e = e->next) expr_count++;
 
     // allocate arrays for cooked and raw strings (Item[quasi_count] each)
-    MIR_reg_t cooked_arr = jm_new_reg(mt, "tt_cooked", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-        MIR_new_reg_op(mt->ctx, cooked_arr),
-        MIR_new_int_op(mt->ctx, quasi_count * 8)));
-    MIR_reg_t raw_arr = jm_new_reg(mt, "tt_raw", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-        MIR_new_reg_op(mt->ctx, raw_arr),
-        MIR_new_int_op(mt->ctx, quasi_count * 8)));
+    // Use heap allocation instead of MIR_ALLOCA to avoid MIR codegen bug
+    // where multiple functions with ALLOCA cause register misallocation on ARM64.
+    MIR_reg_t cooked_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, quasi_count));
+    MIR_reg_t raw_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, quasi_count));
 
     // populate cooked[] and raw[] with boxed string Items
     int qi = 0;
@@ -12572,10 +12703,8 @@ static MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTempl
 
     // build args array: [template_object, ...expressions]
     int total_argc = 1 + expr_count;
-    MIR_reg_t args_ptr = jm_new_reg(mt, "tt_args", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-        MIR_new_reg_op(mt->ctx, args_ptr),
-        MIR_new_int_op(mt->ctx, total_argc * 8)));
+    MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, total_argc));
     // store template object as first arg
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, args_ptr, 0, 1),
@@ -13225,7 +13354,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         if (yield_node->argument) {
             val = jm_transpile_box_item(mt, yield_node->argument);
         } else {
-            val = jm_emit_null(mt);
+            val = jm_emit_undefined(mt);
         }
 
         if (mt->in_generator) {
@@ -13471,7 +13600,17 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             }
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
+                                // generator spill: save cls_obj and fn_item before yield-containing key expr
+                                int cls_spill = -1, fn_spill = -1;
+                                if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                    cls_spill = jm_gen_spill_save(mt, cls_obj);
+                                    fn_spill = jm_gen_spill_save(mt, fn_item);
+                                }
                                 mk = jm_transpile_box_item(mt, me->key_expr);
+                                if (cls_spill >= 0) {
+                                    jm_gen_spill_load(mt, cls_obj, cls_spill);
+                                    jm_gen_spill_load(mt, fn_item, fn_spill);
+                                }
                                 if (me->is_getter) {
                                     mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
                                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
@@ -13522,7 +13661,17 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 
                     MIR_reg_t mk;
                     if (me->computed && me->key_expr) {
+                        // generator spill: save cls_obj and fn_item before yield-containing key expr
+                        int cls_spill = -1, fn_spill = -1;
+                        if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                            cls_spill = jm_gen_spill_save(mt, cls_obj);
+                            fn_spill = jm_gen_spill_save(mt, fn_item);
+                        }
                         mk = jm_transpile_box_item(mt, me->key_expr);
+                        if (cls_spill >= 0) {
+                            jm_gen_spill_load(mt, cls_obj, cls_spill);
+                            jm_gen_spill_load(mt, fn_item, fn_spill);
+                        }
                         if (me->is_getter) {
                             mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
@@ -13709,7 +13858,19 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             }
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
+                                // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
+                                int proto_spill = -1, cls_spill2 = -1, fn_spill = -1;
+                                if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                    proto_spill = jm_gen_spill_save(mt, proto_obj);
+                                    cls_spill2 = jm_gen_spill_save(mt, cls_obj);
+                                    fn_spill = jm_gen_spill_save(mt, fn_item);
+                                }
                                 mk = jm_transpile_box_item(mt, me->key_expr);
+                                if (proto_spill >= 0) {
+                                    jm_gen_spill_load(mt, proto_obj, proto_spill);
+                                    jm_gen_spill_load(mt, cls_obj, cls_spill2);
+                                    jm_gen_spill_load(mt, fn_item, fn_spill);
+                                }
                                 if (me->is_getter) {
                                     mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
                                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
@@ -13759,7 +13920,19 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     }
                     MIR_reg_t mk;
                     if (me->computed && me->key_expr) {
+                        // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
+                        int proto_spill = -1, cls_spill2 = -1, fn_spill = -1;
+                        if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                            proto_spill = jm_gen_spill_save(mt, proto_obj);
+                            cls_spill2 = jm_gen_spill_save(mt, cls_obj);
+                            fn_spill = jm_gen_spill_save(mt, fn_item);
+                        }
                         mk = jm_transpile_box_item(mt, me->key_expr);
+                        if (proto_spill >= 0) {
+                            jm_gen_spill_load(mt, proto_obj, proto_spill);
+                            jm_gen_spill_load(mt, cls_obj, cls_spill2);
+                            jm_gen_spill_load(mt, fn_item, fn_spill);
+                        }
                         if (me->is_getter) {
                             mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
@@ -16361,7 +16534,17 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         }
                         MIR_reg_t mk;
                         if (me->computed && me->key_expr) {
+                            // generator spill: save cls_obj and fn_item before yield-containing key expr
+                            int cls_spill = -1, fn_spill = -1;
+                            if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                cls_spill = jm_gen_spill_save(mt, cls_obj);
+                                fn_spill = jm_gen_spill_save(mt, fn_item);
+                            }
                             mk = jm_transpile_box_item(mt, me->key_expr);
+                            if (cls_spill >= 0) {
+                                jm_gen_spill_load(mt, cls_obj, cls_spill);
+                                jm_gen_spill_load(mt, fn_item, fn_spill);
+                            }
                             if (me->is_getter) {
                                 mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
@@ -16474,7 +16657,21 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                         jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                                     }
                                     MIR_reg_t mk;
-                                    if (me->computed && me->key_expr) { mk = jm_transpile_box_item(mt, me->key_expr); if (me->is_getter) { mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); } else if (me->is_setter) { mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); } }
+                                    if (me->computed && me->key_expr) {
+                                        // generator spill: save proto_obj and fn_item before yield-containing key expr
+                                        int proto_spill = -1, fn_spill = -1;
+                                        if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                            proto_spill = jm_gen_spill_save(mt, proto_obj);
+                                            fn_spill = jm_gen_spill_save(mt, fn_item);
+                                        }
+                                        mk = jm_transpile_box_item(mt, me->key_expr);
+                                        if (proto_spill >= 0) {
+                                            jm_gen_spill_load(mt, proto_obj, proto_spill);
+                                            jm_gen_spill_load(mt, fn_item, fn_spill);
+                                        }
+                                        if (me->is_getter) { mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); }
+                                        else if (me->is_setter) { mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); }
+                                    }
                                     else if (me->is_getter) { char gk[128]; snprintf(gk, sizeof(gk), "__get_%.*s", (int)me->name->len, me->name->chars); mk = jm_box_string_literal(mt, gk, strlen(gk)); }
                                     else if (me->is_setter) { char sk[128]; snprintf(sk, sizeof(sk), "__set_%.*s", (int)me->name->len, me->name->chars); mk = jm_box_string_literal(mt, sk, strlen(sk)); }
                                     else mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
@@ -16504,7 +16701,21 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                             }
                             MIR_reg_t mk;
-                            if (me->computed && me->key_expr) { mk = jm_transpile_box_item(mt, me->key_expr); if (me->is_getter) { mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); } else if (me->is_setter) { mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); } }
+                            if (me->computed && me->key_expr) {
+                                // generator spill: save proto_obj and fn_item before yield-containing key expr
+                                int proto_spill = -1, fn_spill = -1;
+                                if (mt->in_generator && jm_has_yield(me->key_expr)) {
+                                    proto_spill = jm_gen_spill_save(mt, proto_obj);
+                                    fn_spill = jm_gen_spill_save(mt, fn_item);
+                                }
+                                mk = jm_transpile_box_item(mt, me->key_expr);
+                                if (proto_spill >= 0) {
+                                    jm_gen_spill_load(mt, proto_obj, proto_spill);
+                                    jm_gen_spill_load(mt, fn_item, fn_spill);
+                                }
+                                if (me->is_getter) { mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); }
+                                else if (me->is_setter) { mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, mk)); }
+                            }
                             else if (me->is_getter) { char gk[128]; snprintf(gk, sizeof(gk), "__get_%.*s", (int)me->name->len, me->name->chars); mk = jm_box_string_literal(mt, gk, strlen(gk)); }
                             else if (me->is_setter) { char sk[128]; snprintf(sk, sizeof(sk), "__set_%.*s", (int)me->name->len, me->name->chars); mk = jm_box_string_literal(mt, sk, strlen(sk)); }
                             else mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
@@ -17403,6 +17614,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
         gen_env_total_slots += 1;
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+        int gen_spill_start = gen_env_total_slots;  // spill slots start here
         gen_env_total_slots += 16;  // padding for generator yield spill slots (temporaries across yields)
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17453,7 +17665,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_param_offset = param_offset;
         mt->gen_local_offset = local_offset;
         mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-        mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+        mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
         jm_push_scope(mt);
 
@@ -17769,6 +17981,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             gen_this_slot = gen_env_total_slots;  // reserve slot for 'this'
             gen_env_total_slots += 1;
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
+            int gen_spill_start = gen_env_total_slots;  // spill slots start here
             gen_env_total_slots += 16;  // padding for async yield spill slots
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -17820,7 +18033,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_param_offset = param_offset_sm;
             mt->gen_local_offset = local_offset;
             mt->gen_local_slot_count = gen_this_slot + 1;  // next available slot (within padding area)
-            mt->gen_spill_slot_next = gen_env_total_slots;  // spill slots start after padding area
+            mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
 
             jm_push_scope(mt);
 
@@ -20521,20 +20734,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsModuleConstEntry lookup;
                         snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
                         if (!hashmap_get(mt->module_consts, &lookup)) {
-                            if (mt->preamble_mode) {
-                                // Preamble: store as module var so it persists after js_main returns
-                                mce.const_type = MCONST_MODVAR;
-                                mce.int_val = mt->module_var_count++;
-                                hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: preamble func '%s' → module_var[%d]",
-                                    mce.name, (int)mce.int_val);
-                            } else {
-                                mce.const_type = MCONST_FUNC;
-                                // Store index to find in func_entries
-                                mce.int_val = (int64_t)(fc - mt->func_entries);
-                                hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: module func '%s' (idx=%d)", mce.name, (int)mce.int_val);
-                            }
+                            // Store as MCONST_MODVAR so value persists in js_module_vars[].
+                            // Direct call optimization still works independently via
+                            // jm_find_collected_func() in the call expression handler.
+                            // This also allows eval()/new Function() to access the function
+                            // via the shared module_vars array.
+                            mce.const_type = MCONST_MODVAR;
+                            mce.int_val = mt->module_var_count++;
+                            hashmap_set(mt->module_consts, &mce);
+                            log_debug("js-mir: module func '%s' → module_var[%d]",
+                                mce.name, (int)mce.int_val);
                         }
                     }
                 }
@@ -20559,10 +20768,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
             if (!hashmap_get(mt->module_consts, &lookup)) {
-                mce.const_type = MCONST_FUNC;
-                mce.int_val = (int64_t)(fc - mt->func_entries);
+                mce.const_type = MCONST_MODVAR;
+                mce.int_val = mt->module_var_count++;
                 hashmap_set(mt->module_consts, &mce);
-                log_debug("js-mir: iife func '%s' (idx=%d)", mce.name, (int)mce.int_val);
+                log_debug("js-mir: iife func '%s' → module_var[%d]", mce.name, (int)mce.int_val);
             }
         };
 
@@ -21459,9 +21668,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
                     jm_set_var(mt, vname, var_reg);
-                    // Preamble mode: also persist function object as module var
-                    // so it survives after js_main returns
-                    if (mt->preamble_mode) {
+                    // Persist function object as module var so it survives after
+                    // js_main returns and is accessible by eval()/new Function()
+                    {
                         JsModuleConstEntry pmlookup;
                         snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
                         JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);

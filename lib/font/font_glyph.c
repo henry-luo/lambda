@@ -158,6 +158,17 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     GlyphInfo info = {0};
     if (!handle) return info;
 
+    // Font5 §4.2: fast path for ASCII codepoints (32–126)
+    // Direct array lookup — no hash computation needed.
+    if (codepoint >= 32 && codepoint <= 126 && handle->ascii_advance_ready) {
+        uint32_t idx = codepoint - 32;
+        if (handle->ascii_glyph_id[idx] != 0) {
+            info.id = handle->ascii_glyph_id[idx];
+            info.advance_x = handle->ascii_advance[idx];
+            return info;
+        }
+    }
+
     float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                             ? handle->ctx->config.pixel_ratio : 1.0f;
 
@@ -275,6 +286,13 @@ apply_overrides:
         hashmap_set(cache, &entry);
     }
 
+    // Font5 §4.2: populate ASCII advance table entry
+    if (codepoint >= 32 && codepoint <= 126 && char_index != 0) {
+        uint32_t idx = codepoint - 32;
+        handle->ascii_advance[idx] = info.advance_x;
+        handle->ascii_glyph_id[idx] = char_index;
+    }
+
     return info;
 }
 
@@ -330,6 +348,10 @@ static float font_get_kerning_coretext(FontHandle* handle, uint32_t left, uint32
 
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     if (!handle) return 0;
+
+    // Font5 §4.5: skip kerning entirely for fonts with no kern data
+    const FontMetrics* m = font_get_metrics(handle);
+    if (m && !m->has_kerning) return 0.0f;
 
     // FontTables kern table
     if (handle->tables) {
@@ -729,37 +751,79 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
     FontContext* ctx = handle->ctx;
     if (!ctx) return font_load_glyph(handle, style, codepoint, for_rendering);
 
+    // check loaded glyph cache before expensive emoji font lookup
+    struct hashmap* lgcache = ctx->loaded_glyph_cache;
+    if (lgcache) {
+        LoadedGlyphCacheEntry search;
+        search.caller_handle = handle;
+        search.codepoint = codepoint;
+        search.for_rendering = for_rendering;
+        LoadedGlyphCacheEntry* cached = (LoadedGlyphCacheEntry*)hashmap_get(lgcache, &search);
+        if (cached) {
+            s_loaded_glyph = cached->glyph;
+            return &s_loaded_glyph;
+        }
+    }
+
     // Use platform emoji font lookup: passes codepoint + VS16 (U+FE0F) to
     // CoreText so it selects Apple Color Emoji instead of a CJK text font.
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = style->size_px * pixel_ratio;
 
-    int face_index = 0;
-    char* font_path = font_platform_find_emoji_font(codepoint, &face_index);
-    if (font_path) {
-        FontHandle* emoji_handle = font_load_face_internal(
-            ctx, font_path, face_index,
-            style->size_px, physical_size,
-            style->weight, style->slant);
-        mem_free(font_path);
+    // Reuse cached emoji handle if style matches (same font for all emoji)
+    FontHandle* emoji_handle = NULL;
+    bool handle_from_cache = false;
+    if (ctx->cached_emoji_handle
+        && ctx->cached_emoji_size_px == style->size_px
+        && ctx->cached_emoji_physical_size == physical_size
+        && ctx->cached_emoji_weight == style->weight
+        && ctx->cached_emoji_slant == style->slant) {
+        emoji_handle = ctx->cached_emoji_handle;
+        handle_from_cache = true;
+    } else {
+        int face_index = 0;
+        char* font_path = font_platform_find_emoji_font(codepoint, &face_index);
+        if (font_path) {
+            emoji_handle = font_load_face_internal(
+                ctx, font_path, face_index,
+                style->size_px, physical_size,
+                style->weight, style->slant);
+            mem_free(font_path);
+            if (emoji_handle) {
+                // release old cached handle and store new one
+                if (ctx->cached_emoji_handle)
+                    font_handle_release(ctx->cached_emoji_handle);
+                font_handle_retain(emoji_handle);
+                ctx->cached_emoji_handle = emoji_handle;
+                ctx->cached_emoji_size_px = style->size_px;
+                ctx->cached_emoji_physical_size = physical_size;
+                ctx->cached_emoji_weight = style->weight;
+                ctx->cached_emoji_slant = style->slant;
+            }
+        }
+    }
 
-        if (emoji_handle) {
-            LoadedGlyph* result = NULL;
+    if (emoji_handle) {
+        LoadedGlyph* result = NULL;
 #ifdef __APPLE__
-            if (emoji_handle->ct_raster_ref) {
-                result = try_load_from_handle_ct(emoji_handle, codepoint);
-            }
+        if (emoji_handle->ct_raster_ref) {
+            result = try_load_from_handle_ct(emoji_handle, codepoint);
+        }
 #else
-            FT_Int32 load_flags = for_rendering
-                ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
-                : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
-            result = try_load_from_handle(emoji_handle, codepoint, load_flags);
+        FT_Int32 load_flags = for_rendering
+            ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+            : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+        result = try_load_from_handle(emoji_handle, codepoint, load_flags);
 #endif
-            if (result) {
-                fill_loaded_glyph_font_metrics(emoji_handle);
-            }
+        if (result) {
+            fill_loaded_glyph_font_metrics(emoji_handle);
+        }
+        if (!handle_from_cache)
             font_handle_release(emoji_handle);
-            if (result) return result;
+        if (result) {
+            // cache with caller's handle so subsequent lookups hit
+            cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            return result;
         }
     }
 

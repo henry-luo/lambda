@@ -456,7 +456,7 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline + layout page suite regression check"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
@@ -1055,13 +1055,15 @@ test-radiant-baseline: build-test
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
-		echo "📦 Page Snapshot Regression:"; \
+		echo "📦 Layout Page Suite Regression:"; \
 		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page 2>&1) || true; \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
 		echo "$$snap_output" | tail -5; \
-		if echo "$$snap_output" | grep -q "REGRESSION"; then \
+		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		snapshot_passed=$${snapshot_passed:-0}; \
+		if echo "$$snap_output" | grep -q "REGRESSION\|regression detected"; then \
 			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions"; then \
+		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
 			snapshot_status="✅ PASS"; \
 		else \
 			snapshot_status="✅ PASS"; \
@@ -1082,7 +1084,7 @@ test-radiant-baseline: build-test
 	fi; \
 	\
 	echo ""; \
-	echo "📦 Page Load (Headless) Tests:"; \
+	echo "📦 View Page and Markdown (Headless) Tests:"; \
 	if [ -f "test/test_page_load_gtest.exe" ]; then \
 		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
 		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
@@ -1119,8 +1121,8 @@ test-radiant-baseline: build-test
 	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
 	else pretext_status="✅ PASS"; fi; \
 	\
-	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
-	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
+	total_passed=$$((layout_passed + wpt_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + wpt_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
 	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1130,13 +1132,13 @@ test-radiant-baseline: build-test
 	echo "=============================================================="; \
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
-	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped)"; \
-	echo "   ├── Page Snapshot       $$snapshot_status"; \
-	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
-	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
-	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed)"; \
-	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped)"; \
+	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped) (test_radiant_layout.js -c baseline)"; \
+	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped) (test_radiant_layout.js -c wpt-css-text)"; \
+	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
+	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
+	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
+	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped) (test_radiant_layout.js -c pretext)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
@@ -1159,7 +1161,7 @@ test-layout-baseline: build-test
 		echo "Running page suite snapshot regression check..."; \
 		echo "=============================================================="; \
 		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page; \
+			| node test/layout/layout_suite_snapshot.js --check page; \
 	fi
 
 test-ui-automation: build-test
@@ -1173,7 +1175,7 @@ test-ui-automation: build-test
 	fi
 
 test-page-load: build-test
-	@echo "Running Page Load (Headless) test suite..."
+	@echo "Running View Page and Markdown (Headless) test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_page_load_gtest.exe" ]; then \
 		./test/test_page_load_gtest.exe; \
@@ -1211,7 +1213,7 @@ layout-snapshot:
 	fi; \
 	echo "Saving snapshot for suite: $$SUITE_VAR"; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --save $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --save $$SUITE_VAR
 
 layout-snapshot-check:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1220,7 +1222,7 @@ layout-snapshot-check:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --check $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --check $$SUITE_VAR
 
 layout-snapshot-diff:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1229,7 +1231,7 @@ layout-snapshot-diff:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --diff $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
 test-math: build

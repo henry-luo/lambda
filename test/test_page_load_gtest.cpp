@@ -3,12 +3,11 @@
  *
  * Auto-discovers HTML files under test/layout/data/page/ and
  * test/layout/data/markdown/ and runs each via
- * `./lambda.exe view <html> --headless --no-log` to verify they load
- * without crashing.
+ * `./lambda.exe view <html> --headless --no-log` to verify they:
+ *   1. Load without crashing (exit code 0)
+ *   2. Complete layout within 4s and render within 2s
  *
- * Exit code convention:
- *   0   = page loaded and rendered successfully
- *   non-zero / signal = crash or error
+ * Timing is parsed from [LAYOUT_PROF] and [RENDER_PROF] stderr output.
  *
  * Usage:
  *   ./test/test_page_load_gtest.exe
@@ -141,12 +140,31 @@ static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
 // Run a single page load test
 // ============================================================================
 
+// Layout/render time limits (seconds)
+#define MAX_LAYOUT_SECONDS 4.0
+#define MAX_RENDER_SECONDS 2.0
+
 struct PageTestResult {
     int exit_code;        // 0 = success, non-zero = failure
     bool timed_out;
     double elapsed_ms;
+    double layout_ms;     // from [LAYOUT_PROF], -1 if not found
+    double render_ms;     // from [RENDER_PROF], -1 if not found
     std::string output;   // stderr/stdout from lambda.exe
 };
+
+// Parse a profiling line like "[LAYOUT_PROF] layout_html_root: 123.4ms"
+// or "[RENDER_PROF] render_block_view: 456.7ms ..." and return the ms value.
+// Returns -1 if the tag is not found.
+static double parse_prof_ms(const std::string& output, const char* tag) {
+    size_t pos = output.find(tag);
+    if (pos == std::string::npos) return -1;
+    // Find the first number after the tag
+    pos += strlen(tag);
+    while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
+    if (pos >= output.size()) return -1;
+    return atof(output.c_str() + pos);
+}
 
 #ifdef _WIN32
 
@@ -174,6 +192,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.exit_code = status;
     auto t1 = std::chrono::steady_clock::now();
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
+    result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     return result;
 }
 
@@ -184,6 +204,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.exit_code = -1;
     result.timed_out = false;
     result.elapsed_ms = 0;
+    result.layout_ms = -1;
+    result.render_ms = -1;
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -265,6 +287,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
         result.exit_code = -1;
     }
 
+    result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
+    result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     return result;
 }
 
@@ -333,10 +357,13 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     SCOPED_TRACE("Page: " + info.test_name);
 
     // Print timing
-    std::cout << "  [" << info.test_name << "] "
-              << (int)result.elapsed_ms << " ms"
-              << (result.timed_out ? " (TIMEOUT)" : "")
-              << std::endl;
+    char timing_buf[128];
+    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms)%s",
+             info.test_name.c_str(), (int)result.elapsed_ms,
+             result.layout_ms >= 0 ? result.layout_ms : 0.0,
+             result.render_ms >= 0 ? result.render_ms : 0.0,
+             result.timed_out ? " (TIMEOUT)" : "");
+    std::cout << timing_buf << std::endl;
 
     // Print output on failure
     if (result.exit_code != 0) {
@@ -351,6 +378,20 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     EXPECT_EQ(result.exit_code, 0)
         << info.test_name << " exited with code " << result.exit_code
         << (result.exit_code > 128 ? " (signal " + std::to_string(result.exit_code - 128) + ")" : "");
+
+    // Layout time limit
+    if (result.layout_ms >= 0) {
+        EXPECT_LT(result.layout_ms, MAX_LAYOUT_SECONDS * 1000)
+            << info.test_name << " layout took " << result.layout_ms << "ms (limit: "
+            << (MAX_LAYOUT_SECONDS * 1000) << "ms)";
+    }
+
+    // Render time limit
+    if (result.render_ms >= 0) {
+        EXPECT_LT(result.render_ms, MAX_RENDER_SECONDS * 1000)
+            << info.test_name << " render took " << result.render_ms << "ms (limit: "
+            << (MAX_RENDER_SECONDS * 1000) << "ms)";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -393,7 +434,8 @@ int main(int argc, char** argv) {
     std::cout << "║  Runs HTML pages from test/layout/data/page/ and         ║\n";
     std::cout << "║  test/layout/data/markdown/ via:                         ║\n";
     std::cout << "║    ./lambda.exe view <html> --headless --no-log          ║\n";
-    std::cout << "║  Verifies pages load without crashing.                   ║\n";
+    std::cout << "║  Verifies pages load without crashing and within         ║\n";
+    std::cout << "║  time limits (layout <4s, render <2s).                   ║\n";
     std::cout << "╚═══════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
 

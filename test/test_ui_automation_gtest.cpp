@@ -208,6 +208,7 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
         + " view " + info.html_path
         + " --event-file " + info.json_path
         + " --headless"
+        + " --no-log"
         + " 2>&1";
 
     FILE* pipe = popen(cmd.c_str(), "r");
