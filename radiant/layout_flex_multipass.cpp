@@ -1255,7 +1255,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     // Use iframe's actual dimensions as viewport, not window dimensions
                     // This ensures the embedded document layouts to fit within the iframe
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
-                        (int)flex_width, (int)flex_height,
+                        (int)flex_width, (int)flex_height, // INT_CAST_OK: viewport API expects int
                         lycon->ui_context->pixel_ratio);
                     log_debug(">>> FLEX ITEM IFRAME: load_html_doc returned doc=%p", doc);
                     if (doc) {
@@ -1288,8 +1288,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
                             int saved_viewport_width = lycon->ui_context->viewport_width;
                             int saved_viewport_height = lycon->ui_context->viewport_height;
-                            lycon->ui_context->viewport_width = (int)flex_width;
-                            lycon->ui_context->viewport_height = (int)flex_height;
+                            lycon->ui_context->viewport_width = (int)flex_width; // INT_CAST_OK: viewport API expects int
+                            lycon->ui_context->viewport_height = (int)flex_height; // INT_CAST_OK: viewport API expects int
 
                             // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
                             process_document_font_faces(lycon->ui_context, doc);
@@ -1710,10 +1710,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         // estimate wrapped height using word-boundary groups
                         float min_word = widths.min_content;
                         if (min_word > 0 && min_word <= container_content_width) {
-                            int groups_per_line = (int)(container_content_width / min_word);
+                            int groups_per_line = (int)(container_content_width / min_word); // INT_CAST_OK: integer count
                             if (groups_per_line > 0) {
                                 float line_w = groups_per_line * min_word;
-                                int num_lines = (int)ceilf(text_width / line_w);
+                                int num_lines = (int)ceilf(text_width / line_w); // INT_CAST_OK: integer line count
                                 effective_text_height = num_lines * text_height;
                             }
                         } else {
@@ -1866,7 +1866,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                             dt->rect->width = text_width;
                             dt->rect->height = text_height;
                             dt->rect->start_index = 0;
-                            dt->rect->length = (int)strlen(text);
+                            dt->rect->length = (int)strlen(text); // INT_CAST_OK: string length
                             dt->rect->next = nullptr;  // single rect for vertical text
                             log_debug("FLEX TEXT: vertical WM override rect: (%.1f, %.1f, %.1f, %.1f)",
                                       text_x, text_y, text_width, text_height);
@@ -2531,12 +2531,12 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
             block->height = cached_size.height;
             g_layout_cache_hits++;
             log_info("FLEX CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
-                     block, cached_size.width, cached_size.height, (int)lycon->run_mode);
+                     block, cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
             log_leave();
             return;
         }
         g_layout_cache_misses++;
-        log_debug("FLEX CACHE MISS: container=%p, mode=%d", block, (int)lycon->run_mode);
+        log_debug("FLEX CACHE MISS: container=%p, mode=%d", block, (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     // =========================================================================
@@ -2630,7 +2630,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
                                         lycon->run_mode, result);
             g_layout_cache_stores++;
             log_debug("FLEX CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
-                      block, block->width, block->height, (int)lycon->run_mode);
+                      block, block->width, block->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
         }
     }
 

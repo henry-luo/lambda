@@ -1045,7 +1045,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
                     log_debug("Button %s: measured text content width=%.1f, intrinsic=%dx%d",
                               child->node_name(), max_text_width,
-                              (int)elem->form->intrinsic_width, (int)elem->form->intrinsic_height);
+                              (int)elem->form->intrinsic_width, (int)elem->form->intrinsic_height); // INT_CAST_OK: form intrinsic size for log
                 }
             }
 
@@ -1105,7 +1105,7 @@ void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
     measure_text_run(lycon, text_data, text_length, min_width, max_width, height);
 
     log_debug("Measured text accurately: min=%d, max=%d, height=%d (\"%.*s\")",
-              *min_width, *max_width, *height, (int)min(text_length, 20), text_data);
+              *min_width, *max_width, *height, (int)min(text_length, 20), text_data); // INT_CAST_OK: text length for log
 }
 
 // Measure a text run with actual font metrics
@@ -1123,7 +1123,7 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
     *max_width = widths.max_content;
     *min_width = widths.min_content;
     *height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-              (int)(lycon->font.style->font_size + 0.5f) : 20;
+              (int)(lycon->font.style->font_size + 0.5f) : 20; // INT_CAST_OK: font size for char width calc
 
     log_debug("measure_text_run (unified): text_length=%zu, min=%d, max=%d, height=%d",
               length, *min_width, *max_width, *height);
@@ -1137,7 +1137,7 @@ int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t 
     }
     // Fallback: rough estimate when no context available
     float avg_char_width = (lycon && lycon->font.style) ? lycon->font.style->font_size * 0.6f : 10.0f;
-    return (int)(length * avg_char_width);
+    return (int)(length * avg_char_width); // INT_CAST_OK: estimated pixel width
 }
 
 void cleanup_temporary_view(ViewBlock* temp_view) {

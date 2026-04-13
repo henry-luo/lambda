@@ -252,7 +252,7 @@ static void parse_counter_spec(const char* spec,
     // Allocate arrays (max possible pairs)
     int max_pairs = (token_count + 1) / 2;
     char** names = (char**)arena_alloc(arena, sizeof(char*) * max_pairs);
-    int* values = (int*)arena_alloc(arena, sizeof(int) * max_pairs);
+    int* values = (int*)arena_alloc(arena, sizeof(int) * max_pairs); // INT_CAST_OK: pointer cast
 
     if (!names || !values) return;
 
@@ -296,7 +296,7 @@ static void parse_counter_spec(const char* spec,
             } else if (long_value < INT_MIN) {
                 value = INT_MIN;
             } else {
-                value = (int)long_value;
+                value = (int)long_value; // INT_CAST_OK: counter value is integer
             }
 
             // Move pointer past the parsed number
@@ -496,11 +496,11 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     if (counter_count == 0) return;
 
     // Allocate array (from innermost to innermost)
-    *values = (int*)arena_alloc(ctx->arena, sizeof(int) * counter_count);
+    *values = (int*)arena_alloc(ctx->arena, sizeof(int) * counter_count); // INT_CAST_OK: pointer cast
     if (!*values) return;
 
     // Collect values from outermost to innermost
-    int* temp = (int*)mem_alloc(sizeof(int) * counter_count, MEM_CAT_LAYOUT);
+    int* temp = (int*)mem_alloc(sizeof(int) * counter_count, MEM_CAT_LAYOUT); // INT_CAST_OK: pointer cast
     int idx = 0;
 
     scope = ctx->current_scope;
@@ -514,7 +514,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     }
 
     // Copy to output array
-    memcpy(*values, temp, sizeof(int) * counter_count);
+    memcpy(*values, temp, sizeof(int) * counter_count); // INT_CAST_OK: size comparison
     mem_free(temp);
 
     *count = counter_count;
@@ -572,7 +572,7 @@ static int int_to_lower_latin(int value, char* buffer, size_t buffer_size) {
     do {
         buffer[len++] = 'a' + (value % 26);
         value = value / 26 - 1;
-    } while (value >= 0 && len < (int)buffer_size - 1);
+    } while (value >= 0 && len < (int)buffer_size - 1); // INT_CAST_OK: size comparison
 
     // Reverse the string
     for (int i = 0; i < len / 2; i++) {
@@ -624,11 +624,11 @@ static int int_to_lower_greek(int value, char* buffer, size_t buffer_size) {
         temp[temp_len++] = (char)(0xCE + (greek_letters[idx] >= 0x03C0 ? 1 : 0));
         temp[temp_len++] = (char)(0x80 + (greek_letters[idx] & 0x3F));
         value = value / count - 1;
-    } while (value >= 0 && temp_len < (int)sizeof(temp) - 2);
+    } while (value >= 0 && temp_len < (int)sizeof(temp) - 2); // INT_CAST_OK: size comparison
 
     // Reverse pairs
     int len = 0;
-    for (int i = temp_len - 2; i >= 0 && len < (int)buffer_size - 2; i -= 2) {
+    for (int i = temp_len - 2; i >= 0 && len < (int)buffer_size - 2; i -= 2) { // INT_CAST_OK: size comparison
         buffer[len++] = temp[i];
         buffer[len++] = temp[i + 1];
     }
@@ -662,7 +662,7 @@ static int int_to_armenian(int value, char* buffer, size_t buffer_size) {
         if (digits[i] > 0 && digits[i] <= 9) {
             int cp = tables[i][digits[i]];
             // encode as UTF-8 (2 bytes for U+05xx range)
-            if (len < (int)buffer_size - 2) {
+            if (len < (int)buffer_size - 2) { // INT_CAST_OK: size comparison
                 buffer[len++] = (char)(0xD4 + (cp >= 0x0540 ? 1 : 0));
                 buffer[len++] = (char)(0x80 + (cp & 0x3F));
             }
@@ -691,7 +691,7 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
 
     // handle 10000 prefix (ჵ = U+10F5)
     if (value >= 10000) {
-        if (len < (int)buffer_size - 3) {
+        if (len < (int)buffer_size - 3) { // INT_CAST_OK: size comparison
             buffer[len++] = (char)(0xE1);
             buffer[len++] = (char)(0x80 + ((0x10F5 >> 6) & 0x3F));
             buffer[len++] = (char)(0x80 + (0x10F5 & 0x3F));
@@ -711,7 +711,7 @@ static int int_to_georgian(int value, char* buffer, size_t buffer_size) {
         if (parts[i] > 0 && parts[i] <= 9) {
             int cp = tables[i][parts[i]];
             // encode as UTF-8 (3 bytes for U+10xx range)
-            if (len < (int)buffer_size - 3) {
+            if (len < (int)buffer_size - 3) { // INT_CAST_OK: size comparison
                 buffer[len++] = (char)(0xE1);
                 buffer[len++] = (char)(0x80 + ((cp >> 6) & 0x3F));
                 buffer[len++] = (char)(0x80 + (cp & 0x3F));

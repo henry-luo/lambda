@@ -66,12 +66,12 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             grid_container->height = cached_size.height;
             g_layout_cache_hits++;
             log_info("GRID CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
-                     grid_container, cached_size.width, cached_size.height, (int)lycon->run_mode);
+                     grid_container, cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
             log_leave();
             return;
         }
         g_layout_cache_misses++;
-        log_debug("GRID CACHE MISS: container=%p, mode=%d", grid_container, (int)lycon->run_mode);
+        log_debug("GRID CACHE MISS: container=%p, mode=%d", grid_container, (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     // =========================================================================
@@ -461,7 +461,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                                         lycon->run_mode, result);
             g_layout_cache_stores++;
             log_debug("GRID CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
-                      grid_container, grid_container->width, grid_container->height, (int)lycon->run_mode);
+                      grid_container, grid_container->width, grid_container->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
         }
     }
 

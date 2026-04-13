@@ -62,7 +62,7 @@ void calculate_multicol_dimensions(
     // CSS Multi-column §3.4: Pseudo-algorithm for column layout
     if (column_count > 0 && column_width > 0) {
         // Both specified: use min of count and what fits
-        int max_by_width = (int)floorf((available_width + gap) / (column_width + gap));
+        int max_by_width = (int)floorf((available_width + gap) / (column_width + gap)); // INT_CAST_OK: integer column count
         column_count = MIN_INT(column_count, MAX_INT(1, max_by_width));
         // Recalculate width to fill available space
         column_width = (available_width - (column_count - 1) * gap) / column_count;
@@ -73,7 +73,7 @@ void calculate_multicol_dimensions(
     }
     else if (column_width > 0) {
         // Only width specified: fit as many as possible
-        column_count = (int)floorf((available_width + gap) / (column_width + gap));
+        column_count = (int)floorf((available_width + gap) / (column_width + gap)); // INT_CAST_OK: integer column count
         column_count = MAX_INT(1, column_count);
         // Recalculate width to fill available space
         column_width = (available_width - (column_count - 1) * gap) / column_count;

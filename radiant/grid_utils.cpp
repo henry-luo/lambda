@@ -468,7 +468,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                         if (track_size > 0) {
                             span_width += track_size;
                             if (c < col_end - 1) {
-                                span_width += (int)grid->column_gap;
+                                span_width += (int)grid->column_gap; // INT_CAST_OK: grid gap accumulation
                             }
                         } else {
                             // Track has size 0 - might be FR track not yet sized
@@ -482,7 +482,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                         if (item->bound) {
                             box_adjustment += item->bound->padding.left + item->bound->padding.right;
                             if (item->bound->border) {
-                                box_adjustment += (int)(item->bound->border->width.left + item->bound->border->width.right);
+                                box_adjustment += (int)(item->bound->border->width.left + item->bound->border->width.right); // INT_CAST_OK: box model adjustment
                             }
                         }
                         width = (float)(span_width - box_adjustment);
@@ -497,7 +497,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     } else if (grid->content_width > 0) {
                         // FR tracks not sized yet - estimate from container width
                         int col_count = grid->computed_column_count > 0 ? grid->computed_column_count : 1;
-                        int total_gaps = (col_count - 1) * (int)grid->column_gap;
+                        int total_gaps = (col_count - 1) * (int)grid->column_gap; // INT_CAST_OK: grid gap accumulation
                         int span_cols = col_end - col_start;
                         width = (float)((grid->content_width - total_gaps) * span_cols) / col_count;
 

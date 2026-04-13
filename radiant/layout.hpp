@@ -1,6 +1,15 @@
 #ifndef LAYOUT_HPP
 #define LAYOUT_HPP
 #pragma once
+
+// ============================================================================
+// DIMENSION CONVENTION: All layout positions and sizes are float.
+// View.x, y, width, height and all derived measurements (padding, margin,
+// border, gap, offset, content_width, etc.) must use float, never int.
+// If an (int) cast is truly needed, mark it: // INT_CAST_OK: <reason>
+// Run `make check-int-cast` to verify compliance.
+// ============================================================================
+
 #include "view.hpp"
 #include "available_space.hpp"
 #include "layout_mode.hpp"

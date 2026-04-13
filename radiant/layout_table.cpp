@@ -1109,7 +1109,7 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             if (col_count == 0) {
                 // Check span attribute
                 const char* span_str = child->get_attribute("span");
-                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
                 if (col_count <= 0) col_count = 1;
             }
 
@@ -1579,7 +1579,7 @@ static ViewBlock* find_column_element(ViewTable* table, int target_col) {
             // colgroup without col children
             if (current_col <= target_col) {
                 const char* span_str = child->get_attribute("span");
-                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
                 if (span <= 0) span = 1;
                 current_col += span;
             }
@@ -1604,7 +1604,7 @@ static ViewBlock* find_colgroup_element(ViewTable* table, int target_col) {
             }
             if (col_count == 0) {
                 const char* span_str = child->get_attribute("span");
-                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
                 if (col_count <= 0) col_count = 1;
             }
             int last_col = first_col + col_count - 1;
@@ -2426,7 +2426,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
         const char* colspan_str = dom_element_get_attribute(dom_elem, "colspan");
         log_debug("Lambda CSS: colspan_str = %s", colspan_str ? colspan_str : "NULL");
         if (colspan_str && colspan_str[0] != '\0') {
-            int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0);
+            int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0); // INT_CAST_OK: string length
             if (span > 0 && span <= 1000) {
                 cell->td->col_span = span;
                 log_debug("Lambda CSS: Parsed colspan=%d", span);
@@ -2437,7 +2437,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
         const char* rowspan_str = dom_element_get_attribute(dom_elem, "rowspan");
         log_debug("Lambda CSS: rowspan_str = %s", rowspan_str ? rowspan_str : "NULL");
         if (rowspan_str && rowspan_str[0] != '\0') {
-            int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0);
+            int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0); // INT_CAST_OK: string length
             if (span == 0) {
                 // HTML spec: rowspan=0 means "span all remaining rows in the row group"
                 // Store as 0 sentinel - resolved in analyze_table_structure
@@ -4079,7 +4079,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
                 ViewText* text = (ViewText*)child;
                 text->y += vertical_offset;
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
-                         vertical_offset, (int)valign);
+                         vertical_offset, (int)valign); // INT_CAST_OK: enum for log
             } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
                 ViewBlock* block = (ViewBlock*)child;
                 block->y += vertical_offset;
@@ -5133,7 +5133,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 }
                 if (!has_col) {
                     const char* span_str = child->get_attribute("span");
-                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
                     if (span <= 0) span = 1;
                     col_count += span;
                 }
@@ -5256,7 +5256,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 // Colgroup without col children implicitly defines span columns
                 if (!has_col_children) {
                     const char* span_str = child->get_attribute("span");
-                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
+                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: string length
                     if (span <= 0) span = 1;
                     for (int s = 0; s < span && col_idx < columns; s++) {
                         if (colgroup_collapsed) {

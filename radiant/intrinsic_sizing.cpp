@@ -424,7 +424,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     result.max_content = total_width;    // Keep float precision
 
     log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f, text_transform=%d",
-              length, result.min_content, result.max_content, (int)text_transform);
+              length, result.min_content, result.max_content, (int)text_transform); // INT_CAST_OK: enum for log
 
     return result;
 }
@@ -864,7 +864,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                     } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
-                        int w = (int)v->data.number.value;
+                        int w = (int)v->data.number.value; // INT_CAST_OK: CSS numeric value to int
                         if (w >= 1 && w <= 1000) {
                             temp_font_prop->font_weight = (w > 500) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
                             temp_font_prop->font_weight_numeric = (int16_t)w;
@@ -968,7 +968,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 else if (kw == CSS_VALUE_LIGHTER) { mapped_weight = CSS_VALUE_LIGHTER; }
                 else { mapped_weight = CSS_VALUE_NORMAL; numeric_weight = 400; }
             } else if (fw_val->type == CSS_VALUE_TYPE_NUMBER) {
-                int w = (int)fw_val->data.number.value;
+                int w = (int)fw_val->data.number.value; // INT_CAST_OK: CSS numeric value to int
                 numeric_weight = (w >= 100 && w <= 900) ? (int16_t)w : 0;
                 mapped_weight = (w > 500) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
             }
@@ -3369,7 +3369,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width) {
                 float effective_width = width;
                 if (widths.min_content > 0 && widths.min_content <= width) {
-                    int units_per_line = (int)(width / widths.min_content);
+                    int units_per_line = (int)(width / widths.min_content); // INT_CAST_OK: integer count
                     if (units_per_line > 0) {
                         effective_width = units_per_line * widths.min_content;
                     }
@@ -3377,7 +3377,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     // Each break unit overflows the line and gets its own line
                     effective_width = widths.min_content;
                 }
-                num_lines = (int)ceil(text_width / effective_width);
+                num_lines = (int)ceil(text_width / effective_width); // INT_CAST_OK: integer line count
             }
 
             log_debug("calculate_max_content_height: text len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
@@ -3681,7 +3681,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                             if (v->data.function->arg_count > 0 && v->data.function->args[0]) {
                                 CssValue* count_val = v->data.function->args[0];
                                 if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                    int repeat_count = (int)count_val->data.number.value;
+                                    int repeat_count = (int)count_val->data.number.value; // INT_CAST_OK: integer count
                                     int tracks_per_repeat = v->data.function->arg_count - 1;
                                     if (tracks_per_repeat < 1) tracks_per_repeat = 1;
                                     total_cols += repeat_count * tracks_per_repeat;
@@ -3701,7 +3701,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     if (func && func->name && strcmp(func->name, "repeat") == 0) {
                         if (func->arg_count > 0 && func->args[0] &&
                             func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
-                            int repeat_count = (int)func->args[0]->data.number.value;
+                            int repeat_count = (int)func->args[0]->data.number.value; // INT_CAST_OK: integer count
                             int tracks_per_repeat = func->arg_count - 1;
                             if (tracks_per_repeat < 1) tracks_per_repeat = 1;
                             grid_column_count = repeat_count * tracks_per_repeat;

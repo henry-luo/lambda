@@ -1779,7 +1779,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     is_baseline_item = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
                 }
                 log_debug("%s Phase 9a: item %d: is_baseline_item=%d, height=%.0f", container->source_loc(),
-                          j, (int)is_baseline_item, item->height);
+                          j, (int)is_baseline_item, item->height); // INT_CAST_OK: bool for log
 
                 if (is_baseline_item && is_main_axis_horizontal(flex_layout)) {
                     has_baseline = true;
@@ -2706,10 +2706,10 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
                 item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
                 // For SVG images, set max_render_width so render_svg knows the target size
                 if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
-                    item->embed->img->max_render_width = (int)item->blk->given_width;
+                    item->embed->img->max_render_width = (int)item->blk->given_width; // INT_CAST_OK: image API expects int
                     if (item->blk->given_height >= 0) {
                         item->embed->img->max_render_width = max(item->embed->img->max_render_width,
-                                                                  (int)item->blk->given_height);
+                                                                  (int)item->blk->given_height); // INT_CAST_OK: intentional
                     }
                 }
                 log_debug("%s calculate_flex_basis: loaded image for IMG with explicit width: %s", item->source_loc(), src_value);
@@ -2742,10 +2742,10 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
                 item->embed->img = load_image(flex_layout->lycon->ui_context, src_value);
                 // For SVG images, set max_render_width so render_svg knows the target size
                 if (item->embed->img && item->embed->img->format == IMAGE_FORMAT_SVG) {
-                    item->embed->img->max_render_width = (int)item->blk->given_height;
+                    item->embed->img->max_render_width = (int)item->blk->given_height; // INT_CAST_OK: image API expects int
                     if (item->blk->given_width >= 0) {
                         item->embed->img->max_render_width = max(item->embed->img->max_render_width,
-                                                                  (int)item->blk->given_width);
+                                                                  (int)item->blk->given_width); // INT_CAST_OK: intentional
                     }
                 }
                 log_debug("%s calculate_flex_basis: loaded image for IMG with explicit height: %s", item->source_loc(), src_value);
@@ -3633,7 +3633,7 @@ float find_max_baseline(FlexLineInfo* line, int container_align_items) {
 
         // Check if this item participates in baseline alignment
         // Either via align-self: baseline OR container's align-items: baseline (and no override)
-        int align_self = item->fi ? (int)item->fi->align_self : ALIGN_AUTO;
+        int align_self = item->fi ? (int)item->fi->align_self : ALIGN_AUTO; // INT_CAST_OK: enum value
         bool uses_baseline = (align_self == ALIGN_BASELINE) ||
                             (align_self == ALIGN_AUTO && container_align_items == ALIGN_BASELINE);
 
