@@ -227,49 +227,55 @@ store_f64(this_ptr, offset_x, x)   // no boxing, straight memory write
 
 ---
 
-### P3: Inline Method Dispatch for Monomorphic Call Sites (Priority: HIGH)
+### P3: Inline Method Dispatch for Known Class Instances ✅ IMPLEMENTED
 
-**Problem:** `obj.method(args)` compiles to two runtime calls: `js_property_access(obj, "method")` to fetch the function, then `js_call_function(fn, this, args, argc)` to invoke it. For benchmarks like richards (125×) and deltablue (133×), the inner loop is dominated by virtual method dispatch.
+**Problem:** `obj.method(args)` compiles to two runtime calls: `js_property_access(obj, "method")` to fetch the function, then `js_call_function(fn, this, args, argc)` to invoke it. The full dispatch chain is: `js_map_method` (670 lines of type checks) → `js_property_access` (hash lookup + prototype chain walk) → `js_call_function` (type check, this binding, builtin check) → `js_invoke_fn` (arity switch, fn ptr cast) — **6+ function calls per method invocation**.
 
-**Current state:** The P7 optimization exists for direct native calls where the transpiler can resolve the method at compile time. But this requires the transpiler to know both the class of the receiver AND that no subclass overrides the method.
+**Implementation (2025-06-22):** Direct MIR CALL bypassing all runtime dispatch.
 
-**Proposed fix — Inline Cache (IC) at call site:**
-```c
-// Monomorphic IC: cache the last shape → function pointer mapping
-static Shape* cached_shape = NULL;
-static FuncPtr cached_fn = NULL;
+When the receiver's class is known at compile time:
+- `this.method(args)` inside a class method: uses `mt->current_class`
+- `obj.method(args)` where `obj` was assigned from `new ClassName()`: uses `obj->class_entry`
 
-if (obj->shape == cached_shape) {
-    result = cached_fn(obj, args...);  // fast path: direct call
-} else {
-    fn = js_property_access(obj, "method");
-    cached_shape = obj->shape;
-    cached_fn = extract_func(fn);
-    result = js_call_function(fn, obj, args, argc);
-}
-```
+The transpiler resolves the method by walking the class + superclass chain at compile time, then emits a direct `MIR_CALL` to the method's `func_item` with individually transpiled boxed arguments.
 
-In MIR, this translates to a shape-check guard + direct function call.
+**Key implementation details:**
+1. **Override safety:** For `this` receiver, scans ALL known classes to detect subclass overrides. If any subclass overrides the target method, P3 falls back to runtime dispatch. Named vars from `new ClassName()` have exact types — no override check needed.
+2. **Argument evaluation order:** Arguments are transpiled BEFORE setting `this` to the receiver. This prevents a bug where `object.add(name, this.readValue())` would see the wrong `this` during argument evaluation.
+3. **Guards:** Method must have `func_item` (compiled), `capture_count == 0` (no closures), and no spread arguments.
+4. **This save/restore:** Saves `js_get_this()`, sets `js_set_this(recv)`, clears `new.target`, calls method, restores both.
+5. **Closure readback:** Calls `jm_readback_closure_env()` after the direct call in case the method modified closure state.
 
-For class hierarchies with known subclasses (common in AWFY), emit a **switch on shape**:
-```mir
-// Virtual dispatch for node.process() where Node has 3 subclasses
-shape = load_i64(node, 0)  // shape pointer at offset 0
-if shape == WorkerNode_shape: call WorkerNode_process(node)
-elif shape == HandlerNode_shape: call HandlerNode_process(node)
-else: call generic_dispatch(node, "process", ...)
-```
+**Insertion point:** Between spread-arg check and `jm_build_args_array()` in the CALL_EXPRESSION handler for method calls.
 
-**Expected impact:** 5–20× speedup on method-heavy benchmarks → richards from 125× to ~10×, deltablue from 133× to ~15×.
+**Results — AWFY benchmarks (5-run medians, release build, Apple Silicon M4):**
 
-**Effort:** Medium-High. Requires:
-1. Shape comparison in generated MIR code
-2. Per-call-site IC slot allocation (MIR global variables)
-3. Polymorphic fallback for megamorphic sites
+| Benchmark | Pre-P3 (ms) | Post-P3 (ms) | Speedup | vs V8 |
+|-----------|-------------|--------------|---------|-------|
+| sieve | 0.131 | 0.134 | — | **0.26×** |
+| permute | 25.71 | 0.625 | **41.1×** | **0.59×** |
+| queens | 16.29 | 0.482 | **33.8×** | **0.50×** |
+| towers | 48.32 | 4.511 | **10.7×** | 2.73× |
+| bounce | 7.33 | 7.746 | — | 9.11× |
+| list | 7.81 | 0.673 | **11.6×** | **0.89×** |
+| storage | 12.41 | 5.478 | **2.3×** | 6.09× |
+| mandelbrot | 143.85 | 147.03 | — | 3.53× |
+| nbody | 453.14 | 440.22 | — | 59.25× |
+| richards | 5726.52 | 4778.47 | **1.2×** | 71.93× |
+| json | 191.83 | 17.01 | **11.3×** | 4.60× |
+| deltablue | 1843.05 | 1906.63 | — | 100.72× |
+
+**AWFY Geometric Mean: 16.27× → 4.52× (−72.2%, 3.6× overall improvement)**
+
+Four benchmarks now **faster than V8**: sieve (0.26×), permute (0.59×), queens (0.50×), list (0.89×).
+
+**Why some benchmarks don't improve:**
+- **bounce/sieve/mandelbrot/nbody:** Dominated by numeric computation, not method dispatch — P3 doesn't fire on hot paths
+- **richards/deltablue:** Use deep polymorphic hierarchies where `this` receiver has subclass overrides → P3 correctly falls back to runtime dispatch. These need P3b (shape-based polymorphic dispatch) for further improvement
 
 ---
 
-### P4: Direct Array Access in Typed Loops (Priority: HIGH)
+### P4: Direct Array Access in Typed Loops (Priority: HIGH) — ✅ PARTIALLY DONE
 
 **Problem:** Array access in tight loops (`arr[i]` where both arr and i are known types) still goes through bounds checking + deleted-sentinel checking per access. For `matmul` (136×), the inner loop does 3 array reads and 1 array write per iteration, each with full runtime overhead.
 
@@ -278,7 +284,15 @@ else: call generic_dispatch(node, "process", ...)
 - Checking `arr->items[idx] != JS_DELETED_SENTINEL` every access
 - Function call fallback for out-of-bounds
 
-**Proposed fix — Loop-hoisted bounds check:**
+**Implemented (in Phase 2):**
+- ✅ P4b: Array element class type propagation (`bodies[i]` → Body via field-access inference)
+- ✅ P4b-of: For-of loop variable class inference (same field-access inference as P4b)
+- ✅ P4h: Loop-invariant array pointer hoisting (typed + regular arrays in for/while loops)
+- ~~ Bounds check elimination — deferred (diminishing returns; hot loops use function params)
+
+**Remaining (deferred):**
+
+Loop-hoisted bounds check (full elimination):
 ```mir
 // Before loop: verify array won't be resized
 arr_len = load_i64(arr, 16)    // arr->length
@@ -294,12 +308,12 @@ For 2D arrays (`matrix[i][j]`):
 2. Hoist inner array pointer (`row_items = row->items`) to inner loop entry
 3. Inner load becomes single `load_i64(row_items, j * 8)`
 
-**Expected impact:** 5–10× speedup on array-intensive loops → matmul from 136× to ~15×, navier_stokes from 47× to ~8×.
+**Expected impact (remaining):** Bounds check elimination could yield additional 1.5–2× on array-intensive loops, but was deferred as diminishing returns.
 
 **Effort:** Medium. Requires:
 1. Loop analysis to identify array access patterns
 2. Bounds-check hoisting (prove loop bounds ≤ array length)
-3. Array items pointer hoisting (prove no resize in loop body)
+3. Array items pointer hoisting (prove no resize in loop body) — ✅ done (P4h)
 
 ---
 
@@ -624,9 +638,15 @@ The P1 implementation delivers **measurable but modest improvements** (7–26%).
 | json | 208.88 | 191.83 | **−8.2%** | 51.85× |
 | deltablue | 1935.33 | 1843.05 | −4.8% | 97.37× |
 
-**AWFY Geometric Mean: 17.64× → 16.27× (−7.8%)**
+**AWFY Geometric Mean: 17.64× → 16.27× → 4.52× (P3: −72.2%)**
 
-**Analysis:**
+**Phase 3 Analysis:**
+- P3 direct method dispatch eliminates 6+ runtime function calls per method invocation for monomorphic/known-class call sites
+- Massive wins on recursive OOP benchmarks: permute (41×), queens (34×), towers (11×), list (12×), json (11×)
+- richards/deltablue still limited: polymorphic hierarchies cause P3's override check to fall back to runtime dispatch
+- Next step: P3b (shape-based polymorphic dispatch) for richards/deltablue
+
+**Previous Phase 2 Analysis:**
 - P2b INT assignment is the primary driver: storage (−12.2%), richards (−8.4%), json (−8.2%) all use integer fields in OOP patterns
 - Inheritance guard fix enables P1/P2 on more class hierarchies, contributing to richards/deltablue/json improvements
 - P4h array hoisting fires correctly but provides minimal additional speedup (~1-2%) because hoisted loads are a small fraction of total work and matmul's hot inner loop takes arrays as function parameters
@@ -659,17 +679,17 @@ ack                          8.14          18.55        0.44×      (was 0.60×)
 
 ─── AWFY ───
 sieve                        0.13           0.51        0.26×      (was 0.32×) ★
-permute                     25.71           1.06       24.25×      (was 34.91×)
-queens                      16.29           0.97       16.79×      (was 23.36×)
-towers                      48.32           1.65       29.28×      (was 41.92×)
-bounce                       7.33           0.85        8.62×      (was 17.27×)
-list                         7.81           0.76       10.28×      (was 13.68×)
-storage                     12.41           0.90       13.79×      (was 22.72×) ★
-mandelbrot                 143.85          41.65        3.45×      (was 4.68×)
-nbody                      453.14           7.43       60.99×      (was 235.48×) ★
-richards                  5726.52          66.43       86.20×      (was 125.43×)
-json                       191.83           3.70       51.85×      (was 80.90×)
-deltablue                 1843.05          18.93       97.37×      (was 132.82×)
+permute                      0.63           1.06        0.59×      (was 34.91×) ★★★ P3
+queens                       0.48           0.97        0.50×      (was 23.36×) ★★★ P3
+towers                       4.51           1.65        2.73×      (was 41.92×) ★★★ P3
+bounce                       7.75           0.85        9.11×      (was 17.27×)
+list                         0.67           0.76        0.89×      (was 13.68×) ★★★ P3
+storage                      5.48           0.90        6.09×      (was 22.72×) ★★ P3
+mandelbrot                 147.03          41.65        3.53×      (was 4.68×)
+nbody                      440.22           7.43       59.25×      (was 235.48×) ★
+richards                  4778.47          66.43       71.93×      (was 125.43×) ★ P3
+json                        17.01           3.70        4.60×      (was 80.90×) ★★★ P3
+deltablue                 1906.63          18.93      100.72×      (was 132.82×)
 havlak                        ---         182.63        FAIL
 cd                            ---          61.96        FAIL
 
@@ -711,13 +731,14 @@ ray                         10.76           5.22        2.06×      (was 3.06×)
 
 ★ = Major improvement from P1+P2+P4b optimizations
 
-### Improvement Summary (Original → After P1+P2+P2b+P4b+P4b-of+P4h)
+### Improvement Summary (Original → After P1+P2+P2b+P3+P4b+P4b-of+P4h)
 
 | Category | Benchmarks Improved >1.5× | Key Wins |
 |----------|---------------------------|----------|
-| Float + OOP | nbody-A: 235→61×, nbody-B: 160→101×, spectralnorm: 8.6→5.8× | P2 compound assignment + P4b class inference |
-| OOP methods | bounce: 17→8.6×, queens: 23→16.8×, towers: 42→29× | P1 shaped slot reads + P2b INT assignment |
-| INT + OOP | storage: 23→13.8×, richards: 125→86×, json: 81→52× | P2b INT compound assignment + inheritance guard |
+| **P3 method dispatch** | permute: 35→0.59×, queens: 23→0.50×, towers: 42→2.7×, json: 81→4.6× | Direct MIR CALL bypasses 6+ runtime calls |
+| Float + OOP | nbody-A: 235→59×, nbody-B: 160→101×, spectralnorm: 8.6→5.8× | P2 compound assignment + P4b class inference |
+| OOP methods | bounce: 17→9.1×, list: 14→0.89×, storage: 23→6.1× | P1 shaped slot reads + P2b + P3 |
+| INT + OOP | richards: 125→72×, json: 81→4.6× | P2b INT assignment + P3 dispatch |
 | Pure numeric | ack: 0.60→0.44×, nqueens: 1.21→0.85×, fib: 4.74→3.81× | General transpiler improvements |
 | GC/alloc | gcbench: 53→37×, binarytrees: 11→7.8× | Memory subsystem improvements |
-| Still critical | richards: 86×, deltablue: 97×, matmul: 98× | Need P3 (method dispatch) and param type propagation |
+| Still critical | richards: 72×, deltablue: 101×, matmul: 98× | Need P3b (polymorphic dispatch) and param type propagation |

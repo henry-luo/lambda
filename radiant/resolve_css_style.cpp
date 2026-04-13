@@ -2494,16 +2494,15 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             if (has_css_font_family) {
                 bool is_mono = str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
                 if (is_mono) {
-                    bool has_explicit_size = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
-                                             avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr;
-                    if (!has_explicit_size) {
-                        bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-                            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-                        if (!parent_is_mono && span->font->font_size > 0 && span->font->font_size_from_medium) {
-                            float parent_size = span->font->font_size;
-                            span->font->font_size = span->font->font_size * 13.0f / 16.0f;
-                            log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);
-                        }
+                    // Apply quirk based on font_size_from_medium flag rather than
+                    // checking explicit size. Relative units (em, %) that trace back
+                    // to 'medium' through inheritance should still get the quirk.
+                    bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+                        str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+                    if (!parent_is_mono && span->font->font_size > 0 && span->font->font_size_from_medium) {
+                        float parent_size = span->font->font_size;
+                        span->font->font_size = span->font->font_size * 13.0f / 16.0f;
+                        log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);
                     }
                 }
             }
@@ -3261,7 +3260,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     float font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, size_value);
                     if (font_size > 0) {
                         span->font->font_size = font_size;
-                        span->font->font_size_from_medium = false;
+                        // Chromium CheckForGenericFamilyChange: track whether font-size
+                        // derives from the 'medium' initial value through the inheritance chain.
+                        // Relative units (em, %) propagate from parent; absolute units break the chain.
+                        bool parent_from_medium = lycon->font.style && lycon->font.style->font_size_from_medium;
+                        if (size_value->type == CSS_VALUE_TYPE_KEYWORD) {
+                            span->font->font_size_from_medium = true;
+                        } else if (size_value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                                   (size_value->type == CSS_VALUE_TYPE_LENGTH &&
+                                    size_value->data.length.unit == CSS_UNIT_EM)) {
+                            span->font->font_size_from_medium = parent_from_medium;
+                        } else {
+                            span->font->font_size_from_medium = false;
+                        }
                         log_debug("[CSS] Font shorthand: set font-size = %.2f", font_size);
                     }
                 }
@@ -3410,10 +3421,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (valid) {
                 span->font->font_size = font_size;
-                // Track whether font-size comes from the CSS 'medium' keyword.
-                // The monospace quirk only applies when inherited font-size is from 'medium'.
-                span->font->font_size_from_medium =
-                    (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_MEDIUM);
+                // Chromium CheckForGenericFamilyChange: track whether font-size
+                // derives from the 'medium' initial value through the inheritance chain.
+                // Keywords (medium, large, etc.) are all based on the medium baseline.
+                // Relative units (em, %) propagate from parent; absolute units break the chain.
+                bool parent_from_medium = lycon->font.style && lycon->font.style->font_size_from_medium;
+                if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    span->font->font_size_from_medium = true;
+                } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                           (value->type == CSS_VALUE_TYPE_LENGTH &&
+                            value->data.length.unit == CSS_UNIT_EM)) {
+                    span->font->font_size_from_medium = parent_from_medium;
+                } else {
+                    span->font->font_size_from_medium = false;
+                }
                 log_debug("[CSS] Font size set to: %.2f px", font_size);
             } else {
                 log_debug("[CSS] Font size not set (invalid value)");

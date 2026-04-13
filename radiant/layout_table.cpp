@@ -3691,6 +3691,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         // Caption - mark as block and layout content immediately
         ViewBlock* caption = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, node);
         if (caption) {
+            caption->display.inner = CSS_VALUE_TABLE_CAPTION;
             lycon->view = (View*)caption;
             dom_node_resolve_style(node, lycon);  // Resolve caption styles
 
@@ -5080,7 +5081,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     log_debug("%s Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f, collapse=%d)", cell->source_loc(),
         max_width, min_width, padding_horizontal, border_horizontal, border_collapse);
 
-    // Use ceiling to ensure we always have enough space for content
+    // Round up cell widths to ensure enough space for content
     result.max_width = ceilf(max_width);
     result.min_width = ceilf(min_width);
 
@@ -5729,9 +5730,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 int span = tcell->td->col_span;
 
                 // Calculate current totals for all three width arrays
-                int current_col_total = 0;
-                int current_min_total = 0;
-                int current_max_total = 0;
+                float current_col_total = 0;
+                float current_min_total = 0;
+                float current_max_total = 0;
                 for (int c = col; c < col + span && c < columns; c++) {
                     current_col_total += col_widths[c];
                     current_min_total += meta->col_min_widths[c];
@@ -5740,81 +5741,57 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                 // Distribute min_width across col_min_widths (proportional to existing)
                 if (min_width > current_min_total) {
-                    int extra_needed = min_width - current_min_total;
+                    float extra_needed = min_width - current_min_total;
                     if (current_min_total > 0) {
                         // Proportional distribution based on current min widths
-                        int distributed = 0;
                         for (int c = col; c < col + span && c < columns; c++) {
-                            float proportion = (float)meta->col_min_widths[c] / (float)current_min_total;
-                            int amount = (int)(extra_needed * proportion);
+                            float proportion = meta->col_min_widths[c] / current_min_total;
+                            float amount = extra_needed * proportion;
                             meta->col_min_widths[c] += amount;
-                            distributed += amount;
-                        }
-                        // Distribute remainder to first column to ensure we use all extra_needed
-                        if (distributed < extra_needed && col < columns) {
-                            meta->col_min_widths[col] += (extra_needed - distributed);
                         }
                     } else {
                         // Equal distribution if all columns are zero
-                        int extra_per_col = extra_needed / span;
-                        int remainder = extra_needed % span;
+                        float extra_per_col = extra_needed / span;
                         for (int c = col; c < col + span && c < columns; c++) {
                             meta->col_min_widths[c] += extra_per_col;
-                            if (remainder > 0) { meta->col_min_widths[c]++; remainder--; }
                         }
                     }
                 }
 
                 // Distribute pref_width across col_max_widths (proportional to existing)
                 if (pref_width > current_max_total) {
-                    int extra_needed = pref_width - current_max_total;
+                    float extra_needed = pref_width - current_max_total;
                     if (current_max_total > 0) {
                         // Proportional distribution based on current max widths
-                        int distributed = 0;
                         for (int c = col; c < col + span && c < columns; c++) {
-                            float proportion = (float)meta->col_max_widths[c] / (float)current_max_total;
-                            int amount = (int)(extra_needed * proportion);
+                            float proportion = meta->col_max_widths[c] / current_max_total;
+                            float amount = extra_needed * proportion;
                             meta->col_max_widths[c] += amount;
-                            distributed += amount;
-                        }
-                        // Distribute remainder to first column to ensure we use all extra_needed
-                        if (distributed < extra_needed && col < columns) {
-                            meta->col_max_widths[col] += (extra_needed - distributed);
                         }
                     } else {
                         // Equal distribution if all columns are zero
-                        int extra_per_col = extra_needed / span;
-                        int remainder = extra_needed % span;
+                        float extra_per_col = extra_needed / span;
                         for (int c = col; c < col + span && c < columns; c++) {
                             meta->col_max_widths[c] += extra_per_col;
-                            if (remainder > 0) { meta->col_max_widths[c]++; remainder--; }
                         }
                     }
                 }
 
                 // Also update col_widths for backward compatibility (proportional)
                 if (cell_width > current_col_total) {
-                    int extra_needed = cell_width - current_col_total;
+                    float extra_needed = cell_width - current_col_total;
                     if (current_col_total > 0) {
                         // Proportional distribution based on current widths
-                        int distributed = 0;
                         for (int c = col; c < col + span && c < columns; c++) {
-                            float proportion = (float)col_widths[c] / (float)current_col_total;
-                            int amount = (int)(extra_needed * proportion);
+                            float proportion = col_widths[c] / current_col_total;
+                            float amount = extra_needed * proportion;
                             col_widths[c] += amount;
-                            distributed += amount;
-                        }
-                        // Distribute remainder to first column to ensure we use all extra_needed
-                        if (distributed < extra_needed && col < columns) {
-                            col_widths[col] += (extra_needed - distributed);
                         }
                     } else {
                         // Equal distribution if all columns are zero
-                        int extra_per_col = extra_needed / span;
-                        int remainder = extra_needed % span;
+                        float extra_per_col = extra_needed / span;
                         for (int c = col; c < col + span && c < columns; c++) {
                             col_widths[c] += extra_per_col;
-                            if (remainder > 0) { col_widths[c]++; remainder--; }
                         }
                     }
                 }
@@ -6169,24 +6146,24 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("===== CSS 2.1 AUTO TABLE LAYOUT ALGORITHM =====");
 
     // Calculate minimum and preferred table widths (including borders and spacing)
-    int min_table_content_width = 0;  // MCW sum for table content
-    int pref_table_content_width = 0; // PCW sum for table content
+    float min_table_content_width = 0;  // MCW sum for table content
+    float pref_table_content_width = 0; // PCW sum for table content
 
     for (int i = 0; i < columns; i++) {
         min_table_content_width += meta->col_min_widths[i];
         pref_table_content_width += meta->col_max_widths[i];
-        log_debug("Column %d: MCW=%dpx, PCW=%dpx",
+        log_debug("Column %d: MCW=%.1fpx, PCW=%.1fpx",
                  i, meta->col_min_widths[i], meta->col_max_widths[i]);
     }
 
     // Add border-spacing to table width calculation (CSS 2.1 requirement)
-    int border_spacing_total = 0;
+    float border_spacing_total = 0;
     if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
-        border_spacing_total = (int)((columns + 1) * table->tb->border_spacing_h);
+        border_spacing_total = (columns + 1) * table->tb->border_spacing_h;
     }
 
-    int min_table_width = min_table_content_width + border_spacing_total;
-    int pref_table_width = pref_table_content_width + border_spacing_total;
+    float min_table_width = min_table_content_width + border_spacing_total;
+    float pref_table_width = pref_table_content_width + border_spacing_total;
 
     // CSS 2.1 §17.5.2.1: Table width must be at least as wide as the caption.
     // Consider both explicit CSS width and intrinsic content width of the caption.
@@ -6235,39 +6212,39 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
     }
 
-    log_debug("Table content: min=%dpx, preferred=%dpx", min_table_content_width, pref_table_content_width);
-    log_debug("Table total (with spacing): min=%dpx, preferred=%dpx", min_table_width, pref_table_width);
+    log_debug("Table content: min=%.1fpx, preferred=%.1fpx", min_table_content_width, pref_table_content_width);
+    log_debug("Table total (with spacing): min=%.1fpx, preferred=%.1fpx", min_table_width, pref_table_width);
 
     // CSS 2.1: For auto-width tables, constrain by available space minus margins
     // The available space comes from:
     // 1. The parent element's width (most reliable)
     // 2. lycon->line bounds (if set)
     // 3. lycon->available_space (fallback)
-    int max_available_width = 0;
+    float max_available_width = 0;
     if (!has_explicit_table_width) {
         // Try to get container width from parent element first
-        int container_width = 0;
+        float container_width = 0;
 
         // CSS 2.1 §9.5 + §17.5.2.2: For auto-width tables inside a BFC that avoids
         // floats, use lycon->block.content_width which already accounts for float
         // avoidance width reduction computed by layout_block().
         if (lycon->block.content_width > 0) {
-            container_width = (int)lycon->block.content_width;
-            log_debug("Container width from lycon content_width (BFC float avoidance): %dpx", container_width);
+            container_width = lycon->block.content_width;
+            log_debug("Container width from lycon content_width (BFC float avoidance): %.1fpx", container_width);
         }
 
         // Fallback to parent element width
         if (container_width <= 0) {
             ViewBlock* parent = (ViewBlock*)table->parent;
             if (parent && parent->width > 0) {
-                container_width = (int)parent->width;
+                container_width = parent->width;
                 if (parent->bound) {
                     if (parent->bound->border) {
-                        container_width -= (int)(parent->bound->border->width.left + parent->bound->border->width.right);
+                        container_width -= (parent->bound->border->width.left + parent->bound->border->width.right);
                     }
                     container_width -= parent->bound->padding.left + parent->bound->padding.right;
                 }
-                log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
+                log_debug("Container width from parent element: %.1fpx (parent->width=%.1f)", container_width, parent->width);
             }
         }
 
@@ -6278,31 +6255,31 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Fallback to available_space
         if (container_width <= 0 && lycon->available_space.width.is_definite()) {
-            container_width = (int)lycon->available_space.width.to_px_or_zero();
+            container_width = lycon->available_space.width.to_px_or_zero();
         }
 
         // Subtract table margins
-        int margin_left = 0, margin_right = 0;
+        float margin_left = 0, margin_right = 0;
         if (table->bound) {
-            margin_left = (int)table->bound->margin.left;
-            margin_right = (int)table->bound->margin.right;
+            margin_left = table->bound->margin.left;
+            margin_right = table->bound->margin.right;
         }
 
         max_available_width = container_width - margin_left - margin_right;
         if (max_available_width < 0) max_available_width = 0;
 
-        log_debug("Auto table width constraint: container=%dpx, margin_left=%dpx, margin_right=%dpx, max_available=%dpx",
+        log_debug("Auto table width constraint: container=%.1fpx, margin_left=%.1fpx, margin_right=%.1fpx, max_available=%.1fpx",
                  container_width, margin_left, margin_right, max_available_width);
 
         // Constrain preferred width to available space
         // But never go below minimum content width (table will overflow)
         if (max_available_width > 0 && pref_table_width > max_available_width) {
-            log_debug("Constraining preferred width from %dpx to %dpx (available space minus margins)",
+            log_debug("Constraining preferred width from %.1fpx to %.1fpx (available space minus margins)",
                      pref_table_width, max_available_width);
             pref_table_width = max_available_width;
         } else if (max_available_width == 0 && container_width > 0) {
             // Margins consume all available space - use minimum content width
-            log_debug("Margins consume all space, using minimum content width: %dpx", min_table_width);
+            log_debug("Margins consume all space, using minimum content width: %.1fpx", min_table_width);
             pref_table_width = min_table_width;
         }
     }
@@ -6311,7 +6288,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // For explicit width, we need to account for border and padding
     // (table_content_width already has border/padding/spacing subtracted,
     // but we need the width after border/padding only, before spacing)
-    int explicit_content_area = explicit_table_width;
+    float explicit_content_area = (float)explicit_table_width;
     if (has_explicit_table_width) {
         if (table->tb->border_collapse) {
             // Border-collapse: CSS width is border-box including half of outer collapsed borders.
@@ -6319,8 +6296,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Note: padding is ignored in border-collapse per CSS 2.1 §17.6.2
             float half_left = meta->collapsed_border_left / 2.0f;
             float half_right = meta->collapsed_border_right / 2.0f;
-            explicit_content_area -= (int)(half_left + half_right + 0.5f);
-            log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %dpx",
+            explicit_content_area -= (half_left + half_right);
+            log_debug("Explicit content area (border-collapse, half borders %.1f+%.1f): %.1fpx",
                       half_left, half_right, explicit_content_area);
         } else {
             // CSS 2.1 §10.2: In separate borders mode, CSS width is content-box.
@@ -6328,43 +6305,43 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Exception: box-sizing:border-box makes CSS width border-box.
             bool is_border_box = (table->blk && table->blk->box_sizing == CSS_VALUE_BORDER_BOX);
             if (is_border_box && table->bound && table->bound->border) {
-                explicit_content_area -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+                explicit_content_area -= (table->bound->border->width.left + table->bound->border->width.right);
             }
             // Subtract table padding to get the grid area for column distribution.
             if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
                 explicit_content_area -= table->bound->padding.left + table->bound->padding.right;
             }
-            log_debug("Explicit content area (separate borders, border_box=%d): %dpx", is_border_box, explicit_content_area);
+            log_debug("Explicit content area (separate borders, border_box=%d): %.1fpx", is_border_box, explicit_content_area);
         }
     }
 
-    int used_table_width;
+    float used_table_width;
     if (has_explicit_table_width) {
         // CSS 2.1: Table has explicit width - use content area (but not less than minimum)
         used_table_width = explicit_content_area > min_table_width ? explicit_content_area : min_table_width;
-        log_debug("CSS 2.1: Using explicit table content width: %dpx (requested: %dpx)", used_table_width, explicit_content_area);
+        log_debug("CSS 2.1: Using explicit table content width: %.1fpx (requested: %.1fpx)", used_table_width, explicit_content_area);
     } else {
         // CSS 2.1: Table width is auto - use preferred width
         used_table_width = pref_table_width;
-        log_debug("CSS 2.1: Using preferred table width: %dpx (table width: auto)", used_table_width);
+        log_debug("CSS 2.1: Using preferred table width: %.1fpx (table width: auto)", used_table_width);
     }
 
     // Calculate available content width for column distribution
-    int available_content_width = used_table_width - border_spacing_total;
+    float available_content_width = used_table_width - border_spacing_total;
 
     // In border-collapse mode, col_max_widths and col_min_widths already include
     // per-cell border halves (added during measurement). No additional subtraction needed.
     if (table->tb->border_collapse && explicit_table_width > 0) {
-        log_debug("Border-collapse: col widths already include border halves, available=%dpx",
+        log_debug("Border-collapse: col widths already include border halves, available=%.1fpx",
                   available_content_width);
     }
 
     // Check for equal distribution case (CSS behavior for similar columns)
     bool use_equal_distribution = true;
     if (columns > 0) {
-        int first_pref = meta->col_max_widths[0];
+        float first_pref = meta->col_max_widths[0];
         for (int i = 1; i < columns; i++) {
-            if (abs(meta->col_max_widths[i] - first_pref) > 3) { // Allow small differences
+            if (fabsf(meta->col_max_widths[i] - first_pref) > 3) { // Allow small differences
                 use_equal_distribution = false;
                 break;
             }
@@ -6376,18 +6353,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (use_equal_distribution && columns > 1 && !has_explicit_table_width) {
         // Special case: columns have similar preferred widths and table width is auto
         // Use equal distribution (common browser optimization for balanced tables)
-        int avg_width = used_table_width / columns;
-        int remainder = used_table_width % columns;
+        float avg_width = used_table_width / columns;
 
-        log_debug("Using equal distribution - columns have similar content (avg=~%dpx)", avg_width);
+        log_debug("Using equal distribution - columns have similar content (avg=~%.1fpx)", avg_width);
         for (int i = 0; i < columns; i++) {
             col_widths[i] = avg_width;
-            if (i < remainder) col_widths[i]++; // Distribute remainder
         }
     }
 
     // CSS 2.1 Column Width Distribution Algorithm (Section 17.5.2.2)
-    if (available_content_width == pref_table_content_width) {
+    if (fabsf(available_content_width - pref_table_content_width) < 0.01f) {
         // Case 1: Perfect fit - use preferred widths directly
         log_debug("CSS 2.1 Case 1: Perfect fit - using PCW directly");
         for (int i = 0; i < columns; i++) {
@@ -6397,12 +6372,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Case 2: Table wider than preferred - distribute extra space
         // Columns with explicit CSS widths keep their preferred width;
         // extra space is distributed only among auto-width columns.
-        int extra_space = available_content_width - pref_table_content_width;
+        float extra_space = available_content_width - pref_table_content_width;
 
-        log_debug("CSS 2.1 Case 2: Table wider than preferred - distributing %dpx extra", extra_space);
+        log_debug("CSS 2.1 Case 2: Table wider than preferred - distributing %.1fpx extra", extra_space);
 
         // Calculate total preferred width of auto-width columns only
-        int auto_pref_total = 0;
+        float auto_pref_total = 0;
         int auto_col_count = 0;
         for (int i = 0; i < columns; i++) {
             if (!meta->col_has_explicit_width[i]) {
@@ -6411,45 +6386,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         }
 
-        int total_distributed = 0;
         if (auto_col_count > 0) {
             // Distribute extra space only to auto-width columns
             for (int i = 0; i < columns; i++) {
                 if (meta->col_has_explicit_width[i]) {
                     col_widths[i] = meta->col_max_widths[i];
                 } else if (auto_pref_total > 0) {
-                    int extra_for_col = (extra_space * meta->col_max_widths[i]) / auto_pref_total;
+                    float extra_for_col = (extra_space * meta->col_max_widths[i]) / auto_pref_total;
                     col_widths[i] = meta->col_max_widths[i] + extra_for_col;
-                    total_distributed += extra_for_col;
                 } else {
-                    int equal_share = extra_space / auto_col_count;
+                    float equal_share = extra_space / auto_col_count;
                     col_widths[i] = equal_share;
-                    total_distributed += equal_share;
-                }
-            }
-            // Remainder to auto-width columns
-            int remainder = extra_space - total_distributed;
-            for (int i = 0; i < columns && remainder > 0; i++) {
-                if (!meta->col_has_explicit_width[i]) {
-                    col_widths[i]++;
-                    remainder--;
                 }
             }
         } else {
             // All columns have explicit widths - distribute proportionally to all
             for (int i = 0; i < columns; i++) {
                 if (pref_table_content_width > 0) {
-                    int extra_for_col = (extra_space * meta->col_max_widths[i]) / pref_table_content_width;
+                    float extra_for_col = (extra_space * meta->col_max_widths[i]) / pref_table_content_width;
                     col_widths[i] = meta->col_max_widths[i] + extra_for_col;
-                    total_distributed += extra_for_col;
                 } else {
                     col_widths[i] = meta->col_max_widths[i];
                 }
-            }
-            int remainder = extra_space - total_distributed;
-            for (int i = 0; i < columns && remainder > 0; i++) {
-                col_widths[i]++;
-                remainder--;
             }
         }
     } else {
@@ -6458,19 +6416,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         if (available_content_width >= min_table_content_width) {
             // Can fit minimum widths - scale between min and preferred
-            log_debug("Scaling between MCW and PCW (available=%d, min=%d, pref=%d)",
+            log_debug("Scaling between MCW and PCW (available=%.1f, min=%.1f, pref=%.1f)",
                      available_content_width, min_table_content_width, pref_table_content_width);
 
             for (int i = 0; i < columns; i++) {
-                int min_w = meta->col_min_widths[i];
-                int pref_w = meta->col_max_widths[i];
-                int range = pref_w - min_w;
+                float min_w = meta->col_min_widths[i];
+                float pref_w = meta->col_max_widths[i];
+                float range = pref_w - min_w;
 
                 if (pref_table_content_width > min_table_content_width && range > 0) {
                     // Linear interpolation between min and preferred
-                    double factor = (double)(available_content_width - min_table_content_width) /
+                    float factor = (available_content_width - min_table_content_width) /
                                    (pref_table_content_width - min_table_content_width);
-                    col_widths[i] = min_w + (int)(range * factor);
+                    col_widths[i] = min_w + range * factor;
                 } else {
                     col_widths[i] = min_w; // Fallback to minimum
                 }
