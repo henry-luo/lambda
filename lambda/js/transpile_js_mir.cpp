@@ -9136,8 +9136,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // Bind 'this' to the class object for static methods
                     MIR_reg_t class_this;
                     JsModuleConstEntry cls_lookup;
-                    snprintf(cls_lookup.name, sizeof(cls_lookup.name), "_js_%.*s",
-                        (int)ce->name->len, ce->name->chars);
+                    if (ce->name) {
+                        snprintf(cls_lookup.name, sizeof(cls_lookup.name), "_js_%.*s",
+                            (int)ce->name->len, ce->name->chars);
+                    } else {
+                        snprintf(cls_lookup.name, sizeof(cls_lookup.name), "_js_<anon>");
+                    }
                     JsModuleConstEntry* cls_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &cls_lookup);
                     if (cls_mc && cls_mc->const_type == MCONST_CLASS) {
                         class_this = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
@@ -12204,6 +12208,16 @@ static MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
 static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
     MIR_reg_t object = jm_call_0(mt, "js_new_object", MIR_T_I64);
 
+    // Generator spill: if any property value/key/spread contains yield, save object ref to env
+    int obj_spill_slot = -1;
+    if (mt->in_generator) {
+        JsAstNode* cy = obj->properties;
+        while (cy) {
+            if (jm_has_yield(cy)) { obj_spill_slot = jm_gen_spill_save(mt, object); break; }
+            cy = cy->next;
+        }
+    }
+
     JsAstNode* prop = obj->properties;
     while (prop) {
         if (prop->node_type == JS_AST_NODE_PROPERTY) {
@@ -12211,6 +12225,10 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             // Skip getter/setter properties with null key (get key() { ... })
             if (!p->key) { prop = prop->next; continue; }
             MIR_reg_t key;
+            // Generator spill: if value contains yield, we need to spill key too
+            // since key is evaluated before value which may yield
+            int key_spill_slot = -1;
+            bool val_has_yield = obj_spill_slot >= 0 && p->value && jm_has_yield(p->value);
             if (p->computed) {
                 key = jm_transpile_box_item(mt, p->key);
                 // computed getter/setter: wrap key with __get_/__set_ prefix at runtime
@@ -12227,7 +12245,18 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             } else {
                 key = jm_transpile_box_item(mt, p->key);
             }
+            if (val_has_yield) {
+                key_spill_slot = jm_gen_spill_save(mt, key);
+            }
             MIR_reg_t val = jm_transpile_box_item(mt, p->value);
+            // Generator spill: restore object and key refs after yield-containing property value
+            if (val_has_yield) {
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+                jm_gen_spill_load(mt, key, key_spill_slot);
+            } else if (obj_spill_slot >= 0 && jm_has_yield(prop)) {
+                // key itself contained yield (computed key case)
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+            }
             // function name inference from object property key
             if (!p->computed && p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER &&
                 p->value && (p->value->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
@@ -12259,6 +12288,10 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             // Object spread: { ...source } — copy all own properties from source into target
             JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
             MIR_reg_t source = jm_transpile_box_item(mt, sp->argument);
+            // Generator spill: restore object ref after yield-containing spread
+            if (obj_spill_slot >= 0 && jm_has_yield(prop)) {
+                jm_gen_spill_load(mt, object, obj_spill_slot);
+            }
             jm_call_2(mt, "js_object_spread_into", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, source));
@@ -14055,7 +14088,10 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                             if (p4b_ce) {
                                                 var_entry->class_entry = p4b_ce;
                                                 log_debug("P4b: var '%s' inferred as '%.*s' from %d field accesses",
-                                                          vname, (int)p4b_ce->name->len, p4b_ce->name->chars, p4b_count);
+                                                          vname,
+                                                          (int)(p4b_ce->name ? p4b_ce->name->len : 0),
+                                                          p4b_ce->name ? p4b_ce->name->chars : "<anon>",
+                                                          p4b_count);
                                             }
                                         }
                                     }
@@ -15211,7 +15247,7 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         }
 
         // Set __class_name__ for instanceof support
-        {
+        if (ce->name) {
             MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
             MIR_reg_t cn_val = jm_box_string_literal(mt, ce->name->chars, (int)ce->name->len);
             jm_call_3(mt, "js_property_set", MIR_T_I64,
@@ -15907,7 +15943,9 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     fo_var->class_entry = p4b_ce;
                     log_debug("P4b-of: for-of var '%.*s' inferred as '%.*s' from %d field accesses",
                               var_len, var_name,
-                              (int)p4b_ce->name->len, p4b_ce->name->chars, p4b_count);
+                              (int)(p4b_ce->name ? p4b_ce->name->len : 0),
+                              p4b_ce->name ? p4b_ce->name->chars : "<anon>",
+                              p4b_count);
                 }
             }
         }
@@ -20475,8 +20513,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // (child's pre-shaped object conflicts with parent's field writes)
             if (parent_has_ctor_fields) {
                 log_debug("js-mir: disabling P3 for superclass constructor '%.*s' (parent of '%.*s')",
-                    (int)ce->superclass->name->len, ce->superclass->name->chars,
-                    (int)ce->name->len, ce->name->chars);
+                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
+                    ce->superclass->name ? ce->superclass->name->chars : "<anon>",
+                    (int)(ce->name ? ce->name->len : 0),
+                    ce->name ? ce->name->chars : "<anon>");
                 ce->superclass->constructor->fc->ctor_prop_count = 0;
             }
             // Disable P3 for the child class constructor ONLY when parent has fields.
@@ -20486,8 +20526,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 ce->constructor && ce->constructor->fc &&
                 ce->constructor->fc->ctor_prop_count > 0) {
                 log_debug("js-mir: disabling P3 for child constructor '%.*s' (extends '%.*s' with fields)",
-                    (int)ce->name->len, ce->name->chars,
-                    (int)ce->superclass->name->len, ce->superclass->name->chars);
+                    (int)(ce->name ? ce->name->len : 0),
+                    ce->name ? ce->name->chars : "<anon>",
+                    (int)(ce->superclass->name ? ce->superclass->name->len : 0),
+                    ce->superclass->name ? ce->superclass->name->chars : "<anon>");
                 ce->constructor->fc->ctor_prop_count = 0;
             }
         }
@@ -20498,7 +20540,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         JsClassEntry* ce = &mt->class_entries[ci];
         for (int fi = 0; fi < ce->static_field_count; fi++) {
             JsStaticFieldEntry* sf = &ce->static_fields[fi];
-            if (sf->name && mt->module_var_count < 2048) {
+            if (sf->name && ce->name && mt->module_var_count < 2048) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
                 JsModuleConstEntry mce;
@@ -21855,7 +21897,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                             }
                             log_debug("js-mir: emitting static field init %.*s.%.*s → module_var[%d]",
-                                (int)ce->name->len, ce->name->chars,
+                                (int)(ce->name ? ce->name->len : 0),
+                                ce->name ? ce->name->chars : "<anon>",
                                 (int)sf->name->len, sf->name->chars,
                                 sf->module_var_index);
                         }

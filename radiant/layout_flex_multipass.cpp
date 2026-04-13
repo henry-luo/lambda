@@ -649,7 +649,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     if (flex_layout && is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
         // Row flex with auto height: calculate height from flex items
         log_debug("AUTO-HEIGHT: row flex with auto-height, calculating from items");
-        int max_item_height = 0;
+        float max_item_height = 0;
         DomNode* child = flex_container->first_child;
         while (child) {
             if (child->is_element()) {
@@ -661,9 +661,9 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                     continue;
                 }
                 if (item && item->fi && item->height > 0) {
-                    if ((int)item->height > max_item_height) {
-                        max_item_height = (int)item->height;
-                        log_debug("AUTO-HEIGHT: row flex item height = %d, max = %d", (int)item->height, max_item_height);
+                    if (item->height > max_item_height) {
+                        max_item_height = item->height;
+                        log_debug("AUTO-HEIGHT: row flex item height = %.1f, max = %.1f", item->height, max_item_height);
                     }
                 } else if (item) {
                     // Try measured content height from cache
@@ -678,15 +678,15 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         }
         if (max_item_height > 0) {
             // Add padding to content height for final container height
-            int padding_top = 0, padding_bottom = 0;
+            float padding_top = 0, padding_bottom = 0;
             if (flex_container->bound) {
-                padding_top = (int)flex_container->bound->padding.top;
-                padding_bottom = (int)flex_container->bound->padding.bottom;
+                padding_top = flex_container->bound->padding.top;
+                padding_bottom = flex_container->bound->padding.bottom;
             }
-            int total_height = max_item_height + padding_top + padding_bottom;
-            flex_layout->cross_axis_size = (float)max_item_height;  // Content height
-            flex_container->height = (float)total_height;  // Total height including padding
-            log_debug("AUTO-HEIGHT: row flex container height updated to %d (content=%d + padding=%d+%d)",
+            float total_height = max_item_height + padding_top + padding_bottom;
+            flex_layout->cross_axis_size = max_item_height;  // Content height
+            flex_container->height = total_height;  // Total height including padding
+            log_debug("AUTO-HEIGHT: row flex container height updated to %.1f (content=%.1f + padding=%.1f+%.1f)",
                       total_height, max_item_height, padding_top, padding_bottom);
         }
     } else if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
@@ -750,22 +750,22 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             }
             child = child->next_sibling;
         }
-        int total_height = (int)(total_height_f + 0.5f);  // round to nearest integer
+        float total_height = total_height_f;
         // Add gap spacing
         if (item_count > 1 && flex_layout->column_gap > 0) {
-            total_height += (int)(flex_layout->column_gap * (item_count - 1));
+            total_height += flex_layout->column_gap * (item_count - 1);
         } else if (item_count > 1 && flex_layout->row_gap > 0) {
             // For column flex, row-gap applies
-            total_height += (int)(flex_layout->row_gap * (item_count - 1));
+            total_height += flex_layout->row_gap * (item_count - 1);
         }
         if (total_height > 0) {
             // Add padding to content height for final container height
-            int padding_top = 0, padding_bottom = 0;
+            float padding_top = 0, padding_bottom = 0;
             if (flex_container->bound) {
-                padding_top = (int)flex_container->bound->padding.top;
-                padding_bottom = (int)flex_container->bound->padding.bottom;
+                padding_top = flex_container->bound->padding.top;
+                padding_bottom = flex_container->bound->padding.bottom;
             }
-            int final_height = total_height + padding_top + padding_bottom;
+            float final_height = total_height + padding_top + padding_bottom;
             // CSS Flexbox: AUTO-HEIGHT must never shrink a container below the height
             // already determined by a parent flex layout. This prevents stale measurement
             // cache values (measured at unconstrained width) from reducing a container's
@@ -773,8 +773,8 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             // (e.g. a nested column flex item in a column flex, where the inner item's
             // content was measured at width=0 but will be stretched to the parent width).
             float existing_height = flex_container->height;  // Set by parent flex or prior layout
-            if ((float)final_height < existing_height) {
-                log_debug("AUTO-HEIGHT: NOT shrinking container from %.0f to %d (keeping parent-set height)",
+            if (final_height < existing_height) {
+                log_debug("AUTO-HEIGHT: NOT shrinking container from %.0f to %.1f (keeping parent-set height)",
                           existing_height, final_height);
             } else {
                 // For column flex with wrap and indefinite height (auto), set wrapping
@@ -785,10 +785,10 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                     flex_layout->main_axis_size = 1e9f;
                     log_debug("AUTO-HEIGHT: column flex with wrap, using infinite main_axis_size for wrapping");
                 } else {
-                    flex_layout->main_axis_size = (float)total_height;  // Content height
+                    flex_layout->main_axis_size = total_height;  // Content height
                 }
-                flex_container->height = (float)final_height;  // Total height including padding
-                log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
+                flex_container->height = final_height;  // Total height including padding
+                log_debug("AUTO-HEIGHT: column flex container height updated to %.1f (content=%.1f + padding=%.1f+%.1f)",
                           final_height, total_height, padding_top, padding_bottom);
             }
         }
@@ -808,22 +808,22 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_width && !has_flex_basis_width && current_content_width <= 0) {
         // Column flex with auto width: calculate width from widest flex item
         log_debug("AUTO-WIDTH: column flex with auto-width, calculating from items");
-        int max_item_width = 0;
+        float max_item_width = 0;
         DomNode* child = flex_container->first_child;
         while (child) {
             if (child->is_element()) {
                 ViewElement* item = (ViewElement*)child->as_element();
                 if (item && item->fi && item->width > 0) {
-                    if ((int)item->width > max_item_width) {
-                        max_item_width = (int)item->width;
-                        log_debug("AUTO-WIDTH: column flex item width = %d, max = %d", (int)item->width, max_item_width);
+                    if (item->width > max_item_width) {
+                        max_item_width = item->width;
+                        log_debug("AUTO-WIDTH: column flex item width = %.1f, max = %.1f", item->width, max_item_width);
                     }
                 } else if (item) {
                     // Try measured content width from cache
                     MeasurementCacheEntry* cached = get_from_measurement_cache(child);
                     if (cached && cached->measured_width > max_item_width) {
                         max_item_width = cached->measured_width;
-                        log_debug("AUTO-WIDTH: column flex item cached width = %d, max = %d", cached->measured_width, max_item_width);
+                        log_debug("AUTO-WIDTH: column flex item cached width = %d, max = %.1f", cached->measured_width, max_item_width);
                     }
                 }
             }
@@ -831,15 +831,15 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         }
         if (max_item_width > 0) {
             // Add padding to content width for final container width
-            int padding_left = 0, padding_right = 0;
+            float padding_left = 0, padding_right = 0;
             if (flex_container->bound) {
-                padding_left = (int)flex_container->bound->padding.left;
-                padding_right = (int)flex_container->bound->padding.right;
+                padding_left = flex_container->bound->padding.left;
+                padding_right = flex_container->bound->padding.right;
             }
-            int total_width = max_item_width + padding_left + padding_right;
-            flex_layout->cross_axis_size = (float)max_item_width;  // Content width
-            flex_container->width = (float)total_width;  // Total width including padding
-            log_debug("AUTO-WIDTH: column flex container width updated to %d (content=%d + padding=%d+%d)",
+            float total_width = max_item_width + padding_left + padding_right;
+            flex_layout->cross_axis_size = max_item_width;  // Content width
+            flex_container->width = total_width;  // Total width including padding
+            log_debug("AUTO-WIDTH: column flex container width updated to %.1f (content=%.1f + padding=%.1f+%.1f)",
                       total_width, max_item_width, padding_left, padding_right);
         }
     }
@@ -1255,7 +1255,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     // Use iframe's actual dimensions as viewport, not window dimensions
                     // This ensures the embedded document layouts to fit within the iframe
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
-                        (int)flex_width, (int)flex_height,
+                        (int)flex_width, (int)flex_height, // INT_CAST_OK: viewport API expects int
                         lycon->ui_context->pixel_ratio);
                     log_debug(">>> FLEX ITEM IFRAME: load_html_doc returned doc=%p", doc);
                     if (doc) {
@@ -1288,8 +1288,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
                             int saved_viewport_width = lycon->ui_context->viewport_width;
                             int saved_viewport_height = lycon->ui_context->viewport_height;
-                            lycon->ui_context->viewport_width = (int)flex_width;
-                            lycon->ui_context->viewport_height = (int)flex_height;
+                            lycon->ui_context->viewport_width = (int)flex_width; // INT_CAST_OK: viewport API expects int
+                            lycon->ui_context->viewport_height = (int)flex_height; // INT_CAST_OK: viewport API expects int
 
                             // Process @font-face rules before layout (critical for custom fonts like Computer Modern)
                             process_document_font_faces(lycon->ui_context, doc);
@@ -1710,10 +1710,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         // estimate wrapped height using word-boundary groups
                         float min_word = widths.min_content;
                         if (min_word > 0 && min_word <= container_content_width) {
-                            int groups_per_line = (int)(container_content_width / min_word);
+                            int groups_per_line = (int)(container_content_width / min_word); // INT_CAST_OK: integer count
                             if (groups_per_line > 0) {
                                 float line_w = groups_per_line * min_word;
-                                int num_lines = (int)ceilf(text_width / line_w);
+                                int num_lines = (int)ceilf(text_width / line_w); // INT_CAST_OK: integer line count
                                 effective_text_height = num_lines * text_height;
                             }
                         } else {
@@ -1866,7 +1866,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                             dt->rect->width = text_width;
                             dt->rect->height = text_height;
                             dt->rect->start_index = 0;
-                            dt->rect->length = (int)strlen(text);
+                            dt->rect->length = (int)strlen(text); // INT_CAST_OK: string length
                             dt->rect->next = nullptr;  // single rect for vertical text
                             log_debug("FLEX TEXT: vertical WM override rect: (%.1f, %.1f, %.1f, %.1f)",
                                       text_x, text_y, text_width, text_height);
@@ -2237,13 +2237,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         if (fi->bound) {
                             margin_cross = fi->bound->margin.top + fi->bound->margin.bottom;
                         }
-                        int new_outer_cross = (int)(fi->height + margin_cross + 0.5f);
+                        float new_outer_cross = fi->height + margin_cross;
                         for (int li = 0; li < flex->line_count; li++) {
                             FlexLineInfo* line = &flex->lines[li];
                             for (int ii = 0; ii < line->item_count; ii++) {
                                 if (line->items[ii] == (View*)fi) {
                                     if (new_outer_cross > line->cross_size) {
-                                        log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %d -> %d (item %s grew)",
+                                        log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %.1f -> %.1f (item %s grew)",
                                                   li, line->cross_size, new_outer_cross, fi->node_name());
                                         line->cross_size = new_outer_cross;
                                     }
@@ -2531,12 +2531,12 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
             block->height = cached_size.height;
             g_layout_cache_hits++;
             log_info("FLEX CACHE HIT: container=%p, size=(%.1f x %.1f), mode=%d",
-                     block, cached_size.width, cached_size.height, (int)lycon->run_mode);
+                     block, cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
             log_leave();
             return;
         }
         g_layout_cache_misses++;
-        log_debug("FLEX CACHE MISS: container=%p, mode=%d", block, (int)lycon->run_mode);
+        log_debug("FLEX CACHE MISS: container=%p, mode=%d", block, (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     // =========================================================================
@@ -2630,7 +2630,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
                                         lycon->run_mode, result);
             g_layout_cache_stores++;
             log_debug("FLEX CACHE STORE: container=%p, size=(%.1f x %.1f), mode=%d",
-                      block, block->width, block->height, (int)lycon->run_mode);
+                      block, block->width, block->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
         }
     }
 

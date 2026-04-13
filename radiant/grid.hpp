@@ -66,8 +66,8 @@ typedef struct GridTrackList {
 // Computed grid track
 typedef struct GridTrack {
     GridTrackSize* size;
-    int computed_size;           // Final computed size in pixels
-    int base_size;               // Base size for fr calculations
+    float computed_size;         // Final computed size in pixels
+    float base_size;             // Base size for fr calculations
     float growth_limit;          // Growth limit for fr calculations
     bool is_flexible;            // Has fr units
     bool is_implicit;            // Created by auto-placement
@@ -124,10 +124,10 @@ typedef struct GridContainerLayout : GridProp {
     int auto_col_cursor;
 
     // Container dimensions
-    int container_width;
-    int container_height;
-    int content_width;           // Width excluding padding/border
-    int content_height;          // Height excluding padding/border
+    float container_width;
+    float container_height;
+    float content_width;         // Width excluding padding/border
+    float content_height;        // Height excluding padding/border
     bool has_explicit_height;    // True if container has CSS height set (not auto)
     bool is_shrink_to_fit_width; // True if container should shrink-to-fit (abs pos, no explicit width)
     float row_intrinsic_height;  // First-pass row height before pct re-resolution (-1 if not applicable)
@@ -189,8 +189,8 @@ void initialize_track_sizes(GridContainerLayout* grid_layout);
 void resolve_intrinsic_track_sizes(GridContainerLayout* grid_layout);
 void maximize_tracks(GridContainerLayout* grid_layout);
 void expand_flexible_tracks(GridContainerLayout* grid_layout, struct ViewBlock* container);
-int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_index, bool is_row, GridTrackSizeType size_type);
-void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int available_space);
+float calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_index, bool is_row, GridTrackSizeType size_type);
+void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, float available_space);
 
 // Enhanced track sizing algorithm (uses Taffy-inspired implementation)
 void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewBlock* container);

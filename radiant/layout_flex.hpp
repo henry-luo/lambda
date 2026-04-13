@@ -33,13 +33,13 @@ typedef enum {
 typedef struct FlexLineInfo {
     View** items;  // Items in this line
     int item_count;
-    int main_size;            // Total size along main axis
-    int cross_size;           // Size along cross axis (height of tallest item)
-    int cross_position;       // Position along cross axis (set by align_content)
-    int free_space;           // Available space for distribution
+    float main_size;            // Total size along main axis
+    float cross_size;           // Size along cross axis (height of tallest item)
+    float cross_position;       // Position along cross axis (set by align_content)
+    float free_space;           // Available space for distribution
     float total_flex_grow;    // Sum of flex-grow values
     float total_flex_shrink;  // Sum of flex-shrink values
-    int baseline;             // Baseline for alignment
+    float baseline;             // Baseline for alignment
 } FlexLineInfo;
 
 // Main flex layout functions

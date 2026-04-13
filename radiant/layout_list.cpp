@@ -46,7 +46,7 @@ static bool get_element_counter_inc(DomElement* elem, const char* counter_name, 
             if (name && strcmp(name, counter_name) == 0) {
                 if (i + 1 < val->data.list.count &&
                     val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
-                    *out_value = (int)val->data.list.values[i + 1]->data.number.value;
+                    *out_value = (int)val->data.list.values[i + 1]->data.number.value; // INT_CAST_OK: counter value
                 } else {
                     *out_value = 1;
                 }
@@ -131,7 +131,7 @@ static bool get_element_counter_set_value(DomElement* elem, const char* counter_
             if (name && strcmp(name, counter_name) == 0) {
                 if (i + 1 < val->data.list.count &&
                     val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
-                    *out_value = (int)val->data.list.values[i + 1]->data.number.value;
+                    *out_value = (int)val->data.list.values[i + 1]->data.number.value; // INT_CAST_OK: counter value
                 } else {
                     *out_value = 0;
                 }
@@ -244,7 +244,7 @@ const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_
                 stringbuf_append_str(sb, item->data.string);
             } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                 if (sb->length > 0) stringbuf_append_char(sb, ' ');
-                stringbuf_append_int(sb, (int)item->data.number.value);
+                stringbuf_append_int(sb, (int)item->data.number.value); // INT_CAST_OK: CSS numeric value to int
             }
         }
 
@@ -468,7 +468,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     } else if (!is_bullet_marker) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
-        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
+        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) { // INT_CAST_OK: size comparison
             marker_text[marker_len] = '.';
             marker_text[marker_len + 1] = ' ';
             marker_text[marker_len + 2] = '\0';
@@ -486,7 +486,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
     if (marker_prop->text_content && font_handle) {
         TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
-                                                 (int)strlen(marker_prop->text_content));
+                                                 (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
     } else if (is_bullet_marker) {
         // bullet: disc/circle/square - use bullet_size + some padding

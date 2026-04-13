@@ -46,7 +46,7 @@ static bool was_specified_inline(DomElement* elem) {
  * so their internal content (text, nested elements) should not be affected by the
  * inline span's relative positioning offset.
  */
-static void offset_children_recursive(ViewElement* elem, int offset_x, int offset_y) {
+static void offset_children_recursive(ViewElement* elem, float offset_x, float offset_y) {
     View* child = elem->first_child;
     while (child) {
         child->x += offset_x;
@@ -215,7 +215,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // so we must also offset all descendants to move with the inline box
     if (block->view_type == RDT_VIEW_INLINE && (offset_x != 0 || offset_y != 0)) {
         log_debug("Offsetting inline children by (%.1f, %.1f)", offset_x, offset_y);
-        offset_children_recursive((ViewElement*)block, (int)offset_x, (int)offset_y);
+        offset_children_recursive((ViewElement*)block, offset_x, offset_y);
     }
 
     // todo: add to chain of positioned elements for z-index stacking
@@ -389,12 +389,12 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (offset_x != 0 || offset_y != 0) {
-        block->x += (int)offset_x;
-        block->y += (int)offset_y;
-        log_debug("sticky: applied offset (%.1f, %.1f), new position (%d, %d)", offset_x, offset_y, block->x, block->y);
+        block->x += offset_x;
+        block->y += offset_y;
+        log_debug("sticky: applied offset (%.1f, %.1f), new position (%.0f, %.0f)", offset_x, offset_y, block->x, block->y);
 
         if (block->view_type == RDT_VIEW_INLINE) {
-            offset_children_recursive((ViewElement*)block, (int)offset_x, (int)offset_y);
+            offset_children_recursive((ViewElement*)block, offset_x, offset_y);
         }
     } else {
         log_debug("sticky: no offset needed, element at static position");
@@ -494,8 +494,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
             cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
         }
     }
-    log_debug("containing block padding box: (%d, %d) size (%d, %d), border_offset: (%f, %f)",
-              (int)cb_x, (int)cb_y, (int)cb_width, (int)cb_height, border_offset_x, border_offset_y);
+    log_debug("containing block padding box: (%.0f, %.0f) size (%.0f, %.0f), border_offset: (%f, %f)",
+              cb_x, cb_y, cb_width, cb_height, border_offset_x, border_offset_y);
 
     // re-resolve percentage position values against the actual containing block
     // during CSS resolution, percentages were resolved against the wrong reference (parent at resolution time)
@@ -1274,7 +1274,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
                 }
                 log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
-                          line_x, avail_left, avail_right, (int)ta);
+                          line_x, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
             }
         }
 
@@ -1537,7 +1537,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     line_right = avail_right;
                 }
                 log_debug("[STATIC POS] RTL float+align adjusted line_right=%.1f (avail=[%.1f,%.1f], ta=%d)",
-                          line_right, avail_left, avail_right, (int)ta);
+                          line_right, avail_left, avail_right, (int)ta); // INT_CAST_OK: enum for log
             }
         }
 

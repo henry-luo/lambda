@@ -4293,7 +4293,12 @@ extern "C" Item js_get_length_item(Item object) {
 // but JS uses arr->extra for companion property maps. Direct store avoids this conflict.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (arr->length + 2 > arr->capacity) {
+        // Save/restore extra: JS uses arr->extra as a companion-map pointer,
+        // but expand_list interprets it as an extra-item count at buffer end.
+        int64_t saved_extra = arr->extra;
+        arr->extra = 0;
         expand_list((List*)arr);
+        arr->extra = saved_extra;
     }
     arr->items[arr->length] = value;
     arr->length++;

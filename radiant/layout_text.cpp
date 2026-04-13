@@ -1197,16 +1197,16 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
         // needs to shrink by the same amount. If the text's original right edge
         // was well inside the span content area, other content determines the
         // span width.
-        if ((int)old_text_right < (int)content_right) {
+        if ((int)old_text_right < (int)content_right) { // INT_CAST_OK: intentional
             break;  // text was not at the right edge; span width unaffected
         }
         // If span was already trimmed by exit_inline_box (content right <=
         // post-trim text right), no further adjustment needed.
         float text_right = text_view->x + text_view->width;
-        if ((int)text_right >= (int)content_right) {
+        if ((int)text_right >= (int)content_right) { // INT_CAST_OK: intentional
             break;
         }
-        int new_width = parent->width - (int)trim_amount;
+        float new_width = parent->width - trim_amount;
         if (new_width < 0) new_width = 0;
         parent->width = new_width;
         parent = parent->parent_view();
@@ -1330,7 +1330,7 @@ static void fixup_collapsed_inline_spans(ViewSpan* span) {
     if (span->height == 0) {
         DomElement* elem = static_cast<DomElement*>((DomNode*)span);
         if (elem->content_height > 0) {
-            span->height = (int)elem->content_height;
+            span->height = elem->content_height;
         }
     }
 }
@@ -2624,7 +2624,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else if (lycon->line.hanging_space_width > 0
                      && rect->x + rect->width - lycon->line.hanging_space_width <= line_right) {
                 log_debug("pre-wrap hanging: content fits without %dpx hanging spaces",
-                    (int)lycon->line.hanging_space_width);
+                    (int)lycon->line.hanging_space_width); // INT_CAST_OK: pixel count for log
                 // Don't wrap. The spaces hang past the margin. Fall through to continue.
             }
             else if (lycon->line.last_space) { // break at the last space

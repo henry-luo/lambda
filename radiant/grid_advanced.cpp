@@ -298,7 +298,7 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
             log_debug("Parsed fr value: %.2f from token '%s'\n", fr_value, token);
 
             // Store as integer multiplied by 100 for precision
-            int stored_value = (int)(fr_value * 100);
+            int stored_value = (int)(fr_value * 100); // INT_CAST_OK: stored as int
             track_size = create_grid_track_size(GRID_TRACK_SIZE_FR, stored_value);
 
             log_debug("Created FR track with stored_value=%d (%.2ffr)\n", stored_value, fr_value);
@@ -311,7 +311,7 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
             // Percentage value
             float percent_value = strtof(token, NULL);
             log_debug("Parsed percentage value: %.2f from token '%s'\n", percent_value, token);
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_PERCENTAGE, (int)percent_value);
+            track_size = create_grid_track_size(GRID_TRACK_SIZE_PERCENTAGE, (int)percent_value); // INT_CAST_OK: track size
             track_size->is_percentage = true;
         } else if (strcmp(token, "auto") == 0) {
             log_debug("Parsed auto track\n");
@@ -329,7 +329,7 @@ void parse_grid_template_tracks(GridTrackList* track_list, const char* template_
             if (endptr != token && *endptr == '\0') {
                 // Pure number, treat as pixels
                 log_debug("Parsed unitless number: %.2f, treating as pixels\n", numeric_value);
-                track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)numeric_value);
+                track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)numeric_value); // INT_CAST_OK: track size
             } else {
                 log_debug("Unknown token format: '%s', treating as auto\n", token);
                 track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);

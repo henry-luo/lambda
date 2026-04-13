@@ -574,7 +574,7 @@ static int find_first_letter_boundary(const unsigned char* text, int text_len) {
     }
 
     if (!found_letter) return 0;
-    return (int)(after_letter - content_start);
+    return (int)(after_letter - content_start); // INT_CAST_OK: pointer diff is character count
 }
 
 /**
@@ -654,14 +654,14 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     unsigned char* text_data = text_node->text_data();
     if (!text_data || !*text_data) return;
 
-    int text_len = (int)strlen((const char*)text_data);
+    int text_len = (int)strlen((const char*)text_data); // INT_CAST_OK: string length
 
     // Skip leading whitespace to find content start
     const unsigned char* p = text_data;
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
     if (!*p) return;
 
-    int ws_offset = (int)(p - text_data);
+    int ws_offset = (int)(p - text_data); // INT_CAST_OK: pointer diff is char offset
     int boundary = find_first_letter_boundary(p, text_len - ws_offset);
     if (boundary <= 0) {
         log_debug("%s [FIRST-LETTER] No letter found in text", block->source_loc());
@@ -2300,8 +2300,8 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             strbuf_append_str_n(src, value, value_len);
             // Use iframe's actual dimensions as viewport, not window dimensions
             // This ensures the embedded document layouts to fit within the iframe
-            int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width;
-            int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height;
+            int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
+            int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
             log_debug("load iframe doc src: %s (iframe viewport=%dx%d, depth=%d)", src->str, iframe_width, iframe_height, iframe_depth);
 
             // Increment depth before loading
@@ -5751,7 +5751,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->height = cached_size.height;
             g_layout_cache_hits++;
             log_info("%s BLOCK CACHE HIT: element=%s, size=(%.1f x %.1f), mode=%d", elmt->source_loc(),
-                     elmt->node_name(), cached_size.width, cached_size.height, (int)lycon->run_mode);
+                     elmt->node_name(), cached_size.width, cached_size.height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
             // Restore parent context and return early
             lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
             log_leave();
@@ -5761,7 +5761,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             return;
         }
         g_layout_cache_misses++;
-        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->source_loc(), (int)lycon->run_mode);
+        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->source_loc(), (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     // Early bailout for ComputeSize mode when both dimensions are known
@@ -6804,7 +6804,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     lycon->run_mode, result);
         g_layout_cache_stores++;
         log_debug("%s BLOCK CACHE STORE: element=%s, size=(%.1f x %.1f), mode=%d", elmt->source_loc(),
-                  elmt->node_name(), block->width, block->height, (int)lycon->run_mode);
+                  elmt->node_name(), block->width, block->height, (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     log_leave();

@@ -1761,6 +1761,41 @@ check-raw-alloc:
 		echo "✅ No raw allocation violations found"; \
 	fi
 
+# Check for (int) casts in Radiant layout code that may truncate float dimensions.
+# All layout positions/sizes (x, y, width, height, padding, margin, border, gap,
+# offset) are float. Casting to int causes sub-pixel truncation bugs.
+# Intentional int casts (strlen, enum, repeat_count, etc.) must be marked with:
+#   // INT_CAST_OK: <reason>
+check-int-cast:
+	@echo "Checking for unmarked (int) casts in Radiant layout files..."
+	@VIOLATIONS=$$(grep -rn '(int)' \
+		radiant/layout_block.cpp radiant/layout_inline.cpp \
+		radiant/layout_text.cpp radiant/layout_positioned.cpp \
+		radiant/layout_flex.cpp radiant/layout_flex_multipass.cpp \
+		radiant/layout_flex_measurement.cpp \
+		radiant/layout_table.cpp radiant/layout_multicol.cpp \
+		radiant/layout_grid.cpp radiant/layout_grid_multipass.cpp \
+		radiant/layout_form.cpp radiant/layout_list.cpp \
+		radiant/layout_counters.cpp \
+		radiant/grid_sizing.cpp radiant/grid_positioning.cpp \
+		radiant/grid_advanced.cpp radiant/grid_utils.cpp \
+		radiant/intrinsic_sizing.cpp \
+		| grep -v '// INT_CAST_OK' \
+		| grep -v '^\s*//' \
+		| grep -v '^\s*\*' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found unmarked (int) casts (add '// INT_CAST_OK: <reason>' or remove the cast):"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT unmarked cast(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No unmarked (int) casts in Radiant layout files"; \
+	fi
+
 # Clang-tidy static analysis
 tidy:
 	@echo "Running clang-tidy analysis..."

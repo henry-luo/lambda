@@ -193,7 +193,7 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // Use FreeType measurement for accurate button text width.
         // FreeType overestimates proportional font width by ~12.5% vs Chrome UA
         // (likely due to hinting/kerning differences), so apply a correction factor.
-        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, (int)strlen(text));
+        TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, (int)strlen(text)); // INT_CAST_OK: string length
         form->intrinsic_width = tw.max_content * 0.875f;
     } else {
         // Empty button: content width is 0 (border/padding added by layout)

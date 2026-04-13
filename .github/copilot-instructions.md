@@ -13,6 +13,7 @@ These rules MUST be followed. Violations are considered errors.
 7. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
 8. C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
 9. **NEVER use debug build for performance testing**. Use release build (`make release`).
+10. **In `radiant/` layout code, NEVER use `int` for position/dimension variables** (x, y, width, height, padding, margin, border, gap, offset, size). All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, enum for log, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make check-int-cast` to verify.
 
 | DON'T | DO |
 |-------|-----|
@@ -22,6 +23,8 @@ These rules MUST be followed. Violations are considered errors.
 | `std::vector<int> v` | Use `ArrayList` from `lib/arraylist.h` |
 | Edit `parser.c` manually | Edit `grammar.js` then `make generate-grammar` |
 | Edit `premake5.mac.lua` manually | Edit `build_lambda_config.json` then `make` |
+| `int width = (int)block->width` | `float width = block->width` |
+| `span->x = (int)content_left` | `span->x = content_left` |
 
 ## Project Overview
 
