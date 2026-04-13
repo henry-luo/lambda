@@ -136,6 +136,7 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_DOM;
     wrapper->type = (void*)&js_dom_type_marker;  // DOM marker
     wrapper->data = dom_elem;                     // store DomNode* directly
     wrapper->data_cap = 0;
@@ -184,6 +185,7 @@ extern "C" Item js_get_document_object_value() {
     if (js_document_proxy_item.item != ITEM_NULL) return js_document_proxy_item;
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_DOM;
     wrapper->type = (void*)&js_document_proxy_marker;
     wrapper->data = nullptr;
     wrapper->data_cap = 0;
@@ -345,6 +347,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     // create a computed style wrapper
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_DOM;
     wrapper->type = (void*)&js_computed_style_marker;
     wrapper->data = node->as_element();     // store DomElement*
     wrapper->data_cap = pseudo_type;        // store pseudo type

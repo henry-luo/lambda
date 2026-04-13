@@ -334,6 +334,7 @@ extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
 
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_CSSOM;
     wrapper->type = (void*)&js_stylesheet_marker;
     wrapper->data = stylesheet;  // CssStylesheet*
     wrapper->data_cap = 0;
@@ -478,6 +479,7 @@ extern "C" Item js_cssom_wrap_rule(void* rule, void* pool) {
 
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_CSSOM;
     wrapper->type = (void*)&js_css_rule_marker;
     wrapper->data = rule;               // CssRule*
     wrapper->data_cap = 0;
@@ -506,6 +508,7 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
 
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_CSSOM;
     wrapper->type = (void*)&js_rule_decl_marker;
     wrapper->data = rule;               // CssRule* (we access declarations from it)
     wrapper->data_cap = 0;

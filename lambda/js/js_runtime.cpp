@@ -2624,6 +2624,20 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
     return obj;
 }
 
+// §7: Create pre-shaped object with shape cache for inline shape guard.
+// On first call, captures the TypeMap pointer into *shape_cache.
+// Subsequent calls skip — the cache is already populated.
+extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
+    const char** prop_names, const int* prop_lens, int count, void** shape_cache) {
+    Item obj = js_constructor_create_object_shaped(callee, prop_names, prop_lens, count);
+    if (*shape_cache == NULL) {
+        Map* m = (Map*)obj.map;
+        *shape_cache = m->type;
+        log_debug("§7: shape cache populated at %p → TypeMap %p", (void*)shape_cache, m->type);
+    }
+    return obj;
+}
+
 // P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
 // These bypass the hash-table lookup in js_property_get/set by walking the
 // ShapeEntry linked list to the N-th slot (O(slot) ≈ O(2-4) for typical classes).
@@ -2867,124 +2881,105 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
-        // Check if this is a typed array
-        if (js_is_typed_array(object)) {
-            if (get_type_id(key) == LMD_TYPE_STRING) {
-                String* str_key = it2s(key);
-                if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                    return (Item){.item = i2it(js_typed_array_length(object))};
-                }
-                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
-                    return (Item){.item = i2it(ta->byte_length)};
-                }
-                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
-                    return (Item){.item = i2it(ta->byte_offset)};
-                }
-                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
-                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
-                    if (ta->buffer_item) {
-                        // Return the original ArrayBuffer Item to preserve identity (===)
-                        return (Item){.item = ta->buffer_item};
+        // MapKind fast path: plain objects (95%+ of accesses) skip all exotic checks
+        if (m->map_kind != MAP_KIND_PLAIN) {
+            switch (m->map_kind) {
+            case MAP_KIND_TYPED_ARRAY: {
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* str_key = it2s(key);
+                    if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                        return (Item){.item = i2it(js_typed_array_length(object))};
                     }
-                    if (!ta->buffer) {
-                        // Create a backing ArrayBuffer lazily for standalone typed arrays
-                        JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-                        ab->data = ta->data;  // share the same data pointer
-                        ab->byte_length = ta->byte_length;
-                        ta->buffer = ab;
+                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                        JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                        return (Item){.item = i2it(ta->byte_length)};
                     }
-                    return js_arraybuffer_wrap(ta->buffer);
-                }
-                if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
-                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
-                    int bpe = 4;
-                    switch (ta->element_type) {
-                    case JS_TYPED_INT8: case JS_TYPED_UINT8: bpe = 1; break;
-                    case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
-                    case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
-                    case JS_TYPED_FLOAT64: bpe = 8; break;
+                    if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                        JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                        return (Item){.item = i2it(ta->byte_offset)};
                     }
-                    return (Item){.item = i2it(bpe)};
-                }
-                // Non-numeric string key on typed array: check prototype chain, else undefined
-                // Try numeric parse: only forward to element access if the key is a valid integer string
-                {
-                    String* sk = it2s(key);
-                    bool is_numeric = sk->len > 0;
-                    for (int ni = 0; ni < sk->len; ni++) {
-                        if (sk->chars[ni] < '0' || sk->chars[ni] > '9') { is_numeric = false; break; }
+                    if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                        JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                        if (ta->buffer_item) {
+                            return (Item){.item = ta->buffer_item};
+                        }
+                        if (!ta->buffer) {
+                            JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
+                            ab->data = ta->data;
+                            ab->byte_length = ta->byte_length;
+                            ta->buffer = ab;
+                        }
+                        return js_arraybuffer_wrap(ta->buffer);
                     }
-                    if (is_numeric) {
-                        return js_typed_array_get(object, key);
+                    if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
+                        JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                        int bpe = 4;
+                        switch (ta->element_type) {
+                        case JS_TYPED_INT8: case JS_TYPED_UINT8: bpe = 1; break;
+                        case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
+                        case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
+                        case JS_TYPED_FLOAT64: bpe = 8; break;
+                        }
+                        return (Item){.item = i2it(bpe)};
                     }
-                }
-                // Fall through to prototype chain lookup below for methods/other named props
-                // Look up prototype chain for typed array methods
-                Item ta_proto = js_get_prototype(object);
-                if (ta_proto.item != ITEM_NULL) {
-                    Item result = js_property_get(ta_proto, key);
-                    if (result.item != ITEM_NULL) return result;
-                }
-                return (Item){.item = ITEM_NULL};
-            }
-            // Key is not a string (it's an int or other type) — use element access
-            return js_typed_array_get(object, key);
-        }
-        // Check if this is an ArrayBuffer
-        if (js_is_arraybuffer(object)) {
-            if (get_type_id(key) == LMD_TYPE_STRING) {
-                String* str_key = it2s(key);
-                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                    return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
-                }
-            }
-            return (Item){.item = ITEM_NULL};
-        }
-        // Check if this is a DataView
-        if (js_is_dataview(object)) {
-            if (get_type_id(key) == LMD_TYPE_STRING) {
-                String* str_key = it2s(key);
-                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                    JsDataView* dv = (JsDataView*)object.map->data;
-                    return (Item){.item = i2it(dv->byte_length)};
-                }
-                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                    JsDataView* dv = (JsDataView*)object.map->data;
-                    return (Item){.item = i2it(dv->byte_offset)};
-                }
-                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
-                    JsDataView* dv = (JsDataView*)object.map->data;
-                    if (dv->buffer) {
-                        return js_arraybuffer_wrap(dv->buffer);
+                    {
+                        String* sk = it2s(key);
+                        bool is_numeric = sk->len > 0;
+                        for (int ni = 0; ni < sk->len; ni++) {
+                            if (sk->chars[ni] < '0' || sk->chars[ni] > '9') { is_numeric = false; break; }
+                        }
+                        if (is_numeric) {
+                            return js_typed_array_get(object, key);
+                        }
+                    }
+                    Item ta_proto = js_get_prototype(object);
+                    if (ta_proto.item != ITEM_NULL) {
+                        Item result = js_property_get(ta_proto, key);
+                        if (result.item != ITEM_NULL) return result;
                     }
                     return (Item){.item = ITEM_NULL};
                 }
+                return js_typed_array_get(object, key);
             }
-            return (Item){.item = ITEM_NULL};
-        }
-        // Check if this is a document proxy object
-        if (js_is_document_proxy(object)) {
-            return js_document_proxy_get_property(key);
-        }
-        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
-        if (js_is_dom_node(object)) {
-            return js_dom_get_property(object, key);
-        }
-        // Check if this is a computed style wrapper
-        if (js_is_computed_style_item(object)) {
-            return js_computed_style_get_property(object, key);
-        }
-        // Check if this is a CSSOM wrapper (stylesheet, rule, declaration)
-        if (js_is_stylesheet(object)) {
-            return js_cssom_stylesheet_get_property(object, key);
-        }
-        if (js_is_css_rule(object)) {
-            return js_cssom_rule_get_property(object, key);
-        }
-        if (js_is_rule_style_decl(object)) {
-            return js_cssom_rule_decl_get_property(object, key);
+            case MAP_KIND_ARRAYBUFFER: {
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* str_key = it2s(key);
+                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                        return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
+                    }
+                }
+                return (Item){.item = ITEM_NULL};
+            }
+            case MAP_KIND_DATAVIEW: {
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* str_key = it2s(key);
+                    if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                        JsDataView* dv = (JsDataView*)object.map->data;
+                        return (Item){.item = i2it(dv->byte_length)};
+                    }
+                    if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                        JsDataView* dv = (JsDataView*)object.map->data;
+                        return (Item){.item = i2it(dv->byte_offset)};
+                    }
+                    if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                        JsDataView* dv = (JsDataView*)object.map->data;
+                        if (dv->buffer) {
+                            return js_arraybuffer_wrap(dv->buffer);
+                        }
+                        return (Item){.item = ITEM_NULL};
+                    }
+                }
+                return (Item){.item = ITEM_NULL};
+            }
+            case MAP_KIND_DOM:
+                if (js_is_document_proxy(object)) return js_document_proxy_get_property(key);
+                if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
+                return js_dom_get_property(object, key);
+            case MAP_KIND_CSSOM:
+                if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
+                if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
+                return js_cssom_rule_decl_get_property(object, key);
+            }
         }
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
@@ -3820,8 +3815,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         return js_array_set(object, key, value);
     }
 
-    // Typed array: ta[i] = val
-    if (type == LMD_TYPE_MAP && js_is_typed_array(object)) {
+    // Typed array: ta[i] = val (use map_kind for fast check)
+    if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
         return js_typed_array_set(object, key, value);
     }
 
@@ -3882,21 +3877,18 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 }
             }
         }
-        // Check if this is a document proxy object
-        if (js_is_document_proxy(object)) {
-            return js_document_proxy_set_property(key, value);
-        }
-        // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
-        if (js_is_dom_node(object)) {
-            return js_dom_set_property(object, key, value);
-        }
-        // Check if this is a CSSOM rule wrapper (e.g., rule.selectorText = "...")
-        if (js_is_css_rule(object)) {
-            return js_cssom_rule_set_property(object, key, value);
-        }
-        // Check if this is a CSSOM rule declaration wrapper (e.g., rule.style.zIndex = "12345")
-        if (js_is_rule_style_decl(object)) {
-            return js_cssom_rule_decl_set_property(object, key, value);
+        // MapKind fast path: skip exotic checks for plain objects
+        if (m->map_kind != MAP_KIND_PLAIN) {
+            switch (m->map_kind) {
+            case MAP_KIND_DOM:
+                if (js_is_document_proxy(object)) return js_document_proxy_set_property(key, value);
+                return js_dom_set_property(object, key, value);
+            case MAP_KIND_CSSOM:
+                if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
+                return js_cssom_rule_decl_set_property(object, key, value);
+            default:
+                break;  // typed arrays/arraybuffers fall through to regular set
+            }
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
         // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)

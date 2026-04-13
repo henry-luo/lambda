@@ -454,6 +454,8 @@ Item js_new_from_class_object(Item callee, Item* args, int argc);
 Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count);
 // Same as above but also sets __proto__ from callee.prototype
 Item js_constructor_create_object_shaped(Item callee, const char** prop_names, const int* prop_lens, int count);
+// §7: Same as above but captures TypeMap* into shape_cache on first call
+Item js_constructor_create_object_shaped_cached(Item callee, const char** prop_names, const int* prop_lens, int count, void** shape_cache);
 
 // P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
 // Avoids hash-table lookup by walking ShapeEntry chain to the N-th slot index.
