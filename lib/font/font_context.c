@@ -463,6 +463,16 @@ FontHandle* font_handle_retain(FontHandle* handle) {
     return handle;
 }
 
+bool font_handle_get_style(FontHandle* handle, const char** out_family,
+                           float* out_size_px, FontWeight* out_weight, FontSlant* out_slant) {
+    if (!handle) return false;
+    if (out_family)  *out_family  = handle->family_name;
+    if (out_size_px) *out_size_px = handle->size_px;
+    if (out_weight)  *out_weight  = handle->weight;
+    if (out_slant)   *out_slant   = handle->slant;
+    return true;
+}
+
 void font_handle_release(FontHandle* handle) {
     if (!handle) return;
     handle->ref_count--;

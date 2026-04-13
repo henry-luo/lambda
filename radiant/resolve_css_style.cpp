@@ -2476,7 +2476,22 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // 1. First pass: Resolve font properties (font, font-size, font-family, etc.)
     //    This ensures font metrics are available for em/ex unit calculations
     // 2. Second pass: Resolve all other properties
-    int font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+
+    // Font5 §4.4: skip first-pass AVL traversal if no font properties exist.
+    // Most elements (especially in markdown) inherit all font properties from
+    // their parent and have zero font-related CSS declarations.
+    bool has_any_font_prop = (avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_WEIGHT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_STYLE) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_VARIANT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
+
+    int font_processed = 0;
+    if (has_any_font_prop) {
+        font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+    }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
     // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
@@ -2486,7 +2501,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // size was established (keyword, em, px, %, etc.).
     // Only apply when font-family was set via CSS (not by the HTM handler for <code>/<pre>/etc.,
     // which already applies the quirk in resolve_htm_style.cpp).
-    {
+    if (has_any_font_prop) {
         ViewSpan* span = (ViewSpan*)lycon->view;
         if (span && span->font && span->font->family) {
             bool has_css_font_family = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
@@ -2511,7 +2526,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
     // Set up font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
-    if (font_processed > 0) {
+    if (has_any_font_prop) {
         ViewSpan* span = (ViewSpan*)lycon->view;
         // Check if font or font-family was explicitly set on this element
         bool has_font = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||

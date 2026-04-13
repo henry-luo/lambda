@@ -88,6 +88,12 @@ struct FontHandle {
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
 
+    // Font5 §4.2: direct-mapped ASCII advance table (codepoints 32–126)
+    // Eliminates hashmap overhead for ~95% of glyph lookups in English text.
+    float ascii_advance[95];            // advance_x for codepoints 32–126
+    uint32_t ascii_glyph_id[95];        // glyph IDs for codepoints 32–126
+    bool  ascii_advance_ready;          // lazy init flag
+
     // per-face CoreText kerning cache: (left_cp, right_cp) → kerning value
     struct hashmap* kern_cache;
 

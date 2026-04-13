@@ -259,6 +259,9 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
 
     handle->metrics_ready = true;
 
+    // Font5 §4.2: enable ASCII advance fast path now that the handle is fully loaded
+    handle->ascii_advance_ready = true;
+
     const char* fname = handle->family_name ? handle->family_name : "?";
     log_info("font_metrics: %s @%.0fpx — asc=%.1f desc=%.1f lh=%.1f xh=%.1f ch=%.1f sp=%.1f em=%.0f kern=%d",
              fname, handle->physical_size_px,
