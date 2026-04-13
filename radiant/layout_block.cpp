@@ -26,6 +26,16 @@
 #include <cfloat>
 using namespace std::chrono;
 
+// Check if a view element is a descendant of another view element
+static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
+    ViewElement* walker = child->parent_view();
+    while (walker) {
+        if (walker == ancestor) return true;
+        walker = walker->parent_view();
+    }
+    return false;
+}
+
 // CSS 2.1 §8.3.1: Collapse two margins according to spec rules
 // - Both positive: max(a, b)
 // - Both negative: min(a, b) — most negative
@@ -3677,6 +3687,51 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     if (bfc) {
         block_context_calc_bfc_offset((ViewElement*)block, bfc,
                                       &lycon->block.bfc_offset_x, &lycon->block.bfc_offset_y);
+
+        // CSS 2.1 §8.3.1: When this block's margin-top will collapse with its parent's
+        // margin-top (first in-flow child, parent has no top border/padding, parent is
+        // not a BFC root), the parent's y has not yet been shifted to account for the
+        // collapse. Floats registered from within the parent (siblings of this block)
+        // were placed at the parent's pre-collapse y. The BFC offset computed above
+        // includes this block's margin-top, which overshoots the stale float positions.
+        // Correct the offset by removing the pending collapse margin so float intrusion
+        // queries during inline layout use coordinates consistent with the stale floats.
+        //
+        // This correction must NOT be applied when this block itself contains float
+        // children: in that case the block's own prescan will register those floats at
+        // pre-collapse coordinates that are already consistent with the uncorrected offset.
+        if (block->bound && block->bound->margin.top > 0 && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
+            ViewElement* parent = block->parent_view();
+            if (parent && parent->parent_view() && parent->is_block()) {
+                ViewBlock* pa = (ViewBlock*)parent;
+                bool pa_creates_bfc = block_context_establishes_bfc(pa);
+                float pa_border_top = pa->bound && pa->bound->border ? pa->bound->border->width.top : 0;
+                float pa_padding_top = pa->bound ? pa->bound->padding.top : 0;
+                // First in-flow child: block->y == margin.top means parent advance_y was 0
+                bool is_first_inflow = (block->y == block->bound->margin.top);
+                if (!pa_creates_bfc && pa_border_top == 0 && pa_padding_top == 0 && is_first_inflow) {
+                    // Check if this block has float children (quick DOM scan).
+                    // Use get_element_float_value() which checks both resolved
+                    // position and unresolved CSS style tree properties.
+                    bool has_float_children = false;
+                    for (DomNode* ch = block->first_child; ch; ch = ch->next_sibling) {
+                        if (ch->is_element()) {
+                            CssEnum fv = get_element_float_value(ch->as_element());
+                            if (fv == CSS_VALUE_LEFT || fv == CSS_VALUE_RIGHT) {
+                                has_float_children = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!has_float_children) {
+                        lycon->block.bfc_offset_y -= block->bound->margin.top;
+                        log_debug("setup_inline: pending parent-child collapse correction: "
+                                  "bfc_offset_y reduced by %.1f to %.1f",
+                                  block->bound->margin.top, lycon->block.bfc_offset_y);
+                    }
+                }
+            }
+        }
     } else {
         lycon->block.bfc_offset_x = 0;
         lycon->block.bfc_offset_y = 0;
@@ -6493,7 +6548,44 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             // would double-count the sibling margin deduction.
 
                             if (!parent_has_clearance) {
-                                parent->y += margin_top - parent_margin_top;
+                                float y_delta = margin_top - parent_margin_top;
+                                parent->y += y_delta;
+
+                                // CSS 2.1 §8.3.1: When parent-child margin collapse shifts
+                                // the parent's y, floats registered from within the parent
+                                // during prescan have stale BFC coordinates. Update them so
+                                // float intrusion queries for subsequent children use correct
+                                // positions. Only shift floats that are descendants of the
+                                // parent but NOT descendants of the child (block): the child's
+                                // y is zeroed, which compensates for the parent's shift for
+                                // anything inside the child.
+                                if (y_delta != 0) {
+                                    BlockContext* float_bfc = block_context_find_bfc(&lycon->block);
+                                    if (float_bfc) {
+                                        ViewElement* child_view = (ViewElement*)block;
+                                        for (FloatBox* fb = float_bfc->left_floats; fb; fb = fb->next) {
+                                            if (fb->element && view_is_descendant_of((ViewElement*)fb->element, parent)
+                                                && !view_is_descendant_of((ViewElement*)fb->element, child_view)) {
+                                                fb->margin_box_top += y_delta;
+                                                fb->margin_box_bottom += y_delta;
+                                                fb->y += y_delta;
+                                                log_debug("%s margin collapse float update: float %s shifted by %.1f",
+                                                          block->source_loc(), fb->element->node_name(), y_delta);
+                                            }
+                                        }
+                                        for (FloatBox* fb = float_bfc->right_floats; fb; fb = fb->next) {
+                                            if (fb->element && view_is_descendant_of((ViewElement*)fb->element, parent)
+                                                && !view_is_descendant_of((ViewElement*)fb->element, child_view)) {
+                                                fb->margin_box_top += y_delta;
+                                                fb->margin_box_bottom += y_delta;
+                                                fb->y += y_delta;
+                                                log_debug("%s margin collapse float update: float %s shifted by %.1f",
+                                                          block->source_loc(), fb->element->node_name(), y_delta);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // CSS 2.1 §8.3.1: Ensure parent->bound exists so margin.top
                                 // can be stored. Without this, the "unified margin chain"
                                 // code in finalize sees margin.top=0 and double-adjusts y.
@@ -6608,6 +6700,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             // by changes to the block's own position).
                             if (!block->position || block->position->position == CSS_VALUE_STATIC) {
                                 adjust_abs_descendants_y((ViewElement*)block, -collapse);
+                            }
+                            // CSS 2.1 §10.6.7: Float boxes in the parent BFC were
+                            // positioned using the old block->y. Update their BFC
+                            // coordinates to reflect the margin collapse shift.
+                            BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                            if (bfc) {
+                                for (int pass = 0; pass < 2; pass++) {
+                                    FloatBox* fb = (pass == 0) ? bfc->left_floats : bfc->right_floats;
+                                    for (; fb; fb = fb->next) {
+                                        if (!fb->element) continue;
+                                        DomNode* ancestor = (DomNode*)fb->element->parent;
+                                        while (ancestor) {
+                                            if (ancestor == (DomNode*)block) {
+                                                fb->margin_box_top -= collapse;
+                                                fb->margin_box_bottom -= collapse;
+                                                fb->y -= collapse;
+                                                break;
+                                            }
+                                            ancestor = ancestor->parent;
+                                        }
+                                    }
+                                }
                             }
                             log_debug("%s collapsed margin between sibling blocks: %f, block->y now: %f", elmt->source_loc(), collapse, block->y);
                         }
