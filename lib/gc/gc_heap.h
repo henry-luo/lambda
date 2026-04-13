@@ -30,6 +30,7 @@ extern "C" {
 
 // GC header flags
 #define GC_FLAG_FREED    0x01   // object has been freed / returned to free list
+#define GC_FLAG_LARGE    0x08   // large object allocated via malloc (not pool)
 
 // GC generation tags (stored in gc_flags bits 1-2)
 #define GC_GEN_NURSERY   0x00   // generation 0: nursery object

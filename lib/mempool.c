@@ -232,27 +232,29 @@ void* pool_calloc(Pool* pool, size_t size) {
     if (size > SIZE_LIMIT) {
         return NULL;
     }
+    void* result;
     if (pool->heap) {
         // rpmalloc mode
         if ((uintptr_t)pool->heap < 0x10000) {
             log_error("pool_calloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
             return NULL;
         }
-        return rpmalloc_heap_calloc(pool->heap, 1, size);
+        result = rpmalloc_heap_calloc(pool->heap, 1, size);
+    } else {
+        // mmap mode: bump allocate (pages are pre-zeroed by mmap) with size header
+        size = (size + 15) & ~15;
+        size_t total = MMAP_SIZE_HEADER + size;
+        if (!pool->cursor || pool->cursor + total > pool->limit) {
+            mmap_pool_grow(pool, total);
+            if (!pool->cursor) return NULL;  // mmap failed
+        }
+        // store allocation size in header (pages are zeroed, so write size)
+        size_t* header = (size_t*)pool->cursor;
+        *header = size;
+        result = pool->cursor + MMAP_SIZE_HEADER;
+        pool->cursor += total;
     }
-    // mmap mode: bump allocate (pages are pre-zeroed by mmap) with size header
-    size = (size + 15) & ~15;
-    size_t total = MMAP_SIZE_HEADER + size;
-    if (!pool->cursor || pool->cursor + total > pool->limit) {
-        mmap_pool_grow(pool, total);
-        if (!pool->cursor) return NULL;  // mmap failed
-    }
-    // store allocation size in header (pages are zeroed, so write size)
-    size_t* header = (size_t*)pool->cursor;
-    *header = size;
-    void* ptr = pool->cursor + MMAP_SIZE_HEADER;
-    pool->cursor += total;
-    return ptr;  // data area zeroed by MAP_ANONYMOUS
+    return result;
 }
 
 void pool_free(Pool* pool, void* ptr) {
@@ -316,4 +318,9 @@ char* pool_strdup(Pool* pool, const char* str) {
         memcpy(dup, str, len);
     }
     return dup;
+}
+
+unsigned int pool_get_id(Pool* pool) {
+    if (!pool) return 0;
+    return pool->pool_id;
 }

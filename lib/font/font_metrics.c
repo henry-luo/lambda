@@ -508,12 +508,21 @@ float font_get_cell_height(FontHandle* handle) {
 float font_get_rendering_ascender(FontHandle* handle) {
     if (!handle) return 0;
 
+    // return cached value if available
+    if (handle->cached_rendering_ascender_ready)
+        return handle->cached_rendering_ascender;
+
     const char* family = handle->family_name ? handle->family_name : NULL;
     float ascent, descent, lh;
+    float result;
     if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
-        return ascent;
+        result = ascent;
+    } else {
+        const FontMetrics* m = font_get_metrics(handle);
+        result = m ? m->hhea_ascender : 0;
     }
 
-    const FontMetrics* m = font_get_metrics(handle);
-    return m ? m->hhea_ascender : 0;
+    handle->cached_rendering_ascender = result;
+    handle->cached_rendering_ascender_ready = true;
+    return result;
 }

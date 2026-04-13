@@ -1308,6 +1308,7 @@ JitImport jit_runtime_imports[] = {
     {"js_process_stdout_write", FPTR(js_process_stdout_write)},
     {"js_process_hrtime_bigint", FPTR(js_process_hrtime_bigint)},
     {"js_get_process_argv", FPTR(js_get_process_argv)},
+    {"js_get_process_object_value", FPTR(js_get_process_object_value)},
     // global functions
     {"js_parseInt", FPTR(js_parseInt)},
     {"js_parseFloat", FPTR(js_parseFloat)},

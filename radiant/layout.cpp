@@ -2269,7 +2269,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     layout_html_root(&lycon, root_node);
 
     auto t_layout = high_resolution_clock::now();
-    log_info("[TIMING] layout_html_root: %.1fms", duration<double, std::milli>(t_layout - t_init).count());
+    double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
+    log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
+    fprintf(stderr, "[LAYOUT_PROF] layout_html_root: %.1fms\n", layout_ms);
 
     log_debug("layout_html_root complete");
 

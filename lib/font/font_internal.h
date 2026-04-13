@@ -79,6 +79,10 @@ struct FontHandle {
     FontMetrics metrics;
     bool        metrics_ready;
 
+    // cached rendering ascender (from platform font, lazily computed)
+    float       cached_rendering_ascender;
+    bool        cached_rendering_ascender_ready;
+
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
     // FreeType requires the buffer to outlive the face.
     uint8_t*    memory_buffer;
@@ -270,6 +274,13 @@ struct FontContext {
 
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;
+
+    // cached emoji font handle (reused across font_load_glyph_emoji calls)
+    FontHandle*     cached_emoji_handle;
+    float           cached_emoji_size_px;
+    float           cached_emoji_physical_size;
+    FontWeight      cached_emoji_weight;
+    FontSlant       cached_emoji_slant;
 
     // registered @font-face descriptors
     FontFaceEntry** face_descriptors;

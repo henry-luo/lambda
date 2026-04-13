@@ -1057,7 +1057,7 @@ test-radiant-baseline: build-test
 		echo ""; \
 		echo "📦 Layout Page Suite Regression:"; \
 		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page 2>&1) || true; \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
 		echo "$$snap_output" | tail -5; \
 		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		snapshot_passed=$${snapshot_passed:-0}; \
@@ -1134,7 +1134,7 @@ test-radiant-baseline: build-test
 	echo "📊 Test Results by Suite:"; \
 	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped) (test_radiant_layout.js -c baseline)"; \
 	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped) (test_radiant_layout.js -c wpt-css-text)"; \
-	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (save_suite_snapshot.js --check page)"; \
+	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
@@ -1161,7 +1161,7 @@ test-layout-baseline: build-test
 		echo "Running page suite snapshot regression check..."; \
 		echo "=============================================================="; \
 		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page; \
+			| node test/layout/layout_suite_snapshot.js --check page; \
 	fi
 
 test-ui-automation: build-test
@@ -1213,7 +1213,7 @@ layout-snapshot:
 	fi; \
 	echo "Saving snapshot for suite: $$SUITE_VAR"; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --save $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --save $$SUITE_VAR
 
 layout-snapshot-check:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1222,7 +1222,7 @@ layout-snapshot-check:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --check $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --check $$SUITE_VAR
 
 layout-snapshot-diff:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1231,7 +1231,7 @@ layout-snapshot-diff:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --diff $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
 test-math: build

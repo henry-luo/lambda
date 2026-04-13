@@ -2308,8 +2308,20 @@ extern "C" Item js_constructor_create_object(Item callee) {
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
             js_property_get(callee, proto_key); // triggers lazy init
         }
+        static int cco_trace = 0;
+        if (fn->prototype.item == ItemNull.item && cco_trace < 3) {
+            log_error("js_constructor_create_object: fn->prototype is NULL after lazy init, fn=%p name='%.*s'",
+                (void*)fn, fn->name ? (int)fn->name->len : 0, fn->name ? fn->name->chars : "?");
+            cco_trace++;
+        }
         if (fn->prototype.item != ItemNull.item && get_type_id(fn->prototype) == LMD_TYPE_MAP) {
             js_set_prototype(obj, fn->prototype);
+        }
+    } else {
+        static int cco_trace2 = 0;
+        if (cco_trace2 < 3) {
+            log_error("js_constructor_create_object: callee type=%d (not FUNC)", get_type_id(callee));
+            cco_trace2++;
         }
     }
     return obj;
@@ -2864,7 +2876,8 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 // Non-getter data-only property existence check. Used by js_in (the "in" operator)
 // to check if a property exists WITHOUT triggering getters.
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found) {
-    return js_map_get_fast(m, key_str, key_len, out_found);
+    Item result = js_map_get_fast(m, key_str, key_len, out_found);
+    return result;
 }
 
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
@@ -4116,7 +4129,8 @@ extern "C" Item js_property_access(Item object, Item key) {
         js_throw_value(error);
         return make_js_undefined();
     }
-    return js_property_get(object, key);
+    Item result = js_property_get(object, key);
+    return result;
 }
 
 // super.x property read: look up property on [[GetPrototypeOf]](receiver),
@@ -5407,13 +5421,12 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
 }
 
 // Call a JavaScript function stored as an Item
-static int js_call_count = 0;
 
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d, call_count=%d)",
-            (long long)site_id, get_type_id(callee), js_call_count);
+        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d)",
+            (long long)site_id, get_type_id(callee));
     }
     return ItemNull;
 }
@@ -7015,13 +7028,18 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
-    js_call_count++;
-
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // v18: throw TypeError for calling non-callable values
-        log_debug("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
-            js_call_count, get_type_id(func_item), (unsigned long long)func_item.item, arg_count,
-            get_type_id(this_val));
+        static int error_count = 0;
+        if (error_count < 5) {
+            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d)",
+                get_type_id(func_item), arg_count, get_type_id(this_val));
+            error_count++;
+        }
+        // Log args for context
+        for (int i = 0; i < arg_count && i < 3; i++) {
+            log_error("  arg[%d]: type=%d raw=0x%llx", i, get_type_id(args[i]), (unsigned long long)args[i].item);
+        }
         Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
         Item msg = (Item){.item = s2it(heap_create_name("is not a function"))};
         Item error = js_new_error_with_name(type_name, msg);
@@ -7193,8 +7211,17 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         return js_bind_function(func_item, bound_this, bound_args, bound_argc);
     }
+    // If receiver is a MAP, it may have a user-defined .bind() method (e.g. Binder.bind())
+    if (get_type_id(func_item) == LMD_TYPE_MAP) {
+        int total_argc = 1 + bound_argc;
+        Item* args = (Item*)alloca(total_argc * sizeof(Item));
+        args[0] = bound_this;
+        for (int i = 0; i < bound_argc; i++) args[1 + i] = bound_args[i];
+        Item method_name = (Item){.item = s2it(heap_create_name("bind", 4))};
+        return js_map_method(func_item, method_name, args, total_argc);
+    }
     // ES spec: If IsCallable(Target) is false, throw a TypeError.
-    // A non-function object (even if it has Function.prototype) is not callable.
+    log_error("js_func_bind: not a function, type=%d raw=0x%llx", get_type_id(func_item), (unsigned long long)func_item.item);
     Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
     Item msg = (Item){.item = s2it(heap_create_name("Bind must be called on a function"))};
     js_throw_value(js_new_error_with_name(tn, msg));
@@ -8956,6 +8983,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
 
     // Fallback: property access + call
     Item fn = js_property_access(obj, method_name);
+    if (get_type_id(fn) != LMD_TYPE_FUNC) {
+        static int mm_err = 0;
+        if (mm_err < 3) {
+            String* mn = it2s(method_name);
+            log_error("js_map_method fallback: method '%.*s' not found on obj type=%d, fn type=%d argc=%d",
+                mn ? (int)mn->len : 0, mn ? mn->chars : "", get_type_id(obj), get_type_id(fn), argc);
+            mm_err++;
+        }
+    }
     return js_call_function(fn, obj, args, argc);
 }
 
@@ -13573,6 +13609,4 @@ void js_deep_batch_reset() {
     // pending call args
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
-    // call counter
-    js_call_count = 0;
 }
