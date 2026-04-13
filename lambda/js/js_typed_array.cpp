@@ -71,6 +71,7 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
@@ -90,6 +91,7 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     if (!ab) return (Item){.item = ITEM_NULL};
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ARRAYBUFFER;
     m->type = (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
@@ -157,6 +159,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_TYPED_ARRAY;
     m->type = (void*)&js_typed_array_type_marker;
     m->data = ta;
     m->data_cap = 0;
@@ -205,6 +208,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_TYPED_ARRAY;
     m->type = (void*)&js_typed_array_type_marker;
     m->data = ta;
     m->data_cap = 0;
@@ -572,6 +576,7 @@ extern "C" Item js_dataview_new(Item buffer, int byte_offset, int byte_length) {
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_DATAVIEW;
     m->type = (void*)&js_dataview_type_marker;
     m->data = dv;
     m->data_cap = 0;

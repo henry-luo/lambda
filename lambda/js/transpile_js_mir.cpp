@@ -145,6 +145,7 @@ struct JsFuncCollected {
     int ctor_prop_lens[16];         // lengths of each property name
     int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
+    int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
 };
 
 // Class method info for transpiler
@@ -193,6 +194,7 @@ struct JsClassEntry {
     int instance_field_count;
     JsAstNode* static_blocks[8];            // static { ... } block bodies
     int static_block_count;
+    void** shape_cache_ptr;                 // §7: per-class shape cache slot (NULL until allocated)
 };
 
 // Try/catch context for handling return-in-try and exception flow
@@ -2902,6 +2904,69 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                     int64_t byte_offset = (int64_t)p1_slot * (int64_t)sizeof(void*);
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
                     if (field_type == LMD_TYPE_FLOAT) {
+                        // §7: Inline shape guard → direct memory load (no function call)
+                        if (p1_ce->shape_cache_ptr) {
+                            MIR_label_t l_fast = jm_new_label(mt);
+                            MIR_label_t l_slow = jm_new_label(mt);
+                            MIR_label_t l_end = jm_new_label(mt);
+                            MIR_reg_t result_f = jm_new_reg(mt, "s7f", MIR_T_D);
+                            // Load obj->type (offset 8)
+                            MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, shape_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
+                            // Load expected shape from cache slot
+                            MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, cache_addr_reg),
+                                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
+                            MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, expected_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
+                            // Compare shape pointers
+                            MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                                MIR_new_reg_op(mt->ctx, match_reg),
+                                MIR_new_reg_op(mt->ctx, shape_reg),
+                                MIR_new_reg_op(mt->ctx, expected_reg)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_fast),
+                                MIR_new_reg_op(mt->ctx, match_reg)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                                MIR_new_label_op(mt->ctx, l_slow)));
+                            // Fast path: direct memory load — zero function calls
+                            jm_emit_label(mt, l_fast);
+                            MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, data_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
+                            MIR_reg_t fast_f = jm_new_reg(mt, "s7v", MIR_T_D);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                MIR_new_reg_op(mt->ctx, fast_f),
+                                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)byte_offset, data_reg, 0, 1)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                MIR_new_reg_op(mt->ctx, result_f),
+                                MIR_new_reg_op(mt->ctx, fast_f)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                                MIR_new_label_op(mt->ctx, l_end)));
+                            // Slow path: fall back to runtime function
+                            jm_emit_label(mt, l_slow);
+                            MIR_reg_t slow_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                MIR_new_reg_op(mt->ctx, result_f),
+                                MIR_new_reg_op(mt->ctx, slow_f)));
+                            jm_emit_label(mt, l_end);
+                            log_debug("§7: inline shape guard float %.*s.%.*s → offset %d",
+                                      (int)p1_obj->name->len, p1_obj->name->chars,
+                                      (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                            if (target_type == LMD_TYPE_FLOAT)
+                                return result_f;
+                            else
+                                return jm_emit_double_to_int(mt, result_f);
+                        }
                         MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
@@ -2914,6 +2979,69 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                             return jm_emit_double_to_int(mt, native_f);
                     }
                     if (field_type == LMD_TYPE_INT) {
+                        // §7: Inline shape guard → direct memory load (no function call)
+                        if (p1_ce->shape_cache_ptr) {
+                            MIR_label_t l_fast = jm_new_label(mt);
+                            MIR_label_t l_slow = jm_new_label(mt);
+                            MIR_label_t l_end = jm_new_label(mt);
+                            MIR_reg_t result_i = jm_new_reg(mt, "s7i", MIR_T_I64);
+                            // Load obj->type (offset 8)
+                            MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, shape_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
+                            // Load expected shape from cache slot
+                            MIR_reg_t cache_addr_reg = jm_new_reg(mt, "s7a", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, cache_addr_reg),
+                                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
+                            MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, expected_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
+                            // Compare shape pointers
+                            MIR_reg_t match_reg = jm_new_reg(mt, "s7m", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                                MIR_new_reg_op(mt->ctx, match_reg),
+                                MIR_new_reg_op(mt->ctx, shape_reg),
+                                MIR_new_reg_op(mt->ctx, expected_reg)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_fast),
+                                MIR_new_reg_op(mt->ctx, match_reg)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                                MIR_new_label_op(mt->ctx, l_slow)));
+                            // Fast path: direct memory load — zero function calls
+                            jm_emit_label(mt, l_fast);
+                            MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, data_reg),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
+                            MIR_reg_t fast_i = jm_new_reg(mt, "s7v", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, fast_i),
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)byte_offset, data_reg, 0, 1)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result_i),
+                                MIR_new_reg_op(mt->ctx, fast_i)));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                                MIR_new_label_op(mt->ctx, l_end)));
+                            // Slow path: fall back to runtime function
+                            jm_emit_label(mt, l_slow);
+                            MIR_reg_t slow_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, result_i),
+                                MIR_new_reg_op(mt->ctx, slow_i)));
+                            jm_emit_label(mt, l_end);
+                            log_debug("§7: inline shape guard int %.*s.%.*s → offset %d",
+                                      (int)p1_obj->name->len, p1_obj->name->chars,
+                                      (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                            if (target_type == LMD_TYPE_INT)
+                                return result_i;
+                            else
+                                return jm_ensure_native_float(mt, result_i, LMD_TYPE_INT);
+                        }
                         MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
@@ -3712,6 +3840,12 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 ce->constructor->fc->ctor_prop_count = 0;
             }
 
+            // §7: Allocate per-class shape cache slot for inline shape guard
+            if (ce->constructor && ce->constructor->fc &&
+                ce->constructor->fc->ctor_prop_count > 0) {
+                ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
+            }
+
             mt->class_count++;
         }
         break;
@@ -4278,6 +4412,7 @@ static TypeId jm_detect_ctor_field_type(JsAstNode* rhs) {
 // Records property names in order so we can pre-build the object shape.
 static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
     if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    memset(fc->ctor_prop_param_idx, -1, sizeof(fc->ctor_prop_param_idx));
     JsBlockNode* blk = (JsBlockNode*)body;
     JsAstNode* stmt = blk->statements;
     while (stmt) {
@@ -4296,12 +4431,37 @@ static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                             mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
                             if (fc->ctor_prop_count < 16) {
-                                fc->ctor_prop_ptrs[fc->ctor_prop_count] = prop->name->chars;
-                                fc->ctor_prop_lens[fc->ctor_prop_count] = (int)prop->name->len;
+                                int idx = fc->ctor_prop_count;
+                                fc->ctor_prop_ptrs[idx] = prop->name->chars;
+                                fc->ctor_prop_lens[idx] = (int)prop->name->len;
                                 // detect typed array type from RHS
-                                fc->ctor_prop_ta_types[fc->ctor_prop_count] = jm_detect_typed_array_new(asgn->right);
+                                fc->ctor_prop_ta_types[idx] = jm_detect_typed_array_new(asgn->right);
                                 // P1: detect field type from init expression
-                                fc->ctor_prop_types[fc->ctor_prop_count] = jm_detect_ctor_field_type(asgn->right);
+                                fc->ctor_prop_types[idx] = jm_detect_ctor_field_type(asgn->right);
+                                // P4b: detect if RHS is a constructor parameter
+                                if (asgn->right && asgn->right->node_type == JS_AST_NODE_IDENTIFIER) {
+                                    JsIdentifierNode* rhs_id = (JsIdentifierNode*)asgn->right;
+                                    JsAstNode* param = fc->node->params;
+                                    for (int pi = 0; param; pi++, param = param->next) {
+                                        const char* pname = NULL;
+                                        int plen = 0;
+                                        if (param->node_type == JS_AST_NODE_IDENTIFIER) {
+                                            JsIdentifierNode* pid = (JsIdentifierNode*)param;
+                                            pname = pid->name->chars; plen = (int)pid->name->len;
+                                        } else if (param->node_type == (int)TS_AST_NODE_PARAMETER) {
+                                            TsParameterNode* tsp = (TsParameterNode*)param;
+                                            if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER) {
+                                                JsIdentifierNode* pid = (JsIdentifierNode*)tsp->pattern;
+                                                pname = pid->name->chars; plen = (int)pid->name->len;
+                                            }
+                                        }
+                                        if (pname && plen == (int)rhs_id->name->len &&
+                                            strncmp(pname, rhs_id->name->chars, plen) == 0) {
+                                            fc->ctor_prop_param_idx[idx] = pi;
+                                            break;
+                                        }
+                                    }
+                                }
                                 fc->ctor_prop_count++;
                             }
                         }
@@ -11754,6 +11914,82 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 p4_prop->name->chars, (int)p4_prop->name->len);
             if (p4_slot >= 0) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                TypeId field_type = p1_ce->constructor->fc->ctor_prop_types[p4_slot];
+                int64_t byte_offset = (int64_t)p4_slot * (int64_t)sizeof(void*);
+
+                // P4b: Type-specialized slot read with inline map_kind guard.
+                // For INT/FLOAT fields, emits native slot read + inline boxing,
+                // skipping _map_read_field's type switch and js_get_shaped_slot's validation.
+                // map_kind guard ensures exotic objects fall back to js_property_get.
+                if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_FLOAT) {
+                    MIR_label_t l_fast = jm_new_label(mt);
+                    MIR_label_t l_slow = jm_new_label(mt);
+                    MIR_label_t l_end = jm_new_label(mt);
+                    MIR_reg_t result = jm_new_reg(mt, "p4r", MIR_T_I64);
+
+                    // Inline map_kind guard: load flags byte (offset 1), check upper 4 bits == 0
+                    MIR_reg_t flags_reg = jm_new_reg(mt, "p4f", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, flags_reg),
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, obj_reg, 0, 1)));
+                    MIR_reg_t kind_reg = jm_new_reg(mt, "p4k", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                        MIR_new_reg_op(mt->ctx, kind_reg),
+                        MIR_new_reg_op(mt->ctx, flags_reg),
+                        MIR_new_int_op(mt->ctx, 0xF0)));
+                    MIR_reg_t is_plain = jm_new_reg(mt, "p4p", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, is_plain),
+                        MIR_new_reg_op(mt->ctx, kind_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_fast),
+                        MIR_new_reg_op(mt->ctx, is_plain)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_slow)));
+
+                    // Fast path: type-specialized native slot read + boxing
+                    jm_emit_label(mt, l_fast);
+                    if (field_type == LMD_TYPE_INT) {
+                        MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                        MIR_reg_t boxed = jm_box_int_reg(mt, native_i);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_reg_op(mt->ctx, boxed)));
+                    } else {
+                        MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                        MIR_reg_t boxed = jm_box_float(mt, native_f);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_reg_op(mt->ctx, boxed)));
+                    }
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_end)));
+
+                    // Slow path: full property access for exotic objects
+                    jm_emit_label(mt, l_slow);
+                    MIR_reg_t key = jm_box_string_literal(mt,
+                        p4_prop->name->chars, (int)p4_prop->name->len);
+                    MIR_reg_t slow = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, slow)));
+
+                    jm_emit_label(mt, l_end);
+                    log_debug("P4b: typed slot load %.*s.%.*s → slot %d type %s (map_kind guarded)",
+                              (int)p4_obj->name->len, p4_obj->name->chars,
+                              (int)p4_prop->name->len, p4_prop->name->chars,
+                              p4_slot, get_type_name(field_type));
+                    return result;
+                }
+
+                // P4: Untyped fallback — use js_get_shaped_slot
                 log_debug("P4: shaped load %.*s.%.*s → slot %d",
                           (int)p4_obj->name->len, p4_obj->name->chars,
                           (int)p4_prop->name->len, p4_prop->name->chars, p4_slot);
@@ -14951,13 +15187,25 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // Pass ItemNull as callee — class path doesn't need prototype from callee
             MIR_reg_t null_callee = jm_emit_null(mt);
-            obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
-            log_debug("A5-class: new %.*s using pre-shaped object with %d props",
-                      ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+            if (ce->shape_cache_ptr) {
+                // §7: Use cached version that captures shape on first call
+                obj = jm_call_5(mt, "js_constructor_create_object_shaped_cached", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ce->shape_cache_ptr));
+                log_debug("§7: new %.*s using shape-cached pre-shaped object with %d props",
+                          ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+            } else {
+                obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+                log_debug("A5-class: new %.*s using pre-shaped object with %d props",
+                          ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+            }
         } else {
             obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
         }
@@ -18917,6 +19165,226 @@ static TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
     return LMD_TYPE_ANY;
 }
 
+// ============================================================================
+// Phase 1.78: P4b constructor call-site type propagation
+// Walks AST to find new ClassName(args) expressions and accumulates argument
+// type evidence per class constructor, enabling typed slot reads for
+// parameter-assigned fields (this.x = x where x comes from call-site literals).
+// ============================================================================
+struct P4bCtorEvidence {
+    int int_count;
+    int float_count;
+    int other_count;
+};
+
+static void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
+                              P4bCtorEvidence* evidence) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
+            for (int ci = 0; ci < mt->class_count; ci++) {
+                JsClassEntry* ce = &mt->class_entries[ci];
+                if (!ce->name || (int)ce->name->len != (int)cid->name->len) continue;
+                if (strncmp(ce->name->chars, cid->name->chars, ce->name->len) != 0) continue;
+                if (!ce->constructor || !ce->constructor->fc) break;
+                JsFuncCollected* ctor_fc = ce->constructor->fc;
+                if (ctor_fc->ctor_prop_count == 0) break;
+                JsAstNode* arg = call->arguments;
+                for (int pi = 0; arg && pi < 16; pi++, arg = arg->next) {
+                    TypeId at = jm_p6_static_arg_type(mt, arg);
+                    if (at == LMD_TYPE_INT || at == LMD_TYPE_BOOL)
+                        evidence[ci * 16 + pi].int_count++;
+                    else if (at == LMD_TYPE_FLOAT)
+                        evidence[ci * 16 + pi].float_count++;
+                    else
+                        evidence[ci * 16 + pi].other_count++;
+                }
+                break;
+            }
+        }
+        // recurse into arguments (may contain nested new expressions)
+        JsAstNode* a = call->arguments;
+        while (a) { jm_p4b_ctor_walk(mt, a, evidence); a = a->next; }
+        break;
+    }
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        JsAstNode* a = call->arguments;
+        while (a) { jm_p4b_ctor_walk(mt, a, evidence); a = a->next; }
+        jm_p4b_ctor_walk(mt, call->callee, evidence);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_p4b_ctor_walk(mt, bin->left, evidence);
+        jm_p4b_ctor_walk(mt, bin->right, evidence);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_p4b_ctor_walk(mt, un->operand, evidence);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        jm_p4b_ctor_walk(mt, asgn->right, evidence);
+        jm_p4b_ctor_walk(mt, asgn->left, evidence);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        jm_p4b_ctor_walk(mt, mem->object, evidence);
+        if (mem->computed) jm_p4b_ctor_walk(mt, mem->property, evidence);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_p4b_ctor_walk(mt, cond->test, evidence);
+        jm_p4b_ctor_walk(mt, cond->consequent, evidence);
+        jm_p4b_ctor_walk(mt, cond->alternate, evidence);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_p4b_ctor_walk(mt, ret->argument, evidence);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        JsAstNode* d = vd->declarations;
+        while (d) { jm_p4b_ctor_walk(mt, d, evidence); d = d->next; }
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        jm_p4b_ctor_walk(mt, vd->init, evidence);
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_p4b_ctor_walk(mt, es->expression, evidence);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_p4b_ctor_walk(mt, ifn->test, evidence);
+        jm_p4b_ctor_walk(mt, ifn->consequent, evidence);
+        jm_p4b_ctor_walk(mt, ifn->alternate, evidence);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_p4b_ctor_walk(mt, s, evidence); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_p4b_ctor_walk(mt, w->test, evidence);
+        jm_p4b_ctor_walk(mt, w->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_p4b_ctor_walk(mt, f->init, evidence);
+        jm_p4b_ctor_walk(mt, f->test, evidence);
+        jm_p4b_ctor_walk(mt, f->update, evidence);
+        jm_p4b_ctor_walk(mt, f->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fin = (JsForInNode*)node;
+        jm_p4b_ctor_walk(mt, fin->right, evidence);
+        jm_p4b_ctor_walk(mt, fin->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        jm_p4b_ctor_walk(mt, sw->discriminant, evidence);
+        JsAstNode* c = sw->cases;
+        while (c) { jm_p4b_ctor_walk(mt, c, evidence); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        jm_p4b_ctor_walk(mt, sc->test, evidence);
+        JsAstNode* s = sc->consequent;
+        while (s) { jm_p4b_ctor_walk(mt, s, evidence); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        jm_p4b_ctor_walk(mt, t->block, evidence);
+        jm_p4b_ctor_walk(mt, t->handler, evidence);
+        jm_p4b_ctor_walk(mt, t->finalizer, evidence);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        jm_p4b_ctor_walk(mt, cc->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        jm_p4b_ctor_walk(mt, dw->body, evidence);
+        jm_p4b_ctor_walk(mt, dw->test, evidence);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* arr = (JsArrayNode*)node;
+        JsAstNode* e = arr->elements;
+        while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
+        break;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* obj = (JsObjectNode*)node;
+        JsAstNode* p = obj->properties;
+        while (p) { jm_p4b_ctor_walk(mt, p, evidence); p = p->next; }
+        break;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        jm_p4b_ctor_walk(mt, prop->value, evidence);
+        break;
+    }
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
+        if (tl->expressions) {
+            JsAstNode* e = tl->expressions;
+            while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
+        }
+        break;
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* th = (JsThrowNode*)node;
+        jm_p4b_ctor_walk(mt, th->argument, evidence);
+        break;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        jm_p4b_ctor_walk(mt, sp->argument, evidence);
+        break;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        JsAstNode* e = seq->expressions;
+        while (e) { jm_p4b_ctor_walk(mt, e, evidence); e = e->next; }
+        break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* lab = (JsLabeledStatementNode*)node;
+        jm_p4b_ctor_walk(mt, lab->body, evidence);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 // Per-function, per-param call-site evidence
 struct P6NarrowEvidence {
     int int_count;
@@ -20579,6 +21047,62 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
         free(evi);
+    }
+
+    // Phase 1.78: P4b constructor call-site type propagation.
+    // For this.prop = param patterns where the field type is unknown, propagate
+    // types from new ClassName(arg1, arg2, ...) call-site argument types.
+    if (mt->class_count > 0) {
+        // check if any class has untyped param-assigned properties
+        bool needs_scan = false;
+        for (int ci = 0; ci < mt->class_count && !needs_scan; ci++) {
+            JsClassEntry* ce = &mt->class_entries[ci];
+            if (!ce->constructor || !ce->constructor->fc) continue;
+            JsFuncCollected* ctor_fc = ce->constructor->fc;
+            for (int pi = 0; pi < ctor_fc->ctor_prop_count; pi++) {
+                if (ctor_fc->ctor_prop_types[pi] == LMD_TYPE_NULL &&
+                    ctor_fc->ctor_prop_param_idx[pi] >= 0) {
+                    needs_scan = true; break;
+                }
+            }
+        }
+        if (needs_scan) {
+            P4bCtorEvidence* cevi = (P4bCtorEvidence*)calloc(
+                mt->class_count * 16, sizeof(P4bCtorEvidence));
+            // walk program body
+            jm_p4b_ctor_walk(mt, (JsAstNode*)program->body, cevi);
+            // walk all function bodies
+            for (int i = 0; i < mt->func_count; i++) {
+                JsFuncCollected* fc = &mt->func_entries[i];
+                if (fc->node && fc->node->body)
+                    jm_p4b_ctor_walk(mt, (JsAstNode*)fc->node->body, cevi);
+            }
+            // apply: propagate call-site consensus to ctor_prop_types
+            for (int ci = 0; ci < mt->class_count; ci++) {
+                JsClassEntry* ce = &mt->class_entries[ci];
+                if (!ce->constructor || !ce->constructor->fc) continue;
+                JsFuncCollected* ctor_fc = ce->constructor->fc;
+                for (int pi = 0; pi < ctor_fc->ctor_prop_count; pi++) {
+                    if (ctor_fc->ctor_prop_types[pi] != LMD_TYPE_NULL) continue;
+                    int param_idx = ctor_fc->ctor_prop_param_idx[pi];
+                    if (param_idx < 0) continue;
+                    P4bCtorEvidence* e = &cevi[ci * 16 + param_idx];
+                    int total = e->int_count + e->float_count + e->other_count;
+                    if (total == 0 || e->other_count > 0) continue;
+                    if (e->float_count > 0) {
+                        ctor_fc->ctor_prop_types[pi] = LMD_TYPE_FLOAT;
+                    } else if (e->int_count > 0) {
+                        ctor_fc->ctor_prop_types[pi] = LMD_TYPE_INT;
+                    }
+                    log_info("P4b: propagated %s.%.*s → %s (param[%d], %d call sites: %d int, %d float)",
+                        ce->name ? ce->name->chars : "?",
+                        ctor_fc->ctor_prop_lens[pi], ctor_fc->ctor_prop_ptrs[pi],
+                        get_type_name(ctor_fc->ctor_prop_types[pi]),
+                        param_idx, total, e->int_count, e->float_count);
+                }
+            }
+            free(cevi);
+        }
     }
 
     for (int i = 0; i < mt->func_count; i++) {

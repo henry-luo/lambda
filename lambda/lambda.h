@@ -495,6 +495,17 @@ typedef struct Symbol {
 } Symbol;
 typedef String Binary;  // Binary is just a String
 
+// MapKind: discriminates exotic Map sub-types so js_property_get can
+// skip 9 cascading sentinel-pointer checks for plain JS objects.
+enum MapKind {
+    MAP_KIND_PLAIN       = 0,  // regular JS/Lambda object (default, zero-init safe)
+    MAP_KIND_TYPED_ARRAY = 1,  // Int8Array, Float64Array, etc.
+    MAP_KIND_ARRAYBUFFER = 2,  // ArrayBuffer / SharedArrayBuffer
+    MAP_KIND_DATAVIEW    = 3,  // DataView
+    MAP_KIND_DOM         = 4,  // DOM nodes, Document proxy, ComputedStyle
+    MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
+};
+
 // Array and List struct defintions needed for for-loop
 struct Container {
     TypeId type_id;
@@ -505,7 +516,7 @@ struct Container {
             uint8_t is_spreadable:1; // whether this array should be spread when added to collections
             uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1; // data buffer migrated from input pool to runtime pool (for mutated markup containers)
-            uint8_t reserved:4;
+            uint8_t map_kind:4;      // MapKind tag (0 = plain, upper 4 bits of flags byte)
         };
     };
 };

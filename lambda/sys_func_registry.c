@@ -1236,6 +1236,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_from_class_object", FPTR(js_new_from_class_object)},
     {"js_new_object_with_shape", FPTR(js_new_object_with_shape)},
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
+    {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
     {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
     {"js_get_slot_f", FPTR(js_get_slot_f)},
