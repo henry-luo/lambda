@@ -2462,6 +2462,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // CSS 2.1 §16.4: letter-spacing is added after every character
             // Browsers include trailing letter-spacing in text node width
             wd += lycon->font.style->letter_spacing;
+
+            // CSS 2.1 §16.4: word-spacing affects each space (U+0020) and
+            // non-breaking space (U+00A0). U+0020 is handled in the is_space()
+            // branch above. U+00A0 must be handled here since it's not collapsible
+            // whitespace (it prevents line breaks and space collapsing).
+            if (codepoint == 0x00A0) {
+                wd += lycon->font.style->word_spacing;
+                is_word_start = true;
+            }
             // CSS Text 3 §8: Track trailing letter-spacing for trimming at line ends.
             // letter-spacing must not be applied at the start or end of a line.
             lycon->line.trailing_letter_spacing = lycon->font.style->letter_spacing;

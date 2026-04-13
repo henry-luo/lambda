@@ -599,8 +599,11 @@ static bool is_text_all_whitespace(const unsigned char* data) {
  * Skips whitespace-only text nodes (CSS 2.1 §5.12.2: first-letter applies to
  * the first letter of the first formatted line, ignoring preceding whitespace).
  * Returns NULL if no text content is found.
+ * Sets *suppressed = true if a replaced element or other non-text inline content
+ * precedes the first text (CSS 2.1 §5.12.2: ::first-letter must not be created
+ * if preceded by non-eligible content such as images on the first formatted line).
  */
-static DomText* find_first_text_node(DomNode* node) {
+static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
     if (!node) return nullptr;
 
     if (node->is_text()) {
@@ -616,6 +619,22 @@ static DomText* find_first_text_node(DomNode* node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
+        // CSS 2.1 §5.12.2: If a replaced element (image, video, etc.) or other
+        // non-text inline content appears before the first letter, ::first-letter
+        // must not be created. Check for replaced elements before recursing.
+        // Note: At the time ::first-letter is created, child styles may not be
+        // fully resolved yet. Check both display.inner (if resolved) and the
+        // element's tag name for known replaced elements.
+        uintptr_t tag = elem->tag();
+        bool is_replaced = (elem->display.inner == RDT_DISPLAY_REPLACED) ||
+            tag == HTM_TAG_IMG || tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS ||
+            tag == HTM_TAG_IFRAME || tag == HTM_TAG_EMBED || tag == HTM_TAG_OBJECT ||
+            tag == HTM_TAG_INPUT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_SELECT ||
+            tag == HTM_TAG_SVG || tag == HTM_TAG_BR;
+        if (is_replaced) {
+            if (suppressed) *suppressed = true;
+            return nullptr;
+        }
         // Only descend into inline-level elements, not blocks
         // (::first-letter of a block is the first letter of its first inline content)
         if (elem->display.outer != CSS_VALUE_INLINE &&
@@ -626,8 +645,9 @@ static DomText* find_first_text_node(DomNode* node) {
         }
         DomNode* child = elem->first_child;
         while (child) {
-            DomText* result = find_first_text_node(child);
+            DomText* result = find_first_text_node(child, suppressed);
             if (result) return result;
+            if (suppressed && *suppressed) return nullptr;
             child = child->next_sibling;
         }
     }
@@ -645,9 +665,14 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     if (!elem->first_letter_styles) return;
 
     // Find the first text node with content
-    DomText* text_node = find_first_text_node(elem);
-    if (!text_node) {
-        log_debug("%s [FIRST-LETTER] No text node found in <%s>", block->source_loc(), elem->tag_name ? elem->tag_name : "?");
+    // CSS 2.1 §5.12.2: If non-eligible content (e.g., an image) precedes the first
+    // letter, ::first-letter must not be created.
+    bool suppressed = false;
+    DomText* text_node = find_first_text_node(elem, &suppressed);
+    if (!text_node || suppressed) {
+        log_debug("%s [FIRST-LETTER] %s in <%s>", block->source_loc(),
+                  suppressed ? "Suppressed by preceding replaced element" : "No text node found",
+                  elem->tag_name ? elem->tag_name : "?");
         return;
     }
 
