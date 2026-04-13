@@ -246,9 +246,34 @@ static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
     }
 }
 
+// Maximum time (ms) the event loop drain is allowed to run before being
+// forcefully stopped.  Prevents infinite blocking from setInterval() or
+// long-running timers in document scripts (e.g. CSS animation test pages).
+#define EVENT_LOOP_DRAIN_TIMEOUT_MS 5000
+
+static void drain_watchdog_cb(uv_timer_t* handle) {
+    log_debug("event_loop: drain timeout (%d ms) — stopping loop", EVENT_LOOP_DRAIN_TIMEOUT_MS);
+    lambda_uv_stop();
+}
+
+// Stop and close all active interval timers so they don't keep the event
+// loop alive after drain completes or times out.
+static void stop_all_interval_timers(void) {
+    for (int i = timer_handle_count - 1; i >= 0; i--) {
+        JsTimerHandle* th = timer_handles[i];
+        if (th && th->is_interval) {
+            uv_timer_stop(&th->timer);
+            uv_close((uv_handle_t*)&th->timer, timer_close_cb);
+        }
+    }
+}
+
 extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return 0;
 
     // install crash guard for event loop drain
     struct sigaction sa;
@@ -260,8 +285,26 @@ extern "C" int js_event_loop_drain(void) {
 
     int result = 0;
     if (setjmp(event_loop_jmpbuf) == 0) {
-        // run libuv event loop until all timers/handles are done
+        // install watchdog timer to prevent infinite blocking from setInterval
+        uv_timer_t watchdog;
+        uv_timer_init(loop, &watchdog);
+        uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
+        uv_timer_start(&watchdog, drain_watchdog_cb, EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
+
+        // run libuv event loop until all timers/handles are done (or watchdog fires)
         result = lambda_uv_run();
+
+        // clean up watchdog
+        uv_timer_stop(&watchdog);
+        uv_close((uv_handle_t*)&watchdog, NULL);
+        // run once more to process the close callback
+        uv_run(loop, UV_RUN_NOWAIT);
+
+        // stop any remaining interval timers that would keep the loop alive
+        stop_all_interval_timers();
+        // drain close callbacks from stopped intervals
+        uv_run(loop, UV_RUN_NOWAIT);
+
         // final microtask flush after loop exits
         js_microtask_flush();
     } else {
