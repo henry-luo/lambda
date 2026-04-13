@@ -14,8 +14,8 @@ struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);
 void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
 
 // Phase 3: Table layout algorithm implementations
-void table_auto_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, int* col_pref, int* col_widths, long long sum_pref, int avail_width);
-void table_fixed_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, int* col_widths, int avail_width);
+void table_auto_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, float* col_pref, float* col_widths, float sum_pref, float avail_width);
+void table_fixed_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, float* col_widths, float avail_width);
 
 // Text positioning adjustment helpers (called after cell positions are calculated)
 void adjust_table_text_positions_final(struct ViewTable* table);
@@ -23,8 +23,8 @@ void adjust_table_text_positions_final(struct ViewTable* table);
 // CSS 2.1 §17.5.4: Find the first baseline in a table/view hierarchy.
 // Returns distance from parent's top to the first text baseline, or -1 if none found.
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
-void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row, int table_abs_x, int cell_border, int cell_padding);
-void adjust_cell_text_positions_final(struct ViewBlock* cell, int text_abs_x);
+void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row, float table_abs_x, float cell_border, float cell_padding);
+void adjust_cell_text_positions_final(struct ViewBlock* cell, float text_abs_x);
 
 // CSS 2.1 Section 17.2.1: Wrap orphaned table-internal children in anonymous table structures
 // This handles cases like <div><span style="display:table-cell">...</span></div>
