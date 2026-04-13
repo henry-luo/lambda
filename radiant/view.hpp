@@ -448,10 +448,10 @@ struct GridItemProp {
     int computed_grid_column_end;
 
     // Track area dimensions (computed during positioning phase, used for alignment)
-    int track_area_width;        // Width of the track area this item spans
-    int track_area_height;       // Height of the track area this item spans
-    int track_base_x;            // Base X position of track area (before alignment)
-    int track_base_y;            // Base Y position of track area (before alignment)
+    float track_area_width;      // Width of the track area this item spans
+    float track_area_height;     // Height of the track area this item spans
+    float track_base_x;          // Base X position of track area (before alignment)
+    float track_base_y;          // Base Y position of track area (before alignment)
 
     // Grid item flags
     bool has_explicit_grid_row_start;

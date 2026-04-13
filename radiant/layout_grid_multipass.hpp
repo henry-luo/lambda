@@ -70,8 +70,8 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout);
  * @param max_height Output: maximum content height
  */
 void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
-                                  int* min_width, int* max_width,
-                                  int* min_height, int* max_height);
+                                  float* min_width, float* max_width,
+                                  float* min_height, float* max_height);
 
 // ============================================================================
 // Pass 2: Grid Algorithm (already in layout_grid.cpp)

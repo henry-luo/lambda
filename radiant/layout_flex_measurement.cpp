@@ -283,8 +283,8 @@ uint32_t get_measurement_cache_generation() {
     return cache_generation;
 }
 
-void store_in_measurement_cache(DomNode* node, int width, int height,
-                               int content_width, int content_height) {
+void store_in_measurement_cache(DomNode* node, float width, float height,
+                               float content_width, float content_height) {
     if (cache_count >= 1000) {
         log_error("Measurement cache overflow");
         return;
@@ -298,7 +298,7 @@ void store_in_measurement_cache(DomNode* node, int width, int height,
     measurement_cache[cache_count].generation = cache_generation;
     cache_count++;
 
-    log_debug("Cached measurement for node %p: %dx%d (content: %dx%d) gen=%u",
+    log_debug("Cached measurement for node %p: %.1fx%.1f (content: %.1fx%.1f) gen=%u",
               node, width, height, content_width, content_height, cache_generation);
 }
 
@@ -361,14 +361,17 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
     // Perform layout in measurement mode to determine intrinsic sizes
     ViewBlock* temp_view = nullptr;
-    int measured_width = 0;
-    int measured_height = 0;
-    int content_width = 0;
-    int content_height = 0;
+    float measured_width = 0;
+    float measured_height = 0;
+    float content_width = 0;
+    float content_height = 0;
 
     if (child->is_text()) {
         // Measure text content
-        measure_text_content(&measure_context, child, &measured_width, &measured_height);
+        int mw_int = 0, mh_int = 0;
+        measure_text_content(&measure_context, child, &mw_int, &mh_int);
+        measured_width = mw_int;
+        measured_height = mh_int;
         content_width = measured_width;
         content_height = measured_height;
     } else {
@@ -421,24 +424,24 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
         // Get font-size from resolved styles (after init_flex_item_view resolved CSS)
         ViewElement* view_elem = (ViewElement*)child_elem;
-        int elem_font_size = 16;  // default fallback
+        float elem_font_size = 16;  // default fallback
         if (view_elem && view_elem->font && view_elem->font->font_size > 0) {
-            elem_font_size = (int)(view_elem->font->font_size + 0.5f);
+            elem_font_size = view_elem->font->font_size;
         }
 
         // Calculate actual line height using the font's metrics (Chrome-compatible)
         // This requires setting up the font first to get accurate font metrics
-        int text_line_height = elem_font_size;  // fallback
+        float text_line_height = elem_font_size;  // fallback
         if (lycon->ui_context && view_elem && view_elem->font) {
             // Set up font at the element's font size
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, view_elem->font);
             if (temp_font.font_handle) {
                 // Use the Chrome-compatible line height calculation
-                text_line_height = (int)(calc_normal_line_height(temp_font.font_handle) + 0.5f);
+                text_line_height = calc_normal_line_height(temp_font.font_handle);
             }
         }
-        log_debug("measure_flex_child_content: elem_font_size=%d, text_line_height=%d",
+        log_debug("measure_flex_child_content: elem_font_size=%.1f, text_line_height=%.1f",
                   elem_font_size, text_line_height);
 
         if (child_elem) {
@@ -472,7 +475,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
                     // Estimate element height based on type
                     uintptr_t tag = sub_child->tag();
-                    int elem_height = 0;
+                    float elem_height = 0;
                     bool has_explicit_height_css = false;  // Track if element has explicit CSS height
 
                     // Common block elements with typical heights
@@ -490,7 +493,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             if (h > 0) {
                                 elem_height = h;
                                 has_explicit_height_css = true;
-                                log_debug("SVG height from attribute: %d", elem_height);
+                                log_debug("SVG height from attribute: %.1f", elem_height);
                             }
                         }
                         if (!has_explicit_height_css && elem && elem->specified_style) {
@@ -498,10 +501,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 elem->specified_style, CSS_PROPERTY_HEIGHT);
                             if (height_decl && height_decl->value &&
                                 height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
                                                                          height_decl->value);
                                 has_explicit_height_css = true;
-                                log_debug("SVG height from CSS: %d", elem_height);
+                                log_debug("SVG height from CSS: %.1f", elem_height);
                             }
                         }
                         if (!has_explicit_height_css) {
@@ -516,7 +519,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 elem->specified_style, CSS_PROPERTY_HEIGHT);
                             if (height_decl && height_decl->value &&
                                 height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
                                                                          height_decl->value);
                                 has_explicit_height_css = true;
                                 log_debug("Replaced element %s has explicit CSS height=%d",
@@ -662,9 +665,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 // Children have explicit heights - use recursive measurement
                                 float content_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
                                 if (content_height > 0) {
-                                    elem_height = (int)content_height;
+                                    elem_height = content_height;
                                     has_explicit_height_css = true;  // Reliable measured height
-                                    log_debug("Nested flex container: measured content height=%d", elem_height);
+                                    log_debug("Nested flex container: measured content height=%.1f", elem_height);
                                 } else {
                                     // Fallback: use 0 and let flex layout determine height
                                     elem_height = 0;
@@ -676,14 +679,14 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 // Try recursive measurement first for accurate sizing
                                 float recursive_height = measure_content_height_recursive((DomNode*)elem, lycon, 0);
                                 if (recursive_height > 0) {
-                                    elem_height = (int)recursive_height;
+                                    elem_height = recursive_height;
                                     has_explicit_height_css = true;  // Measured height is reliable
-                                    log_debug("Nested flex container with content: recursive measured height=%d", elem_height);
+                                    log_debug("Nested flex container with content: recursive measured height=%.1f", elem_height);
                                 } else if (has_text_content) {
                                     // Only use text_line_height if there's actual text content
                                     elem_height = text_line_height;
                                     has_explicit_height_css = false;
-                                    log_debug("Nested flex container with text content: using text_line_height=%d", elem_height);
+                                    log_debug("Nested flex container with text content: using text_line_height=%.1f", elem_height);
                                 } else {
                                     // Element children only, but recursive measurement returned 0
                                     // Children are likely empty flex containers — use 0
@@ -744,7 +747,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 log_debug("Non-flex div with block elements: using estimate height=56");
                             } else if (has_inline_element || has_text_content) {
                                 elem_height = text_line_height;
-                                log_debug("Non-flex div with inline/text content: using text_line_height=%d", elem_height);
+                                log_debug("Non-flex div with inline/text content: using text_line_height=%.1f", elem_height);
                             } else {
                                 elem_height = 0;
                             }
@@ -776,19 +779,19 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             // Resolve child's CSS line-height for content height
                             // (text_line_height is the font-metric "normal" line height,
                             //  but CSS line-height may differ, e.g. Bootstrap line-height:1.5)
-                            int child_content_height = text_line_height;
+                            float child_content_height = text_line_height;
                             ViewElement* sub_view = (ViewElement*)elem;
-                            int child_fs = elem_font_size;
+                            float child_fs = elem_font_size;
                             if (sub_view && sub_view->font && sub_view->font->font_size > 0) {
-                                child_fs = (int)(sub_view->font->font_size + 0.5f);
+                                child_fs = sub_view->font->font_size;
                             }
                             if (sub_view && sub_view->blk && sub_view->blk->line_height) {
                                 const CssValue* lh = sub_view->blk->line_height;
                                 if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                                    child_content_height = (int)(lh->data.number.value * child_fs + 0.5f);
+                                    child_content_height = lh->data.number.value * child_fs;
                                 } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
                                     float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-                                    if (lh_px > 0) child_content_height = (int)(lh_px + 0.5f);
+                                    if (lh_px > 0) child_content_height = lh_px;
                                 }
                                 // CSS_VALUE_TYPE_KEYWORD "normal" → keep font metric fallback
                             } else if (elem->specified_style) {
@@ -796,10 +799,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                     elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
                                 if (lh_decl && lh_decl->value) {
                                     if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                                        child_content_height = (int)(lh_decl->value->data.number.value * child_fs + 0.5f);
+                                        child_content_height = lh_decl->value->data.number.value * child_fs;
                                     } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                         float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
-                                        if (lh_px > 0) child_content_height = (int)(lh_px + 0.5f);
+                                        if (lh_px > 0) child_content_height = lh_px;
                                     }
                                 }
                             }
@@ -881,7 +884,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 }
                                 vert_extra = pad_top + pad_bottom + brd_top + brd_bottom;
                             }
-                            elem_height += (int)(vert_extra + 0.5f);
+                            elem_height += vert_extra;
                             if (vert_extra > 0) has_explicit_height_css = true;
                             log_debug("Element %s: content_height=%d, padding+border=%.1f, total=%d",
                                       sub_child->node_name(), child_content_height, vert_extra, elem_height);
@@ -897,7 +900,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                           height_decl && height_decl->value ? height_decl->value->type : -1);
                                 if (height_decl && height_decl->value &&
                                     height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                    elem_height = (int)resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                    elem_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
                                                                              height_decl->value);
                                     has_explicit_height_css = true;
                                     log_debug("Element %s has explicit CSS height=%d",
@@ -951,7 +954,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // This is because inline children flow horizontally and should not stack heights
         if (max_child_height > 0 && (is_row_flex || measured_height == 0)) {
             measured_height = max_child_height;
-            log_debug("Using max child height %d (is_row_flex=%d)", measured_height, is_row_flex);
+            log_debug("Using max child height %.1f (is_row_flex=%d)", measured_height, is_row_flex);
         }
 
         // Set measured dimensions
@@ -961,8 +964,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         bool has_explicit_width = (elem && elem->blk && elem->blk->given_width >= 0);
 
         if (has_explicit_width) {
-            measured_width = (int)elem->blk->given_width;
-            log_debug("Measured element %s: using explicit width %d", child->node_name(), measured_width);
+            measured_width = elem->blk->given_width;
+            log_debug("Measured element %s: using explicit width %.1f", child->node_name(), measured_width);
         } else {
             // For elements without explicit width, use 0 as intrinsic width
             // The actual width will be determined by flex layout (stretch, etc.)
@@ -975,9 +978,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Special handling for form controls - use intrinsic size as content
         if (elem && elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
             // Form controls have intrinsic sizes stored in form property
-            content_height = (int)elem->form->intrinsic_height;
+            content_height = elem->form->intrinsic_height;
             measured_height = content_height;
-            content_width = (int)elem->form->intrinsic_width;
+            content_width = elem->form->intrinsic_width;
             measured_width = content_width;
 
             // Special handling for buttons with child content (e.g., <button>Subscribe</button>)
@@ -1035,9 +1038,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
                     // Update content sizes (intrinsic, without padding/border)
                     // Padding/border will be added below in the generic code
-                    content_width = (int)max_text_width;
+                    content_width = max_text_width;
                     measured_width = content_width;
-                    content_height = (int)FormDefaults::TEXT_HEIGHT;
+                    content_height = FormDefaults::TEXT_HEIGHT;
                     measured_height = content_height;
 
                     log_debug("Button %s: measured text content width=%.1f, intrinsic=%dx%d",
@@ -1046,22 +1049,22 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 }
             }
 
-            log_debug("Form control %s: using intrinsic size %dx%d",
+            log_debug("Form control %s: using intrinsic size %.1fx%.1f",
                       child->node_name(), measured_width, measured_height);
         }
 
         // Add padding and border to measured height for total height
         // CSS box model: total_height = content_height + padding + border
         if (elem && elem->bound) {
-            measured_height += (int)(elem->bound->padding.top + elem->bound->padding.bottom);
+            measured_height += elem->bound->padding.top + elem->bound->padding.bottom;
             if (elem->bound->border) {
-                measured_height += (int)(elem->bound->border->width.top + elem->bound->border->width.bottom);
+                measured_height += elem->bound->border->width.top + elem->bound->border->width.bottom;
             }
-            log_debug("Added box model to height: content=%d, total=%d (padding+border)",
+            log_debug("Added box model to height: content=%.1f, total=%.1f (padding+border)",
                       content_height, measured_height);
         }
 
-        log_debug("Measured element %s: %dx%d (content-based estimation)",
+        log_debug("Measured element %s: %.1fx%.1f (content-based estimation)",
                   child->node_name(), measured_width, measured_height);
     }
 
@@ -1209,7 +1212,7 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
         ViewBlock* view = (ViewBlock*)node;
         log_debug("DEBUG: view = %p, node = %p", view, node);
         if (view == node) {
-            log_debug("Applying cached measurements to flex item: %dx%d",
+            log_debug("Applying cached measurements to flex item: %.1fx%.1f",
                 cached->measured_width, cached->measured_height);
 
             // For grid containers, skip the cached height — measure_flex_child_content
@@ -1231,7 +1234,7 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
             if (!node_is_grid && view->height <= 0) {
                 view->height = cached->measured_height;
             }
-            log_debug("Applied measurements: view size now %dx%d (is_grid=%d)", view->width, view->height, node_is_grid);
+            log_debug("Applied measurements: view size now %.1fx%.1f (is_grid=%d)", view->width, view->height, node_is_grid);
         } else {
             log_debug("DEBUG: Node mismatch - cached for different node");
         }
@@ -1703,7 +1706,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         MeasurementCacheEntry* cached = get_from_measurement_cache((DomNode*)item);
         log_debug("calculate_item_intrinsic_sizes: cache lookup returned %p", cached);
         if (cached) {
-            log_debug("calculate_item_intrinsic_sizes: cached entry - measured_width=%d, measured_height=%d",
+            log_debug("calculate_item_intrinsic_sizes: cached entry - measured_width=%.1f, measured_height=%.1f",
                       cached->measured_width, cached->measured_height);
         }
 

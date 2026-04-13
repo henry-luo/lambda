@@ -1113,7 +1113,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             (width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
              (width_decl->value->type == CSS_VALUE_TYPE_NUMBER &&
               width_decl->value->data.number.value == 0))) {
-            int explicit_width = (int)resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
+            float explicit_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH,
                                                             width_decl->value);
             if (explicit_width >= 0) {
                 // CSS width property sets content width by default (box-sizing: content-box)
@@ -1168,8 +1168,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         float css_bw = get_border_width_from_css(lycon, element);
                         if (css_bw > 0) { border_left = css_bw; border_right = css_bw; }
                     }
-                    explicit_width += (int)(pad_left + pad_right + border_left + border_right);
-                    log_debug("  -> explicit width: %d (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
+                    explicit_width += pad_left + pad_right + border_left + border_right;
+                    log_debug("  -> explicit width: %.0f (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
                               explicit_width, pad_left, pad_right, border_left, border_right);
                 } else {
                     // border-box: floor at padding+border (content-box >= 0)
@@ -1179,12 +1179,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (view_for_pb->bound->border) {
                             pb_w += view_for_pb->bound->border->width.left + view_for_pb->bound->border->width.right;
                         }
-                        if (explicit_width < (int)pb_w) {
-                            log_debug("  -> explicit width: %d floored to %d (border-box, padding+border)", explicit_width, (int)pb_w);
-                            explicit_width = (int)pb_w;
+                        if (explicit_width < pb_w) {
+                            log_debug("  -> explicit width: %.0f floored to %.0f (border-box, padding+border)", explicit_width, pb_w);
+                            explicit_width = pb_w;
                         }
                     }
-                    log_debug("  -> explicit width: %d (border-box)", explicit_width);
+                    log_debug("  -> explicit width: %.0f (border-box)", explicit_width);
                 }
 
                 sizes.min_content = explicit_width;
@@ -1264,8 +1264,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
         if (height > 0) {
             float aspect_width = height * aspect_ratio;
-            sizes.min_content = (int)(aspect_width + 0.5f);
-            sizes.max_content = (int)(aspect_width + 0.5f);
+            sizes.min_content = aspect_width;
+            sizes.max_content = aspect_width;
             log_debug("  -> aspect-ratio width: %.1f (height=%.1f, ratio=%.3f)",
                       aspect_width, height, aspect_ratio);
             return sizes;
@@ -1303,7 +1303,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Try to get image dimensions - first check if already loaded
             if (view_block_replaced->embed && view_block_replaced->embed->img) {
                 replaced_width = view_block_replaced->embed->img->width;
-                log_debug("  -> replaced IMG intrinsic width: %d (from loaded image)", (int)replaced_width);
+                log_debug("  -> replaced IMG intrinsic width: %.0f (from loaded image)", replaced_width);
             }
             // Try to load the image to get intrinsic dimensions
             if (replaced_width < 0) {
@@ -1319,7 +1319,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     strbuf_free(src_buf);
                     if (view_block_replaced->embed->img) {
                         replaced_width = view_block_replaced->embed->img->width;
-                        log_debug("  -> replaced IMG intrinsic width: %d (newly loaded)", (int)replaced_width);
+                        log_debug("  -> replaced IMG intrinsic width: %.0f (newly loaded)", replaced_width);
                     }
                 }
             }
@@ -1438,8 +1438,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
 
         if (replaced_width >= 0) {
-            sizes.min_content = (int)(replaced_width + 0.5f);
-            sizes.max_content = (int)(replaced_width + 0.5f);
+            sizes.min_content = replaced_width;
+            sizes.max_content = replaced_width;
             replaced_intrinsic_set = true;
         }
     }
@@ -1460,8 +1460,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             }
         }
-        sizes.min_content = (int)(svg_width + 0.5f);
-        sizes.max_content = (int)(svg_width + 0.5f);
+        sizes.min_content = svg_width;
+        sizes.max_content = svg_width;
         replaced_intrinsic_set = true;
         log_debug("  -> SVG (tag-based) intrinsic width: %.0f", svg_width);
     }
@@ -2689,10 +2689,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Add gaps for row flex containers
     if (is_row_flex && flex_child_count > 1 && flex_gap > 0) {
-        int total_gap = (int)(flex_gap * (flex_child_count - 1));
+        float total_gap = flex_gap * (flex_child_count - 1);
         sizes.min_content += total_gap;
         sizes.max_content += total_gap;
-        log_debug("  row flex gap: %d items, %.1fpx gap = %dpx total",
+        log_debug("  row flex gap: %d items, %.1fpx gap = %.0fpx total",
                   flex_child_count, flex_gap, total_gap);
     }
 
@@ -3116,16 +3116,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    int horiz_padding = (int)(pad_left + pad_right);
-    int horiz_border = (int)(border_left + border_right);
+    float horiz_padding = pad_left + pad_right;
+    float horiz_border = border_left + border_right;
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
 
     // CSS 2.1 §8.3: For inline elements with forced breaks, the left padding/border
     // applies to the first line and the right padding/border to the last line.
     if (sizes.has_forced_break) {
-        sizes.first_line_max += (int)(pad_left + border_left);
-        sizes.last_line_max += (int)(pad_right + border_right);
+        sizes.first_line_max += pad_left + border_left;
+        sizes.last_line_max += pad_right + border_right;
     }
 
     // CSS 2.1 §10.4: Apply min-width and max-width constraints to intrinsic sizes.

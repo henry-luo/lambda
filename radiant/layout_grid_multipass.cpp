@@ -222,7 +222,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 }
                 log_debug("GRID row[%d] height updated: %d -> %.0f (from content)",
                           r, gl->computed_rows[r].computed_size, max_content_h);
-                gl->computed_rows[r].computed_size = (int)(max_content_h + 0.5f);
+                gl->computed_rows[r].computed_size = max_content_h;
                 gl->computed_rows[r].base_size = max_content_h;
                 rows_changed = true;
             }
@@ -267,8 +267,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
             if (ox != 0 || oy != 0) {
                 log_debug("GRID relative offset: item %d (%.0f, %.0f)", i, ox, oy);
-                item->x += (int)ox;
-                item->y += (int)oy;
+                item->x += ox;
+                item->y += oy;
             }
         }
     }
@@ -507,7 +507,7 @@ int resolve_grid_item_styles(LayoutContext* lycon, ViewBlock* grid_container) {
     if (saved_parent) {
         grid_parent_ctx = *saved_parent;
     }
-    grid_parent_ctx.content_width = (int)container_content_width;
+    grid_parent_ctx.content_width = container_content_width;
     lycon->block.parent = &grid_parent_ctx;
 
     int item_count = 0;
@@ -635,7 +635,7 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
             bool is_display_none = (item->display.outer == CSS_VALUE_NONE);
 
             if (!is_absolute && !is_display_none) {
-                int min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+                float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
                 measure_grid_item_intrinsic(lycon, item, &min_width, &max_width,
                                             &min_height, &max_height);
 
@@ -669,8 +669,8 @@ void measure_grid_items(LayoutContext* lycon, GridContainerLayout* grid_layout) 
 }
 
 void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
-                                  int* min_width, int* max_width,
-                                  int* min_height, int* max_height) {
+                                  float* min_width, float* max_width,
+                                  float* min_height, float* max_height) {
     if (!item) {
         *min_width = *max_width = *min_height = *max_height = 0;
         return;
@@ -696,27 +696,27 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
         if (item->blk->given_width > 0) {
-            int w = (int)item->blk->given_width;
+            float w = item->blk->given_width;
             // CSS Box Model: border-box cannot be smaller than padding+border
             if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
                 float h_pb = item->bound->padding.left + item->bound->padding.right;
                 if (item->bound->border) {
                     h_pb += item->bound->border->width.left + item->bound->border->width.right;
                 }
-                if (w < (int)h_pb) w = (int)h_pb;
+                if (w < h_pb) w = h_pb;
             }
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
         if (item->blk->given_height > 0) {
-            int h = (int)item->blk->given_height;
+            float h = item->blk->given_height;
             // CSS Box Model: border-box cannot be smaller than padding+border
             if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
                 float v_pb = item->bound->padding.top + item->bound->padding.bottom;
                 if (item->bound->border) {
                     v_pb += item->bound->border->width.top + item->bound->border->width.bottom;
                 }
-                if (h < (int)v_pb) h = (int)v_pb;
+                if (h < v_pb) h = v_pb;
             }
             *min_height = *max_height = h;
             has_explicit_height = true;
@@ -724,7 +724,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
 
         // If both dimensions are explicit, we're done
         if (has_explicit_width && has_explicit_height) {
-            log_debug("Grid item %s has explicit dimensions: %dx%d",
+            log_debug("Grid item %s has explicit dimensions: %.1fx%.1f",
                       item->node_name(), *min_width, *min_height);
             return;
         }
@@ -734,8 +734,8 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // This uses FreeType for accurate text measurement
     if (!has_explicit_width) {
         IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
-        *min_width = (int)(item_sizes.min_content + 0.5f);
-        *max_width = (int)(item_sizes.max_content + 0.5f);
+        *min_width = item_sizes.min_content;
+        *max_width = item_sizes.max_content;
     }
 
     if (!has_explicit_height) {
@@ -759,8 +759,8 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
 
         // For block containers, min-content height == max-content height
         float content_height = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
-        *min_height = (int)(content_height + 0.5f);
-        *max_height = (int)(content_height + 0.5f);
+        *min_height = content_height;
+        *max_height = content_height;
     }
 
     // NOTE: Padding and border are already included by:
@@ -772,7 +772,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     store_in_measurement_cache((DomNode*)item, *max_width, *max_height,
                                *min_width, *min_height);
 
-    log_debug("Grid item %s measured: min=%dx%d, max=%dx%d",
+    log_debug("Grid item %s measured: min=%.1fx%.1f, max=%.1fx%.1f",
               item->node_name(), *min_width, *min_height, *max_width, *max_height);
 }
 
@@ -801,7 +801,7 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
         ViewBlock* item = grid_layout->grid_items[i];
         if (!item) continue;
 
-        log_debug("Final layout for grid item %d: %s at (%d,%d) size %dx%d",
+        log_debug("Final layout for grid item %d: %s at (%.0f,%.0f) size %.0fx%.0f",
                   i, item->node_name(), item->x, item->y, item->width, item->height);
 
         layout_grid_item_final_content_multipass(lycon, item);
@@ -816,7 +816,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     if (!grid_item) return;
 
     log_enter();
-    log_info("Layout grid item content: item=%p (%s), size=%dx%d at (%d,%d)",
+    log_info("Layout grid item content: item=%p (%s), size=%.0fx%.0f at (%.0f,%.0f)",
              grid_item, grid_item->node_name(),
              grid_item->width, grid_item->height,
              grid_item->x, grid_item->y);
@@ -1268,7 +1268,7 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                         float free_w = pb_w - child_block->width - ml - mr;
                         float offset = radiant::compute_alignment_offset_simple(justify, free_w);
                         if (offset != 0) {
-                            child_block->x += (int)offset;
+                            child_block->x += offset;
                             log_debug("Absolute no-area: justify=%d free=%.0f offset=%.0f -> x=%.0f",
                                       justify, free_w, offset, child_block->x);
                         }
@@ -1279,7 +1279,7 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                         float free_h = pb_h - child_block->height - mt - mb;
                         float offset = radiant::compute_alignment_offset_simple(align, free_h);
                         if (offset != 0) {
-                            child_block->y += (int)offset;
+                            child_block->y += offset;
                             log_debug("Absolute no-area: align=%d free=%.0f offset=%.0f -> y=%.0f",
                                       align, free_h, offset, child_block->y);
                         }

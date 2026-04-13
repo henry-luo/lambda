@@ -71,8 +71,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             if (fh) {
                 font_content_h = font_get_cell_height(fh);
             }
-            span->width = (int)inline_sum;
-            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->width = inline_sum;
+            span->height = roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             // No inline-axis decorations — the inline box is invisible, collapse to zero
             span->width = 0;
@@ -116,8 +116,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             if (fh) {
                 font_content_h = font_get_cell_height(fh);
             }
-            span->width = (int)inline_sum;
-            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->width = inline_sum;
+            span->height = roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             span->width = 0;
             span->height = 0;
@@ -131,17 +131,17 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // of the inline flow and contribute to the containing inline span's width.
     // child->x is the border-box position (margin already added to the x coordinate),
     // so the outer-left = child->x - margin.left, outer-right = child->x + width + margin.right.
-    auto get_child_outer_left = [](View* c) -> int {
+    auto get_child_outer_left = [](View* c) -> float {
         if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* vb = (ViewBlock*)c;
-            if (vb->bound) return (int)(c->x - vb->bound->margin.left);
+            if (vb->bound) return c->x - vb->bound->margin.left;
         }
         return c->x;
     };
-    auto get_child_outer_right = [](View* c) -> int {
+    auto get_child_outer_right = [](View* c) -> float {
         if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* vb = (ViewBlock*)c;
-            if (vb->bound) return (int)(c->x + c->width + vb->bound->margin.right);
+            if (vb->bound) return c->x + c->width + vb->bound->margin.right;
         }
         return c->x + c->width;
     };
@@ -158,14 +158,14 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // affect the parent's bounding rect. For children with position:relative
     // (block or inline), use their static (pre-offset) position when computing
     // the parent inline span's bounding box.
-    auto get_child_static_y = [](View* c) -> int {
+    auto get_child_static_y = [](View* c) -> float {
         if (c->is_block()) {
             ViewBlock* vb = (ViewBlock*)c;
             if (vb->position && vb->position->position == CSS_VALUE_RELATIVE) {
                 float dy = 0;
                 if (vb->position->has_top) dy = vb->position->top;
                 else if (vb->position->has_bottom) dy = -vb->position->bottom;
-                return (int)(c->y - dy);
+                return c->y - dy;
             }
         } else if (c->view_type == RDT_VIEW_INLINE) {
             DomElement* elem = (DomElement*)c;
@@ -173,13 +173,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 float dy = 0;
                 if (elem->position->has_top) dy = elem->position->top;
                 else if (elem->position->has_bottom) dy = -elem->position->bottom;
-                return (int)(c->y - dy);
+                return c->y - dy;
             }
         }
         return c->y;
     };
 
-    auto get_child_content_y = [&get_child_static_y](View* c) -> int {
+    auto get_child_content_y = [&get_child_static_y](View* c) -> float {
         if (c->view_type == RDT_VIEW_INLINE) {
             ViewSpan* cs = (ViewSpan*)c;
             float bt = 0, pt = 0;
@@ -187,11 +187,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 if (cs->bound->border) bt = cs->bound->border->width.top;
                 pt = cs->bound->padding.top > 0 ? cs->bound->padding.top : 0;
             }
-            return (int)(get_child_static_y(c) + bt + pt);
+            return get_child_static_y(c) + bt + pt;
         }
         return get_child_static_y(c);
     };
-    auto get_child_content_bottom = [&get_child_static_y](View* c) -> int {
+    auto get_child_content_bottom = [&get_child_static_y](View* c) -> float {
         if (c->view_type == RDT_VIEW_INLINE) {
             ViewSpan* cs = (ViewSpan*)c;
             float bb = 0, pb = 0;
@@ -199,18 +199,18 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 if (cs->bound->border) bb = cs->bound->border->width.bottom;
                 pb = cs->bound->padding.bottom > 0 ? cs->bound->padding.bottom : 0;
             }
-            return (int)(get_child_static_y(c) + c->height - bb - pb);
+            return get_child_static_y(c) + c->height - bb - pb;
         }
         return get_child_static_y(c) + c->height;
     };
 
-    int min_x = get_child_outer_left(child);
-    int child_sy = get_child_static_y(child);
-    int visual_min_y = child_sy;
-    int max_x = get_child_outer_right(child);
-    int visual_max_y = child_sy + child->height;
-    int content_min_y = get_child_content_y(child);
-    int content_max_y = get_child_content_bottom(child);
+    float min_x = get_child_outer_left(child);
+    float child_sy = get_child_static_y(child);
+    float visual_min_y = child_sy;
+    float max_x = get_child_outer_right(child);
+    float visual_max_y = child_sy + child->height;
+    float content_min_y = get_child_content_y(child);
+    float content_max_y = get_child_content_bottom(child);
 
     // Iterate through remaining children to find union
     child = child->next();
@@ -220,8 +220,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             child = child->next();
             continue;
         }
-        int child_min_x = get_child_outer_left(child);
-        int child_max_x = get_child_outer_right(child);
+        float child_min_x = get_child_outer_left(child);
+        float child_max_x = get_child_outer_right(child);
 
         // Expand bounding box to include this child
         if (child_min_x < min_x) min_x = child_min_x;
@@ -229,13 +229,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
 
         // Visual extent (including child inline span borders)
         // For block children with position:relative, use static y
-        int sy = get_child_static_y(child);
+        float sy = get_child_static_y(child);
         if (sy < visual_min_y) visual_min_y = sy;
         if (sy + child->height > visual_max_y) visual_max_y = sy + child->height;
 
         // Content extent (stripped of child inline span borders)
-        int cy = get_child_content_y(child);
-        int cb = get_child_content_bottom(child);
+        float cy = get_child_content_y(child);
+        float cb = get_child_content_bottom(child);
         if (cy < content_min_y) content_min_y = cy;
         if (cb > content_max_y) content_max_y = cb;
 
@@ -264,8 +264,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float left_edge = border_left + pad_left;
     float right_edge = border_right + pad_right;
     float inline_sum = left_edge + right_edge;
-    int content_width = max_x - min_x;
-    int visual_height = visual_max_y - visual_min_y;
+    float content_width = max_x - min_x;
+    float visual_height = visual_max_y - visual_min_y;
     if (content_width == 0 && visual_height == 0 && inline_sum == 0) {
         span->width = 0;
         span->height = 0;
@@ -280,10 +280,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // (which includes child inline span borders that may extend further).
     // Use roundf to avoid truncation for fractional em-based padding (e.g. 0.2em = 2.72px).
     // Truncating 2.72 → 2 loses 0.7px per side, making inline code elements too short.
-    int parent_border_top_y = content_min_y - (int)roundf(border_top) - (int)roundf(pad_top);
-    int parent_border_bottom_y = content_max_y + (int)roundf(border_bottom) + (int)roundf(pad_bottom);
-    int final_min_y = min(visual_min_y, parent_border_top_y);
-    int final_max_y = max(visual_max_y, parent_border_bottom_y);
+    float parent_border_top_y = content_min_y - roundf(border_top) - roundf(pad_top);
+    float parent_border_bottom_y = content_max_y + roundf(border_bottom) + roundf(pad_bottom);
+    float final_min_y = min(visual_min_y, parent_border_top_y);
+    float final_max_y = max(visual_max_y, parent_border_bottom_y);
 
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // of the inline box. For single-line spans, border+padding expand the bounding box
@@ -298,9 +298,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         span->height = final_max_y - final_min_y;
     } else {
         // Single-line: include horizontal border+padding in bounding box
-        span->x = min_x - (int)left_edge;
+        span->x = min_x - left_edge;
         span->y = final_min_y;
-        span->width = content_width + (int)left_edge + (int)right_edge;
+        span->width = content_width + left_edge + right_edge;
         span->height = final_max_y - final_min_y;
     }
 }
@@ -923,7 +923,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // children's visual positions (after their own relative positioning),
         // which would contaminate the span's base position for its own offset.
         if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
-            span->y = (int)pre_split_advance_y;
+            span->y = pre_split_advance_y;
         }
 
         // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
@@ -953,10 +953,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
                 float strut_top = pre_split_advance_y - border_top - pad_top;
                 if (strut_top < span->y) {
-                    int old_y = span->y;
-                    span->height += (old_y - (int)strut_top);
-                    span->y = (int)strut_top;
-                    log_debug("%s block-in-inline: extended span y upward from %d to %d (leading strut)", elmt->source_loc(),
+                    float old_y = span->y;
+                    span->height += (old_y - strut_top);
+                    span->y = strut_top;
+                    log_debug("%s block-in-inline: extended span y upward from %.0f to %.0f (leading strut)", elmt->source_loc(),
                               old_y, span->y);
                 }
             }
@@ -1010,8 +1010,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     float trailing_extent = last_block_bottom + line_height + border_bottom + pad_bottom;
                     float span_bottom = span->y + span->height;
                     if (trailing_extent > span_bottom) {
-                        span->height = (int)(trailing_extent - span->y);
-                        log_debug("%s block-in-inline: extended span height to %d (last_block_bottom=%.1f, line_height=%.1f, border_bottom=%.1f)",
+                        span->height = trailing_extent - span->y;
+                        log_debug("%s block-in-inline: extended span height to %.0f (last_block_bottom=%.1f, line_height=%.1f, border_bottom=%.1f)",
                                   elmt->source_loc(), span->height, last_block_bottom, line_height, border_bottom);
                     }
                 }
@@ -1035,9 +1035,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             float content_left = pb_border_left + pb_pad_left;
             float content_width = pb->width - pb_border_left - pb_border_right - pb_pad_left - pb_pad_right;
             if (content_width < 0) content_width = 0;
-            span->x = (int)content_left;
-            span->width = (int)content_width;
-            log_debug("%s block-in-inline: span bounds set to parent content area: x=%d, w=%d (pb_w=%d, bl=%f, br=%f)", elmt->source_loc(),
+            span->x = content_left;
+            span->width = content_width;
+            log_debug("%s block-in-inline: span bounds set to parent content area: x=%.0f, w=%.0f (pb_w=%.0f, bl=%f, br=%f)", elmt->source_loc(),
                       span->x, span->width, pb->width, pb_border_left, pb_border_right);
         }
 
@@ -1315,7 +1315,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 pt_val = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
                 pb_val = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
-            int expected_height = (int)(content_area + bt + pt_val + pb_val + bb);
+            float expected_height = content_area + bt + pt_val + pb_val + bb;
             if (!span_is_multi_line && span->height > expected_height) {
                 // CSS 2.1 §10.6.1: For inline non-replaced elements, the inline box
                 // height = content_area + own border + own padding. Children's borders
@@ -1334,7 +1334,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
                 if (!child_overflows) {
                     span->height = expected_height;
-                    log_debug("%s inline span height capped to content area: %d (area=%.1f)", elmt->source_loc(), expected_height, content_area);
+                    log_debug("%s inline span height capped to content area: %.0f (area=%.1f)", elmt->source_loc(), expected_height, content_area);
                 }
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
@@ -1348,7 +1348,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     ascender = lycon->font.style->ascender;
                 }
                 if (ascender > 0 && lycon->block.line_height < content_area) {
-                    span->y = (int)(lycon->block.advance_y + lycon->line.max_ascender - ascender - bt - pt_val);
+                    span->y = lycon->block.advance_y + lycon->line.max_ascender - ascender - bt - pt_val;
                 }
             }
         }

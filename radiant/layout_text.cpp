@@ -1206,7 +1206,7 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
         if ((int)text_right >= (int)content_right) {
             break;
         }
-        int new_width = parent->width - (int)trim_amount;
+        float new_width = parent->width - trim_amount;
         if (new_width < 0) new_width = 0;
         parent->width = new_width;
         parent = parent->parent_view();
@@ -1330,7 +1330,7 @@ static void fixup_collapsed_inline_spans(ViewSpan* span) {
     if (span->height == 0) {
         DomElement* elem = static_cast<DomElement*>((DomNode*)span);
         if (elem->content_height > 0) {
-            span->height = (int)elem->content_height;
+            span->height = elem->content_height;
         }
     }
 }
