@@ -221,13 +221,11 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
 // Harness files that mutate global built-in state.  Tests including ANY of
 // these MUST run individually, never inside a shared batch process, because
 // the mutations leak into subsequent tests within the same batch.
-// propertyHelper.js is listed here because its isConfigurable() helper
-// calls `delete obj[name]` to verify configurability — this permanently
-// removes built-in prototype methods in a shared batch process.  ~1500
-// baseline tests include it; running them individually (chunk_size=1) adds
-// only ~1.5s wallclock with 12 parallel workers.
+// NOTE: propertyHelper.js was previously listed here because its
+// isConfigurable() helper called `delete obj[name]` without restoring.
+// We patched isConfigurable() to restore after testing, so it's now safe
+// to batch.
 static const std::set<std::string> NON_BATCH_INCLUDES = {
-    "propertyHelper.js",
 };
 
 // =============================================================================
