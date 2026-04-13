@@ -25,50 +25,50 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
     log_debug(" Positioning grid items - container: %.0fx%.0f at (%.0f,%.0f)\n",
            container->width, container->height, container->x, container->y);
-    log_debug(" Grid content dimensions: %dx%d\n",
+    log_debug(" Grid content dimensions: %.1fx%.1f\n",
            grid_layout->content_width, grid_layout->content_height);
     log_debug(" Grid gaps - row: %.1f, column: %.1f\n",
            grid_layout->row_gap, grid_layout->column_gap);
     log_debug("Positioning grid items\n");
 
     // Calculate track positions
-    int* row_positions = (int*)scratch_calloc(sa, (grid_layout->computed_row_count + 1) * sizeof(int));
-    int* column_positions = (int*)scratch_calloc(sa, (grid_layout->computed_column_count + 1) * sizeof(int));
+    float* row_positions = (float*)scratch_calloc(sa, (grid_layout->computed_row_count + 1) * sizeof(float));
+    float* column_positions = (float*)scratch_calloc(sa, (grid_layout->computed_column_count + 1) * sizeof(float));
 
     // First, calculate the total grid content size (all tracks + gaps)
-    int total_row_size = 0;
+    float total_row_size = 0;
     for (int i = 0; i < grid_layout->computed_row_count; i++) {
         total_row_size += grid_layout->computed_rows[i].computed_size;
         if (i < grid_layout->computed_row_count - 1) {
-            total_row_size += (int)grid_layout->row_gap;
+            total_row_size += grid_layout->row_gap;
         }
     }
 
-    int total_column_size = 0;
+    float total_column_size = 0;
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
         total_column_size += grid_layout->computed_columns[i].computed_size;
         if (i < grid_layout->computed_column_count - 1) {
-            total_column_size += (int)grid_layout->column_gap;
+            total_column_size += grid_layout->column_gap;
         }
     }
 
-    log_debug(" Total grid content: %dx%d, container content: %dx%d\n",
+    log_debug(" Total grid content: %.1fx%.1f, container content: %.1fx%.1f\n",
               total_column_size, total_row_size,
               grid_layout->content_width, grid_layout->content_height);
 
     // Calculate justify-content offset and spacing (horizontal)
     // Using unified alignment functions from layout_alignment.hpp
-    int justify_offset = 0;
+    float justify_offset = 0;
     float justify_spacing = 0;  // Additional spacing between tracks
-    int extra_column_space = grid_layout->content_width - total_column_size;
+    float extra_column_space = grid_layout->content_width - total_column_size;
     int col_count = grid_layout->computed_column_count;
     if (col_count > 0) {
         int32_t justify = grid_layout->justify_content;
         if (extra_column_space > 0 && radiant::alignment_is_space_distribution(justify)) {
             // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                justify, (float)extra_column_space, col_count, 0.0f);
-            justify_offset = (int)dist.gap_before_first;
+                justify, extra_column_space, col_count, 0.0f);
+            justify_offset = dist.gap_before_first;
             justify_spacing = dist.gap_between;
         } else {
             // Use single offset for start/end/center
@@ -78,25 +78,25 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             if (extra_column_space < 0 && radiant::alignment_is_space_distribution(justify)) {
                 effective_align = CSS_VALUE_START;  // Fall back to start for overflow
             }
-            justify_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_column_space);
+            justify_offset = radiant::compute_alignment_offset_simple(effective_align, extra_column_space);
         }
     }
-    log_debug(" justify-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
+    log_debug(" justify-content=%d, extra_space=%.1f, offset=%.1f, spacing=%.1f\n",
               grid_layout->justify_content, extra_column_space, justify_offset, justify_spacing);
 
     // Calculate align-content offset and spacing (vertical)
     // Using unified alignment functions from layout_alignment.hpp
-    int align_offset = 0;
+    float align_offset = 0;
     float align_spacing = 0;  // Additional spacing between tracks
-    int extra_row_space = grid_layout->content_height - total_row_size;
+    float extra_row_space = grid_layout->content_height - total_row_size;
     int row_count = grid_layout->computed_row_count;
     if (row_count > 0) {
         int32_t align = grid_layout->align_content;
         if (extra_row_space > 0 && radiant::alignment_is_space_distribution(align)) {
             // Use space distribution for space-between/around/evenly (only with positive space)
             radiant::SpaceDistribution dist = radiant::compute_space_distribution(
-                align, (float)extra_row_space, row_count, 0.0f);
-            align_offset = (int)dist.gap_before_first;
+                align, extra_row_space, row_count, 0.0f);
+            align_offset = dist.gap_before_first;
             align_spacing = dist.gap_between;
         } else {
             // Use single offset for start/end/center
@@ -106,21 +106,21 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             if (extra_row_space < 0 && radiant::alignment_is_space_distribution(align)) {
                 effective_align = CSS_VALUE_START;  // Fall back to start for overflow
             }
-            align_offset = (int)radiant::compute_alignment_offset_simple(effective_align, (float)extra_row_space);
+            align_offset = radiant::compute_alignment_offset_simple(effective_align, extra_row_space);
         }
     }
-    log_debug(" align-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
+    log_debug(" align-content=%d, extra_space=%.1f, offset=%.1f, spacing=%.1f\n",
               grid_layout->align_content, extra_row_space, align_offset, align_spacing);
 
     // Calculate row positions with align-content offset and spacing
     float current_y_f = align_offset;
     log_debug(" Calculating row positions for %d rows:\n", grid_layout->computed_row_count);
     for (int i = 0; i <= grid_layout->computed_row_count; i++) {
-        row_positions[i] = (int)current_y_f;
-        log_debug(" Row %d position: %d\n", i, row_positions[i]);
+        row_positions[i] = current_y_f;
+        log_debug(" Row %d position: %.1f\n", i, row_positions[i]);
         if (i < grid_layout->computed_row_count) {
-            int track_size = grid_layout->computed_rows[i].computed_size;
-            log_debug(" Row %d size: %d\n", i, track_size);
+            float track_size = grid_layout->computed_rows[i].computed_size;
+            log_debug(" Row %d size: %.1f\n", i, track_size);
             current_y_f += track_size;
             if (i < grid_layout->computed_row_count - 1) {
                 current_y_f += grid_layout->row_gap;
@@ -140,11 +140,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     float current_x_f = justify_offset;
     log_debug(" Calculating column positions for %d columns:\n", grid_layout->computed_column_count);
     for (int i = 0; i <= grid_layout->computed_column_count; i++) {
-        column_positions[i] = (int)current_x_f;
-        log_debug(" Column %d position: %d\n", i, column_positions[i]);
+        column_positions[i] = current_x_f;
+        log_debug(" Column %d position: %.1f\n", i, column_positions[i]);
         if (i < grid_layout->computed_column_count) {
-            int track_size = grid_layout->computed_columns[i].computed_size;
-            log_debug(" Column %d size: %d\n", i, track_size);
+            float track_size = grid_layout->computed_columns[i].computed_size;
+            log_debug(" Column %d size: %.1f\n", i, track_size);
             current_x_f += track_size;
             if (i < grid_layout->computed_column_count - 1) {
                 current_x_f += grid_layout->column_gap;
@@ -179,25 +179,25 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         col_end = fmax(col_start + 1, fmin(col_end, grid_layout->computed_column_count));
 
         // Calculate item position and size
-        int item_x = column_positions[col_start];
-        int item_y = row_positions[row_start];
+        float item_x = column_positions[col_start];
+        float item_y = row_positions[row_start];
 
         // Calculate track width by summing individual track sizes (not from positions, which include gaps)
-        int track_width = 0;
+        float track_width = 0;
         for (int c = col_start; c < col_end; c++) {
             track_width += grid_layout->computed_columns[c].computed_size;
             // Add gap for interior tracks (not the last one in the span)
             if (c < col_end - 1) {
-                track_width += (int)grid_layout->column_gap;
+                track_width += grid_layout->column_gap;
             }
         }
 
-        int track_height = 0;
+        float track_height = 0;
         for (int r = row_start; r < row_end; r++) {
             track_height += grid_layout->computed_rows[r].computed_size;
             // Add gap for interior tracks (not the last one in the span)
             if (r < row_end - 1) {
-                track_height += (int)grid_layout->row_gap;
+                track_height += grid_layout->row_gap;
             }
         }
 
@@ -209,17 +209,17 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
         // Determine item dimensions - use CSS-specified size if available,
         // otherwise default to track size (will be adjusted during alignment)
-        int item_width = track_width;
-        int item_height = track_height;
+        float item_width = track_width;
+        float item_height = track_height;
 
         // Check if item has explicit CSS width
         if (item->blk && item->blk->given_width > 0) {
-            item_width = (int)item->blk->given_width;
+            item_width = item->blk->given_width;
         }
 
         // Check if item has explicit CSS height
         if (item->blk && item->blk->given_height > 0) {
-            item_height = (int)item->blk->given_height;
+            item_height = item->blk->given_height;
         }
 
         // CSS Box Model: border-box minimum — the box cannot be smaller than padding+border
@@ -230,33 +230,33 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
                 h_pad_border += item->bound->border->width.left + item->bound->border->width.right;
                 v_pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
             }
-            if (item_width < (int)h_pad_border) {
-                item_width = (int)h_pad_border;
+            if (item_width < h_pad_border) {
+                item_width = h_pad_border;
             }
-            if (item_height < (int)v_pad_border) {
-                item_height = (int)v_pad_border;
+            if (item_height < v_pad_border) {
+                item_height = v_pad_border;
             }
         }
 
         // Apply min-width/max-width and min-height/max-height constraints
         if (item->blk) {
-            if (item->blk->given_max_width > 0 && item_width > (int)item->blk->given_max_width) {
-                item_width = (int)item->blk->given_max_width;
+            if (item->blk->given_max_width > 0 && item_width > item->blk->given_max_width) {
+                item_width = item->blk->given_max_width;
             }
-            if (item->blk->given_min_width > 0 && item_width < (int)item->blk->given_min_width) {
-                item_width = (int)item->blk->given_min_width;
+            if (item->blk->given_min_width > 0 && item_width < item->blk->given_min_width) {
+                item_width = item->blk->given_min_width;
             }
-            if (item->blk->given_max_height > 0 && item_height > (int)item->blk->given_max_height) {
-                item_height = (int)item->blk->given_max_height;
+            if (item->blk->given_max_height > 0 && item_height > item->blk->given_max_height) {
+                item_height = item->blk->given_max_height;
             }
-            if (item->blk->given_min_height > 0 && item_height < (int)item->blk->given_min_height) {
-                item_height = (int)item->blk->given_min_height;
+            if (item->blk->given_min_height > 0 && item_height < item->blk->given_min_height) {
+                item_height = item->blk->given_min_height;
             }
         }
 
         // Apply container offset (borders and padding)
-        int container_offset_x = 0;
-        int container_offset_y = 0;
+        float container_offset_x = 0;
+        float container_offset_y = 0;
 
         if (container->bound) {
             container_offset_x += container->bound->padding.left;
@@ -278,25 +278,25 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
             item->gi->track_base_y = new_y;
         }
 
-        log_debug(" Assigning item %d: x=%.0f (%d+%d), y=%.0f, width=%d, height=%d\n",
+        log_debug(" Assigning item %d: x=%.0f (%.0f+%.0f), y=%.0f, width=%.1f, height=%.1f\n",
                i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
         log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
         item->x = new_x;
         item->y = new_y;
-        item->width = (float)item_width;
-        item->height = (float)item_height;
+        item->width = item_width;
+        item->height = item_height;
         log_debug(" After assignment item %d: x=%.0f, y=%.0f, width=%.0f, height=%.0f at item=%p\n",
                i, item->x, item->y, item->width, item->height, (void*)item);
 
         log_debug(" Grid item %d positioning:\n", i);
         log_debug("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
-        log_debug("  Track positions: x=%d, y=%d\n", item_x, item_y);
-        log_debug("  Track sizes: width=%d, height=%d\n", item_width, item_height);
-        log_debug("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
+        log_debug("  Track positions: x=%.1f, y=%.1f\n", item_x, item_y);
+        log_debug("  Track sizes: width=%.1f, height=%.1f\n", item_width, item_height);
+        log_debug("  Container: offset=(%.1f,%.1f)\n", container_offset_x, container_offset_y);
         log_debug("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
                item->x, item->y, item->width, item->height);
 
-        log_debug("Positioned grid item %d: pos=(%d,%d), size=%dx%d, grid_area=(%d-%d, %d-%d)\n",
+        log_debug("Positioned grid item %d: pos=(%.0f,%.0f), size=%.0fx%.0f, grid_area=(%d-%d, %d-%d)\n",
                   i, item->x, item->y, item->width, item->height,
                   row_start + 1, row_end, col_start + 1, col_end);
     }
@@ -427,7 +427,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         for (int r = 0; r < row_count; r++) {
             float needed = row_max_baseline[r] + row_max_below[r];
             if (needed > grid_layout->computed_rows[r].computed_size + 0.5f) {
-                grid_layout->computed_rows[r].computed_size = (int)(needed + 0.5f);
+                grid_layout->computed_rows[r].computed_size = needed;
                 rows_changed = true;
             }
         }
@@ -451,7 +451,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             // Recompute row offsets
             float row_offset = 0;
             for (int r = 0; r < row_count; r++) {
-                grid_layout->computed_rows[r].base_size = (int)row_offset;
+                grid_layout->computed_rows[r].base_size = row_offset;
                 row_offset += grid_layout->computed_rows[r].computed_size + row_gap;
             }
 
@@ -463,8 +463,8 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                 int row_idx = item->gi->computed_grid_row_start - 1;
                 if (row_idx < 0 || row_idx >= row_count) continue;
 
-                item->gi->track_base_y = (int)(grid_layout->computed_rows[row_idx].base_size
-                                               + content_top_offset);
+                item->gi->track_base_y = grid_layout->computed_rows[row_idx].base_size
+                                               + content_top_offset;
 
                 // Recompute track_area_height for multi-row items
                 int row_end_idx = item->gi->computed_grid_row_end - 1;
@@ -475,7 +475,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                     area_h += grid_layout->computed_rows[r].computed_size;
                     if (r < row_end_idx - 1) area_h += row_gap;
                 }
-                item->gi->track_area_height = (int)area_h;
+                item->gi->track_area_height = area_h;
             }
         }
 
@@ -497,7 +497,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
             float shift = row_max_baseline[row_idx] - baseline;
             if (shift > 0.01f) {
-                item->gi->track_base_y += (int)shift;
+                item->gi->track_base_y += shift;
             }
         }
 
@@ -522,8 +522,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     item->y = item->gi->track_base_y;
 
     // Use stored track area dimensions from positioning phase
-    int available_width = item->gi->track_area_width;
-    int available_height = item->gi->track_area_height;
+    float available_width = item->gi->track_area_width;
+    float available_height = item->gi->track_area_height;
 
     // CSS Grid §8.1: fixed (non-auto) margins reduce the usable grid area for alignment.
     // The item's alignment box = grid area minus fixed margins.  Auto margins are handled
@@ -570,8 +570,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     }
 
     // Reduce available area by the fixed margins before any alignment calculation
-    available_width  -= (int)(margin_left + margin_right);
-    available_height -= (int)(margin_top  + margin_bottom);
+    available_width  -= margin_left + margin_right;
+    available_height -= margin_top  + margin_bottom;
     if (available_width  < 0) available_width  = 0;
     if (available_height < 0) available_height = 0;
     // Offset the base position so alignment operates inside the margin box

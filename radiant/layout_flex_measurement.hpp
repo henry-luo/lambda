@@ -9,10 +9,10 @@
 // Measurement cache entry
 typedef struct {
     DomNode* node;
-    int measured_width;
-    int measured_height;
-    int content_width;
-    int content_height;
+    float measured_width;
+    float measured_height;
+    float content_width;
+    float content_height;
     uint32_t generation;  // layout generation when this entry was stored
 } MeasurementCacheEntry;
 
@@ -39,7 +39,7 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
 
 // Measurement cache functions
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
-void store_in_measurement_cache(DomNode* node, int width, int height, int content_width, int content_height);
+void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
 void invalidate_measurement_cache_for_node(DomNode* node);

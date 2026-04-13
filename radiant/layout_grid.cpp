@@ -292,7 +292,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 }
             }
             if (new_h > (float)container->height) {
-                container->height = (int)new_h;
+                container->height = (int)new_h; // INT_CAST_OK: grid container height
                 log_debug("%s GRID: Updated empty-grid container height to %.1f from explicit rows", container->source_loc(), new_h);
             }
         }
@@ -516,12 +516,12 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                         if (text_max_inline > definite_row_height && text_min_unit > 0) {
                             float eff = definite_row_height;
                             if (text_min_unit <= definite_row_height) {
-                                int units = (int)(definite_row_height / text_min_unit);
+                                int units = (int)(definite_row_height / text_min_unit); // INT_CAST_OK: intentional
                                 if (units > 0) eff = units * text_min_unit;
                             } else {
                                 eff = text_min_unit;
                             }
-                            int num_lines = (int)ceilf(text_max_inline / eff);
+                            int num_lines = (int)ceilf(text_max_inline / eff); // INT_CAST_OK: integer line count
                             float w = num_lines * line_advance;
                             if (w > max_block_size) max_block_size = w;
                         } else {
@@ -575,7 +575,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
 
         container->width = container_width;
-        grid_layout->container_width = (int)container->width;
+        grid_layout->container_width = (int)container->width; // INT_CAST_OK: grid container width
     }
 
     // Phase 6: Position grid items
@@ -619,8 +619,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
         if (offset_x != 0 || offset_y != 0) {
             log_debug("%s Phase 7.5: grid item %d relative offset (%.0f, %.0f)", container->source_loc(), i, offset_x, offset_y);
-            item->x += (int)offset_x;
-            item->y += (int)offset_y;
+            item->x += (int)offset_x; // INT_CAST_OK: grid item relative offset
+            item->y += (int)offset_y; // INT_CAST_OK: grid item relative offset
         }
     }
 
@@ -1312,7 +1312,7 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
                 GridTrackSize* other = cols->tracks[j];
                 if (!other) continue;
                 if (other->type == GRID_TRACK_SIZE_LENGTH) {
-                    fixed_track_space += (int)other->value;
+                    fixed_track_space += (int)other->value; // INT_CAST_OK: track size value
                     fixed_track_count++;
                 }
                 // percentage/flex tracks: skip (can't know their size without container width)
@@ -1320,14 +1320,14 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             // Total gaps for the non-auto-fill tracks we know about
             // (will be recalculated once the final track count is known, but we approximate here)
             int total_explicit_tracks = fixed_track_count;
-            int gap_for_fixed = (total_explicit_tracks > 0) ? (int)(total_explicit_tracks * gap) : 0;
+            int gap_for_fixed = (total_explicit_tracks > 0) ? (int)(total_explicit_tracks * gap) : 0; // INT_CAST_OK: gap calculation
             int available = grid_layout->content_width - fixed_track_space - gap_for_fixed;
 
             // Calculate how many repetitions fit
             // Formula: (available + gap) / (pattern_size + gap) = max repetitions
             int repeat_count = 1;
             if (pattern_size + gap > 0) {
-                repeat_count = (int)((available + gap) / (pattern_size + gap));
+                repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: integer count
                 if (repeat_count < 1) repeat_count = 1;
             }
 
@@ -1425,16 +1425,16 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
                 GridTrackSize* other = rows->tracks[j];
                 if (!other) continue;
                 if (other->type == GRID_TRACK_SIZE_LENGTH) {
-                    fixed_row_space += (int)other->value;
+                    fixed_row_space += (int)other->value; // INT_CAST_OK: track size value
                     fixed_row_count++;
                 }
             }
-            int gap_for_fixed_rows = fixed_row_count > 0 ? (int)(fixed_row_count * gap) : 0;
+            int gap_for_fixed_rows = fixed_row_count > 0 ? (int)(fixed_row_count * gap) : 0; // INT_CAST_OK: gap calculation
             int available = grid_layout->content_height - fixed_row_space - gap_for_fixed_rows;
 
             int repeat_count = 1;
             if (pattern_size + gap > 0) {
-                repeat_count = (int)((available + gap) / (pattern_size + gap));
+                repeat_count = (int)((available + gap) / (pattern_size + gap)); // INT_CAST_OK: integer count
                 if (repeat_count < 1) repeat_count = 1;
             }
 
