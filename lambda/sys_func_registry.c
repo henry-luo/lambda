@@ -35,6 +35,10 @@ extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
 extern Item fn_split(Item str, Item sep); // JIT name: fn_split2
 extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_replace3
 
+// super property access (js_runtime.cpp)
+extern Item js_super_property_get(Item receiver, Item key);
+extern Item js_super_property_set(Item receiver, Item key, Item value);
+
 // view/edit template apply
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
@@ -1189,6 +1193,8 @@ JitImport jit_runtime_imports[] = {
     {"js_property_get", FPTR(js_property_get)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_property_access", FPTR(js_property_access)},
+    {"js_super_property_get", FPTR(js_super_property_get)},
+    {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_property_get_str", FPTR(js_property_get_str)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},

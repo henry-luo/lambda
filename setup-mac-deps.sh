@@ -115,9 +115,12 @@ else
 fi
 
 # Install npm dependencies (jsdom for test comparators, puppeteer for browser tests)
+# Use --ignore-scripts to avoid node-gyp trying to build tree-sitter-javascript
+# native binding before parser.c is generated. The C static library is built
+# separately by the tree-sitter build steps below.
 echo "Installing npm dependencies..."
 if [ -f "package.json" ]; then
-    PUPPETEER_SKIP_DOWNLOAD=true npm install
+    PUPPETEER_SKIP_DOWNLOAD=true npm install --ignore-scripts
     echo "npm dependencies installed"
 else
     echo "Warning: package.json not found, skipping npm install"
