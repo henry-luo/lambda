@@ -1097,10 +1097,14 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             int last_col = current_col;
 
             // Count columns in this group by iterating its children
+            // Each <col> may have a span attribute indicating multiple columns
             int col_count = 0;
             for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                    col_count++;
+                    const char* col_span_str = col->get_attribute("span");
+                    int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
+                    if (col_span <= 0) col_span = 1;
+                    col_count += col_span;
                 }
             }
 
@@ -1122,14 +1126,13 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             // (they include border + padding + border-spacing offsets).
             if (first_col < columns) {
                 float x = col_x_positions[first_col];
+                // Sum column widths + border-spacing between spanned columns
                 float width = 0;
                 for (int c = first_col; c <= last_col && c < columns; c++) {
                     width += col_widths[c];
                 }
-                // Add border-spacing between columns (if applicable)
-                // Note: col_x_positions already includes spacing, so calculate from positions
-                if (last_col < columns) {
-                    width = (col_x_positions[last_col + 1] - col_x_positions[first_col]);
+                if (!table->tb->border_collapse && (last_col - first_col) > 0) {
+                    width += (last_col - first_col) * table->tb->border_spacing_h;
                 }
 
                 child->x = x;
@@ -1149,11 +1152,25 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             int col_idx = first_col;
             for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
                 if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
+                    // Check span attribute on col element
+                    const char* col_span_str = col->get_attribute("span");
+                    int col_span = (col_span_str && *col_span_str) ? (int)str_to_int64_default(col_span_str, strlen(col_span_str), 0) : 1; // INT_CAST_OK: span count
+                    if (col_span <= 0) col_span = 1;
+                    int col_end = col_idx + col_span - 1;
+                    if (col_end >= columns) col_end = columns - 1;
+
                     // Column x absolute from table border-box
                     float col_x_in_table = col_x_positions[col_idx];
                     // Column x relative to parent colgroup
                     float col_x = col_x_in_table - colgroup_x;
-                    float col_width = col_widths[col_idx];
+                    // Sum widths of spanned columns + border-spacing between them
+                    float col_width = 0;
+                    for (int c = col_idx; c <= col_end && c < columns; c++) {
+                        col_width += col_widths[c];
+                    }
+                    if (!table->tb->border_collapse && (col_end - col_idx) > 0) {
+                        col_width += (col_end - col_idx) * table->tb->border_spacing_h;
+                    }
 
                     col->x = col_x;
                     col->y = 0;
@@ -1161,9 +1178,9 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                     // CSS 2.1 §17.5.1: Columns with zero width have zero height
                     col->height = (col_width > 0) ? table_height : 0;
 
-                    log_debug("%s [COLUMN-LAYOUT] Column %d: x=%.1f (in table: %.1f), y=0, width=%.1f, height=%.1f", table->source_loc(),
-                              col_idx, col_x, col_x_in_table, col_width, col->height);
-                    col_idx++;
+                    log_debug("%s [COLUMN-LAYOUT] Column %d-%d: x=%.1f (in table: %.1f), y=0, width=%.1f, height=%.1f", table->source_loc(),
+                              col_idx, col_end, col_x, col_x_in_table, col_width, col->height);
+                    col_idx = col_end + 1;
                 }
             }
 
@@ -1172,8 +1189,22 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
         else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
             // Standalone column (not in a colgroup)
             if (current_col < columns) {
+                // Check span attribute
+                const char* span_str = child->get_attribute("span");
+                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
+                if (span <= 0) span = 1;
+                int col_end = current_col + span - 1;
+                if (col_end >= columns) col_end = columns - 1;
+
                 float col_x = col_x_positions[current_col];
-                float col_width = col_widths[current_col];
+                // Sum widths of spanned columns + border-spacing between them
+                float col_width = 0;
+                for (int c = current_col; c <= col_end && c < columns; c++) {
+                    col_width += col_widths[c];
+                }
+                if (!table->tb->border_collapse && (col_end - current_col) > 0) {
+                    col_width += (col_end - current_col) * table->tb->border_spacing_h;
+                }
 
                 child->x = col_x;
                 child->y = content_y_offset;
@@ -1181,9 +1212,9 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
                 // CSS 2.1 §17.5.1: Columns with zero width have zero height
                 child->height = (col_width > 0) ? table_height : 0;
 
-                log_debug("%s [COLUMN-LAYOUT] Standalone column %d: x=%.1f, y=0, width=%.1f, height=%.1f", table->source_loc(),
-                          current_col, col_x, col_width, child->height);
-                current_col++;
+                log_debug("%s [COLUMN-LAYOUT] Standalone column %d-%d: x=%.1f, y=0, width=%.1f, height=%.1f", table->source_loc(),
+                          current_col, col_end, col_x, col_width, child->height);
+                current_col = col_end + 1;
             }
         }
     }
@@ -5127,7 +5158,10 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 bool has_col = false;
                 for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
                     if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
-                        col_count++;
+                        const char* span_str = col->get_attribute("span");
+                        int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
+                        if (span <= 0) span = 1;
+                        col_count += span;
                         has_col = true;
                     }
                 }
@@ -5138,7 +5172,10 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                     col_count += span;
                 }
             } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
-                col_count++;
+                const char* span_str = child->get_attribute("span");
+                int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
+                if (span <= 0) span = 1;
+                col_count += span;
             }
         }
         if (col_count > columns) columns = col_count;
@@ -5279,6 +5316,192 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     return meta;
 }
 
+// Helper: re-layout a single caption after its width changes.
+// Returns the updated caption height (including margins).
+static float relayout_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
+    DomElement* dom_elem = static_cast<DomElement*>(cap);
+
+    // Reset child views before re-layout
+    if (dom_elem) {
+        for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+            if (child->is_text()) {
+                child->view_type = RDT_VIEW_NONE;
+                ViewText* text_view = (ViewText*)child;
+                text_view->rect = nullptr;
+                text_view->width = 0;
+                text_view->height = 0;
+            }
+        }
+    }
+
+    LayoutContextScope lscope(lycon);
+    View* saved_view = lycon->view;
+
+    float content_width = cap->width;
+    if (cap->bound) {
+        content_width -= cap->bound->padding.left + cap->bound->padding.right;
+        if (cap->bound->border) {
+            content_width -= cap->bound->border->width.left + cap->bound->border->width.right;
+        }
+    }
+    content_width = max(content_width, 0.0f);
+
+    lycon->view = (View*)cap;
+    dom_node_resolve_style((DomNode*)cap, lycon);
+
+    lycon->block.content_width = content_width;
+    lycon->block.content_height = 10000;
+    lycon->block.advance_y = 0;
+
+    float inner_left = 0;
+    if (cap->bound) {
+        if (cap->bound->border) {
+            inner_left += cap->bound->border->width.left;
+            lycon->block.advance_y += cap->bound->border->width.top;
+        }
+        inner_left += cap->bound->padding.left;
+        lycon->block.advance_y += cap->bound->padding.top;
+    }
+    lycon->line.left = inner_left;
+    lycon->line.right = inner_left + content_width;
+
+    if (cap->font) {
+        setup_font(lycon->ui_context, &lycon->font, cap->font);
+    }
+    setup_line_height(lycon, cap);
+    if (lycon->font.font_handle) {
+        if (lycon->block.line_height_is_normal) {
+            font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+        } else {
+            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+            if (typo.valid && typo.use_typo_metrics) {
+                lycon->block.init_ascender = typo.ascender;
+                lycon->block.init_descender = typo.descender;
+            } else {
+                const FontMetrics* fm = font_get_metrics(lycon->font.font_handle);
+                if (fm) {
+                    lycon->block.init_ascender = fm->hhea_ascender;
+                    lycon->block.init_descender = -(fm->hhea_descender);
+                }
+            }
+        }
+    }
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+
+    if (cap->blk) {
+        if (!isnan(cap->blk->text_indent_percent)) {
+            lycon->block.text_indent = content_width * cap->blk->text_indent_percent / 100.0f;
+        } else {
+            lycon->block.text_indent = cap->blk->text_indent;
+        }
+        if (lycon->block.text_indent != 0.0f) {
+            lycon->block.is_first_line = true;
+        }
+    }
+
+    line_reset(lycon);
+
+    if (cap->blk && cap->blk->text_align) {
+        lycon->block.text_align = cap->blk->text_align;
+    }
+    if (cap->blk && cap->blk->direction) {
+        lycon->block.direction = cap->blk->direction;
+    }
+
+    if (dom_elem) {
+        for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+            layout_flow_node(lycon, child);
+        }
+        if (!lycon->line.is_line_start) { line_break(lycon); }
+    }
+
+    float caption_content_height = lycon->block.advance_y;
+    float caption_given_height = (cap->blk && cap->blk->given_height >= 0)
+        ? cap->blk->given_height : -1;
+    if (caption_given_height >= 0) {
+        cap->height = caption_given_height;
+        if (cap->bound) {
+            cap->height += cap->bound->padding.top + cap->bound->padding.bottom;
+            if (cap->bound->border) {
+                cap->height += cap->bound->border->width.top + cap->bound->border->width.bottom;
+            }
+        }
+    } else {
+        cap->height = caption_content_height;
+        if (cap->bound) {
+            cap->height += cap->bound->padding.bottom;
+            if (cap->bound->border) {
+                cap->height += cap->bound->border->width.bottom;
+            }
+        }
+    }
+    if (cap->blk) {
+        bool is_border_box = cap->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        if (is_border_box) {
+            cap->height = adjust_min_max_height(cap, cap->height);
+        } else {
+            float pad_border_v = 0;
+            if (cap->bound) {
+                pad_border_v += cap->bound->padding.top + cap->bound->padding.bottom;
+                if (cap->bound->border) {
+                    pad_border_v += cap->bound->border->width.top + cap->bound->border->width.bottom;
+                }
+            }
+            float content_h = cap->height - pad_border_v;
+            float clamped_h = adjust_min_max_height(cap, content_h);
+            cap->height = clamped_h + pad_border_v;
+        }
+    }
+
+    log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
+
+    lycon->view = saved_view;
+    // lscope destructor restores block, line, font
+
+    // Return height including margins
+    float margin_v = 0;
+    if (cap->bound) {
+        float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
+        float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
+        margin_v = mt + mb;
+    }
+    return cap->height + margin_v;
+}
+
+// Helper: adjust caption width based on table width and CSS constraints.
+// Returns the updated width.
+static float adjust_caption_width(ViewBlock* cap, float table_width) {
+    if (cap->blk && cap->blk->given_width > 0) {
+        cap->width = cap->blk->given_width;
+        if (cap->blk->box_sizing != CSS_VALUE_BORDER_BOX && cap->bound) {
+            cap->width += cap->bound->padding.left + cap->bound->padding.right;
+            if (cap->bound->border) {
+                cap->width += cap->bound->border->width.left + cap->bound->border->width.right;
+            }
+        }
+    } else {
+        cap->width = table_width;
+    }
+    if (cap->blk) {
+        bool is_border_box = cap->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+        if (is_border_box) {
+            cap->width = adjust_min_max_width(cap, cap->width);
+        } else {
+            float pad_border_h = 0;
+            if (cap->bound) {
+                pad_border_h += cap->bound->padding.left + cap->bound->padding.right;
+                if (cap->bound->border) {
+                    pad_border_h += cap->bound->border->width.left + cap->bound->border->width.right;
+                }
+            }
+            float content_w = cap->width - pad_border_h;
+            float clamped_w = adjust_min_max_width(cap, content_w);
+            cap->width = clamped_w + pad_border_h;
+        }
+    }
+    return cap->width;
+}
+
 // Enhanced table layout algorithm with colspan/rowspan support
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
@@ -5298,34 +5521,38 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table->tb->border_spacing_h, table->tb->border_spacing_v, table->tb->border_collapse ? "true" : "false");
 
     // CRITICAL FIX: Handle caption positioning first
-    ViewBlock* caption = nullptr;
+    // CSS 2.1 §17.4: A table may have multiple captions; all are rendered.
+    ArrayList* captions = arraylist_new(4);
+    ViewBlock* caption = nullptr;  // first caption (for backward-compat checks)
     float caption_height = 0;
 
-    // Find and position caption - check both HTML tag and CSS display property
+    // Find ALL captions - check both HTML tag and CSS display property
     for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         // Check for HTML <caption> tag OR CSS display: table-caption
         DisplayValue child_display = resolve_display_value((void*)child);
         bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
                          (child_display.inner == CSS_VALUE_TABLE_CAPTION);
         if (is_caption) {
-            caption = child;
+            arraylist_append(captions, child);
+            if (!caption) caption = child;
             // Caption height calculation: caption->height already includes content+padding+border
-            if (caption->height > 0) {
+            if (child->height > 0) {
                 float margin_v = 0;
-                if (caption->bound) {
+                if (child->bound) {
                     // Include both vertical margins of the caption in the height contribution.
                     // CSS 2.1 §17.4: The caption box occupies space including its margins.
-                    float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
-                    float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
+                    float mt = child->bound->margin.top > 0 ? child->bound->margin.top : 0;
+                    float mb = child->bound->margin.bottom > 0 ? child->bound->margin.bottom : 0;
                     margin_v = mt + mb;
                 }
-                caption_height = caption->height + margin_v;
-                log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total=%.1f",
-                    caption->height, margin_v, caption_height);
+                caption_height += child->height + margin_v;
+                log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total_so_far=%.1f",
+                    child->height, margin_v, caption_height);
             }
-            break;
+            // Continue to find all captions (no break)
         }
     }
+    log_debug("Found %d caption(s), total caption_height=%.1f", captions->length, caption_height);
 
     // Step 1: Analyze table structure (Phase 3 optimization)
     // Single-pass analysis counts columns/rows AND assigns cell indices
@@ -5359,11 +5586,21 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Position caption: margin-left determines x offset within table wrapper
-            float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                               ? caption->bound->margin.left : 0;
-            caption->x = caption_ml;
-            caption->y = 0;
-            caption->width = caption_box_width;
+            float cap_y = 0;
+            for (int ci = 0; ci < captions->length; ci++) {
+                ViewBlock* cap = (ViewBlock*)captions->data[ci];
+                float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
+                                   ? cap->bound->margin.left : 0;
+                float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
+                cap->x = cap_ml;
+                cap->y = cap_y + cap_mt;
+                cap->width = caption_box_width;
+                cap_y += cap->height;
+                if (cap->bound) {
+                    cap_y += (cap->bound->margin.top > 0 ? cap->bound->margin.top : 0);
+                    cap_y += (cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0);
+                }
+            }
 
             // Table wrapper width accommodates caption's margin-box
             table->width = table_width;
@@ -5937,20 +6174,99 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
 
         log_debug("Content width for columns: %.1fpx", content_width);
-        // STEP 3: Read explicit column widths from FIRST ROW cells
+        // STEP 3: Determine column widths per CSS 2.1 §17.5.2.1
+        // Priority: 1) col element width, 2) first-row cell width, 3) equal distribution
         float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
         float total_explicit = 0.0f;  int unspecified_cols = 0;
 
+        // STEP 3a: Read explicit widths from <col>/<colgroup> elements first
+        {
+            int col_idx = 0;
+            for (ViewElement* child = (ViewElement*)table->first_child; child && col_idx < columns;
+                 child = (ViewElement*)child->next_sibling) {
+                if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+                    for (ViewElement* col = (ViewElement*)child->first_child; col && col_idx < columns;
+                         col = (ViewElement*)col->next_sibling) {
+                        if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
+                            const char* span_str = col->get_attribute("span");
+                            int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
+                            if (span <= 0) span = 1;
+
+                            float col_width = 0;
+                            if (col->node_type == DOM_NODE_ELEMENT) {
+                                DomElement* dom_col = col->as_element();
+                                if (dom_col->specified_style) {
+                                    CssDeclaration* w_decl = style_tree_get_declaration(dom_col->specified_style, CSS_PROPERTY_WIDTH);
+                                    if (w_decl && w_decl->value) {
+                                        if (w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                            col_width = (float)(content_width * w_decl->value->data.percentage.value / 100.0);
+                                        } else if (w_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                            col_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, w_decl->value);
+                                        }
+                                    }
+                                }
+                            }
+                            if (col_width > 0) {
+                                float per_col = col_width / span;
+                                for (int c = col_idx; c < col_idx + span && c < columns; c++) {
+                                    explicit_col_widths[c] = per_col;
+                                    total_explicit += per_col;
+                                }
+                                log_debug("FIXED LAYOUT col %d (span=%d): %.1fpx from <col> element", col_idx, span, col_width);
+                            }
+                            col_idx += span;
+                        }
+                    }
+                } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+                    const char* span_str = child->get_attribute("span");
+                    int span = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1; // INT_CAST_OK: span count
+                    if (span <= 0) span = 1;
+
+                    float col_width = 0;
+                    if (child->node_type == DOM_NODE_ELEMENT) {
+                        DomElement* dom_col = child->as_element();
+                        if (dom_col->specified_style) {
+                            CssDeclaration* w_decl = style_tree_get_declaration(dom_col->specified_style, CSS_PROPERTY_WIDTH);
+                            if (w_decl && w_decl->value) {
+                                if (w_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                    col_width = (float)(content_width * w_decl->value->data.percentage.value / 100.0);
+                                } else if (w_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    col_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, w_decl->value);
+                                }
+                            }
+                        }
+                    }
+                    if (col_width > 0) {
+                        float per_col = col_width / span;
+                        for (int c = col_idx; c < col_idx + span && c < columns; c++) {
+                            explicit_col_widths[c] = per_col;
+                            total_explicit += per_col;
+                        }
+                        log_debug("FIXED LAYOUT col %d (span=%d): %.1fpx from standalone <col>", col_idx, span, col_width);
+                    }
+                    col_idx += span;
+                }
+            }
+        }
+
+        // STEP 3b: Read cell widths from first row (only for columns not yet specified by col elements)
         // Find first row using navigation helper
         ViewTableRow* first_row = table->first_row();
 
-        // Read cell widths from first row
+        // Read cell widths from first row (only for columns not yet set by col elements)
         if (first_row) {
             int col = 0;
             log_debug("Reading first row cell widths...");
             for (ViewTableCell* cell = first_row->first_cell();
                  cell && col < columns;
                  cell = first_row->next_cell(cell)) {
+
+                    // Skip columns already specified by col elements
+                    if (explicit_col_widths[col] > 0) {
+                        log_debug("  Column %d: already set by <col> element (%.1fpx), skipping cell", col, explicit_col_widths[col]);
+                        col += cell->td->col_span;
+                        continue;
+                    }
 
                     // Try to get explicit width from CSS
                     float cell_width = 0.0f;
@@ -6028,24 +6344,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
                 log_debug("Distributing %.1fpx to %d unspecified columns (%.1fpx each)",
                        remaining_width, unspecified_cols, width_per_unspecified);
-            } else if (unspecified_cols > 0) {
-                // Not enough space even for explicit widths, scale everything
-                float scale_factor = (float)content_width / total_explicit;
-                for (int i = 0; i < columns; i++) {
-                    if (explicit_col_widths[i] > 0.0f) {
-                        explicit_col_widths[i] = explicit_col_widths[i] * scale_factor;
-                    }
-                }
-                // Distribute any remainder
-                float scaled_total = 0.0f;
-                for (int i = 0; i < columns; i++) scaled_total += explicit_col_widths[i];
-                float remainder = content_width - scaled_total;
-                for (int i = 0; i < columns && remainder > 0.0f; i++) {
-                    if (explicit_col_widths[i] == 0.0f) {
-                        explicit_col_widths[i] = remainder / unspecified_cols;
-                    }
-                }
-                log_debug("Scaled explicit widths by %.2f to fit content width", scale_factor);
+            } else if (remaining_width < 0.0f) {
+                // CSS 2.1 §17.5.2.1: "If the table's width is then smaller than
+                // the sum of the column widths, the user agent must widen the table."
+                // Keep explicit col widths; give unspecified columns zero width.
+                log_debug("FIXED LAYOUT: column widths exceed table width (%.1f > %.1f), expanding table",
+                       total_explicit, content_width);
+                content_width = total_explicit;
             }
         } else {
             // No explicit widths, distribute equally
@@ -6817,266 +7122,71 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     float content_area_top_y = current_y;
 
     // Position caption at top if caption-side is top (default)
-    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
-        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                           ? caption->bound->margin.left : 0;
-        caption->x = caption_ml;
-        // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
-        // The caption's margin-top pushes it down from the table wrapper's content edge.
-        float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
-        caption->y = caption_mt;
+    if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+        float cap_y = 0;
+        caption_height = 0;  // recalculate from scratch during positioning
+        for (int ci = 0; ci < captions->length; ci++) {
+            ViewBlock* cap = (ViewBlock*)captions->data[ci];
+            float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
+                               ? cap->bound->margin.left : 0;
+            cap->x = cap_ml;
+            float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
+            cap->y = cap_y + cap_mt;
 
-        // Check if caption needs re-layout due to width change
-        // This happens because caption was laid out before table width was calculated
-        float old_width = caption->width;
-        // CSS 2.1 §17.4: Caption is a block box. Respect explicit CSS width if set.
-        if (caption->blk && caption->blk->given_width > 0) {
-            caption->width = caption->blk->given_width;
-            if (caption->blk->box_sizing != CSS_VALUE_BORDER_BOX && caption->bound) {
-                caption->width += caption->bound->padding.left + caption->bound->padding.right;
-                if (caption->bound->border) {
-                    caption->width += caption->bound->border->width.left + caption->bound->border->width.right;
-                }
-            }
-        } else {
-            caption->width = table_width;
-        }
-        // Apply min-width/max-width constraints (CSS 2.1 §10.4)
-        if (caption->blk) {
-            bool is_border_box = caption->blk->box_sizing == CSS_VALUE_BORDER_BOX;
-            if (is_border_box) {
-                caption->width = adjust_min_max_width(caption, caption->width);
+            // Adjust width and re-layout if needed
+            float old_width = cap->width;
+            adjust_caption_width(cap, table_width);
+
+            float this_cap_height;
+            if (fabs(cap->width - old_width) > 0.5f) {
+                log_debug("Caption %d width changed: %.1f -> %.1f, re-laying out", ci, old_width, cap->width);
+                this_cap_height = relayout_caption(lycon, cap, table_width);
             } else {
-                float pad_border_h = 0;
-                if (caption->bound) {
-                    pad_border_h += caption->bound->padding.left + caption->bound->padding.right;
-                    if (caption->bound->border) {
-                        pad_border_h += caption->bound->border->width.left + caption->bound->border->width.right;
-                    }
-                }
-                float content_w = caption->width - pad_border_h;
-                float clamped_w = adjust_min_max_width(caption, content_w);
-                caption->width = clamped_w + pad_border_h;
-            }
-        }
-
-        // If the width changed significantly, re-layout caption content to reflow text
-        if (fabs(caption->width - old_width) > 0.5f) {
-            log_debug("Caption width changed: %.1f -> %.1f, re-laying out content", old_width, caption->width);
-
-            // Reset child views before re-layout
-            // This is necessary because the DOM children still have their old view state
-            DomElement* dom_elem = static_cast<DomElement*>(caption);
-            if (dom_elem) {
-                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
-                    if (child->is_text()) {
-                        // Reset text node's view state
-                        child->view_type = RDT_VIEW_NONE;
-                        ViewText* text_view = (ViewText*)child;
-                        text_view->rect = nullptr;
-                        text_view->width = 0;
-                        text_view->height = 0;
-                    }
-                }
-            }
-
-            // Note: We do NOT clear caption->first_child because that's the DOM tree link!
-            // The views share memory with DOM nodes (ViewElement extends DomElement)
-
-            // Save and set up layout context for caption
-            LayoutContextScope lscope(lycon);
-            View* saved_view = lycon->view;
-
-            // Calculate content width by subtracting padding and border (CSS box model)
-            float content_width = caption->width;
-            if (caption->bound) {
-                content_width -= caption->bound->padding.left + caption->bound->padding.right;
-                if (caption->bound->border) {
-                    content_width -= caption->bound->border->width.left + caption->bound->border->width.right;
-                }
-            }
-            content_width = max(content_width, 0.0f);
-
-            lycon->view = (View*)caption;
-            // Re-resolve caption styles to refresh font in layout context
-            dom_node_resolve_style((DomNode*)caption, lycon);
-
-            lycon->block.content_width = content_width;
-            lycon->block.content_height = 10000;
-            lycon->block.advance_y = 0;
-
-            // Calculate inner content bounds from border and padding
-            float inner_left = 0;
-            if (caption->bound) {
-                if (caption->bound->border) {
-                    inner_left += caption->bound->border->width.left;
-                    lycon->block.advance_y += caption->bound->border->width.top;
-                }
-                inner_left += caption->bound->padding.left;
-                lycon->block.advance_y += caption->bound->padding.top;
-            }
-            lycon->line.left = inner_left;
-            lycon->line.right = inner_left + content_width;
-
-            // CSS 2.1 §10.8.1: Set up font and line-height for the caption's own styles
-            if (caption->font) {
-                setup_font(lycon->ui_context, &lycon->font, caption->font);
-            }
-            setup_line_height(lycon, caption);
-            if (lycon->font.font_handle) {
-                if (lycon->block.line_height_is_normal) {
-                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
-                } else {
-                    TypoMetrics typo_c2 = get_os2_typo_metrics(lycon->font.font_handle);
-                    if (typo_c2.valid && typo_c2.use_typo_metrics) {
-                        lycon->block.init_ascender = typo_c2.ascender;
-                        lycon->block.init_descender = typo_c2.descender;
-                    } else {
-                        const FontMetrics* mc2 = font_get_metrics(lycon->font.font_handle);
-                        if (mc2) {
-                            lycon->block.init_ascender = mc2->hhea_ascender;
-                            lycon->block.init_descender = -(mc2->hhea_descender);
+                // Width didn't change - just re-align text if centered
+                if (cap->blk && cap->blk->text_align == CSS_VALUE_CENTER) {
+                    float inner_left = 0;
+                    float caption_content_w = cap->width;
+                    if (cap->bound) {
+                        if (cap->bound->border) {
+                            inner_left += cap->bound->border->width.left;
+                            caption_content_w -= cap->bound->border->width.left + cap->bound->border->width.right;
                         }
+                        inner_left += cap->bound->padding.left;
+                        caption_content_w -= cap->bound->padding.left + cap->bound->padding.right;
                     }
-                }
-            }
-            lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-
-            // CSS 2.1 §16.1: Propagate text-indent for caption re-layout
-            if (caption->blk) {
-                if (!isnan(caption->blk->text_indent_percent)) {
-                    lycon->block.text_indent = content_width * caption->blk->text_indent_percent / 100.0f;
-                } else {
-                    lycon->block.text_indent = caption->blk->text_indent;
-                }
-                if (lycon->block.text_indent != 0.0f) {
-                    lycon->block.is_first_line = true;
-                }
-            }
-
-            line_reset(lycon);
-
-            // Propagate text-align from caption's resolved style
-            if (caption->blk && caption->blk->text_align) {
-                lycon->block.text_align = caption->blk->text_align;
-            }
-            // CSS 2.1 §9.2.1: Propagate direction from caption
-            if (caption->blk && caption->blk->direction) {
-                lycon->block.direction = caption->blk->direction;
-            }
-
-            // Re-layout caption content
-            if (dom_elem) {
-                DomNode* child = dom_elem->first_child;
-                log_debug("Caption re-layout: dom_elem=%p, first_child=%p", dom_elem, child);
-                for (; child; child = child->next_sibling) {
-                    log_debug("Caption re-layout: laying out child %s (%p)", child->node_name(), child);
-                    layout_flow_node(lycon, child);
-                }
-                log_debug("Caption re-layout: after children, advance_y=%.1f, is_line_start=%d",
-                          lycon->block.advance_y, lycon->line.is_line_start);
-                if (!lycon->line.is_line_start) { line_break(lycon); }
-            }
-
-            // Determine caption height: use given_height if specified, otherwise content flow height
-            // advance_y already includes border-top + padding-top, so only add bottom
-            float caption_content_height = lycon->block.advance_y;
-            float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
-                ? caption->blk->given_height : -1;
-            if (caption_given_height >= 0) {
-                caption->height = caption_given_height;
-                // given_height is content height only, add all padding and border
-                if (caption->bound) {
-                    caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
-                    if (caption->bound->border) {
-                        caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
-                    }
-                }
-            } else {
-                caption->height = caption_content_height;
-                // advance_y includes border-top+padding-top, only add bottom
-                if (caption->bound) {
-                    caption->height += caption->bound->padding.bottom;
-                    if (caption->bound->border) {
-                        caption->height += caption->bound->border->width.bottom;
-                    }
-                }
-            }
-            // Apply min-height/max-height constraints (CSS 2.1 §10.7)
-            if (caption->blk) {
-                bool is_border_box = caption->blk->box_sizing == CSS_VALUE_BORDER_BOX;
-                if (is_border_box) {
-                    caption->height = adjust_min_max_height(caption, caption->height);
-                } else {
-                    float pad_border_v = 0;
-                    if (caption->bound) {
-                        pad_border_v += caption->bound->padding.top + caption->bound->padding.bottom;
-                        if (caption->bound->border) {
-                            pad_border_v += caption->bound->border->width.top + caption->bound->border->width.bottom;
-                        }
-                    }
-                    float content_h = caption->height - pad_border_v;
-                    float clamped_h = adjust_min_max_height(caption, content_h);
-                    caption->height = clamped_h + pad_border_v;
-                }
-            }
-            log_debug("Caption re-layout complete: width=%.1f, height=%.1f (content+padding+border)", table_width, caption->height);
-
-            // Recalculate caption_height since we re-laid out the caption
-            // Note: caption->height now includes content + padding + border
-            float margin_v = 0;
-            if (caption->bound) {
-                float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
-                float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
-                margin_v = mt + mb;
-            }
-            caption_height = caption->height + margin_v;
-            log_debug("Caption height recalculated after re-layout: %.1f (height includes padding+border)", caption_height);
-
-            // Update current_y since caption_height changed
-            // current_y was set before re-layout with old caption_height
-            current_y = caption_height + table_border_top + table_padding_top;
-            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
-                current_y += table->tb->border_spacing_v;
-            }
-            log_debug("Updated current_y after caption re-layout: %.1f", current_y);
-
-            lycon->view = saved_view;
-            // block, line, font auto-restored by lscope destructor
-        } else {
-            // Just re-align caption text content for centering
-            if (caption->blk && caption->blk->text_align == CSS_VALUE_CENTER) {
-                // Calculate content area offset from border and padding
-                float inner_left = 0;
-                float caption_content_w = table_width;
-                if (caption->bound) {
-                    if (caption->bound->border) {
-                        inner_left += caption->bound->border->width.left;
-                        caption_content_w -= caption->bound->border->width.left + caption->bound->border->width.right;
-                    }
-                    inner_left += caption->bound->padding.left;
-                    caption_content_w -= caption->bound->padding.left + caption->bound->padding.right;
-                }
-                if (caption_content_w < 0) caption_content_w = 0;
-                for (View* child = caption->first_child; child; child = child->next_sibling) {
-                    if (child->view_type == RDT_VIEW_TEXT) {
-                        ViewText* text = (ViewText*)child;
-                        // Center the text within the caption content area
-                        float text_width = text->width;
-                        float offset = inner_left + (caption_content_w - text_width) / 2.0f;
-                        if (offset > 0) {
-                            text->x = offset;
-                            if (text->rect) {
-                                text->rect->x = offset;
+                    if (caption_content_w < 0) caption_content_w = 0;
+                    for (View* cchild = cap->first_child; cchild; cchild = cchild->next_sibling) {
+                        if (cchild->view_type == RDT_VIEW_TEXT) {
+                            ViewText* text = (ViewText*)cchild;
+                            float text_width = text->width;
+                            float offset = inner_left + (caption_content_w - text_width) / 2.0f;
+                            if (offset > 0) {
+                                text->x = offset;
+                                if (text->rect) text->rect->x = offset;
                             }
                         }
                     }
                 }
+                float margin_v = 0;
+                if (cap->bound) {
+                    float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
+                    float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
+                    margin_v = mt + mb;
+                }
+                this_cap_height = cap->height + margin_v;
             }
+
+            caption_height += this_cap_height;
+            cap_y += this_cap_height;
+            log_debug("Positioned caption %d at top: y=%.1f, height=%.1f, total=%.1f", ci, cap->y, cap->height, caption_height);
         }
 
-        log_debug("Positioned caption at top: y=0, width=%.1f", table_width);
+        // Update current_y with total caption height
+        current_y = caption_height + table_border_top + table_padding_top;
+        if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+            current_y += table->tb->border_spacing_v;
+        }
+        log_debug("Updated current_y after all captions: %.1f", current_y);
     }
 
     // Global row index for tracking row positions across all row groups
@@ -7106,49 +7216,44 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // =========================================================================
     // CSS 2.1 Section 17.2: Visual ordering of row groups
-    // Row groups must be rendered in order: THEAD → TBODY → TFOOT
-    // regardless of their order in the DOM source.
-    // Collect all row groups and sort them by section type before layout.
+    // Only the FIRST table-header-group acts as header (rendered at top).
+    // Only the FIRST table-footer-group acts as footer (rendered at bottom).
+    // Additional thead/tfoot elements are treated as table-row-group and
+    // maintain their source order relative to other body groups.
     // =========================================================================
 
-    // First pass: collect row groups and direct rows, grouped by section type
-    ArrayList* thead_groups = arraylist_new(2);
-    ArrayList* tbody_groups = arraylist_new(4);
-    ArrayList* tfoot_groups = arraylist_new(2);
-    ArrayList* direct_rows = arraylist_new(8);
+    // First pass: collect the first thead/tfoot separately; everything else
+    // goes into body_groups in source order.
+    ViewBlock* header_group = nullptr;
+    ViewBlock* footer_group = nullptr;
+    ArrayList* body_groups = arraylist_new(8);  // tbody + extra thead/tfoot + direct rows
 
     for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             ViewTableRowGroup* group = (ViewTableRowGroup*)child;
-            switch (group->get_section_type()) {
-                case TABLE_SECTION_THEAD:
-                    arraylist_append(thead_groups, child);
-                    break;
-                case TABLE_SECTION_TFOOT:
-                    arraylist_append(tfoot_groups, child);
-                    break;
-                case TABLE_SECTION_TBODY:
-                default:
-                    arraylist_append(tbody_groups, child);
-                    break;
+            int section = group->get_section_type();
+            if (section == TABLE_SECTION_THEAD && !header_group) {
+                header_group = child;
+            } else if (section == TABLE_SECTION_TFOOT && !footer_group) {
+                footer_group = child;
+            } else {
+                // Additional theads/tfoots become regular row groups (source order)
+                arraylist_append(body_groups, child);
             }
         } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Direct rows are treated as part of tbody
-            arraylist_append(direct_rows, child);
+            arraylist_append(body_groups, child);
         }
     }
 
-    // Build ordered list: THEAD → TBODY (with direct rows interleaved) → TFOOT
-    // The comment about direct_rows being handled separately is outdated - they need to go before TFOOT
-    ArrayList* ordered_elements = arraylist_new(thead_groups->length + tbody_groups->length + direct_rows->length + tfoot_groups->length);
-    for (int i = 0; i < thead_groups->length; i++) arraylist_append(ordered_elements, thead_groups->data[i]);
-    for (int i = 0; i < tbody_groups->length; i++) arraylist_append(ordered_elements, tbody_groups->data[i]);
-    // Direct rows are part of the implicit tbody section - must come before TFOOT
-    for (int i = 0; i < direct_rows->length; i++) arraylist_append(ordered_elements, direct_rows->data[i]);
-    for (int i = 0; i < tfoot_groups->length; i++) arraylist_append(ordered_elements, tfoot_groups->data[i]);
+    // Build ordered list: first THEAD → body groups (source order) → first TFOOT
+    ArrayList* ordered_elements = arraylist_new(body_groups->length + 2);
+    if (header_group) arraylist_append(ordered_elements, header_group);
+    for (int i = 0; i < body_groups->length; i++) arraylist_append(ordered_elements, body_groups->data[i]);
+    if (footer_group) arraylist_append(ordered_elements, footer_group);
 
-    log_info("%s Row group ordering: %d thead, %d tbody, %d direct rows, %d tfoot (total %d)", table->source_loc(),
-              thead_groups->length, tbody_groups->length, direct_rows->length, tfoot_groups->length,
+    log_info("%s Row group ordering: header=%s, %d body groups, footer=%s (total %d)", table->source_loc(),
+              header_group ? "yes" : "no", body_groups->length, footer_group ? "yes" : "no",
               ordered_elements->length);
 
     // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
@@ -7903,10 +8008,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (section_count > 0) {
                     total_spacing = (section_count + 1) * table->tb->border_spacing_v;
                 }
-                // Add inter-row spacing within ALL groups (already counted in content_only_height via current_y)
-                // We need to calculate how many row boundaries there are
-                int total_row_boundaries = (meta->row_count > 0) ? (meta->row_count - 1) : 0;
-                total_spacing += total_row_boundaries * table->tb->border_spacing_v;
+                // Add inter-row spacing WITHIN groups only (between-group boundaries
+                // are already counted in the section spacing above).
+                // Total within-group boundaries = total_rows - section_count
+                int within_group_boundaries = meta->row_count - section_count;
+                if (within_group_boundaries < 0) within_group_boundaries = 0;
+                total_spacing += within_group_boundaries * table->tb->border_spacing_v;
             }
 
             // Now calculate extra height available for body rows
@@ -7988,7 +8095,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
 
                 // Second pass: recalculate row y positions after height changes
-                float y_accum = table_padding_top;
+                // Must include caption (if top) + border + padding, matching the first pass current_y
+                float y_accum = table_border_top + table_padding_top;
+                if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+                    y_accum += caption_height;
+                }
                 if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
                     y_accum += table->tb->border_spacing_v;
                 }
@@ -8017,7 +8128,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         log_debug("%s   Non-body row %d: += %.1f = %.1f", table->source_loc(), r, row_extra, meta->row_heights[r]);
                     }
                     // Recalculate y positions after height changes
-                    float y_accum = table_padding_top;
+                    // Must include caption (if top) + border + padding, matching the first pass current_y
+                    float y_accum = table_border_top + table_padding_top;
+                    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+                        y_accum += caption_height;
+                    }
                     if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
                         y_accum += table->tb->border_spacing_v;
                     }
@@ -8182,218 +8297,42 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("%s Added table edge bottom vertical spacing: +%.1fpx", table->source_loc(), table->tb->border_spacing_v);
     }
 
-    // Position caption at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
-    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
-        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
-        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                           ? caption->bound->margin.left : 0;
-        caption->x = caption_ml;
-        // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
-        // The caption's margin-top pushes it down from the table box's bottom edge.
-        float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
-        caption->y = final_table_height + caption_mt;  // Position after all rows + margin-top
+    // Position captions at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
+    if (captions->length > 0 && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
+        float cap_y = final_table_height;
+        float total_bottom_caption_height = 0;
+        for (int ci = 0; ci < captions->length; ci++) {
+            ViewBlock* cap = (ViewBlock*)captions->data[ci];
+            float cap_ml = (cap->bound && cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
+                               ? cap->bound->margin.left : 0;
+            cap->x = cap_ml;
+            float cap_mt = (cap->bound && cap->bound->margin.top > 0) ? cap->bound->margin.top : 0;
+            cap->y = cap_y + cap_mt;
 
-        // Check if caption needs re-layout due to width change (same as top caption)
-        float old_width = caption->width;
-        // CSS 2.1 §17.4: Caption is a block box. Respect explicit CSS width if set.
-        if (caption->blk && caption->blk->given_width > 0) {
-            caption->width = caption->blk->given_width;
-            if (caption->blk->box_sizing != CSS_VALUE_BORDER_BOX && caption->bound) {
-                caption->width += caption->bound->padding.left + caption->bound->padding.right;
-                if (caption->bound->border) {
-                    caption->width += caption->bound->border->width.left + caption->bound->border->width.right;
-                }
-            }
-        } else {
-            caption->width = table_width;
-        }
-        // Apply min-width/max-width constraints (CSS 2.1 §10.4)
-        if (caption->blk) {
-            bool is_border_box = caption->blk->box_sizing == CSS_VALUE_BORDER_BOX;
-            if (is_border_box) {
-                caption->width = adjust_min_max_width(caption, caption->width);
+            float old_width = cap->width;
+            adjust_caption_width(cap, table_width);
+
+            float this_cap_height;
+            if (fabs(table_width - old_width) > 0.5f) {
+                log_debug("%s Bottom caption %d width changed: %.1f -> %.1f, re-laying out", table->source_loc(), ci, old_width, table_width);
+                this_cap_height = relayout_caption(lycon, cap, table_width);
             } else {
-                float pad_border_h = 0;
-                if (caption->bound) {
-                    pad_border_h += caption->bound->padding.left + caption->bound->padding.right;
-                    if (caption->bound->border) {
-                        pad_border_h += caption->bound->border->width.left + caption->bound->border->width.right;
-                    }
+                float margin_v = 0;
+                if (cap->bound) {
+                    float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
+                    float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
+                    margin_v = mt + mb;
                 }
-                float content_w = caption->width - pad_border_h;
-                float clamped_w = adjust_min_max_width(caption, content_w);
-                caption->width = clamped_w + pad_border_h;
+                this_cap_height = cap->height + margin_v;
             }
+
+            cap_y += this_cap_height;
+            total_bottom_caption_height += this_cap_height;
+            log_debug("%s Positioned caption %d at bottom: y=%.1f, height=%.1f", table->source_loc(), ci, cap->y, cap->height);
         }
-
-        if (fabs(table_width - old_width) > 0.5f) {
-            log_debug("%s Bottom caption width changed: %.1f -> %.1f, re-laying out content", table->source_loc(), old_width, table_width);
-
-            // Reset child views before re-layout
-            DomElement* dom_elem = static_cast<DomElement*>(caption);
-            if (dom_elem) {
-                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
-                    if (child->is_text()) {
-                        child->view_type = RDT_VIEW_NONE;
-                        ViewText* text_view = (ViewText*)child;
-                        text_view->rect = nullptr;
-                        text_view->width = 0;
-                        text_view->height = 0;
-                    }
-                }
-            }
-
-            // Save and set up layout context for caption
-            LayoutContextScope lscope2(lycon);
-            View* saved_view = lycon->view;
-
-            // Calculate content width by subtracting padding and border
-            float content_width = caption->width;
-            if (caption->bound) {
-                content_width -= caption->bound->padding.left + caption->bound->padding.right;
-                if (caption->bound->border) {
-                    content_width -= caption->bound->border->width.left + caption->bound->border->width.right;
-                }
-            }
-            content_width = max(content_width, 0.0f);
-
-            lycon->view = (View*)caption;
-            // Re-resolve caption styles to refresh font in layout context
-            dom_node_resolve_style((DomNode*)caption, lycon);
-
-            lycon->block.content_width = content_width;
-            lycon->block.content_height = 10000;
-            lycon->block.advance_y = 0;
-
-            // Calculate inner content bounds from border and padding
-            float inner_left = 0;
-            if (caption->bound) {
-                if (caption->bound->border) {
-                    inner_left += caption->bound->border->width.left;
-                    lycon->block.advance_y += caption->bound->border->width.top;
-                }
-                inner_left += caption->bound->padding.left;
-                lycon->block.advance_y += caption->bound->padding.top;
-            }
-            lycon->line.left = inner_left;
-            lycon->line.right = inner_left + content_width;
-
-            // CSS 2.1 §10.8.1: Set up font and line-height for the caption's own styles
-            if (caption->font) {
-                setup_font(lycon->ui_context, &lycon->font, caption->font);
-            }
-            setup_line_height(lycon, caption);
-            if (lycon->font.font_handle) {
-                if (lycon->block.line_height_is_normal) {
-                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
-                } else {
-                    TypoMetrics typo_c3 = get_os2_typo_metrics(lycon->font.font_handle);
-                    if (typo_c3.valid && typo_c3.use_typo_metrics) {
-                        lycon->block.init_ascender = typo_c3.ascender;
-                        lycon->block.init_descender = typo_c3.descender;
-                    } else {
-                        const FontMetrics* mc3 = font_get_metrics(lycon->font.font_handle);
-                        if (mc3) {
-                            lycon->block.init_ascender = mc3->hhea_ascender;
-                            lycon->block.init_descender = -(mc3->hhea_descender);
-                        }
-                    }
-                }
-            }
-            lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-
-            // CSS 2.1 §16.1: Propagate text-indent for bottom caption re-layout
-            if (caption->blk) {
-                if (!isnan(caption->blk->text_indent_percent)) {
-                    lycon->block.text_indent = content_width * caption->blk->text_indent_percent / 100.0f;
-                } else {
-                    lycon->block.text_indent = caption->blk->text_indent;
-                }
-                if (lycon->block.text_indent != 0.0f) {
-                    lycon->block.is_first_line = true;
-                }
-            }
-
-            line_reset(lycon);
-
-            // Propagate text-align from caption's resolved style
-            if (caption->blk && caption->blk->text_align) {
-                lycon->block.text_align = caption->blk->text_align;
-            }
-            // CSS 2.1 §9.2.1: Propagate direction from caption
-            if (caption->blk && caption->blk->direction) {
-                lycon->block.direction = caption->blk->direction;
-            }
-
-            // Re-layout caption content
-            if (dom_elem) {
-                DomNode* child = dom_elem->first_child;
-                for (; child; child = child->next_sibling) {
-                    layout_flow_node(lycon, child);
-                }
-                if (!lycon->line.is_line_start) { line_break(lycon); }
-            }
-
-            // Determine caption height: use given_height if specified, otherwise content flow height
-            // advance_y already includes border-top + padding-top, so only add bottom
-            float caption_content_height = lycon->block.advance_y;
-            float caption_given_height = (caption->blk && caption->blk->given_height >= 0)
-                ? caption->blk->given_height : -1;
-            if (caption_given_height >= 0) {
-                caption->height = caption_given_height;
-                // given_height is content height only, add all padding and border
-                if (caption->bound) {
-                    caption->height += caption->bound->padding.top + caption->bound->padding.bottom;
-                    if (caption->bound->border) {
-                        caption->height += caption->bound->border->width.top + caption->bound->border->width.bottom;
-                    }
-                }
-            } else {
-                caption->height = caption_content_height;
-                // advance_y includes border-top+padding-top, only add bottom
-                if (caption->bound) {
-                    caption->height += caption->bound->padding.bottom;
-                    if (caption->bound->border) {
-                        caption->height += caption->bound->border->width.bottom;
-                    }
-                }
-            }
-            // Apply min-height/max-height constraints (CSS 2.1 §10.7)
-            if (caption->blk) {
-                bool is_border_box = caption->blk->box_sizing == CSS_VALUE_BORDER_BOX;
-                if (is_border_box) {
-                    caption->height = adjust_min_max_height(caption, caption->height);
-                } else {
-                    float pad_border_v = 0;
-                    if (caption->bound) {
-                        pad_border_v += caption->bound->padding.top + caption->bound->padding.bottom;
-                        if (caption->bound->border) {
-                            pad_border_v += caption->bound->border->width.top + caption->bound->border->width.bottom;
-                        }
-                    }
-                    float content_h = caption->height - pad_border_v;
-                    float clamped_h = adjust_min_max_height(caption, content_h);
-                    caption->height = clamped_h + pad_border_v;
-                }
-            }
-            log_debug("%s Bottom caption re-layout complete: width=%.1f, height=%.1f (content+padding+border)", table->source_loc(), table_width, caption->height);
-
-            // Recalculate caption_height with both margins
-            float margin_v = 0;
-            if (caption->bound) {
-                float mt = caption->bound->margin.top > 0 ? caption->bound->margin.top : 0;
-                float mb = caption->bound->margin.bottom > 0 ? caption->bound->margin.bottom : 0;
-                margin_v = mt + mb;
-            }
-            caption_height = caption->height + margin_v;
-            log_debug("%s Bottom caption height recalculated after re-layout: %.1f", table->source_loc(), caption_height);
-
-            lycon->view = saved_view;
-            // block, line, font auto-restored by lscope2 destructor
-        }
-
-        final_table_height += caption_height;  // Add caption height to table
-        log_debug("%s Positioned caption at bottom: y=%.1f, caption_height=%.1f", table->source_loc(), caption->y, caption_height);
+        final_table_height += total_bottom_caption_height;
+        caption_height = total_bottom_caption_height;
+        log_debug("%s Total bottom caption height: %.1f", table->source_loc(), total_bottom_caption_height);
     }
 
     // Override calculated height with explicit height if set and larger than content height
@@ -8568,10 +8507,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                            (float)row_area_height, (float)content_area_top_y);
 
     // Cleanup ArrayLists
-    arraylist_free(thead_groups);
-    arraylist_free(tbody_groups);
-    arraylist_free(tfoot_groups);
-    arraylist_free(direct_rows);
+    arraylist_free(body_groups);
     arraylist_free(ordered_elements);
 
     // Cleanup - TableMetadata destructor handles grid_occupied and col_widths
