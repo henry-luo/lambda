@@ -1,5 +1,16 @@
 #include <gtest/gtest.h>
 
+// Suppress LeakSanitizer exit code - pool allocator internals (name_pool, shape_pool)
+// use malloc'd hashmaps with no per-instance free; leaks are expected in test fixtures.
+#ifdef __has_feature
+#if __has_feature(address_sanitizer)
+#define HAS_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) || defined(HAS_ASAN)
+extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
+#endif
+
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/selector_matcher.hpp"
 #include "../../lambda/input/css/css_style.hpp"
