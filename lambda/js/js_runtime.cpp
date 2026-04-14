@@ -2136,6 +2136,9 @@ enum JsBuiltinId {
     JS_BUILTIN_NUM_TO_EXPONENTIAL,
     // Symbol.prototype methods
     JS_BUILTIN_SYM_TO_STRING,
+    // Symbol static methods
+    JS_BUILTIN_SYMBOL_FOR,
+    JS_BUILTIN_SYMBOL_KEY_FOR,
     // String static methods
     JS_BUILTIN_STRING_RAW,
     JS_BUILTIN_STRING_FROM_CODE_POINT,
@@ -2933,7 +2936,7 @@ static Item js_get_proto_key() {
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
-static Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count);
+Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count);
 static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
                                           const char* prop_name, int prop_len);
 
@@ -4932,7 +4935,7 @@ void js_builtin_cache_reset() {
     for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
 }
 
-static Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count) {
+Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count) {
     if (!js_builtin_cache_init) {
         for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
         js_builtin_cache_init = true;
@@ -4954,6 +4957,13 @@ static Item js_get_or_create_builtin(int builtin_id, const char* name, int param
     Item result = {.function = (Function*)fn};
     js_builtin_cache[builtin_id] = result;
     return result;
+}
+
+// Wrapper for js_globals.cpp to create Symbol.for / Symbol.keyFor builtins
+extern "C" Item js_symbol_builtin_method(int which) {
+    if (which == 0) return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_FOR, "for", 1);
+    if (which == 1) return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_KEY_FOR, "keyFor", 1);
+    return ItemNull;
 }
 
 // v18k: Lookup static methods on constructor functions (Object.keys, Array.isArray, etc.)
@@ -6716,6 +6726,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_SYM_TO_STRING:
         return js_symbol_to_string(this_val);
 
+    // Symbol static methods
+    case JS_BUILTIN_SYMBOL_FOR:
+        return js_symbol_for(arg0);
+    case JS_BUILTIN_SYMBOL_KEY_FOR:
+        return js_symbol_key_for(arg0);
+
     // String.raw — tagged template / direct call
     case JS_BUILTIN_STRING_RAW:
         return js_string_raw(args, arg_count);
@@ -6911,11 +6927,23 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_DATE_SET_UTC_MILLISECONDS:
         return js_date_setter(this_val, 36, arg0, undef, undef, undef);
 
-    // v45: Promise static methods
-    case JS_BUILTIN_PROMISE_RESOLVE:
+    // v45: Promise static methods — spec requires Type(this) to be Object
+    case JS_BUILTIN_PROMISE_RESOLVE: {
+        TypeId tt = get_type_id(this_val);
+        if (tt != LMD_TYPE_MAP && tt != LMD_TYPE_ARRAY && tt != LMD_TYPE_ELEMENT &&
+            tt != LMD_TYPE_FUNC && tt != LMD_TYPE_OBJECT && tt != LMD_TYPE_VMAP) {
+            return js_throw_type_error("Promise.resolve requires that 'this' be an Object");
+        }
         return js_promise_resolve(arg0);
-    case JS_BUILTIN_PROMISE_REJECT:
+    }
+    case JS_BUILTIN_PROMISE_REJECT: {
+        TypeId tt = get_type_id(this_val);
+        if (tt != LMD_TYPE_MAP && tt != LMD_TYPE_ARRAY && tt != LMD_TYPE_ELEMENT &&
+            tt != LMD_TYPE_FUNC && tt != LMD_TYPE_OBJECT && tt != LMD_TYPE_VMAP) {
+            return js_throw_type_error("Promise.reject requires that 'this' be an Object");
+        }
         return js_promise_reject(arg0);
+    }
     case JS_BUILTIN_PROMISE_ALL:
         return js_promise_all(arg0);
     case JS_BUILTIN_PROMISE_ALL_SETTLED:
@@ -7349,16 +7377,9 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         return js_bind_function(func_item, bound_this, bound_args, bound_argc);
     }
-    // If receiver is a MAP, it may have a user-defined .bind() method (e.g. Binder.bind())
-    if (get_type_id(func_item) == LMD_TYPE_MAP) {
-        int total_argc = 1 + bound_argc;
-        Item* args = (Item*)alloca(total_argc * sizeof(Item));
-        args[0] = bound_this;
-        for (int i = 0; i < bound_argc; i++) args[1 + i] = bound_args[i];
-        Item method_name = (Item){.item = s2it(heap_create_name("bind", 4))};
-        return js_map_method(func_item, method_name, args, total_argc);
-    }
-    // ES spec: If IsCallable(Target) is false, throw a TypeError.
+    // ES spec §20.2.3.2: If IsCallable(Target) is false, throw a TypeError.
+    // Do NOT delegate to js_map_method for MAPs — that would look up .bind() on
+    // the prototype chain (e.g. Function.prototype.bind) and recurse infinitely.
     log_error("js_func_bind: not a function, type=%d raw=0x%llx", get_type_id(func_item), (unsigned long long)func_item.item);
     Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
     Item msg = (Item){.item = s2it(heap_create_name("Bind must be called on a function"))};
@@ -12133,6 +12154,7 @@ struct JsGenerator {
     int64_t state;            // current state index (0=initial, -1=done)
     bool   done;
     bool   executing;         // true while state machine is running (re-entrance guard)
+    bool   is_async;          // true for async generators: .next()/.return()/.throw() return Promises
     Item   delegate;          // active yield* delegate iterator (ItemNull when none)
     int64_t delegate_resume;  // state to resume after delegate is exhausted
 };
@@ -12168,7 +12190,7 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
     return arr;
 }
 
-extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
+extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async) {
     // Try to recycle a completed generator slot first
     int idx = -1;
     for (int i = 0; i < js_generator_count; i++) {
@@ -12192,6 +12214,7 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
     gen->state = 0;
     gen->done = false;
     gen->executing = false;
+    gen->is_async = (is_async != 0);
     gen->delegate = ItemNull;
     gen->delegate_resume = -1;
 
@@ -12199,9 +12222,10 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
     Item obj = js_new_object();
     String* gen_key = heap_create_name("__gen_idx", 9);
     js_property_set(obj, (Item){.item = s2it(gen_key)}, (Item){.item = i2it(idx)});
-    // v41: Set Symbol.toStringTag = "Generator" for Object.prototype.toString
+    // v41: Set Symbol.toStringTag for Object.prototype.toString
     Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-    Item tag_val = (Item){.item = s2it(heap_create_name("Generator", 9))};
+    Item tag_val = (Item){.item = s2it(heap_create_name(
+        is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
     js_property_set(obj, tag_key, tag_val);
 
     return obj;
@@ -12221,11 +12245,15 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
         log_error("generator_next: invalid generator object");
-        return js_make_iter_result(make_js_undefined(), true);
+        Item result = js_make_iter_result(make_js_undefined(), true);
+        return result;
     }
 
+    bool is_async = gen->is_async;
+
     if (gen->done) {
-        return js_make_iter_result(make_js_undefined(), true);
+        Item result = js_make_iter_result(make_js_undefined(), true);
+        return is_async ? js_promise_resolve(result) : result;
     }
 
     // ES spec: throw TypeError if called while generator is already executing
@@ -12234,7 +12262,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         Item msg = (Item){.item = s2it(heap_create_name("Generator is already running"))};
         Item error = js_new_error_with_name(type_name, msg);
         js_throw_value(error);
-        return js_make_iter_result(make_js_undefined(), true);
+        Item result = js_make_iter_result(make_js_undefined(), true);
+        return is_async ? js_promise_resolve(result) : result;
     }
 
     gen->executing = true;
@@ -12255,7 +12284,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             } else {
                 // Delegate still producing — return its result
                 gen->executing = false;
-                return del_result;
+                // For async generators, delegate results are already wrapped if delegate is async
+                return is_async ? js_promise_resolve(del_result) : del_result;
             }
         }
     }
@@ -12290,11 +12320,13 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             gen->done = true;
             gen->state = -1;
             gen->executing = false;
-            return js_make_iter_result(value, true);
+            Item iter_result = js_make_iter_result(value, true);
+            return is_async ? js_promise_resolve(iter_result) : iter_result;
         } else {
             gen->state = next_state;
             gen->executing = false;
-            return js_make_iter_result(value, false);
+            Item iter_result = js_make_iter_result(value, false);
+            return is_async ? js_promise_resolve(iter_result) : iter_result;
         }
     }
 
@@ -12302,27 +12334,32 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     gen->done = true;
     gen->state = -1;
     gen->executing = false;
-    return js_make_iter_result(result, true);
+    Item iter_result = js_make_iter_result(result, true);
+    return is_async ? js_promise_resolve(iter_result) : iter_result;
 }
 
 extern "C" Item js_generator_return(Item generator, Item value) {
     JsGenerator* gen = js_get_generator(generator);
+    bool is_async = gen && gen->is_async;
     if (gen) {
         gen->done = true;
         gen->state = -1;
     }
-    return js_make_iter_result(value, true);
+    Item result = js_make_iter_result(value, true);
+    return is_async ? js_promise_resolve(result) : result;
 }
 
 extern "C" Item js_generator_throw(Item generator, Item error) {
     JsGenerator* gen = js_get_generator(generator);
+    bool is_async = gen && gen->is_async;
     if (gen) {
         gen->done = true;
         gen->state = -1;
     }
     // Throw the error via the JS exception mechanism
     js_throw_value(error);
-    return js_make_iter_result(make_js_undefined(), true);
+    Item result = js_make_iter_result(make_js_undefined(), true);
+    return is_async ? js_promise_resolve(result) : result;
 }
 
 // v15: Check if an object is a generator (has __gen_idx property)
@@ -12653,7 +12690,7 @@ extern "C" Item js_iterator_close(Item iterator) {
 
     // Generic iterator: call .return() if available
     TypeId tid = get_type_id(iterator);
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP || tid == LMD_TYPE_OBJECT) {
         String* return_key = heap_create_name("return", 6);
         Item return_fn = js_property_get(iterator, (Item){.item = s2it(return_key)});
         if (get_type_id(return_fn) == LMD_TYPE_FUNC) {

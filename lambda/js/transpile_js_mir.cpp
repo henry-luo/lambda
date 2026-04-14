@@ -235,6 +235,10 @@ struct JsMirTranspiler {
     JsLoopLabels loop_stack[32];
     int loop_depth;
 
+    // Active for-of iterator stack for return cleanup
+    MIR_reg_t for_of_iterators[32];
+    int for_of_depth;
+
     // v11: pending label for next loop push
     const char* pending_label_name;
     int pending_label_len;
@@ -10834,6 +10838,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_builtin_eval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+            // ES spec §20.2.1.1: Function(p1, p2, ..., body) is equivalent to new Function(...)
+            if (nl == 8 && strncmp(n, "Function", 8) == 0) {
+                MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                return jm_call_2(mt, "js_new_function_from_string", MIR_T_I64,
+                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            }
             // v12: Symbol(desc) — create a new unique symbol
             if (nl == 6 && strncmp(n, "Symbol", 6) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
@@ -16283,6 +16294,9 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Get iterator from iterable
     MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    if (mt->for_of_depth < 32) {
+        mt->for_of_iterators[mt->for_of_depth++] = iterator;
+    }
 
     // Check for exception (e.g. TypeError: null is not iterable)
     MIR_reg_t iter_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
@@ -16379,7 +16393,25 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         }
     }
 
-    // Body
+    // Body — wrapped in synthetic try-catch for IteratorClose on abrupt completion
+    MIR_label_t l_iter_exc = jm_new_label(mt);
+
+    // Push synthetic try context: exceptions in body → l_iter_exc
+    bool pushed_try = false;
+    if (mt->try_ctx_depth < 16) {
+        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+        tc->catch_label = l_iter_exc;
+        tc->finally_label = 0;
+        tc->end_label = 0;
+        tc->return_val_reg = 0;
+        tc->has_return_reg = 0;
+        tc->has_catch = true;
+        tc->has_finally = false;
+        tc->inlining_finally = false;
+        tc->finally_body = NULL;
+        pushed_try = true;
+    }
+
     if (fo->body) {
         if (fo->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             jm_push_scope(mt);
@@ -16393,6 +16425,9 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         }
     }
 
+    // Pop synthetic try context
+    if (pushed_try) mt->try_ctx_depth--;
+
     // Update: jump back to test (no index to increment — iterator handles state)
     jm_emit_label(mt, l_update);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
@@ -16404,6 +16439,25 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     jm_emit_label(mt, l_end);
     jm_emit_label(mt, l_iter_err);  // exception from js_get_iterator jumps here
+
+    // IteratorClose on exception from body — call return() then re-throw
+    {
+        MIR_label_t l_iter_exc_done = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_iter_exc_done)));
+        jm_emit_label(mt, l_iter_exc);
+        // Save exception, close iterator, restore exception and re-throw
+        MIR_reg_t saved_exc = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+        jm_call_1(mt, "js_iterator_close", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+        jm_call_0(mt, "js_clear_exception", MIR_T_I64);  // clear any exc from iterator close
+        jm_call_void_1(mt, "js_throw_value",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc));
+        // Propagate to outer handler
+        jm_emit_exc_propagate_check(mt);
+        jm_emit_label(mt, l_iter_exc_done);
+    }
+
+    if (mt->for_of_depth > 0) mt->for_of_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
     jm_pop_scope(mt);
 }
@@ -17527,6 +17581,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_item = native_item;
         mt->current_func = native_func;
         mt->loop_depth = 0;
+        mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = true;
@@ -17785,6 +17840,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_item = gen_sm_func_item;
         mt->current_func = sm_func;
         mt->loop_depth = 0;
+        mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = false;
@@ -18165,6 +18221,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->current_func_item = gen_sm_func_item;
             mt->current_func = sm_func;
             mt->loop_depth = 0;
+            mt->for_of_depth = 0;
             mt->pending_label_name = NULL;
             mt->pending_label_len = 0;
             mt->in_native_func = false;
@@ -18535,6 +18592,24 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         pi++;
     }
 
+    // Handle duplicate parameter names (valid in non-strict JS): rename earlier
+    // occurrences so MIR gets unique register names. Last parameter wins per spec.
+    {
+        int env_offset = has_captures ? 1 : 0;
+        for (int i = env_offset; i < pi; i++) {
+            for (int j = i + 1; j < pi; j++) {
+                if (strcmp(param_names_arr[i], param_names_arr[j]) == 0) {
+                    // Rename earlier duplicate — it's shadowed by the later one
+                    char* renamed = (char*)alloca(128);
+                    snprintf(renamed, 128, "%s__dup%d", param_names_arr[i], i);
+                    param_names_arr[i] = renamed;
+                    params[i].name = renamed;
+                    break; // only need to rename once per earlier occurrence
+                }
+            }
+        }
+    }
+
     MIR_type_t ret_type = MIR_T_I64;
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->name, 1, &ret_type, total_params, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
@@ -18577,6 +18652,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_func_item = func_item;
     mt->current_func = func;
     mt->loop_depth = 0;
+    mt->for_of_depth = 0;
     mt->pending_label_name = NULL;
     mt->pending_label_len = 0;
     mt->in_native_func = false;
@@ -18693,15 +18769,16 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_new_reg_op(mt->ctx, this_val)));
         }
 
-        // Call js_generator_create(state_machine_fn_ptr, env, env_size)
+        // Call js_generator_create(state_machine_fn_ptr, env, env_size, is_async)
         MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "smfn", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
-        MIR_reg_t gen_obj = jm_call_3(mt, "js_generator_create", MIR_T_I64,
+        MIR_reg_t gen_obj = jm_call_4(mt, "js_generator_create", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, gen_env),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, fn->is_async ? 1 : 0));
 
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, gen_obj)));
         goto finish_boxed;
@@ -23897,11 +23974,13 @@ extern "C" Item js_builtin_eval(Item code_item) {
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
         mem_free(mt);
-        // Eagerly finish the MIR context — eval() direct-script code is executed
-        // once and the result captured, so generated code is no longer reachable.
-        MIR_finish(eval_ctx);
-        // Also free name_pool and ast_pool eagerly (no live code references them)
-        js_transpiler_destroy(tp);
+        // Defer MIR context cleanup — eval code may return closures/functions
+        // whose JIT pointers must remain valid, and string literals from the
+        // name_pool/ast_pool may be captured by variables or closures.
+        jm_defer_mir_cleanup(eval_ctx);
+        // Do NOT destroy the transpiler eagerly — its name_pool backs string
+        // literals that may still be referenced.  Cleanup at program exit.
+        // js_transpiler_destroy(tp);
 
         return result;
     }

@@ -566,11 +566,18 @@ int run_layout(const char* html_file) {
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless) {
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
+                                    const char** font_dirs, int font_dir_count) {
     log_init_wrapper();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
     ui_context_init(&ui_context, headless);
+
+    // Add custom font scan directories (must be done before any font resolution)
+    for (int i = 0; i < font_dir_count; i++) {
+        font_context_add_scan_directory(ui_context.font_ctx, font_dirs[i]);
+        log_debug("view: Added font directory: %s", font_dirs[i]);
+    }
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
               ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
     GLFWwindow* window = ui_context.window;
@@ -825,7 +832,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0);
 }
 
 int window_main(int argc, char* argv[]) {
