@@ -1551,6 +1551,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (keyword == CSS_VALUE_AUTO) {
             log_info("length value: auto");
             result = 0.0f;  // auto represented as 0, caller should check keyword separately
+        } else if (keyword == CSS_VALUE_THIN) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thin' → 1px
+            result = 1.0f;
+        } else if (keyword == CSS_VALUE_MEDIUM) {
+            // CSS 2.1 §8.5.1: border-width keyword 'medium' → 3px
+            result = 3.0f;
+        } else if (keyword == CSS_VALUE_THICK) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thick' → 5px
+            result = 5.0f;
         } else {
             const CssEnumInfo* info = css_enum_info(keyword);
             log_debug("length keyword: %s (treating as 0)", info ? info->name : "unknown");
