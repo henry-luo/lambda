@@ -235,6 +235,10 @@ struct JsMirTranspiler {
     JsLoopLabels loop_stack[32];
     int loop_depth;
 
+    // Active for-of iterator stack for return cleanup
+    MIR_reg_t for_of_iterators[32];
+    int for_of_depth;
+
     // v11: pending label for next loop push
     const char* pending_label_name;
     int pending_label_len;
@@ -16290,6 +16294,9 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Get iterator from iterable
     MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    if (mt->for_of_depth < 32) {
+        mt->for_of_iterators[mt->for_of_depth++] = iterator;
+    }
 
     // Check for exception (e.g. TypeError: null is not iterable)
     MIR_reg_t iter_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
@@ -16450,6 +16457,7 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit_label(mt, l_iter_exc_done);
     }
 
+    if (mt->for_of_depth > 0) mt->for_of_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
     jm_pop_scope(mt);
 }
@@ -17573,6 +17581,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_item = native_item;
         mt->current_func = native_func;
         mt->loop_depth = 0;
+        mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = true;
@@ -17831,6 +17840,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_item = gen_sm_func_item;
         mt->current_func = sm_func;
         mt->loop_depth = 0;
+        mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
         mt->pending_label_len = 0;
         mt->in_native_func = false;
@@ -18211,6 +18221,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->current_func_item = gen_sm_func_item;
             mt->current_func = sm_func;
             mt->loop_depth = 0;
+            mt->for_of_depth = 0;
             mt->pending_label_name = NULL;
             mt->pending_label_len = 0;
             mt->in_native_func = false;
@@ -18641,6 +18652,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_func_item = func_item;
     mt->current_func = func;
     mt->loop_depth = 0;
+    mt->for_of_depth = 0;
     mt->pending_label_name = NULL;
     mt->pending_label_len = 0;
     mt->in_native_func = false;
