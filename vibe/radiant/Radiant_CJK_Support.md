@@ -69,16 +69,38 @@ if (!remove_break && last_processed_cp && next_cp
 
 **File**: `test/layout/data/font/NotoSansSC-Subset.otf`
 
-**Decision**: Broader subset (full CJK Basic block) rather than corpus-only characters. Single SC variant sufficient — layout metrics are identical across regional variants (SC/TC/JP/KR). Note: Noto Sans SC contains 0 Hangul syllables; Korean tests fall back to system fonts.
+**Decision**: Broader subset (full CJK Basic block) rather than corpus-only characters.
+
+Additionally, a dedicated **Noto Sans KR** subset was created for Korean:
+- Hangul Syllables (U+AC00–D7AF): 11,172 glyphs
+- Hangul Jamo (U+1100–11FF): 256 glyphs, Compat Jamo (U+3130–318F): 94 glyphs
+- ASCII, Latin-1, general punctuation, CJK symbols, fullwidth forms
+- **Total**: 11,780 glyphs in 1.7 MB OTF file
+
+**File**: `test/layout/data/font/NotoSansKR-Subset.otf`
+
+**Per-language font selection** in the generator:
+- Korean → Noto Sans KR (has Hangul syllables)
+- Chinese/Japanese → Noto Sans SC (has CJK Unified + Kana)
+- English/other → Liberation Sans
 
 ### G3: CJK Pretext Corpus Tests — ✅ FIXED
 
 **Implementation**: Added Phase 4 CJK corpora to `test/layout/data/pretext/generate_corpus_tests.js`:
 - 6 corpora: `zh-guxiang`, `zh-zhufu`, `ja-kumo-no-ito`, `ja-rashomon`, `ko-sonagi`, `ko-unsu-joh-eun-nal`
 - Each generates 61 widths (300–900px, step 10) = **366 HTML test files**
-- CJK files use `@font-face` with `NotoSansSC-Subset.otf`
+- Per-language `@font-face`: ko→`NotoSansKR-Subset.otf`, zh/ja→`NotoSansSC-Subset.otf`
 - `<html lang="zh|ja|ko">` attribute set per corpus language
-- Currently 78 pretext baseline passed, 366 CJK tests skipped (no reference captures yet)
+- CJK CSS includes `font-kerning: none; text-spacing-trim: space-all;` to disable Chrome's CJK punctuation compression (which Radiant doesn't implement), ensuring browser references match Radiant's advance-width behavior
+- All 366 browser references captured; 428/488 pretext tests pass overall
+
+**CJK pass rates** (vs Chrome browser references):
+
+| Language | Tests | Pass Rate | Notes |
+|----------|-------|-----------|-------|
+| zh (Chinese) | 122 | **91.8%** (112/122) | Remaining failures: minor text diffs at specific widths |
+| ja (Japanese) | 122 | **98.4%** (120/122) | 2 failures at edge-case widths |
+| ko (Korean) | 122 | **96.7%** (118/122) | 4 failures at edge-case widths |
 
 Additionally, 5 hand-crafted CJK smoke tests in `test/layout/data/cjk/`:
 - `cjk_001_segment_break.html` — Segment break Rule 2 (6 test cases)
@@ -113,18 +135,21 @@ CSS Text 4 `text-autospace` / `text-spacing` property adds small spacing between
 | 4    | **Create CJK smoke tests**                      | `test/layout/data/cjk/cjk_001–005.html`                           | ✅ Done  |
 | 5    | **Add Phase 4 CJK corpora to generator**        | `test/layout/data/pretext/generate_corpus_tests.js`               | ✅ Done  |
 | 6    | **Generate CJK test files**                     | 366 `pretext_zh_*.html`, `pretext_ja_*.html`, `pretext_ko_*.html` | ✅ Done  |
-| 7    | **Capture pretext CJK browser references**      | `test/layout/reference/pretext/`                                  | Pending |
-| 8    | **Add default-ignorable char handling (G7)**    | `radiant/layout_text.cpp`                                         | Open    |
+| 7    | **Create Noto Sans KR subset font (Korean)**    | `test/layout/data/font/NotoSansKR-Subset.otf`                    | ✅ Done  |
+| 8    | **Add per-language font selection + CJK CSS**   | `test/layout/data/pretext/generate_corpus_tests.js`               | ✅ Done  |
+| 9    | **Capture pretext CJK browser references**      | `test/layout/reference/pretext/`                                  | ✅ Done  |
+| 10   | **Add default-ignorable char handling (G7)**    | `radiant/layout_text.cpp`                                         | Open    |
 
 ---
 
 ## 4. Decisions (from review)
 
 1. **Font subset**: Broader coverage (full CJK Basic block + Kana + punctuation), not just corpus characters. Results in ~7.7 MB, 29,497 glyphs.
-2. **Single font**: Noto Sans SC sufficient for all three languages. Layout metrics are identical across regional variants.
+2. **Per-language fonts**: Noto Sans SC for Chinese/Japanese, Noto Sans KR for Korean (SC has 0 Hangul syllables). Layout metrics are identical within each font.
 3. **Test width range**: Same as existing pretext (300–900px, step 10).
 4. **`lang` attribute**: Implemented. `resolve_lang()` walks up the DOM tree to find `lang` attribute. CJ class resolution is now language-aware: NS for Japanese, ID for Chinese/Korean in `line-break: normal`.
 5. **Test data**: Both CJK smoke tests (5 files, hand-crafted) and pretext corpus expansion (366 generated files).
+6. **CJK punctuation compression**: Chrome applies `text-spacing-trim: normal` by default (since Chrome 133), compressing CJK punctuation to half-width via OpenType GPOS `halt`/`palt` features. Radiant doesn't implement this. Test CSS uses `text-spacing-trim: space-all; font-kerning: none;` to disable Chrome's compression, ensuring fair comparison.
 
 ---
 
@@ -149,3 +174,4 @@ WPT test `segment-break-transformation-ignorable-1` validates this behavior. Cur
 | `text-combine-upright` | Only relevant for vertical text. Deferred with vertical layout. |
 | `text-spacing` / `text-autospace` | CJK–Latin inter-script spacing. CSS Text 4 draft. Low priority. |
 | Complex text shaping (HarfBuzz) | Not needed for CJK/Hangul. Would be needed for Indic, Arabic, complex ligatures. |
+| CJK punctuation compression (`text-spacing-trim`) | Chrome compresses CJK punctuation via `halt`/`palt` GPOS features. Implementing this would improve accuracy further. Medium effort. |
