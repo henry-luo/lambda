@@ -26,7 +26,7 @@
     null_value: null
   },
   strings: {
-    empty: null,
+    empty: "",
     whitespace: "   	
   ",
     unicode: "Hello 🌍 世界 مرحبا بالعالم",
