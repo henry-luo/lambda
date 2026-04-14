@@ -4012,6 +4012,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
+    // Track previous margin-bottom for block-flow margin collapse (used in else branch below,
+    // declared here so the last-child-margin fix after padding/border resolution can access them)
+    float prev_margin_bottom = 0;
+    bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
+
     // For multi-column grids, calculate height based on rows
     if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
@@ -4130,10 +4135,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
 
-        // Track previous margin-bottom for block-flow margin collapse
-        float prev_margin_bottom = 0;
-        bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
-
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
             if (child->is_element()) {
@@ -4143,7 +4144,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     continue;
                 }
             }
-            float child_height = calculate_max_content_height(lycon, child, content_w);
+            // CSS 2.1 §10.3.3: The available width for a child element's content
+            // is the parent's content width minus the child's own padding and border.
+            // Pass the child's content-box width so its descendants wrap correctly.
+            float child_content_w = content_w;
+            if (child->is_element()) {
+                ViewElement* child_ve = (ViewElement*)child->as_element();
+                if (child_ve->bound) {
+                    float cp = child_ve->bound->padding.left + child_ve->bound->padding.right;
+                    float cb = 0;
+                    if (child_ve->bound->border)
+                        cb = child_ve->bound->border->width.left + child_ve->bound->border->width.right;
+                    if (cp + cb > 0 && child_content_w - cp - cb > 0) {
+                        child_content_w -= cp + cb;
+                    }
+                }
+            }
+            float child_height = calculate_max_content_height(lycon, child, child_content_w);
 
             // Resolve child's vertical margins for height estimation
             if (child->is_element() && content_w > 0) {
@@ -4266,6 +4283,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (view->bound && view->bound->border) {
         border_top = view->bound->border->width.top;
         border_bottom = view->bound->border->width.bottom;
+    }
+
+    // CSS 2.1 §8.3.1: The last child's margin-bottom does not collapse through the
+    // parent when the parent has padding-bottom or border-bottom. In that case, the
+    // last child's margin contributes to the parent's content height.
+    if (is_block_flow && prev_margin_bottom > 0 && (pad_bottom > 0 || border_bottom > 0)) {
+        height += prev_margin_bottom;
     }
 
     height += pad_top + pad_bottom + border_top + border_bottom;
