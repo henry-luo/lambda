@@ -138,8 +138,10 @@ int view_doc_in_window(const char* doc_file) {
     return 1;
 }
 
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless) {
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
+                                    const char** font_dirs, int font_dir_count) {
     (void)doc_file; (void)event_file; (void)headless;
+    (void)font_dirs; (void)font_dir_count;
     fprintf(stderr, "Error: view command not available in headless CLI build\n");
     return 1;
 }
