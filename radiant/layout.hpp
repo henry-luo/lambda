@@ -425,8 +425,9 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
 
 /**
  * Find the lowest Y where a given width is available
+ * @param element_height Height of the element to place (queries full height range for floats)
  */
-float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y);
+float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height = 1.0f);
 
 /**
  * Find Y position to clear floats
@@ -442,8 +443,10 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx);
 /**
  * Update line effective bounds for BFC floats
  * Adjusts line.effective_left and line.effective_right based on floats at current Y
+ * @param query_height If > 0, use this height for float queries instead of line-height.
+ *                     Used for inline-blocks whose height exceeds the line-height.
  */
-void update_line_for_bfc_floats(LayoutContext* lycon);
+void update_line_for_bfc_floats(LayoutContext* lycon, float query_height = 0);
 
 /**
  * Find the BFC root for a given BlockContext
