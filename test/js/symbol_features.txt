@@ -1,0 +1,12 @@
+t1:1,2,3,4,5
+t2:10,11,12,13
+t3:7,8,9
+t4a:100
+t4b:150
+t4c:100 USD
+t5:true,false,true
+t6:MyCollection
+t7:secret
+t7b:true
+t8:false
+t8b:symbol

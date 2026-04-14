@@ -56,6 +56,8 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+
+
 // POC: MIR interpreter mode — set from mir.c
 extern "C" int g_mir_interp_mode;
 
@@ -5014,6 +5016,20 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
         pc > 3 ? ",..." : "");
 }
 
+// check if a + expression chain contains a string literal operand
+static bool jm_add_chain_has_string(JsAstNode* expr) {
+    if (!expr) return false;
+    if (expr->node_type == JS_AST_NODE_LITERAL)
+        return ((JsLiteralNode*)expr)->literal_type == JS_LITERAL_STRING;
+    if (expr->node_type == JS_AST_NODE_TEMPLATE_LITERAL) return true;
+    if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        if (bin->op == JS_OP_ADD)
+            return jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right);
+    }
+    return false;
+}
+
 // Infer return type by collecting types from all return statements.
 // For recursive calls to self, assume result type matches the base-case return type.
 static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
@@ -5053,7 +5069,14 @@ static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
             case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
                 t = LMD_TYPE_BOOL; break;
-            case JS_OP_ADD: case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
+            case JS_OP_ADD:
+                // + is string concat when any operand is a string
+                if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
+                    t = LMD_TYPE_STRING;
+                else
+                    t = LMD_TYPE_INT;
+                break;
+            case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
                 t = LMD_TYPE_INT; break; // approximate — may be float
             case JS_OP_DIV: case JS_OP_EXP:
                 t = LMD_TYPE_FLOAT; break;
@@ -21620,6 +21643,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         for (int i = 0; i < mt->func_count; i++) {
             JsFuncCollected* fc = &mt->func_entries[i];
             if (fc->node && (fc->node->is_generator || fc->node->is_async)) continue;
+            if (fc->has_scope_env) continue; // params may be captured by child closures — don't narrow
             bool narrowed = false;
             for (int p = 0; p < fc->param_count && p < 16; p++) {
                 if (fc->param_types[p] != LMD_TYPE_ANY) continue;
@@ -23389,7 +23413,9 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         return ItemNull;
     }
 
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
+    // Use optimize level 0 for dynamic code (eval/new Function) — small snippets
+    // don't benefit from optimization but pay the full cost of each pass.
+    MIR_context_t ctx = jit_init(0);
     if (!ctx) {
         log_error("js-new-function: MIR context init failed");
         js_transpiler_destroy(tp);
@@ -23642,6 +23668,37 @@ extern "C" Item js_builtin_eval(Item code_item) {
         if (!has_code) return ItemNull;
     }
 
+    // Fast path: if code is a single RegExp literal, construct directly
+    // without going through the full parse → AST → JIT pipeline.
+    // Pattern: /.../ optionally followed by [gimsuy]* flags, nothing else.
+    if (code_str->len >= 2 && code_str->chars[0] == '/') {
+        size_t i = 1;
+        bool in_class = false;
+        while (i < code_str->len) {
+            char c = code_str->chars[i];
+            if (c == '\\' && i + 1 < code_str->len) { i += 2; continue; }
+            if (c == '[') { in_class = true; i++; continue; }
+            if (c == ']' && in_class) { in_class = false; i++; continue; }
+            if (c == '/' && !in_class) break;
+            i++;
+        }
+        if (i < code_str->len) {
+            size_t flags_start = i + 1;
+            bool valid = true;
+            for (size_t j = flags_start; j < code_str->len; j++) {
+                char f = code_str->chars[j];
+                if (!(f == 'g' || f == 'i' || f == 'm' || f == 's' || f == 'u' || f == 'y')) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid && flags_start <= code_str->len) {
+                extern Item js_create_regexp_from_source(const char* src, size_t len);
+                return js_create_regexp_from_source(code_str->chars, code_str->len);
+            }
+        }
+    }
+
     extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
@@ -23690,10 +23747,11 @@ extern "C" Item js_builtin_eval(Item code_item) {
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
         Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-        // Eagerly free the MIR context deferred by js_new_function_from_string.
-        // The compiled function was called once and its result captured — the
-        // generated code is no longer reachable.
-        jm_finish_last_deferred_mir();
+        // NOTE: we intentionally do NOT call jm_finish_last_deferred_mir() here.
+        // The deferred MIR context keeps the name_pool alive — its backing ast_pool
+        // contains string literals (via jm_box_string_literal) that may be referenced
+        // by the returned Item.  Freeing it would leave dangling pointers.
+        // Cleanup happens at program exit via jm_free_all_deferred_mir_contexts().
         return result;
     }
 
@@ -23707,7 +23765,8 @@ extern "C" Item js_builtin_eval(Item code_item) {
             fn_item = js_new_function_from_string(&body_item, 1);
             if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
                 Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-                jm_finish_last_deferred_mir();
+                // Do not call jm_finish_last_deferred_mir() — see note above
+                // about name_pool lifetime.
                 return result;
             }
         }
@@ -23741,7 +23800,9 @@ extern "C" Item js_builtin_eval(Item code_item) {
             return ItemNull;
         }
 
-        MIR_context_t eval_ctx = jit_init(g_js_mir_optimize_level);
+        // Use optimize level 0 for eval code — small snippets don't benefit
+        // from optimization but pay the full cost of each pass.
+        MIR_context_t eval_ctx = jit_init(0);
         if (!eval_ctx) {
             log_error("js-eval: MIR context init failed");
             js_transpiler_destroy(tp);

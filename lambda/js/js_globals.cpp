@@ -4275,16 +4275,38 @@ extern "C" void js_assert_not_same_value(Item actual, Item unexpected, Item mess
 // Native compareArray / assert.compareArray for test262 (debug builds only)
 // =============================================================================
 
+// check if item is an array or typed array (array-like for comparison)
+static bool is_array_like(Item v) {
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_ARRAY) return true;
+    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
+    return false;
+}
+
+// get length of array or typed array (for compareArray)
+static int64_t array_like_length(Item v) {
+    extern int64_t js_array_length(Item array);
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_ARRAY) return js_array_length(v);
+    // for typed arrays, use property access for "length"
+    if (t == LMD_TYPE_MAP) {
+        extern Item js_property_access(Item object, Item key);
+        Item len_key = (Item){.item = s2it(heap_create_name("length"))};
+        Item len_val = js_property_access(v, len_key);
+        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
+    }
+    return 0;
+}
+
 // compareArray(a, b): element-wise SameValue comparison, returns bool Item
 extern "C" Item js_compare_array(Item a, Item b) {
-    extern int64_t js_array_length(Item array);
     extern Item js_array_get_int(Item array, int64_t index);
 
-    if (get_type_id(a) != LMD_TYPE_ARRAY || get_type_id(b) != LMD_TYPE_ARRAY)
+    if (!is_array_like(a) || !is_array_like(b))
         return (Item){.item = b2it(false)};
 
-    int64_t len_a = js_array_length(a);
-    int64_t len_b = js_array_length(b);
+    int64_t len_a = array_like_length(a);
+    int64_t len_b = array_like_length(b);
     if (len_a != len_b) return (Item){.item = b2it(false)};
 
     for (int64_t i = 0; i < len_a; i++) {
@@ -4297,14 +4319,13 @@ extern "C" Item js_compare_array(Item a, Item b) {
 
 // helper: format array as "[elem1, elem2, ...]" for error messages
 static Item assert_format_array(Item arr) {
-    extern int64_t js_array_length(Item array);
     extern Item js_array_get_int(Item array, int64_t index);
     extern Item js_to_string_val(Item value);
 
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+    if (!is_array_like(arr)) {
         return (Item){.item = s2it(heap_create_name("(not an array)"))};
     }
-    int64_t len = js_array_length(arr);
+    int64_t len = array_like_length(arr);
     // pre-pass: compute total length
     int total = 2; // "[]"
     char* strs[256];

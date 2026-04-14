@@ -1,0 +1,13 @@
+t1:12,14
+t2:32
+t2b:100
+t3:circle:79,square:16
+t4:hello world
+t5:3
+t5b:0
+t6:ABC
+t7:true,true,true,true
+t8:10
+t8b:20
+t9:[number:42],[string:hi]
+t10:a-b-c
