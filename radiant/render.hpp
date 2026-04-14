@@ -41,6 +41,11 @@ typedef struct {
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 
+// Tile-based PNG rendering for large pages that would OOM with a single surface.
+// Only used for PNG output.  total_width/total_height are in physical pixels.
+void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree, const char* output_file,
+                           int total_width, int total_height);
+
 // UI overlay rendering (focus, caret, selection)
 void render_focus_outline(RenderContext* rdcon, RadiantState* state);
 void render_caret(RenderContext* rdcon, RadiantState* state);

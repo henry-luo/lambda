@@ -2304,8 +2304,6 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
     // This is a thread-local variable shared with layout_flex_multipass.cpp
     // Keep this low since each HTTP download can take seconds
-    const int MAX_IFRAME_DEPTH = 3;
-
     if (iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
         return;

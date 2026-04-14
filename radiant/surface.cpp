@@ -378,10 +378,11 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     int bottom = (int)std::min(clip->bottom, rect->y + rect->height);
     if (left >= right || top >= bottom) return; // rect outside clip
 
+    int y_off = surface->tile_offset_y;  // subtract to get tile-relative row index
     // Fast path: no clip shapes active
     if (clip_depth <= 0) {
         for (int i = top; i < bottom; i++) {
-            uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
             _fill_row(row_pixels, left, right - left, color);
         }
         return;
@@ -392,7 +393,7 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
             (float)left + 0.5f, (float)top + 0.5f,
             (float)(right - left - 1), (float)(bottom - top - 1))) {
         for (int i = top; i < bottom; i++) {
-            uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
             _fill_row(row_pixels, left, right - left, color);
         }
         return;
@@ -404,7 +405,7 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
         int rl = left, rr = right;
         clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &rl, &rr);
         if (rl >= rr) continue;
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
         _fill_row(row_pixels, rl, rr - rl, color);
     }
 }
@@ -532,6 +533,7 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             (float)left + 0.5f, (float)top + 0.5f,
             (float)(right - left - 1), (float)(bottom - top - 1));
 
+    int y_off = dst->tile_offset_y;  // subtract to get tile-relative row index
     for (int i = top; i < bottom; i++) {
         int row_left = left, row_right = right;
         if (need_shape_clip) {
@@ -539,7 +541,7 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &row_left, &row_right);
             if (row_left >= row_right) continue;
         }
-        uint8_t* row_pixels = (uint8_t*)dst->pixels + i * dst->pitch;
+        uint8_t* row_pixels = (uint8_t*)dst->pixels + (i - y_off) * dst->pitch;
         for (int j = row_left; j < row_right; j++) {
             float src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
             float src_y = src_rect->y + (i - dst_rect->y) * y_ratio;

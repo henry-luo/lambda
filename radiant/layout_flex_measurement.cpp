@@ -284,7 +284,8 @@ uint32_t get_measurement_cache_generation() {
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
-                               float content_width, float content_height) {
+                               float content_width, float content_height,
+                               float context_width) {
     if (cache_count >= 1000) {
         log_error("Measurement cache overflow");
         return;
@@ -295,6 +296,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     measurement_cache[cache_count].measured_height = height;
     measurement_cache[cache_count].content_width = content_width;
     measurement_cache[cache_count].content_height = content_height;
+    measurement_cache[cache_count].context_width = context_width;
     measurement_cache[cache_count].generation = cache_generation;
     cache_count++;
 
@@ -1065,9 +1067,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                   child->node_name(), measured_width, measured_height);
     }
 
-    // Store measurement results
+    // Store measurement results (include the container width used during measurement)
     store_in_measurement_cache(child, measured_width, measured_height,
-                              content_width, content_height);
+                              content_width, content_height,
+                              saved_context.block.content_width);
 
     // Restore original context, but preserve depth and node_count guards
     int current_depth = lycon->depth;

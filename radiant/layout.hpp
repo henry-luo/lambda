@@ -10,6 +10,7 @@
 // Run `make check-int-cast` to verify compliance.
 // ============================================================================
 
+#include "layout_guards.h"
 #include "view.hpp"
 #include "available_space.hpp"
 #include "layout_mode.hpp"

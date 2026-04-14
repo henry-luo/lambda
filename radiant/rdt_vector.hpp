@@ -68,6 +68,10 @@ void rdt_vector_destroy(RdtVector* vec);
 // re-bind to a (possibly different) pixel buffer of the same size
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride);
 
+// set a Y-pixel offset for tiled rendering (0 = normal full-page mode)
+// all subsequent draw calls are translated upward by offset_y physical pixels
+void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y);
+
 // ---------------------------------------------------------------------------
 // Path construction
 // ---------------------------------------------------------------------------

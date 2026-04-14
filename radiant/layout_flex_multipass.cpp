@@ -10,11 +10,6 @@
 #include "../lib/strbuf.h"
 #include <cmath>
 
-// Flex-in-flex nesting limit — prevents O(n²) timeout from deeply nested flex
-// containers (e.g., 200 nested position:fixed display:flex divs).
-// MAX_LAYOUT_DEPTH (300) guards stack overflow; this guards exponential flex work.
-static const int MAX_FLEX_DEPTH = 16;
-
 // Forward declarations
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
@@ -1197,8 +1192,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             // Uses the same thread-local counter as layout_iframe in layout_block.cpp
             // Keep this low since each HTTP download can take seconds
             extern __thread int iframe_depth;
-            const int MAX_IFRAME_DEPTH = 3;
-
             if (iframe_depth >= MAX_IFRAME_DEPTH) {
                 log_warn("flex iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
                 return;
@@ -2045,6 +2038,15 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
                 child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
                 ViewBlock* flex_item = (ViewBlock*)child;
+                // skip abs/fixed items — they are laid out by layout_flex_absolute_children,
+                // not here. including them in the fallback causes O(2^n) exponential blowup
+                // (each item gets laid out twice, duplicating the entire subtree recursively).
+                if (flex_item->position && flex_item->position->position &&
+                    (flex_item->position->position == CSS_VALUE_ABSOLUTE ||
+                     flex_item->position->position == CSS_VALUE_FIXED)) {
+                    child = child->next();
+                    continue;
+                }
                 layout_flex_item_content(lycon, flex_item);
             }
             child = child->next();
@@ -2543,20 +2545,10 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     FlexContainerLayout* pa_flex = lycon->flex_container;
-    init_flex_container(lycon, block);
-
-    // UNIFIED PASS: Collect, measure, and prepare all flex items in a single traversal
-    // This replaces the old separate PASS 1 (measurement + View creation) and Phase 1 (collection)
-    log_info("=== UNIFIED PASS: Collect, measure, and prepare flex items ===");
-    int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, block);
-    log_info("=== UNIFIED PASS COMPLETE: %d flex items collected ===", item_count);
-
-    // Print view tree and validate coordinates after unified collection
-    print_view_tree_snapshot(block, "After Unified Collection");
-    validate_flex_coordinates(block, "After Unified Collection");
 
     // PASS 2: Run enhanced flex algorithm with nested content support
-    // Note: The flex algorithm now skips collection since items are already prepared
+    // layout_flex_container_with_nested_content handles init_flex_container +
+    // collect_and_prepare_flex_items internally, so we don't duplicate that here.
     log_info("=== PASS 2: Running enhanced flex algorithm ===");
     layout_flex_container_with_nested_content(lycon, block);
     log_info("=== PASS 2 COMPLETE ===");
@@ -2592,9 +2584,9 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    // restore parent flex context
-    cleanup_flex_container(lycon);
-    lycon->flex_container = pa_flex;
+    // Note: layout_flex_container_with_nested_content handles its own
+    // init_flex_container + cleanup_flex_container + pa_flex restore.
+    // lycon->flex_container is already restored to pa_flex at this point.
 
     log_info("FLEX LAYOUT END: container=%p", block);
     log_leave();
