@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
 
     // In batch mode (no filter), disable logging for speed.
     // In filtered mode, keep logging enabled for debugging.
-    std::string gtest_filter = GTEST_FLAG_GET(filter);
+    std::string gtest_filter = ::testing::GTEST_FLAG(filter);
     if (gtest_filter == "*") {
 #ifdef _WIN32
         _putenv_s("LAMBDA_NO_LOG", "1");

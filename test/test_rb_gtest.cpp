@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
     // Suppress Lambda log output unless running a specific filter
-    std::string filter = GTEST_FLAG_GET(filter);
+    std::string filter = ::testing::GTEST_FLAG(filter);
     if (filter == "*") {
 #ifdef _WIN32
         _putenv_s("LAMBDA_NO_LOG", "1");

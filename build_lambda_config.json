@@ -315,6 +315,7 @@
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
             "link": "static",
+            "pic": true,
             "defines": [
                 "UTF8PROC_STATIC",
                 "SQLITE_THREADSAFE=0",
