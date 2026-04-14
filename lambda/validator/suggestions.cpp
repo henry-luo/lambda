@@ -14,6 +14,24 @@
 
 // ==================== Levenshtein Distance ====================
 
+// helper: create a pool-allocated list with pre-allocated items array
+// so expand_list (which uses heap_data_alloc) is never called
+static List* list_pooled_with_capacity(Pool* pool, int capacity) {
+    List* list = (List*)pool_calloc(pool, sizeof(List));
+    list->type_id = LMD_TYPE_ARRAY;
+    list->items = (Item*)pool_calloc(pool, capacity * sizeof(Item));
+    list->capacity = capacity;
+    list->length = 0;
+    return list;
+}
+
+// helper: append an item to a pool-allocated list (no expand needed)
+static void list_pooled_append(List* list, Item item) {
+    if (list->length < list->capacity) {
+        list->items[list->length++] = item;
+    }
+}
+
 /**
  * Calculate Levenshtein distance (edit distance) between two strings
  * Used for typo detection and field name suggestions
@@ -138,8 +156,8 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
         return nullptr;
     }
 
-    List* result = (List*)pool_calloc(pool, sizeof(List));
-    int count = (3 < suggestion_count) ? 3 : suggestion_count;
+    List* result = list_pooled_with_capacity(pool, (3 < suggestion_count) ? 3 : suggestion_count);
+    int count = result->capacity;
     for (int i = 0; i < count; i++) {
         const char* text = suggestions[i].name;
         size_t len = strlen(text);
@@ -148,7 +166,7 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
         memcpy(str->chars, text, len);
         str->chars[len] = '\0';
         Item item = {.item = s2it(str)};
-        list_push(result, item);
+        list_pooled_append(result, item);
     }
 
     return result;
@@ -181,36 +199,36 @@ List* generate_type_suggestions(TypeId actual_type, Type* expected_type, Pool* p
         return str;
     };
 
-    // type-specific suggestions
+    // type-specific suggestions (fully pool-allocated to avoid heap leaks)
     if (expected_type->type_id == LMD_TYPE_STRING && actual_type == LMD_TYPE_INT) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Try wrapping the value in quotes: \"42\"", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
     else if (expected_type->type_id == LMD_TYPE_INT && actual_type == LMD_TYPE_FLOAT) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Remove decimal part or use integer value", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
     else if (expected_type->type_id == LMD_TYPE_INT && actual_type == LMD_TYPE_STRING) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Try removing quotes: 42 instead of \"42\"", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
     else if (expected_type->type_id == LMD_TYPE_BOOL && actual_type == LMD_TYPE_STRING) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Use boolean value: true or false (without quotes)", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
     else if (expected_type->type_id == LMD_TYPE_ARRAY && actual_type != LMD_TYPE_ARRAY) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Wrap value in array brackets: [value]", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
     else if (expected_type->type_id == LMD_TYPE_MAP && actual_type != LMD_TYPE_MAP) {
-        suggestions = (List*)pool_calloc(pool, sizeof(List));
+        suggestions = list_pooled_with_capacity(pool, 2);
         String* s = create_suggestion_string("Use map syntax: {key: value}", pool);
-        list_push(suggestions, (Item){.item = s2it(s)});
+        list_pooled_append(suggestions, (Item){.item = s2it(s)});
     }
 
     return suggestions;

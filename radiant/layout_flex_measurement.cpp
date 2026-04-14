@@ -1815,6 +1815,21 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     if (available_width <= 0) available_width = 10000.0f;
                 }
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
+                // calculate_max_content_height returns border-box values (includes the
+                // element's own padding+border). Convert back to content-box so all
+                // stored intrinsic sizes are content-box — resolve_flex_item_constraints
+                // adds padding+border when converting to border-box for comparison.
+                // (Same conversion as done for width above.)
+                if (item->bound) {
+                    float vp = item->bound->padding.top + item->bound->padding.bottom;
+                    float vb = 0;
+                    if (item->bound->border)
+                        vb = item->bound->border->width.top + item->bound->border->width.bottom;
+                    min_height -= (vp + vb);
+                    max_height -= (vp + vb);
+                    if (min_height < 0) min_height = 0;
+                    if (max_height < 0) max_height = 0;
+                }
                 log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f avail_w=%.1f (is_grid=%d)", min_height, available_width, item_is_grid_container);
             }
 
@@ -2089,6 +2104,87 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             } else if (dom_css_height > 0) {
                                 child_height = dom_css_height;
                             }
+                        } else if (is_row_flex_container && lycon && flex_layout &&
+                                   !is_main_axis_horizontal(flex_layout) &&
+                                   flex_layout->cross_axis_size > 0) {
+                            // Row flex items in a column parent: compute height at
+                            // the item's estimated width share, not the grandparent's
+                            // full cross-axis size (which would prevent text wrapping).
+                            float row_width = flex_layout->cross_axis_size;
+                            if (item->bound) {
+                                row_width -= item->bound->margin.left + item->bound->margin.right;
+                                row_width -= item->bound->padding.left + item->bound->padding.right;
+                                if (item->bound->border)
+                                    row_width -= item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                            // Estimate each child's share of the row (assumes flex:1 equal split)
+                            float gap = 0;
+                            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+                                ViewBlock* bv = (ViewBlock*)item;
+                                if (bv->embed && bv->embed->flex)
+                                    gap = bv->embed->flex->column_gap;
+                            }
+                            int n_flex_children = 0;
+                            for (DomNode* sc = item->first_child; sc; sc = sc->next_sibling)
+                                if (sc->is_element()) n_flex_children++;
+                            float child_share = row_width;
+                            if (n_flex_children > 1)
+                                child_share = (row_width - gap * (n_flex_children - 1)) / n_flex_children;
+                            // Subtract child's own padding+border to get content width
+                            float child_content_w = child_share;
+                            if (child_view->bound) {
+                                child_content_w -= child_view->bound->padding.left + child_view->bound->padding.right;
+                                if (child_view->bound->border)
+                                    child_content_w -= child_view->bound->border->width.left + child_view->bound->border->width.right;
+                            } else if (child_view->specified_style) {
+                                // Fallback: resolve padding/border from CSS when bound not yet computed
+                                float cp = 0, cb = 0;
+                                CssDeclaration* pad_decl = style_tree_get_declaration(
+                                    child_view->specified_style, CSS_PROPERTY_PADDING);
+                                if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                                    cp = p * 2; // left + right
+                                } else {
+                                    CssDeclaration* pl = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_PADDING_LEFT);
+                                    CssDeclaration* pr = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                                    if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH)
+                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
+                                    if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH)
+                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
+                                }
+                                CssDeclaration* bw_decl = style_tree_get_declaration(
+                                    child_view->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+                                if (bw_decl && bw_decl->value && bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    float b = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
+                                    cb = b * 2;
+                                } else {
+                                    // Check border shorthand (e.g., "border: 1px solid #color")
+                                    CssDeclaration* b_sh = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_BORDER);
+                                    if (b_sh && b_sh->value) {
+                                        float bw = 0;
+                                        if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                                            for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
+                                                CssValue* bv = b_sh->value->data.list.values[bi];
+                                                if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
+                                                    bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
+                                                    break;
+                                                }
+                                            }
+                                        } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                            bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
+                                        }
+                                        cb = bw * 2;
+                                    }
+                                }
+                                child_content_w -= cp + cb;
+                            }
+                            if (child_content_w < 0) child_content_w = 0;
+                            child_height = calculate_max_content_height(lycon, c, child_content_w);
+                            log_debug("Row flex child height at estimated share: share=%.1f, content_w=%.1f, h=%.1f",
+                                      child_share, child_content_w, child_height);
                         } else if (child_view->fi) {
                             // Child has fi - use cached intrinsic or calculate recursively
                             if (!child_view->fi->has_intrinsic_height) {

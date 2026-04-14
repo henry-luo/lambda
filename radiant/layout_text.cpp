@@ -405,6 +405,36 @@ static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
     return CSS_VALUE_NORMAL;
 }
 
+/**
+ * Resolve the lang attribute by walking up the DOM tree.
+ * Returns the first non-null lang (or xml:lang) attribute found on an ancestor,
+ * or nullptr if none is set. The lang attribute is inherited per HTML spec.
+ */
+static const char* resolve_lang(DomNode* node) {
+    while (node) {
+        if (node->is_element()) {
+            const char* lang = node->get_attribute("lang");
+            if (lang && *lang) return lang;
+            lang = node->get_attribute("xml:lang");
+            if (lang && *lang) return lang;
+        }
+        node = node->parent;
+    }
+    return nullptr;
+}
+
+/**
+ * Check if a lang attribute value indicates Japanese.
+ * Matches "ja", "ja-JP", "ja-*" (case-insensitive prefix match).
+ */
+static inline bool is_lang_japanese(const char* lang) {
+    if (!lang) return false;
+    if ((lang[0] == 'j' || lang[0] == 'J') && (lang[1] == 'a' || lang[1] == 'A')) {
+        return lang[2] == '\0' || lang[2] == '-';
+    }
+    return false;
+}
+
 // ============================================================================
 // CSS white-space Property Helpers
 // ============================================================================
@@ -2054,6 +2084,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops
 
+    // CSS Text 3 §6.2: Resolve lang for CJ class behavior.
+    // In line-break: normal, CJ → NS for Japanese, CJ → ID for Chinese/Korean.
+    // In strict, CJ → NS always. In loose, CJ → ID always.
+    const char* lang = resolve_lang(text_node);
+    bool cj_is_non_starter = (line_break_val == CSS_VALUE_STRICT)
+        || (line_break_val != CSS_VALUE_LOOSE && is_lang_japanese(lang));
+
     // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
     // transformation. When a collapsible segment break occurs between two East Asian
     // Wide characters (neither Hangul), the break is removed instead of becoming a space.
@@ -2834,7 +2871,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 //   Rule 1: If adjacent to ZWSP (U+200B), remove the segment break.
                 //   Rule 2: If both the character before and after are East Asian Width
                 //           Fullwidth/Wide (not Hangul), remove the segment break.
-                //           NOTE: Rule 2 is deferred — browser references do not implement it.
                 // Otherwise the segment break becomes a space (already added as wd).
                 if (has_segment_break && collapse_newlines) {
                     bool remove_break = false;
@@ -2842,19 +2878,26 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     bool prev_is_zwsp = (last_processed_cp == 0x200B);
                     // check character after: peek at next non-whitespace
                     bool next_is_zwsp = false;
-                    if (*str) {
-                        if (str[0] == 0xE2 && str[1] == 0x80 && str[2] == 0x8B) {
-                            next_is_zwsp = true;
-                        }
+                    uint32_t next_cp = *str ? peek_codepoint(str) : 0;
+                    if (next_cp == 0x200B) {
+                        next_is_zwsp = true;
                     }
                     // Rule 1: adjacent to ZWSP
                     if (prev_is_zwsp || next_is_zwsp) {
                         remove_break = true;
                     }
+                    // Rule 2: East Asian Wide ↔ East Asian Wide (not Hangul)
+                    // CSS Text 3 §4.1.2: segment breaks between two East Asian F/W
+                    // characters (neither Hangul) are removed instead of becoming spaces.
+                    if (!remove_break && last_processed_cp && next_cp
+                        && is_east_asian_fw(last_processed_cp) && !is_hangul(last_processed_cp)
+                        && is_east_asian_fw(next_cp) && !is_hangul(next_cp)) {
+                        remove_break = true;
+                    }
                     if (remove_break) {
                         rect->width -= wd;  // undo the space width
                         log_debug("segment break removed between U+%04X and U+%04X (CSS Text 3 §4.1.2)",
-                                  last_processed_cp, next_is_zwsp ? 0x200BU : 0U);
+                                  last_processed_cp, next_cp);
                         continue;  // skip break opportunity recording
                     }
                 }
@@ -3015,8 +3058,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     if (is_line_break_cl(next_cp)) {
                         allow_break = false;
                     }
-                    // NS class prevents break; CJ chars also prevent unless loose mode
-                    else if (is_line_break_ns(next_cp) || (!is_loose && is_line_break_cj(next_cp))) {
+                    // NS class prevents break; CJ chars also prevent when resolved to NS
+                    // CSS Text 3 §6.2: CJ → NS for Japanese (normal/strict), CJ → ID for
+                    // Chinese/Korean (normal). Strict always → NS, loose always → ID.
+                    else if (is_line_break_ns(next_cp) || (cj_is_non_starter && is_line_break_cj(next_cp))) {
                         allow_break = false;
                     }
                     // EX/IS/SY prevents break, but loose mode allows break before fullwidth ！？

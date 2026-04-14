@@ -680,7 +680,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // This must happen before computing x position, because right-positioned elements
     // use the element's own width to determine x (x = cb_width - right - margin - width).
     // If we clamp after position, right/bottom-positioned elements get wrong offsets.
+    float pre_clamp_cw = content_width;
     content_width = adjust_min_max_width(block, content_width);
+    if (content_width != pre_clamp_cw) {
+        fprintf(stderr, "[TRACE ABS] %s adjust_min_max clamped: %.1f -> %.1f\n", block->source_loc(), pre_clamp_cw, content_width);
+    }
 
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
     // When left, right, and width are all NOT auto, the equation is over-constrained.
@@ -1485,7 +1489,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
         block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
         lycon->block.given_height, block->position->has_top, block->position->has_bottom);
-
     // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
     bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
     bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);

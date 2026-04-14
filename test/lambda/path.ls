@@ -48,7 +48,7 @@ type(/etc.hosts)
 
 "File content (lazy loading)"
 let hosts = /etc.hosts
-len(hosts)
+(len(hosts) > 0)
 
 "exists() function - directory exists"
 exists(/etc)

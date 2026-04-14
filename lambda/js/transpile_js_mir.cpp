@@ -284,6 +284,9 @@ struct JsMirTranspiler {
     char last_closure_capture_names[32][128];
     bool last_closure_has_env;
 
+    // Assignment target hint for closure self-capture detection in copy-env path
+    const char* assign_target_vname;  // set before RHS eval, NULL otherwise
+
     // Phase 1: parent function tracking during collection
     int collect_parent_func_index;   // current parent func index (-1 = top level)
 
@@ -2663,6 +2666,7 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, val)));
+
             return;
         }
     }
@@ -5880,6 +5884,7 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
             {"encodeURI", 9, 1}, {"decodeURI", 9, 1},
             {"encodeURIComponent", 18, 1}, {"decodeURIComponent", 18, 1},
             {"eval", 4, 1}, {"atob", 4, 1}, {"btoa", 4, 1},
+            {"print", 5, 1},
             {NULL, 0, 0}
         };
         for (int i = 0; global_builtins[i].name; i++) {
@@ -7386,7 +7391,10 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
         // --- Boxed variable path (original) ---
         MIR_reg_t rhs;
         if (asgn->op == JS_OP_ASSIGN) {
+            // Set assignment target hint for closure self-capture detection
+            mt->assign_target_vname = vname;
             rhs = jm_transpile_box_item(mt, asgn->right);
+            mt->assign_target_vname = NULL;
             // v18: function name inference for simple assignment
             if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                 asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
@@ -10755,6 +10763,23 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_alert", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+            // print(args...) — V8 shell compat, maps to console.log
+            if (nl == 5 && strncmp(n, "print", 5) == 0) {
+                int ac = jm_count_args(call->arguments);
+                if (ac == 0) {
+                    jm_call_void_1(mt, "js_console_log", MIR_T_I64, MIR_new_int_op(mt->ctx, ITEM_JS_UNDEFINED));
+                } else if (ac == 1) {
+                    MIR_reg_t val = jm_transpile_box_item(mt, call->arguments);
+                    jm_call_void_1(mt, "js_console_log", MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                } else {
+                    // Multi-arg: space-separated output
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, ac);
+                    jm_call_void_2(mt, "js_console_log_multi",
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ac));
+                }
+                return jm_emit_undefined(mt);
+            }
             // v12: encodeURIComponent(str)
             if (nl == 18 && strncmp(n, "encodeURIComponent", 18) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
@@ -12936,9 +12961,19 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
+            // Detect self-capture via assignment target hint:
+            // e.g. sc_loop1_75 = function(l) { ... sc_loop1_75(l.cdr) ... }
+            int self_ref_slot_fe = -1;
+
             for (int i = 0; i < fc->capture_count; i++) {
                 int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
                 if (slot < 0) continue;
+
+                // Skip self-capture — will be patched after closure creation
+                if (mt->assign_target_vname && strcmp(fc->captures[i].name, mt->assign_target_vname) == 0) {
+                    self_ref_slot_fe = slot;
+                    continue;
+                }
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
                 if (var) {
                     MIR_reg_t value_to_store;
@@ -13053,6 +13088,13 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
+
+            // Patch self-reference: store the closure itself in its copied env slot
+            if (self_ref_slot_fe >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, self_ref_slot_fe * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, fn_reg)));
+            }
         }
     } else {
         fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,
@@ -14303,7 +14345,10 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                     } else {
                         // boxed (string, object, array, any, etc.)
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
+                        // Set assignment target hint for closure self-capture detection
+                        mt->assign_target_vname = vname;
                         MIR_reg_t val = jm_transpile_box_item(mt, d->init);
+                        mt->assign_target_vname = NULL;
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, val)));
@@ -18558,7 +18603,6 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->name, 1, &ret_type, total_params, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
 
-    fc->func_item = func_item;
     jm_register_local_func(mt, fc->name, func_item);
 
     // Save transpiler state
@@ -18579,6 +18623,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
+    mt->last_closure_has_env = false;  // clear stale closure env from previous function
 
     // Determine if this function is a class method and set current_class
     mt->current_class = NULL;
@@ -20796,93 +20841,100 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // is a candidate implicit global.
     //
     // IMPORTANT: A variable assigned-but-not-declared in one function may be a
-    // legitimate closure capture if it IS declared in another function. For example:
+    // legitimate closure capture if it IS declared in an ANCESTOR function.
+    // For example:
     //   function makeRunningSum() {
     //       let n = 0;
     //       return function(x) { n = n + x; return n; };  // n is NOT an implicit global
     //   }
-    // So after collecting all candidates, we filter out any name that appears as a
-    // declaration (var/let/const/param) in ANY function or at the top level.
+    // So for each candidate, we check if it's declared in an ancestor function
+    // (via parent_index chain) or at the top level. Only if it's NOT declared
+    // in any ancestor scope is it a true implicit global.
     {
         struct hashmap* implicit_globals = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
 
-        // all_declarations: union of every declared name across ALL functions + top level.
-        // Used to filter out false implicit globals that are actually closure captures.
-        struct hashmap* all_declarations = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+        // Collect top-level declarations
+        struct hashmap* top_declarations = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
+
+        // Build per-function declaration sets for ancestor checking
+        // func_decl_sets[fi] = set of names declared (var/let/const/param) in function fi
+        struct hashmap** func_decl_sets = (struct hashmap**)calloc(mt->func_count, sizeof(struct hashmap*));
 
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn = mt->func_entries[fi].node;
-            if (!fn || !fn->body) continue;
+            if (!fn || !fn->body) {
+                func_decl_sets[fi] = NULL;
+                continue;
+            }
 
-            // Collect parameter names
             struct hashmap* func_declared = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             JsAstNode* param = fn->params;
             while (param) {
                 jm_collect_pattern_names(param, func_declared);
-                jm_collect_pattern_names(param, all_declarations);
                 param = param->next;
             }
-
-            // Collect local var/let/const declarations (without recursing into inner functions)
             jm_collect_body_locals(fn->body, func_declared);
-            // Also add to all_declarations
-            jm_collect_body_locals(fn->body, all_declarations);
+            func_decl_sets[fi] = func_declared;
 
-            // Collect assignment targets within this function (without recursing into inner functions)
+            // Collect assignment targets within this function
             struct hashmap* func_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             jm_collect_func_assignments(fn->body, func_assigned);
 
             // assigned - declared = undeclared → candidate implicit globals
+            // But only if not declared in an ancestor function (closure capture)
             size_t iter = 0; void* item;
             while (hashmap_iter(func_assigned, &iter, &item)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)item;
-                if (!jm_name_set_has(func_declared, e->name)) {
+                if (jm_name_set_has(func_declared, e->name)) continue;  // declared locally
+
+                // Check ancestor chain: if declared in any ancestor, it's a capture
+                bool in_ancestor = false;
+                int anc_idx = mt->func_entries[fi].parent_index;
+                while (anc_idx >= 0 && anc_idx < mt->func_count) {
+                    if (func_decl_sets[anc_idx] && jm_name_set_has(func_decl_sets[anc_idx], e->name)) {
+                        in_ancestor = true;
+                        break;
+                    }
+                    anc_idx = mt->func_entries[anc_idx].parent_index;
+                }
+                if (!in_ancestor) {
                     jm_name_set_add(implicit_globals, e->name);
                 }
             }
 
-            hashmap_free(func_declared);
             hashmap_free(func_assigned);
         }
 
         // Also check top-level assignments (not inside any function)
-        struct hashmap* top_declared = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-            jm_name_hash, jm_name_cmp, NULL, NULL);
         struct hashmap* top_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         JsAstNode* s = program->body;
         while (s) {
-            // Collect top-level declarations (including hoisted var from nested positions)
+            // Collect top-level declarations
             if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                jm_collect_body_locals(s, top_declared);
-                jm_collect_body_locals(s, all_declarations);
+                jm_collect_body_locals(s, top_declarations);
             } else if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                 JsFunctionNode* fn = (JsFunctionNode*)s;
                 if (fn->name) {
                     char name[128];
                     snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
-                    jm_name_set_add(top_declared, name);
-                    jm_name_set_add(all_declarations, name);
+                    jm_name_set_add(top_declarations, name);
                 }
             } else if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                 JsClassNode* cls = (JsClassNode*)s;
                 if (cls->name) {
                     char name[128];
                     snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
-                    jm_name_set_add(top_declared, name);
-                    jm_name_set_add(all_declarations, name);
+                    jm_name_set_add(top_declarations, name);
                 }
             } else {
-                // Collect hoisted var declarations from nested positions
-                // (for-inits, labeled statements, if/while/switch bodies, etc.)
-                jm_collect_body_locals(s, top_declared);
-                jm_collect_body_locals(s, all_declarations);
+                jm_collect_body_locals(s, top_declarations);
             }
-            // Collect top-level assignments (only from non-function statements)
+            // Collect top-level assignments
             if (s->node_type != JS_AST_NODE_FUNCTION_DECLARATION &&
                 s->node_type != JS_AST_NODE_FUNCTION_EXPRESSION &&
                 s->node_type != JS_AST_NODE_ARROW_FUNCTION) {
@@ -20895,26 +20947,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             size_t iter = 0; void* item;
             while (hashmap_iter(top_assigned, &iter, &item)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)item;
-                if (!jm_name_set_has(top_declared, e->name)) {
+                if (!jm_name_set_has(top_declarations, e->name)) {
                     jm_name_set_add(implicit_globals, e->name);
                 }
             }
         }
-        hashmap_free(top_declared);
         hashmap_free(top_assigned);
 
-        // Register implicit globals as module vars — but ONLY if the name is not
-        // declared in ANY function or at the top level. If it IS declared somewhere,
-        // it's a closure capture target, not a true implicit global.
+        // Also filter: if a candidate is declared at the top level, it's not a global
+        // (it's already a top-level local/var). Only register truly undeclared names.
         size_t iter = 0; void* item;
         while (hashmap_iter(implicit_globals, &iter, &item)) {
             JsNameSetEntry* e = (JsNameSetEntry*)item;
-            // Filter: if declared anywhere in the program, it's a capture, not a global
-            if (jm_name_set_has(all_declarations, e->name)) {
-                log_debug("js-mir: '%s' assigned-but-not-declared in some function, "
-                          "but declared elsewhere — closure capture, not implicit global", e->name);
-                continue;
-            }
+            if (jm_name_set_has(top_declarations, e->name)) continue;  // already a top-level var
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
             if (hashmap_get(mt->module_consts, &lookup)) continue;  // already registered
@@ -20929,7 +20974,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
 
-        hashmap_free(all_declarations);
+        hashmap_free(top_declarations);
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            if (func_decl_sets[fi]) hashmap_free(func_decl_sets[fi]);
+        }
+        free(func_decl_sets);
         hashmap_free(implicit_globals);
     }
 
@@ -21219,27 +21268,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     snprintf(name, sizeof(name), "_js_%.*s", (int)fnd->name->len, fnd->name->chars);
                     jm_name_set_add(all_names, name);
                 }
-                // Add function's params and locals as visible names (for nested closures)
-                JsAstNode* p = fnd->params;
-                while (p) {
-                    if (p->node_type == JS_AST_NODE_IDENTIFIER) {
-                        JsIdentifierNode* pid = (JsIdentifierNode*)p;
-                        char pname[128];
-                        snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
-                        jm_name_set_add(all_names, pname);
-                    }
-                    p = p->next;
-                }
-                // Collect locals from function body
-                struct hashmap* fn_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                if (fnd->body) jm_collect_body_locals(fnd->body, fn_locals);
-                size_t iter2 = 0; void* item2;
-                while (hashmap_iter(fn_locals, &iter2, &item2)) {
-                    JsNameSetEntry* e = (JsNameSetEntry*)item2;
-                    jm_name_set_add(all_names, e->name);
-                }
-                hashmap_free(fn_locals);
+                // NOTE: Do NOT add function params/locals to all_names — they are
+                // function-scoped, not module-scoped. The per-function ancestor chain
+                // walk (below) will add ancestor function locals properly.
             }
             if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                 JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
@@ -21272,28 +21303,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             for (int mi = 0; mi < ce->method_count; mi++) {
                 JsClassMethodEntry* me = &ce->methods[mi];
                 if (!me->fc || !me->fc->node) continue;
-                JsFunctionNode* fnd = me->fc->node;
-                // Add method params
-                JsAstNode* p = fnd->params;
-                while (p) {
-                    if (p->node_type == JS_AST_NODE_IDENTIFIER) {
-                        JsIdentifierNode* pid = (JsIdentifierNode*)p;
-                        char pname[128];
-                        snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
-                        jm_name_set_add(all_names, pname);
-                    }
-                    p = p->next;
-                }
-                // Collect locals from method body
-                struct hashmap* fn_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                if (fnd->body) jm_collect_body_locals(fnd->body, fn_locals);
-                size_t iter3 = 0; void* item3;
-                while (hashmap_iter(fn_locals, &iter3, &item3)) {
-                    JsNameSetEntry* e = (JsNameSetEntry*)item3;
-                    jm_name_set_add(all_names, e->name);
-                }
-                hashmap_free(fn_locals);
+                // NOTE: Do NOT add method params/locals to all_names — they are
+                // method-scoped. The per-function ancestor chain walk will handle them.
             }
         }
 
@@ -21419,11 +21430,47 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             if (strcmp(cap_name, child_self_name) == 0) continue;
                         }
 
-                        // Check module_consts — no need to propagate compile-time constants
+                        // Check module_consts — no need to propagate compile-time constants.
+                        // For MCONST_MODVAR (IIFE-promoted vars), an ancestor function may
+                        // define a param with the same name that shadows the module var.
+                        // If shadowed, the capture MUST propagate so the local binding
+                        // is used rather than the stale module-level value.
                         if (mt->module_consts) {
                             JsModuleConstEntry lookup;
                             snprintf(lookup.name, sizeof(lookup.name), "%s", cap_name);
-                            if (hashmap_get(mt->module_consts, &lookup)) continue;
+                            JsModuleConstEntry* mc_prop = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                            if (mc_prop) {
+                                if (mc_prop->const_type != MCONST_MODVAR) {
+                                    continue;  // truly immutable constant, safe to skip
+                                }
+                                // Walk ancestor chain: check if any ancestor function has a
+                                // param with the same name (shadowing the module var).
+                                bool shadowed_by_ancestor = false;
+                                for (int ai = parent_idx; ai >= 0 && ai < mt->func_count;
+                                     ai = mt->func_entries[ai].parent_index) {
+                                    JsFuncCollected* anc = &mt->func_entries[ai];
+                                    if (!anc->node) break;
+                                    // Check params only (safe and fast)
+                                    JsAstNode* ap = anc->node->params;
+                                    while (ap) {
+                                        if (ap->node_type == JS_AST_NODE_IDENTIFIER) {
+                                            JsIdentifierNode* id = (JsIdentifierNode*)ap;
+                                            if (id->name) {
+                                                char pname[128];
+                                                snprintf(pname, sizeof(pname), "_js_%.*s",
+                                                    (int)id->name->len, id->name->chars);
+                                                if (strcmp(pname, cap_name) == 0) {
+                                                    shadowed_by_ancestor = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        ap = ap->next;
+                                    }
+                                    if (shadowed_by_ancestor) break;
+                                }
+                                if (!shadowed_by_ancestor) continue; // not shadowed, use module var
+                            }
                         }
 
                         // Add as capture to parent
@@ -22006,8 +22053,78 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
                                 MIR_new_reg_op(mt->ctx, value_to_store)));
                         } else {
-                            log_error("js-mir: captured var '%s' not found for fn decl '%.*s'",
-                                fc->captures[ci].name, (int)fn->name->len, fn->name->chars);
+                            // fallback: check module_consts (implicit globals, module vars, etc.)
+                            bool found_mc = false;
+                            if (mt->module_consts) {
+                                JsModuleConstEntry mclookup;
+                                snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
+                                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                                if (mc) {
+                                    found_mc = true;
+                                    MIR_reg_t const_val;
+                                    switch (mc->const_type) {
+                                    case MCONST_INT:
+                                        const_val = jm_box_int_const(mt, mc->int_val);
+                                        break;
+                                    case MCONST_FLOAT: {
+                                        MIR_reg_t d = jm_new_reg(mt, "mconst_d", MIR_T_D);
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                                            MIR_new_reg_op(mt->ctx, d),
+                                            MIR_new_double_op(mt->ctx, mc->float_val)));
+                                        const_val = jm_box_float(mt, d);
+                                        break;
+                                    }
+                                    case MCONST_NULL:
+                                        const_val = jm_emit_null(mt);
+                                        break;
+                                    case MCONST_UNDEFINED: {
+                                        const_val = jm_new_reg(mt, "mundef", MIR_T_I64);
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, const_val),
+                                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                                        break;
+                                    }
+                                    case MCONST_BOOL: {
+                                        const_val = jm_new_reg(mt, "mbool", MIR_T_I64);
+                                        uint64_t bval = mc->int_val ? ITEM_TRUE_VAL : ITEM_FALSE_VAL;
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, const_val), MIR_new_int_op(mt->ctx, (int64_t)bval)));
+                                        break;
+                                    }
+                                    case MCONST_CLASS:
+                                        const_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                                        break;
+                                    case MCONST_FUNC: {
+                                        int fii = (int)mc->int_val;
+                                        if (fii >= 0 && fii < mt->func_count && mt->func_entries[fii].func_item) {
+                                            JsFuncCollected* func = &mt->func_entries[fii];
+                                            int fpc = func->param_count;
+                                            if (func->has_rest_param) fpc = -fpc;
+                                            const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                                MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
+                                                MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
+                                            const char* fn_name = (func->node && func->node->name) ? func->node->name->chars : NULL;
+                                            jm_emit_set_function_name(mt, const_val, fn_name, func->formal_length);
+                                        } else {
+                                            const_val = jm_emit_null(mt);
+                                        }
+                                        break;
+                                    }
+                                    case MCONST_MODVAR:
+                                        const_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                                        break;
+                                    }
+                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                                        MIR_new_reg_op(mt->ctx, const_val)));
+                                }
+                            }
+                            if (!found_mc) {
+                                log_error("js-mir: captured var '%s' not found for fn decl '%.*s'",
+                                    fc->captures[ci].name, (int)fn->name->len, fn->name->chars);
+                            }
                         }
                     }
                     MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure", MIR_T_I64,

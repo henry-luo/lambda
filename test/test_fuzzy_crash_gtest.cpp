@@ -301,6 +301,8 @@ static void run_fuzzy_tests_parallel(int jobs) {
 // Parameterized test fixture
 // ============================================================================
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(FuzzyCrashTest);
+
 class FuzzyCrashTest : public ::testing::TestWithParam<size_t> {
 protected:
     void SetUp() override {

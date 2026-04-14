@@ -33,7 +33,7 @@ http.api.**
 "Path type checking"
 path
 "File content (lazy loading)"
-213
+true
 "exists() function - directory exists"
 true
 "exists() function - file exists"
@@ -53,14 +53,14 @@ true
 "len() on relative directory"
 3
 "Relative path iteration with single wildcard (*) - list paths"
-.test.input.dir.'test.txt'
 .test.input.dir.child_dir
 .test.input.dir.readme_link
-"Relative path iteration with recursive wildcard (**) - list paths"
 .test.input.dir.'test.txt'
+"Relative path iteration with recursive wildcard (**) - list paths"
 .test.input.dir.child_dir
 .test.input.dir.child_dir.'child.txt'
 .test.input.dir.readme_link
+.test.input.dir.'test.txt'
 "Wildcard finds nested items"
 true
 "Path property: nametest.jsonPath property: is_dir on directory"

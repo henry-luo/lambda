@@ -681,12 +681,7 @@ build-jube-test: build-jube build-test
 # Run jube-specific tests only (Python, Bash, Ruby)
 test-jube: build-jube-test
 	@echo "Running jube-specific test suites (Python, Bash, Ruby)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=jube --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=jube --parallel
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -824,45 +819,25 @@ test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running lambda (core) test suites (excluding jube)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --exclude-target=jube --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --exclude-target=jube --parallel
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running ALL test suites (baseline + extended)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --parallel
 
 test-all-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running BASELINE test suites only..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --category=baseline --parallel
 
 test-lambda-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=lambda --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=lambda --category=baseline --parallel
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -876,12 +851,7 @@ test-c2mir: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		LAMBDA_USE_C2MIR=1 ./test/test_run.sh --target=lambda --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@LAMBDA_USE_C2MIR=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
 # test262 baseline: run only tests in baseline, must pass 100%
 test262-baseline: build-test
@@ -1304,50 +1274,23 @@ test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running EXTENDED test suites only..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --category=extended --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --category=extended --parallel
 
 test-library: build
 	@echo "Running library test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=library --raw; \
-	else \
-		echo "Error: No test script found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=library --raw
 
 test-input: build
 	@echo "Running input processing test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=input --raw; \
-	else \
-		echo "Error: No test script found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=input --raw
 
 test-validator: build
 	@echo "Running validator test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=validator --raw; \
-	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=validator --raw
 
 test-lambda: build
 	@echo "Running lambda test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=lambda --raw; \
-	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=lambda --raw
 
 # CSS Resolution Verification Target
 # Compares Lambda CSS resolved properties against browser reference data
@@ -1453,7 +1396,7 @@ test-coverage:
 	@if command -v gcov >/dev/null 2>&1 && command -v lcov >/dev/null 2>&1; then \
 		echo "Compiling with coverage flags..."; \
 		gcc --coverage -fprofile-arcs -ftest-coverage -o lambda_coverage.exe $(shell find lambda -name "*.c") -I./include -I./lambda; \
-		./test/test_run.sh; \
+		node test/test_run.js; \
 		gcov $(shell find lambda -name "*.c"); \
 		lcov --capture --directory . --output-file coverage.info; \
 		genhtml coverage.info --output-directory coverage-report; \

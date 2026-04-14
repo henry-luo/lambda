@@ -1,3 +1,3 @@
-.test.input.dir.'test.txt'
 .test.input.dir.child_dir
 .test.input.dir.readme_link
+.test.input.dir.'test.txt'
