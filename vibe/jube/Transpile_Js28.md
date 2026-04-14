@@ -506,3 +506,204 @@ Remaining 12 SLOW entries are inherently slow (§5) — not fixable without algo
 - 2× RegExp Unicode (`\S` non-whitespace, Ideographic) — RE2 code point matching
 - 2× regexp eval 65K (S7.8.5_A1.1_T2, S7.8.5_A2.1_T2) — 65K JIT compilations
 - 1× dynamic-import FIXTURE — deliberate Date.now() busy-wait
+
+---
+
+## 10. Deep Analysis of Remaining 12 SLOW Tests (Post-Js28)
+
+### 10.1 Classification by Actual Behavior
+
+Running all 12 tests with the batch runner reveals their **actual** status is different from the SLOW tag — several are FAIL (correctness bugs) or TIMEOUT (infinite loop / hangs), not merely slow:
+
+| # | Test | Time | Actual Status | Root Cause Category |
+|---|------|------|---------------|---------------------|
+| 1 | `decodeURI_S15.1.3.1_A2.5_T1` | 1.9s | **FAIL** (exit 1) | Correctness: `String.fromCharCode` surrogate pair bug |
+| 2 | `decodeURIComponent_S15.1.3.2_A2.5_T1` | 2.5s | **FAIL** (exit 1) | Same as #1 |
+| 3 | `RegExp_property_escapes_Ideographic` | 5.0s | **FAIL** (exit 1) | Parser: `\P{Ideo}` short-form property escape unsupported |
+| 4 | `RegExp_character_class_escape_non_whitespace` | 2.3s | **PASS** ✅ | Already fixed — remove from quarantine |
+| 5 | `TypedArray_with_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.with()` not implemented |
+| 6 | `TypedArray_toReversed_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.toReversed()` not implemented |
+| 7 | `TypedArray_toSorted_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.toSorted()` not implemented |
+| 8 | `for_of_arguments_mapped_mutation` | >10s | **TIMEOUT** | Parser: IIFE `(function() { ... }(args))` not parsed |
+| 9 | `for_of_arguments_unmapped_mutation` | >10s | **TIMEOUT** | Same as #8 |
+| 10 | `regexp_S7.8.5_A1.1_T2` | >10s | **TIMEOUT** | 65K × `eval("/" + ch + "/")` — JIT recompilation per eval |
+| 11 | `regexp_S7.8.5_A2.1_T2` | >10s | **TIMEOUT** | Same as #10 |
+| 12 | `dynamic_import_FIXTURE` | >10s | **TIMEOUT** | Helper module (uses `export`) run as standalone test |
+
+### 10.2 Group A: `decodeURI` / `decodeURIComponent` — Fixable (Correctness Bug)
+
+**Test logic:**
+```javascript
+// 4-nested loop: B1=0xF0..0xF4, B2=0x80..0xBF, B3=0x80..0xBF, B4=0x80..0xBF
+// ~983,040 total iterations
+var hexB1_B2_B3_B4 = "%F0%90%80%80";  // 4 percent-encoded bytes
+var index = (codepoint from B1..B4);
+var H = high surrogate, L = low surrogate;
+if (decodeURI(hexB1_B2_B3_B4) === String.fromCharCode(H, L)) continue;  // MISMATCH
+```
+
+**Root cause:** `String.fromCharCode(H, L)` with two arguments (surrogate pair) likely produces incorrect UTF-8 output. The current `js_string_fromCharCode` only handles a single code point argument. The `js_string_fromCharCode_array` handles arrays, but the transpiler may route 2-arg calls through the single-arg path, producing two separate 3-byte UTF-8 surrogates instead of a single 4-byte UTF-8 codepoint.
+
+Meanwhile, `decodeURI("%F0%90%80%80")` correctly decodes to U+10000 as a 4-byte UTF-8 sequence. The comparison fails because one side produces proper UTF-8 and the other produces a surrogate pair in UTF-8 (6 bytes of two 3-byte surrogates vs 4 bytes of one codepoint).
+
+**Fix:** Ensure `String.fromCharCode(H, L)` where H and L form a valid surrogate pair produces the same 4-byte UTF-8 as the direct codepoint encoding. This requires the multi-arg path to detect surrogate pairs and combine them.
+
+**Effort:** Medium — needs `js_string_fromCharCode_array` to scan for adjacent surrogates and combine them into supplementary codepoints before UTF-8 encoding.
+
+**Expected impact:** Both tests should PASS in ~2s (the ~983K iterations are inherently slow but fast enough for the 10s timeout). If 2s still exceeds the 3s baseline threshold, the tests can remain quarantined as SLOW but with correct results.
+
+### 10.3 Group B: TypedArray `.with()` / `.toReversed()` / `.toSorted()` — Fixable (Missing Implementation)
+
+**Test logic:**
+```javascript
+testWithTypedArrayConstructors(TA => {    // iterates 11 TypedArray constructors
+  var ta = new TA([3, 1, 2]);
+  Object.defineProperty(ta, "length", { value: 2 });  // shadow length
+  var res = ta.with(0, 0);               // ← NOT IMPLEMENTED for TypedArrays
+  assert.compareArray(res, [0, 1, 2]);   // should use internal [[ArrayLength]], not .length
+});
+```
+
+**Root cause:** The `with`, `toReversed`, `toSorted` implementations in `js_array_method` only handle `LMD_TYPE_ARRAY`:
+```cpp
+if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
+    if (arr_type != LMD_TYPE_ARRAY) return arr;  // ← TypedArrays early-return unchanged
+    ...
+}
+```
+
+TypedArrays (`LMD_TYPE_MAP` with `MAP_KIND_TYPED_ARRAY`) fall through to property lookup on the prototype chain. Since `.with()` is not registered as a prototype method, the lookup traverses the full prototype chain and eventually returns undefined. When `js_call_function(undefined, ...)` is called, it loops or errors — causing the timeout.
+
+The `js_map_method` dispatcher for typed arrays handles 19 methods but **not** `with`, `toReversed`, or `toSorted` (ES2023 additions).
+
+**Fix:** Add TypedArray-specific implementations:
+```cpp
+// In js_map_method's TypedArray section:
+if (method_len == 4 && strncmp(method_str, "with", 4) == 0) {
+    int len = js_typed_array_length(obj);   // internal [[ArrayLength]]
+    int idx = (int)js_get_number(args[0]);
+    // ... create new TypedArray copy with one element replaced
+}
+```
+
+Each method needs to:
+1. Read `js_typed_array_length(obj)` (internal length, ignoring shadowed `.length`)
+2. Create a new TypedArray of the same constructor type
+3. Copy data and apply the operation
+
+**Effort:** Medium — straightforward implementation of 3 methods, each ~20 lines.
+
+**Expected impact:** All 3 tests should PASS almost instantly (only 11 × tiny 3-element operations).
+
+### 10.4 Group C: `for-of arguments` — Fixable (Parser Bug)
+
+**Test pattern:**
+```javascript
+(function() {
+  for (var value of arguments) { ... }
+}(1, 2, 3));
+```
+
+**Root cause:** The JS parser (`tree-sitter-javascript` via the Lambda wrapper) fails to parse the IIFE (Immediately Invoked Function Expression) syntax `(function() { ... }(args))`. This is standard ES6 syntax.
+
+**Investigation:** Running the test directly with `./lambda.exe` produces:
+```
+error[E100]: Unexpected syntax near '(function() { for (var value' [(, ERROR, (...]
+```
+
+In the `js-test-batch` mode, the parser also fails, but the batch timeout mechanism catches the hang (the parser may enter a slow recovery loop rather than producing a clean error).
+
+**Fix options:**
+- **Option A (parser):** Fix the tree-sitter JS grammar to handle IIFE patterns. The grammar likely needs `parenthesized_expression → ( function_expression arguments )` to be valid.
+- **Option B (transpiler):** Detect the pattern `(function_expression)(args)` or `(function_expression(args))` in the AST and transpile it as an anonymous function definition + immediate call.
+
+**Effort:** Medium-High — parser/grammar changes require careful testing.
+
+**Expected impact:** Both tests should PASS instantly (tiny 3-element iteration).
+
+### 10.5 Group D: RegExp Unicode Property Escape `\P{Ideo}` — Fixable (Parser Enhancement)
+
+**Test pattern:**
+```javascript
+/^\P{Ideographic}+$/u   // Works — full property name
+/^\P{Ideo}+$/u          // Fails — short alias
+```
+
+**Root cause:** The regex parser supports `\p{Ideographic}` (full Unicode property name) but not short aliases like `\p{Ideo}`. The parser produces:
+```
+error[E100]: Unexpected syntax near '/^\P{Ideo}' [{, identifier, }]
+```
+
+ES2018 specifies that Unicode property escapes accept both the canonical name and the short alias.
+
+**Fix:** Add a lookup table mapping short aliases to canonical names in the regex property escape parser (e.g., `Ideo` → `Ideographic`, `AHex` → `ASCII_Hex_Digit`, etc.).
+
+**Effort:** Small — add alias map in the regex pattern preprocessing (already handles `\p{...}` expansion to RE2 format, just needs the extra alias resolution).
+
+**Expected impact:** Test should PASS in ~5s (building ~100K+ codepoint string + regex matching is inherently slow).
+
+### 10.6 Group E: RegExp eval 65K — Inherently Slow
+
+**Test pattern:**
+```javascript
+for (var cu = 0; cu <= 0xffff; ++cu) {
+  var pattern = eval("/" + xx + "/");   // 65,536 eval() calls
+  assert.sameValue(pattern.source, xx, "Code unit: " + cu.toString(16));
+}
+```
+
+**Root cause:** Each `eval()` invokes a full parse + JIT compile cycle. 65,536 compilations at ~0.15ms each = ~10s. This is an inherent cost of the eval-per-iteration design.
+
+**Possible optimizations:**
+- **eval() caching:** If the same source string is eval'd twice, reuse the compiled result. But these are all unique regex patterns, so no cache hits.
+- **Regex literal fast-path:** Replace `eval("/" + xx + "/")` interpretation with a direct `new RegExp(xx)` path — detect the pattern `eval("/" + expr + "/")` in the transpiler and emit `new RegExp(expr)` instead. This avoids the full parse+compile cycle.
+- **Faster MIR context:** The eval MIR context accumulation fix from Js27 already helped (CRASH → SLOW). Further reducing per-eval overhead requires MIR module caching which is a significant effort.
+
+**Effort:** High for any meaningful speedup. The eval-to-RegExp pattern transform is clever but fragile.
+
+**Expected impact:** Even with optimization, ~65K regex creations will take 2-3s minimum.
+
+### 10.7 Group F: `non_whitespace` — Already Fixed ✅
+
+**Status:** Now PASS in 2.3s. Should be removed from quarantine.
+
+Note: 2.3s exceeds the 3s baseline threshold check, but is fast enough that it won't timeout. The test iterates 0x0000..0xFFFF (65,536 code units) calling `str.replace(/\S+/g, "test262")` on each — this is simply 65K regex replacements and there's nothing to optimize beyond RE2 engine work.
+
+### 10.8 Group G: `dynamic_import_FIXTURE` — Not a Real Test
+
+**Test source:**
+```javascript
+var startTime = Date.now();
+var endTime;
+export { endTime as time }
+while (true) { endTime = Date.now() - startTime; if (endTime > 100) break; }
+```
+
+This is a `_FIXTURE.js` helper module imported by other dynamic-import tests. It uses `export` (ES module syntax) and contains a deliberate `Date.now()` busy-wait loop. It should **never** be run as a standalone test.
+
+**Fix:** Skip `_FIXTURE` files in the test262 runner's test discovery phase.
+
+**Effort:** Trivial — add `_FIXTURE` to the skip pattern.
+
+**Expected impact:** Removes 1 test from quarantine.
+
+### 10.9 Summary: Actionable Improvements
+
+| Group | Tests | Fix Type | Effort | Expected Result |
+|-------|-------|----------|--------|-----------------|
+| **A: decodeURI surrogate pairs** | 2 | Correctness fix: `String.fromCharCode` multi-arg surrogate combining | Medium | FAIL → PASS (~2s) |
+| **B: TypedArray ES2023 methods** | 3 | New implementation: `with`/`toReversed`/`toSorted` for typed arrays | Medium | TIMEOUT → PASS (<1s) |
+| **C: IIFE parser** | 2 | Parser fix: handle `(function() {}(args))` pattern | Medium-High | TIMEOUT → PASS (<1s) |
+| **D: RegExp short aliases** | 1 | Parser enhancement: property escape alias lookup table | Small | FAIL → PASS (~5s) |
+| **E: eval 65K** | 2 | Possible: eval-to-RegExp pattern transform; or accept as slow | High | TIMEOUT → SLOW (~5-10s) |
+| **F: non_whitespace** | 1 | Already fixed — remove from quarantine | None | ✅ Already PASS |
+| **G: FIXTURE skip** | 1 | Skip `_FIXTURE` in test discovery | Trivial | Remove from quarantine |
+
+**Priority order:**
+1. **G (FIXTURE skip)** — Trivial, removes 1 quarantine entry
+2. **F (non_whitespace)** — Already fixed, remove from quarantine
+3. **B (TypedArray methods)** — 3 tests, medium effort, clear implementation needed anyway for ES2023 compliance
+4. **A (decodeURI surrogates)** — 2 tests, medium effort, correctness bug
+5. **D (RegExp aliases)** — 1 test, small effort, spec compliance
+6. **C (IIFE parser)** — 2 tests, medium-high effort, impacts many other potential tests
+7. **E (eval 65K)** — 2 tests, high effort, marginal return
