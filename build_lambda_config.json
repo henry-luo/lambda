@@ -286,6 +286,7 @@
                 "lib/pdf_writer.c",
                 "lib/strbuf.c",
                 "lib/str.c",
+                "lib/utf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
                 "lib/string.c",
@@ -394,6 +395,7 @@
                 "lib/log.c",
                 "lib/memtrack.c",
                 "lib/str.c",
+                "lib/utf.c",
                 "radiant/symbol_resolver.cpp"
             ],
             "libraries": [
@@ -1454,7 +1456,8 @@
                             "lib/hashmap.c",
                             "lib/arraylist.c",
                             "lib/strbuf.c",
-                            "lib/str.c"
+                            "lib/str.c",
+                            "lib/utf.c"
                         ],
                         "binary": "test_woff2_gtest.exe",
                         "icon": "🧱"
@@ -1516,6 +1519,7 @@
                         "additional_sources": [
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_mempool_gtest.exe",
@@ -1536,6 +1540,7 @@
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_memtrack_gtest.exe",
@@ -1554,6 +1559,7 @@
                             "lib/avl_tree.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree.exe",
@@ -1587,7 +1593,8 @@
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
-                            "lib/str.c"
+                            "lib/str.c",
+                            "lib/utf.c"
                         ],
                         "binary": "test_scratch_arena_gtest.exe",
                         "icon": "📋"
@@ -1650,6 +1657,7 @@
                             "lib/avl_tree.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree_perf.exe",
@@ -2290,6 +2298,7 @@
                             "lib/memtrack.c",
                             "lib/arena.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_css_style_node.exe",
@@ -2316,6 +2325,7 @@
                             "lib/arena.c",
                             "lib/string.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/hashmap.c",
                             "lib/log.c"
                         ],

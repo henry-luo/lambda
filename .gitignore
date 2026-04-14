@@ -151,10 +151,6 @@ test/events/
 analysis-results*/
 
 # reference projects
-gumbo-parser/
-taffy/
-latex-js/
-mathlive/
 !test/latex/fixtures/math/mathlive/
 
 lambda/tree-sitter-latex/src/parser.c

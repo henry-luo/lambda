@@ -4,6 +4,7 @@
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
+#include "../lib/utf.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -315,34 +316,6 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
 // ============================================================================
 
 /**
- * Convert a Unicode codepoint to a UTF-8 encoded string.
- * buf must have at least 5 bytes of space.
- */
-static void codepoint_to_utf8(uint32_t cp, char* buf) {
-    if (cp < 0x80) {
-        buf[0] = (char)cp;
-        buf[1] = 0;
-    } else if (cp < 0x800) {
-        buf[0] = (char)(0xC0 | (cp >> 6));
-        buf[1] = (char)(0x80 | (cp & 0x3F));
-        buf[2] = 0;
-    } else if (cp < 0x10000) {
-        buf[0] = (char)(0xE0 | (cp >> 12));
-        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (cp & 0x3F));
-        buf[3] = 0;
-    } else if (cp <= 0x10FFFF) {
-        buf[0] = (char)(0xF0 | (cp >> 18));
-        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (cp & 0x3F));
-        buf[4] = 0;
-    } else {
-        buf[0] = 0; // invalid codepoint
-    }
-}
-
-/**
  * Convert a key code to a human-readable key name string.
  * Returns a static string (no allocation needed).
  */
@@ -420,7 +393,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         uint32_t cp = evcon->event.text_input.codepoint;
         if (cp > 0) {
             char utf8_buf[5];
-            codepoint_to_utf8(cp, utf8_buf);
+            utf8_encode_z(cp, utf8_buf);
             mb.put("char", utf8_buf);
         }
     }

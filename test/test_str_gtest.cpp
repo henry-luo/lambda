@@ -33,6 +33,7 @@
 
 extern "C" {
 #include "../lib/str.h"
+#include "../lib/utf.h"
 }
 
 /* ================================================================== *
@@ -1191,6 +1192,523 @@ TEST_F(StrUtf8Test, RoundTripDecodeEncode) {
         size_t written = str_utf8_encode(cp, buf, 4);
         EXPECT_EQ(written, lengths[i]);
         EXPECT_EQ(memcmp(buf, inputs[i], lengths[i]), 0);
+    }
+}
+
+/* ================================================================== *
+ * §13b  utf.h – Direct UTF Codec & Classification                    *
+ * ================================================================== */
+
+class UtfCodecTest : public ::testing::Test {};
+
+// ── utf8_encode ──────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, EncodeAscii) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0x41, buf), 1u);
+    EXPECT_EQ(buf[0], 'A');
+}
+
+TEST_F(UtfCodecTest, EncodeTwoByte) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0x00E9, buf), 2u);  // é
+    EXPECT_EQ((unsigned char)buf[0], 0xC3u);
+    EXPECT_EQ((unsigned char)buf[1], 0xA9u);
+}
+
+TEST_F(UtfCodecTest, EncodeThreeByte) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0x4E2D, buf), 3u);  // 中
+    EXPECT_EQ((unsigned char)buf[0], 0xE4u);
+    EXPECT_EQ((unsigned char)buf[1], 0xB8u);
+    EXPECT_EQ((unsigned char)buf[2], 0xADu);
+}
+
+TEST_F(UtfCodecTest, EncodeFourByte) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0x1F600, buf), 4u);  // 😀
+    EXPECT_EQ((unsigned char)buf[0], 0xF0u);
+    EXPECT_EQ((unsigned char)buf[1], 0x9Fu);
+    EXPECT_EQ((unsigned char)buf[2], 0x98u);
+    EXPECT_EQ((unsigned char)buf[3], 0x80u);
+}
+
+TEST_F(UtfCodecTest, EncodeNullCodepoint) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0, buf), 1u);
+    EXPECT_EQ(buf[0], '\0');
+}
+
+TEST_F(UtfCodecTest, EncodeBoundaries) {
+    char buf[4];
+    // max 1-byte: U+007F
+    EXPECT_EQ(utf8_encode(0x7F, buf), 1u);
+    EXPECT_EQ((unsigned char)buf[0], 0x7Fu);
+    // min 2-byte: U+0080
+    EXPECT_EQ(utf8_encode(0x80, buf), 2u);
+    EXPECT_EQ((unsigned char)buf[0], 0xC2u);
+    EXPECT_EQ((unsigned char)buf[1], 0x80u);
+    // max 2-byte: U+07FF
+    EXPECT_EQ(utf8_encode(0x7FF, buf), 2u);
+    // min 3-byte: U+0800
+    EXPECT_EQ(utf8_encode(0x800, buf), 3u);
+    // max 3-byte: U+FFFF (skip surrogates)
+    EXPECT_EQ(utf8_encode(0xFFFF, buf), 3u);
+    // min 4-byte: U+10000
+    EXPECT_EQ(utf8_encode(0x10000, buf), 4u);
+    // max valid: U+10FFFF
+    EXPECT_EQ(utf8_encode(0x10FFFF, buf), 4u);
+}
+
+TEST_F(UtfCodecTest, EncodeRejectsSurrogates) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0xD800, buf), 0u);  // high surrogate start
+    EXPECT_EQ(utf8_encode(0xDBFF, buf), 0u);  // high surrogate end
+    EXPECT_EQ(utf8_encode(0xDC00, buf), 0u);  // low surrogate start
+    EXPECT_EQ(utf8_encode(0xDFFF, buf), 0u);  // low surrogate end
+}
+
+TEST_F(UtfCodecTest, EncodeRejectsOutOfRange) {
+    char buf[4];
+    EXPECT_EQ(utf8_encode(0x110000, buf), 0u);
+    EXPECT_EQ(utf8_encode(0xFFFFFFFF, buf), 0u);
+}
+
+TEST_F(UtfCodecTest, EncodeNullBuf) {
+    EXPECT_EQ(utf8_encode(0x41, NULL), 0u);
+}
+
+// ── utf8_encode_z ────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, EncodeZNullTerminated) {
+    char buf[5];
+    memset(buf, 0xFF, sizeof(buf));
+    EXPECT_EQ(utf8_encode_z(0x41, buf), 1u);
+    EXPECT_EQ(buf[0], 'A');
+    EXPECT_EQ(buf[1], '\0');
+}
+
+TEST_F(UtfCodecTest, EncodeZFourByte) {
+    char buf[5];
+    memset(buf, 0xFF, sizeof(buf));
+    EXPECT_EQ(utf8_encode_z(0x1F600, buf), 4u);
+    EXPECT_EQ(buf[4], '\0');
+}
+
+TEST_F(UtfCodecTest, EncodeZInvalid) {
+    char buf[5];
+    EXPECT_EQ(utf8_encode_z(0xD800, buf), 0u);
+}
+
+// ── utf8_decode ──────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, DecodeAscii) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("Z", 1, &cp), 1);
+    EXPECT_EQ(cp, 0x5Au);
+}
+
+TEST_F(UtfCodecTest, DecodeTwoByte) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\xc3\xa9", 2, &cp), 2);  // é
+    EXPECT_EQ(cp, 0xE9u);
+}
+
+TEST_F(UtfCodecTest, DecodeThreeByte) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\xe4\xb8\xad", 3, &cp), 3);  // 中
+    EXPECT_EQ(cp, 0x4E2Du);
+}
+
+TEST_F(UtfCodecTest, DecodeFourByte) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\xf0\x9f\x98\x80", 4, &cp), 4);  // 😀
+    EXPECT_EQ(cp, 0x1F600u);
+}
+
+TEST_F(UtfCodecTest, DecodeRejectsOverlong) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\xc0\x80", 2, &cp), -1);      // overlong NUL
+    EXPECT_EQ(utf8_decode("\xe0\x80\x80", 3, &cp), -1);   // overlong NUL 3-byte
+    EXPECT_EQ(utf8_decode("\xf0\x80\x80\x80", 4, &cp), -1); // overlong NUL 4-byte
+    EXPECT_EQ(utf8_decode("\xc1\xbf", 2, &cp), -1);       // overlong U+007F
+}
+
+TEST_F(UtfCodecTest, DecodeRejectsSurrogate) {
+    uint32_t cp;
+    // U+D800 = ED A0 80
+    EXPECT_EQ(utf8_decode("\xed\xa0\x80", 3, &cp), -1);
+    // U+DFFF = ED BF BF
+    EXPECT_EQ(utf8_decode("\xed\xbf\xbf", 3, &cp), -1);
+}
+
+TEST_F(UtfCodecTest, DecodeTruncated) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\xc3", 1, &cp), -1);      // 2-byte missing cont
+    EXPECT_EQ(utf8_decode("\xe4\xb8", 2, &cp), -1);   // 3-byte missing cont
+    EXPECT_EQ(utf8_decode("\xf0\x9f\x98", 3, &cp), -1); // 4-byte missing cont
+}
+
+TEST_F(UtfCodecTest, DecodeNullSafe) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode(NULL, 0, &cp), -1);
+    EXPECT_EQ(utf8_decode("a", 0, &cp), -1);
+}
+
+TEST_F(UtfCodecTest, DecodeInvalidLeadBytes) {
+    uint32_t cp;
+    EXPECT_EQ(utf8_decode("\x80", 1, &cp), -1);   // bare continuation
+    EXPECT_EQ(utf8_decode("\xff", 1, &cp), -1);
+    EXPECT_EQ(utf8_decode("\xfe", 1, &cp), -1);
+}
+
+// ── utf8_char_len ────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, CharLenAll) {
+    EXPECT_EQ(utf8_char_len(0x00), 1u);  // NUL is 1-byte
+    EXPECT_EQ(utf8_char_len('A'), 1u);
+    EXPECT_EQ(utf8_char_len(0x7F), 1u);
+    EXPECT_EQ(utf8_char_len(0xC2), 2u);
+    EXPECT_EQ(utf8_char_len(0xDF), 2u);
+    EXPECT_EQ(utf8_char_len(0xE0), 3u);
+    EXPECT_EQ(utf8_char_len(0xEF), 3u);
+    EXPECT_EQ(utf8_char_len(0xF0), 4u);
+    EXPECT_EQ(utf8_char_len(0xF4), 4u);
+    EXPECT_EQ(utf8_char_len(0x80), 0u);  // continuation
+    EXPECT_EQ(utf8_char_len(0xBF), 0u);  // continuation
+    // note: 0xC0/0xC1 return 2 (lead-byte pattern); overlong rejection is in utf8_decode
+    EXPECT_EQ(utf8_char_len(0xC0), 2u);
+    EXPECT_EQ(utf8_char_len(0xC1), 2u);
+    // note: 0xF5+ return 4 (lead-byte pattern); range rejection is in utf8_decode
+    EXPECT_EQ(utf8_char_len(0xF5), 4u);
+    EXPECT_EQ(utf8_char_len(0xFF), 0u);
+}
+
+// ── utf8_count ───────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, CountEmpty) {
+    EXPECT_EQ(utf8_count("", 0), 0u);
+    EXPECT_EQ(utf8_count(NULL, 0), 0u);
+}
+
+TEST_F(UtfCodecTest, CountAscii) {
+    EXPECT_EQ(utf8_count("hello", 5), 5u);
+}
+
+TEST_F(UtfCodecTest, CountMixed) {
+    // "aé中😀" = 1 + 2 + 3 + 4 = 10 bytes, 4 chars
+    const char* s = "a\xc3\xa9\xe4\xb8\xad\xf0\x9f\x98\x80";
+    EXPECT_EQ(utf8_count(s, 10), 4u);
+}
+
+TEST_F(UtfCodecTest, CountSWARPath) {
+    // 64 ASCII bytes to exercise SWAR acceleration
+    char buf[64];
+    memset(buf, 'x', 64);
+    EXPECT_EQ(utf8_count(buf, 64), 64u);
+}
+
+TEST_F(UtfCodecTest, CountSWARMultibyte) {
+    // 16 × 3-byte chars = 48 bytes, should trigger SWAR
+    char buf[48];
+    for (int i = 0; i < 16; i++) {
+        buf[i*3]   = (char)0xE4;
+        buf[i*3+1] = (char)0xB8;
+        buf[i*3+2] = (char)0xAD;
+    }
+    EXPECT_EQ(utf8_count(buf, 48), 16u);
+}
+
+// ── utf8_valid ───────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, ValidGood) {
+    EXPECT_TRUE(utf8_valid("hello", 5));
+    EXPECT_TRUE(utf8_valid("", 0));
+    EXPECT_TRUE(utf8_valid(NULL, 0));
+    EXPECT_TRUE(utf8_valid("caf\xc3\xa9", 5));
+    EXPECT_TRUE(utf8_valid("\xe4\xb8\xad", 3));
+    EXPECT_TRUE(utf8_valid("\xf0\x9f\x98\x80", 4));
+}
+
+TEST_F(UtfCodecTest, ValidBad) {
+    EXPECT_FALSE(utf8_valid("\xc0\x80", 2));           // overlong
+    EXPECT_FALSE(utf8_valid("\xed\xa0\x80", 3));       // surrogate
+    EXPECT_FALSE(utf8_valid("\xe4\xb8", 2));           // truncated
+    EXPECT_FALSE(utf8_valid("\xff", 1));               // invalid lead
+    EXPECT_FALSE(utf8_valid("\x80", 1));               // bare continuation
+    EXPECT_FALSE(utf8_valid("abc\xfe\x80\x80\x80", 7)); // invalid embedded
+}
+
+TEST_F(UtfCodecTest, ValidLongMixed) {
+    // valid: 20 ascii + 2-byte + 3-byte + 4-byte = 29 bytes
+    char buf[29];
+    memset(buf, 'a', 20);
+    buf[20] = (char)0xC3; buf[21] = (char)0xA9;          // é
+    buf[22] = (char)0xE4; buf[23] = (char)0xB8; buf[24] = (char)0xAD;  // 中
+    buf[25] = (char)0xF0; buf[26] = (char)0x9F; buf[27] = (char)0x98; buf[28] = (char)0x80; // 😀
+    EXPECT_TRUE(utf8_valid(buf, 29));
+}
+
+// ── utf8_char_to_byte / utf8_byte_to_char ────────────────────────────
+
+TEST_F(UtfCodecTest, CharToByteMultibyte) {
+    // "aé中" = 1 + 2 + 3 = 6 bytes, 3 chars
+    const char* s = "a\xc3\xa9\xe4\xb8\xad";
+    EXPECT_EQ(utf8_char_to_byte(s, 6, 0), 0u);   // 'a' at byte 0
+    EXPECT_EQ(utf8_char_to_byte(s, 6, 1), 1u);   // 'é' at byte 1
+    EXPECT_EQ(utf8_char_to_byte(s, 6, 2), 3u);   // '中' at byte 3
+    EXPECT_EQ(utf8_char_to_byte(s, 6, 3), 6u);   // one past end
+    EXPECT_EQ(utf8_char_to_byte(s, 6, 4), (size_t)-1);  // out of range
+}
+
+TEST_F(UtfCodecTest, ByteToCharMultibyte) {
+    const char* s = "a\xc3\xa9\xe4\xb8\xad";
+    EXPECT_EQ(utf8_byte_to_char(s, 6, 0), 0u);
+    EXPECT_EQ(utf8_byte_to_char(s, 6, 1), 1u);
+    EXPECT_EQ(utf8_byte_to_char(s, 6, 3), 2u);
+    EXPECT_EQ(utf8_byte_to_char(s, 6, 6), 3u);
+}
+
+// ── utf16_decode_pair ────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, Utf16DecodePairValid) {
+    // U+1F600 = D83D DE00
+    EXPECT_EQ(utf16_decode_pair(0xD83D, 0xDE00), 0x1F600u);
+    // U+10000 = D800 DC00
+    EXPECT_EQ(utf16_decode_pair(0xD800, 0xDC00), 0x10000u);
+    // U+10FFFF = DBFF DFFF
+    EXPECT_EQ(utf16_decode_pair(0xDBFF, 0xDFFF), 0x10FFFFu);
+}
+
+TEST_F(UtfCodecTest, Utf16DecodePairInvalid) {
+    // reversed surrogates
+    EXPECT_EQ(utf16_decode_pair(0xDE00, 0xD83D), 0u);
+    // non-surrogates
+    EXPECT_EQ(utf16_decode_pair(0x0041, 0xDC00), 0u);
+    EXPECT_EQ(utf16_decode_pair(0xD800, 0x0041), 0u);
+}
+
+// ── utf16_encode ─────────────────────────────────────────────────────
+
+TEST_F(UtfCodecTest, Utf16EncodeBMP) {
+    uint16_t buf[2] = {0, 0};
+    EXPECT_EQ(utf16_encode(0x41, buf), 1);      // 'A'
+    EXPECT_EQ(buf[0], 0x0041u);
+    EXPECT_EQ(utf16_encode(0xFFFF, buf), 1);    // max BMP
+    EXPECT_EQ(buf[0], 0xFFFFu);
+}
+
+TEST_F(UtfCodecTest, Utf16EncodeSupplementary) {
+    uint16_t buf[2] = {0, 0};
+    EXPECT_EQ(utf16_encode(0x1F600, buf), 2);   // 😀
+    EXPECT_EQ(buf[0], 0xD83Du);
+    EXPECT_EQ(buf[1], 0xDE00u);
+}
+
+TEST_F(UtfCodecTest, Utf16EncodeBoundary) {
+    uint16_t buf[2] = {0, 0};
+    EXPECT_EQ(utf16_encode(0x10000, buf), 2);   // min supplementary
+    EXPECT_EQ(buf[0], 0xD800u);
+    EXPECT_EQ(buf[1], 0xDC00u);
+    EXPECT_EQ(utf16_encode(0x10FFFF, buf), 2);  // max valid
+    EXPECT_EQ(buf[0], 0xDBFFu);
+    EXPECT_EQ(buf[1], 0xDFFFu);
+}
+
+TEST_F(UtfCodecTest, Utf16EncodeInvalid) {
+    uint16_t buf[2];
+    EXPECT_EQ(utf16_encode(0xD800, buf), 0);    // surrogate
+    EXPECT_EQ(utf16_encode(0xDFFF, buf), 0);    // surrogate
+    EXPECT_EQ(utf16_encode(0x110000, buf), 0);  // out of range
+}
+
+TEST_F(UtfCodecTest, Utf16RoundTrip) {
+    // encode then decode should round-trip for supplementary codepoints
+    uint32_t cps[] = {0x10000, 0x1F600, 0x10FFFF, 0x20000};
+    for (int i = 0; i < 4; i++) {
+        uint16_t buf[2];
+        int n = utf16_encode(cps[i], buf);
+        EXPECT_EQ(n, 2);
+        uint32_t decoded = utf16_decode_pair(buf[0], buf[1]);
+        EXPECT_EQ(decoded, cps[i]);
+    }
+}
+
+// ── utf_is_surrogate / utf_is_valid_codepoint ────────────────────────
+
+TEST_F(UtfCodecTest, IsSurrogate) {
+    EXPECT_TRUE(utf_is_surrogate(0xD800));
+    EXPECT_TRUE(utf_is_surrogate(0xDBFF));
+    EXPECT_TRUE(utf_is_surrogate(0xDC00));
+    EXPECT_TRUE(utf_is_surrogate(0xDFFF));
+    EXPECT_FALSE(utf_is_surrogate(0xD7FF));
+    EXPECT_FALSE(utf_is_surrogate(0xE000));
+    EXPECT_FALSE(utf_is_surrogate(0x0041));
+}
+
+TEST_F(UtfCodecTest, IsValidCodepoint) {
+    EXPECT_TRUE(utf_is_valid_codepoint(0));
+    EXPECT_TRUE(utf_is_valid_codepoint(0x41));
+    EXPECT_TRUE(utf_is_valid_codepoint(0xFFFF));
+    EXPECT_TRUE(utf_is_valid_codepoint(0x10FFFF));
+    EXPECT_FALSE(utf_is_valid_codepoint(0xD800));
+    EXPECT_FALSE(utf_is_valid_codepoint(0xDFFF));
+    EXPECT_FALSE(utf_is_valid_codepoint(0x110000));
+}
+
+// ── utf_is_cjk ──────────────────────────────────────────────────────
+
+class UtfClassifyTest : public ::testing::Test {};
+
+TEST_F(UtfClassifyTest, CjkUnifiedIdeographs) {
+    EXPECT_TRUE(utf_is_cjk(0x4E00));   // first
+    EXPECT_TRUE(utf_is_cjk(0x9FFF));   // last
+    EXPECT_TRUE(utf_is_cjk(0x6C49));   // 汉
+}
+
+TEST_F(UtfClassifyTest, CjkExtensionA) {
+    EXPECT_TRUE(utf_is_cjk(0x3400));
+    EXPECT_TRUE(utf_is_cjk(0x4DBF));
+}
+
+TEST_F(UtfClassifyTest, CjkExtensionB) {
+    EXPECT_TRUE(utf_is_cjk(0x20000));
+    EXPECT_TRUE(utf_is_cjk(0x2A6DF));
+}
+
+TEST_F(UtfClassifyTest, Hiragana) {
+    EXPECT_TRUE(utf_is_cjk(0x3040));   // first
+    EXPECT_TRUE(utf_is_cjk(0x309F));   // last
+    EXPECT_TRUE(utf_is_cjk(0x3042));   // あ
+}
+
+TEST_F(UtfClassifyTest, Katakana) {
+    EXPECT_TRUE(utf_is_cjk(0x30A0));
+    EXPECT_TRUE(utf_is_cjk(0x30FF));
+    EXPECT_TRUE(utf_is_cjk(0x30A2));   // ア
+}
+
+TEST_F(UtfClassifyTest, HangulSyllables) {
+    EXPECT_TRUE(utf_is_cjk(0xAC00));   // 가
+    EXPECT_TRUE(utf_is_cjk(0xD7AF));
+}
+
+TEST_F(UtfClassifyTest, HalfwidthKatakana) {
+    EXPECT_TRUE(utf_is_cjk(0xFF65));
+    EXPECT_TRUE(utf_is_cjk(0xFF9F));
+}
+
+TEST_F(UtfClassifyTest, CjkNonMatches) {
+    EXPECT_FALSE(utf_is_cjk(0x41));     // 'A'
+    EXPECT_FALSE(utf_is_cjk(0x0410));   // Cyrillic А
+    EXPECT_FALSE(utf_is_cjk(0x1100));   // Hangul Jamo (not in CJK range)
+}
+
+// ── utf_is_hangul ────────────────────────────────────────────────────
+
+TEST_F(UtfClassifyTest, HangulJamo) {
+    EXPECT_TRUE(utf_is_hangul(0x1100));   // first
+    EXPECT_TRUE(utf_is_hangul(0x11FF));   // last
+}
+
+TEST_F(UtfClassifyTest, HangulCompatibilityJamo) {
+    EXPECT_TRUE(utf_is_hangul(0x3130));
+    EXPECT_TRUE(utf_is_hangul(0x318F));
+}
+
+TEST_F(UtfClassifyTest, HangulJamoExtendedA) {
+    EXPECT_TRUE(utf_is_hangul(0xA960));
+    EXPECT_TRUE(utf_is_hangul(0xA97F));
+}
+
+TEST_F(UtfClassifyTest, HangulSyllablesClassify) {
+    EXPECT_TRUE(utf_is_hangul(0xAC00));   // 가
+    EXPECT_TRUE(utf_is_hangul(0xD7AF));
+}
+
+TEST_F(UtfClassifyTest, HangulJamoExtendedB) {
+    EXPECT_TRUE(utf_is_hangul(0xD7B0));
+    EXPECT_TRUE(utf_is_hangul(0xD7FF));
+}
+
+TEST_F(UtfClassifyTest, HangulNonMatches) {
+    EXPECT_FALSE(utf_is_hangul(0x41));
+    EXPECT_FALSE(utf_is_hangul(0x4E00));   // CJK ideograph
+    EXPECT_FALSE(utf_is_hangul(0x10FF));   // just before Jamo
+    EXPECT_FALSE(utf_is_hangul(0xD800));   // surrogate, not Hangul
+}
+
+// ── utf_is_emoji_for_zwj ─────────────────────────────────────────────
+
+TEST_F(UtfClassifyTest, EmojiForZwjSMP) {
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x1F600));  // 😀
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x1F000));  // first SMP emoji block
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x1FFFF));  // last SMP emoji block
+}
+
+TEST_F(UtfClassifyTest, EmojiForZwjMiscSymbols) {
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x2600));   // ☀
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x27BF));   // end Dingbats
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x2300));   // Misc Technical start
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x2B50));   // ⭐ in Misc Symbols&Arrows
+}
+
+TEST_F(UtfClassifyTest, EmojiForZwjSpecials) {
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x200D));   // ZWJ itself
+    EXPECT_TRUE(utf_is_emoji_for_zwj(0x2764));   // ❤ Heavy heart
+}
+
+TEST_F(UtfClassifyTest, EmojiForZwjNonMatches) {
+    EXPECT_FALSE(utf_is_emoji_for_zwj(0x41));     // 'A'
+    EXPECT_FALSE(utf_is_emoji_for_zwj(0x4E00));   // CJK
+    EXPECT_FALSE(utf_is_emoji_for_zwj(0x0041));   // Latin
+}
+
+// ── utf_is_zwj_composition_base ──────────────────────────────────────
+
+TEST_F(UtfClassifyTest, ZwjCompBasePersonEmoji) {
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F466));  // Boy
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F469));  // Woman
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F9D1));  // Person
+}
+
+TEST_F(UtfClassifyTest, ZwjCompBaseObjects) {
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F441));  // Eye
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F3F3));  // Flag white
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F3F4));  // Flag black
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F408));  // Cat
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F415));  // Dog
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F43B));  // Bear
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F426));  // Bird
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F48B));  // Kiss Mark
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x2764));   // Heart
+}
+
+TEST_F(UtfClassifyTest, ZwjCompBaseNonMatches) {
+    EXPECT_FALSE(utf_is_zwj_composition_base(0x41));
+    EXPECT_FALSE(utf_is_zwj_composition_base(0x1F600));  // 😀 not a ZWJ base
+    EXPECT_FALSE(utf_is_zwj_composition_base(0x1F465));  // just before Boy
+    EXPECT_FALSE(utf_is_zwj_composition_base(0x1F46A));  // just after Woman
+}
+
+// ── Round-trip: utf8_encode → utf8_decode ────────────────────────────
+
+TEST_F(UtfCodecTest, RoundTripEncDec) {
+    uint32_t test_cps[] = {
+        0, 0x41, 0x7F,           // 1-byte
+        0x80, 0xE9, 0x7FF,      // 2-byte
+        0x800, 0x4E2D, 0xFFFD, 0xFFFF,  // 3-byte
+        0x10000, 0x1F600, 0x10FFFF      // 4-byte
+    };
+    for (size_t i = 0; i < sizeof(test_cps)/sizeof(test_cps[0]); i++) {
+        char buf[4];
+        size_t n = utf8_encode(test_cps[i], buf);
+        ASSERT_GT(n, 0u) << "encode failed for U+" << std::hex << test_cps[i];
+
+        uint32_t decoded;
+        int consumed = utf8_decode(buf, n, &decoded);
+        EXPECT_EQ((size_t)consumed, n) << "decode length mismatch for U+" << std::hex << test_cps[i];
+        EXPECT_EQ(decoded, test_cps[i]) << "round-trip failed for U+" << std::hex << test_cps[i];
     }
 }
 

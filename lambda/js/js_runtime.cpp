@@ -15,6 +15,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
@@ -13779,29 +13780,11 @@ extern "C" Item js_text_decoder_new(Item encoding_item) {
 
 // Helper: encode a single Unicode codepoint to UTF-8, return bytes written
 static int js_cp_to_utf8(char* buf, uint32_t cp) {
-    if (cp < 0x80) {
-        buf[0] = (char)cp;
-        return 1;
-    } else if (cp < 0x800) {
-        buf[0] = (char)(0xC0 | (cp >> 6));
-        buf[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    } else if (cp < 0x10000) {
-        buf[0] = (char)(0xE0 | (cp >> 12));
-        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    } else if (cp <= 0x10FFFF) {
-        buf[0] = (char)(0xF0 | (cp >> 18));
-        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (cp & 0x3F));
-        return 4;
-    } else {
-        // replacement character
-        buf[0] = (char)0xEF; buf[1] = (char)0xBF; buf[2] = (char)0xBD;
-        return 3;
-    }
+    size_t n = utf8_encode(cp, buf);
+    if (n > 0) return (int)n;
+    // replacement character for invalid codepoints
+    buf[0] = (char)0xEF; buf[1] = (char)0xBF; buf[2] = (char)0xBD;
+    return 3;
 }
 
 extern "C" Item js_text_decoder_decode(Item decoder, Item input) {

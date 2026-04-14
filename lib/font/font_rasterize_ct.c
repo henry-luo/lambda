@@ -16,6 +16,7 @@
 #ifdef __APPLE__
 
 #include "font_internal.h"
+#include "../utf.h"
 #include <CoreText/CoreText.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <math.h>
@@ -83,18 +84,8 @@ bool font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
 
     // encode codepoint as UTF-16
     UniChar utf16[2];
-    CFIndex char_count;
-    if (codepoint <= 0xFFFF) {
-        utf16[0] = (UniChar)codepoint;
-        char_count = 1;
-    } else if (codepoint <= 0x10FFFF) {
-        uint32_t cp = codepoint - 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
-        char_count = 2;
-    } else {
-        return false;
-    }
+    CFIndex char_count = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (char_count == 0) return false;
 
     CGGlyph glyphs[2] = {0, 0};
     bool found = CTFontGetGlyphsForCharacters(font, utf16, glyphs, char_count);
@@ -136,18 +127,8 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
 
     // encode codepoint
     UniChar utf16[2];
-    CFIndex char_count;
-    if (codepoint <= 0xFFFF) {
-        utf16[0] = (UniChar)codepoint;
-        char_count = 1;
-    } else if (codepoint <= 0x10FFFF) {
-        uint32_t cp = codepoint - 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
-        char_count = 2;
-    } else {
-        return NULL;
-    }
+    CFIndex char_count = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (char_count == 0) return NULL;
 
     CGGlyph glyphs[2] = {0, 0};
     if (!CTFontGetGlyphsForCharacters(font, utf16, glyphs, char_count) || glyphs[0] == 0) {
