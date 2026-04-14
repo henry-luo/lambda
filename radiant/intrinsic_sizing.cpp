@@ -3245,6 +3245,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_for_minmax = (ViewBlock*)element;
     bool view_is_border_box = view_for_minmax->blk &&
                               view_for_minmax->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    // Fallback: check CSS if blk hasn't been set up yet
+    if (!view_is_border_box && element->specified_style) {
+        CssDeclaration* bs_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_BOX_SIZING);
+        if (bs_decl && bs_decl->value &&
+            bs_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            bs_decl->value->data.keyword == CSS_VALUE_BORDER_BOX) {
+            view_is_border_box = true;
+        }
+    }
 
     // Apply min-width: floor the intrinsic sizes to ensure they're at least min-width
     float given_min_width = -1;
