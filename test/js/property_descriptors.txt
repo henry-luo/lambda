@@ -1,0 +1,14 @@
+t1:42
+t2:fixed
+t3:10,true,true,true
+t4:visible
+t4b:secret
+t5:10
+t6:1,true
+t7k:x,y,z
+t7v:1,2,3
+t7e:x=1,y=2,z=3
+t8:99,2,3
+t9:hello world
+t9b:true,false
+t10:true,false,a,c

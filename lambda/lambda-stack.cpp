@@ -140,8 +140,12 @@ static bool is_stack_overflow_fault(uintptr_t fault_addr) {
         return true;
     }
 
-    // Also check if fault_addr is below our safety limit (deep in guard territory)
-    if (fault_addr < _lambda_stack_limit) {
+    // Also check if fault_addr is just below our safety limit (deep in guard territory)
+    // but still in the stack region. Don't catch addresses far from the stack.
+    uintptr_t stack_size = _lambda_stack_base - _lambda_stack_limit + LAMBDA_STACK_SAFETY_MARGIN;
+    uintptr_t stack_region_start = _lambda_stack_base > stack_size + guard_window
+        ? _lambda_stack_base - stack_size - guard_window : 0;
+    if (fault_addr < _lambda_stack_limit && fault_addr >= stack_region_start) {
         return true;
     }
 

@@ -1,0 +1,16 @@
+t1_finally
+t1:try
+t2_finally
+t2:caught:oops
+t3:wrapped:inner
+t4:TypeError:bad type
+t5a:TypeError
+t5b:RangeError
+t5c:SyntaxError
+t5d:ReferenceError
+t5e:URIError
+t6:string:string error
+t7:number:42
+t8:test message,Error
+t9:fail,404
+t10:err0,ok1,err2,ok3,err4

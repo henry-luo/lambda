@@ -506,3 +506,391 @@ Remaining 12 SLOW entries are inherently slow (§5) — not fixable without algo
 - 2× RegExp Unicode (`\S` non-whitespace, Ideographic) — RE2 code point matching
 - 2× regexp eval 65K (S7.8.5_A1.1_T2, S7.8.5_A2.1_T2) — 65K JIT compilations
 - 1× dynamic-import FIXTURE — deliberate Date.now() busy-wait
+
+---
+
+## 10. Deep Analysis of Remaining 12 SLOW Tests (Post-Js28)
+
+### 10.1 Classification by Actual Behavior
+
+Running all 12 tests with the batch runner reveals their **actual** status is different from the SLOW tag — several are FAIL (correctness bugs) or TIMEOUT (infinite loop / hangs), not merely slow:
+
+| # | Test | Time | Actual Status | Root Cause Category |
+|---|------|------|---------------|---------------------|
+| 1 | `decodeURI_S15.1.3.1_A2.5_T1` | 1.9s | **FAIL** (exit 1) | Correctness: `String.fromCharCode` surrogate pair bug |
+| 2 | `decodeURIComponent_S15.1.3.2_A2.5_T1` | 2.5s | **FAIL** (exit 1) | Same as #1 |
+| 3 | `RegExp_property_escapes_Ideographic` | 5.0s | **FAIL** (exit 1) | Parser: `\P{Ideo}` short-form property escape unsupported |
+| 4 | `RegExp_character_class_escape_non_whitespace` | 2.3s | **PASS** ✅ | Already fixed — remove from quarantine |
+| 5 | `TypedArray_with_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.with()` not implemented |
+| 6 | `TypedArray_toReversed_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.toReversed()` not implemented |
+| 7 | `TypedArray_toSorted_length_property_ignored` | >10s | **TIMEOUT** | Missing: TypedArray `.toSorted()` not implemented |
+| 8 | `for_of_arguments_mapped_mutation` | >10s | **TIMEOUT** | Parser: IIFE `(function() { ... }(args))` not parsed |
+| 9 | `for_of_arguments_unmapped_mutation` | >10s | **TIMEOUT** | Same as #8 |
+| 10 | `regexp_S7.8.5_A1.1_T2` | >10s | **TIMEOUT** | 65K × `eval("/" + ch + "/")` — JIT recompilation per eval |
+| 11 | `regexp_S7.8.5_A2.1_T2` | >10s | **TIMEOUT** | Same as #10 |
+| 12 | `dynamic_import_FIXTURE` | >10s | **TIMEOUT** | Helper module (uses `export`) run as standalone test |
+
+### 10.2 Group A: `decodeURI` / `decodeURIComponent` — Fixable (Correctness Bug)
+
+**Test logic:**
+```javascript
+// 4-nested loop: B1=0xF0..0xF4, B2=0x80..0xBF, B3=0x80..0xBF, B4=0x80..0xBF
+// ~983,040 total iterations
+var hexB1_B2_B3_B4 = "%F0%90%80%80";  // 4 percent-encoded bytes
+var index = (codepoint from B1..B4);
+var H = high surrogate, L = low surrogate;
+if (decodeURI(hexB1_B2_B3_B4) === String.fromCharCode(H, L)) continue;  // MISMATCH
+```
+
+**Root cause:** `String.fromCharCode(H, L)` with two arguments (surrogate pair) likely produces incorrect UTF-8 output. The current `js_string_fromCharCode` only handles a single code point argument. The `js_string_fromCharCode_array` handles arrays, but the transpiler may route 2-arg calls through the single-arg path, producing two separate 3-byte UTF-8 surrogates instead of a single 4-byte UTF-8 codepoint.
+
+Meanwhile, `decodeURI("%F0%90%80%80")` correctly decodes to U+10000 as a 4-byte UTF-8 sequence. The comparison fails because one side produces proper UTF-8 and the other produces a surrogate pair in UTF-8 (6 bytes of two 3-byte surrogates vs 4 bytes of one codepoint).
+
+**Fix:** Ensure `String.fromCharCode(H, L)` where H and L form a valid surrogate pair produces the same 4-byte UTF-8 as the direct codepoint encoding. This requires the multi-arg path to detect surrogate pairs and combine them.
+
+**Effort:** Medium — needs `js_string_fromCharCode_array` to scan for adjacent surrogates and combine them into supplementary codepoints before UTF-8 encoding.
+
+**Expected impact:** Both tests should PASS in ~2s (the ~983K iterations are inherently slow but fast enough for the 10s timeout). If 2s still exceeds the 3s baseline threshold, the tests can remain quarantined as SLOW but with correct results.
+
+### 10.3 Group B: TypedArray `.with()` / `.toReversed()` / `.toSorted()` — Fixable (Missing Implementation)
+
+**Test logic:**
+```javascript
+testWithTypedArrayConstructors(TA => {    // iterates 11 TypedArray constructors
+  var ta = new TA([3, 1, 2]);
+  Object.defineProperty(ta, "length", { value: 2 });  // shadow length
+  var res = ta.with(0, 0);               // ← NOT IMPLEMENTED for TypedArrays
+  assert.compareArray(res, [0, 1, 2]);   // should use internal [[ArrayLength]], not .length
+});
+```
+
+**Root cause:** The `with`, `toReversed`, `toSorted` implementations in `js_array_method` only handle `LMD_TYPE_ARRAY`:
+```cpp
+if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
+    if (arr_type != LMD_TYPE_ARRAY) return arr;  // ← TypedArrays early-return unchanged
+    ...
+}
+```
+
+TypedArrays (`LMD_TYPE_MAP` with `MAP_KIND_TYPED_ARRAY`) fall through to property lookup on the prototype chain. Since `.with()` is not registered as a prototype method, the lookup traverses the full prototype chain and eventually returns undefined. When `js_call_function(undefined, ...)` is called, it loops or errors — causing the timeout.
+
+The `js_map_method` dispatcher for typed arrays handles 19 methods but **not** `with`, `toReversed`, or `toSorted` (ES2023 additions).
+
+**Fix:** Add TypedArray-specific implementations:
+```cpp
+// In js_map_method's TypedArray section:
+if (method_len == 4 && strncmp(method_str, "with", 4) == 0) {
+    int len = js_typed_array_length(obj);   // internal [[ArrayLength]]
+    int idx = (int)js_get_number(args[0]);
+    // ... create new TypedArray copy with one element replaced
+}
+```
+
+Each method needs to:
+1. Read `js_typed_array_length(obj)` (internal length, ignoring shadowed `.length`)
+2. Create a new TypedArray of the same constructor type
+3. Copy data and apply the operation
+
+**Effort:** Medium — straightforward implementation of 3 methods, each ~20 lines.
+
+**Expected impact:** All 3 tests should PASS almost instantly (only 11 × tiny 3-element operations).
+
+### 10.4 Group C: `for-of arguments` — Fixable (Parser Bug)
+
+**Test pattern:**
+```javascript
+(function() {
+  for (var value of arguments) { ... }
+}(1, 2, 3));
+```
+
+**Root cause:** The JS parser (`tree-sitter-javascript` via the Lambda wrapper) fails to parse the IIFE (Immediately Invoked Function Expression) syntax `(function() { ... }(args))`. This is standard ES6 syntax.
+
+**Investigation:** Running the test directly with `./lambda.exe` produces:
+```
+error[E100]: Unexpected syntax near '(function() { for (var value' [(, ERROR, (...]
+```
+
+In the `js-test-batch` mode, the parser also fails, but the batch timeout mechanism catches the hang (the parser may enter a slow recovery loop rather than producing a clean error).
+
+**Fix options:**
+- **Option A (parser):** Fix the tree-sitter JS grammar to handle IIFE patterns. The grammar likely needs `parenthesized_expression → ( function_expression arguments )` to be valid.
+- **Option B (transpiler):** Detect the pattern `(function_expression)(args)` or `(function_expression(args))` in the AST and transpile it as an anonymous function definition + immediate call.
+
+**Effort:** Medium-High — parser/grammar changes require careful testing.
+
+**Expected impact:** Both tests should PASS instantly (tiny 3-element iteration).
+
+### 10.5 Group D: RegExp Unicode Property Escape `\P{Ideo}` — Fixable (Parser Enhancement)
+
+**Test pattern:**
+```javascript
+/^\P{Ideographic}+$/u   // Works — full property name
+/^\P{Ideo}+$/u          // Fails — short alias
+```
+
+**Root cause:** The regex parser supports `\p{Ideographic}` (full Unicode property name) but not short aliases like `\p{Ideo}`. The parser produces:
+```
+error[E100]: Unexpected syntax near '/^\P{Ideo}' [{, identifier, }]
+```
+
+ES2018 specifies that Unicode property escapes accept both the canonical name and the short alias.
+
+**Fix:** Add a lookup table mapping short aliases to canonical names in the regex property escape parser (e.g., `Ideo` → `Ideographic`, `AHex` → `ASCII_Hex_Digit`, etc.).
+
+**Effort:** Small — add alias map in the regex pattern preprocessing (already handles `\p{...}` expansion to RE2 format, just needs the extra alias resolution).
+
+**Expected impact:** Test should PASS in ~5s (building ~100K+ codepoint string + regex matching is inherently slow).
+
+### 10.6 Group E: RegExp eval 65K — Inherently Slow
+
+**Test pattern:**
+```javascript
+for (var cu = 0; cu <= 0xffff; ++cu) {
+  var pattern = eval("/" + xx + "/");   // 65,536 eval() calls
+  assert.sameValue(pattern.source, xx, "Code unit: " + cu.toString(16));
+}
+```
+
+**Root cause:** Each `eval()` invokes a full parse + JIT compile cycle. 65,536 compilations at ~0.15ms each = ~10s. This is an inherent cost of the eval-per-iteration design.
+
+**Possible optimizations:**
+- **eval() caching:** If the same source string is eval'd twice, reuse the compiled result. But these are all unique regex patterns, so no cache hits.
+- **Regex literal fast-path:** Replace `eval("/" + xx + "/")` interpretation with a direct `new RegExp(xx)` path — detect the pattern `eval("/" + expr + "/")` in the transpiler and emit `new RegExp(expr)` instead. This avoids the full parse+compile cycle.
+- **Faster MIR context:** The eval MIR context accumulation fix from Js27 already helped (CRASH → SLOW). Further reducing per-eval overhead requires MIR module caching which is a significant effort.
+
+**Effort:** High for any meaningful speedup. The eval-to-RegExp pattern transform is clever but fragile.
+
+**Expected impact:** Even with optimization, ~65K regex creations will take 2-3s minimum.
+
+### 10.7 Group F: `non_whitespace` — Already Fixed ✅
+
+**Status:** Now PASS in 2.3s. Should be removed from quarantine.
+
+Note: 2.3s exceeds the 3s baseline threshold check, but is fast enough that it won't timeout. The test iterates 0x0000..0xFFFF (65,536 code units) calling `str.replace(/\S+/g, "test262")` on each — this is simply 65K regex replacements and there's nothing to optimize beyond RE2 engine work.
+
+### 10.8 Group G: `dynamic_import_FIXTURE` — Not a Real Test
+
+**Test source:**
+```javascript
+var startTime = Date.now();
+var endTime;
+export { endTime as time }
+while (true) { endTime = Date.now() - startTime; if (endTime > 100) break; }
+```
+
+This is a `_FIXTURE.js` helper module imported by other dynamic-import tests. It uses `export` (ES module syntax) and contains a deliberate `Date.now()` busy-wait loop. It should **never** be run as a standalone test.
+
+**Fix:** Skip `_FIXTURE` files in the test262 runner's test discovery phase.
+
+**Effort:** Trivial — add `_FIXTURE` to the skip pattern.
+
+**Expected impact:** Removes 1 test from quarantine.
+
+### 10.9 Summary: Actionable Improvements
+
+| Group | Tests | Fix Type | Effort | Expected Result |
+|-------|-------|----------|--------|-----------------|
+| **A: decodeURI surrogate pairs** | 2 | Correctness fix: `String.fromCharCode` multi-arg surrogate combining | Medium | FAIL → PASS (~2s) |
+| **B: TypedArray ES2023 methods** | 3 | New implementation: `with`/`toReversed`/`toSorted` for typed arrays | Medium | TIMEOUT → PASS (<1s) |
+| **C: IIFE parser** | 2 | Parser fix: handle `(function() {}(args))` pattern | Medium-High | TIMEOUT → PASS (<1s) |
+| **D: RegExp short aliases** | 1 | Parser enhancement: property escape alias lookup table | Small | FAIL → PASS (~5s) |
+| **E: eval 65K** | 2 | Possible: eval-to-RegExp pattern transform; or accept as slow | High | TIMEOUT → SLOW (~5-10s) |
+| **F: non_whitespace** | 1 | Already fixed — remove from quarantine | None | ✅ Already PASS |
+| **G: FIXTURE skip** | 1 | Skip `_FIXTURE` in test discovery | Trivial | Remove from quarantine |
+
+**Priority order:**
+1. **G (FIXTURE skip)** — Trivial, removes 1 quarantine entry
+2. **F (non_whitespace)** — Already fixed, remove from quarantine
+3. **B (TypedArray methods)** — 3 tests, medium effort, clear implementation needed anyway for ES2023 compliance
+4. **A (decodeURI surrogates)** — 2 tests, medium effort, correctness bug
+5. **D (RegExp aliases)** — 1 test, small effort, spec compliance
+6. **C (IIFE parser)** — 2 tests, medium-high effort, impacts many other potential tests
+7. **E (eval 65K)** — 2 tests, high effort, marginal return
+
+---
+
+## 11. Proposal: Eval Performance Optimization
+
+The two `S7.8.5_A*` regexp tests each call `eval()` ~65,000 times, taking ~12 seconds before timing out. Each `eval()` call currently performs a full **create → parse → build AST → JIT init → transpile → link → execute → cleanup** cycle. This section proposes three avenues to reduce per-eval overhead.
+
+### 11.1 Current Per-Eval Cost Breakdown
+
+Each call to `js_builtin_eval()` or `js_new_function_from_string()` executes the following pipeline:
+
+| Step | Function | Allocations | Est. Cost |
+|------|----------|-------------|-----------|
+| 1. Create transpiler | `js_transpiler_create()` | `Pool`, `NamePool`, `TSParser`, 2× `StrBuf`, scope tree | ~0.1ms |
+| 2. Parse source | `ts_parser_parse_string()` | Tree-sitter `TSTree` | ~0.05ms |
+| 3. Build AST | `build_js_ast()` | `JsAstNode*` tree in `ast_pool` | ~0.05ms |
+| 4. Init MIR context | `jit_init()` → `MIR_init()` + `MIR_gen_init()` | MIR internal state, gen tables | ~0.6ms |
+| 5. Setup JsMirTranspiler | manual alloc + 4 hashmaps | `import_cache`, `local_funcs`, `var_scopes[0]`, `widen_to_float` | ~0.02ms |
+| 6. Transpile to MIR | `transpile_js_mir_ast()` | MIR instructions, modules | ~0.1ms |
+| 7. Link + codegen | `MIR_link()` | Native code (gen interface) | ~0.2ms |
+| 8. Execute | `js_main_fn()` / `js_call_function()` | varies | ~0.01ms |
+| 9. Cleanup hashmaps | 4-6× `hashmap_free()` | — | ~0.01ms |
+| 10. Finish MIR | `MIR_finish()` | — | ~0.3ms |
+| 11. Destroy transpiler | `js_transpiler_destroy()` | frees pools, parser, buffers | ~0.05ms |
+| **Total** | | | **~1.5ms** |
+
+At 65K calls, total overhead ≈ **97 seconds** — far above the 10-second timeout.
+
+### 11.2 Proposal 1: MIR Context Reuse
+
+**Problem:** `jit_init()` + `MIR_finish()` cost ~0.9ms per eval — 60% of per-call overhead. Prior research (Transpile_Js24 §1) attempted MIR context reuse across batch test262 runs and abandoned it after 4 versions: MIR's internal state (func maps, gen tables) grows without bound, and `MIR_finish()` is the only way to reclaim it.
+
+**Key difference for eval:** Unlike batch testing (thousands of independent scripts), eval within a single program runs many small code snippets that share the host's lifetime. The MIR context can be reused across eval calls within a *single program execution*, with one `MIR_finish()` at program exit.
+
+**Approach:**
+
+1. Add a **per-runtime eval MIR context** — initialize lazily on first `eval()` call, store in a global:
+   ```c
+   static MIR_context_t g_eval_mir_ctx = NULL;
+   ```
+2. On each `eval()`, reuse `g_eval_mir_ctx` instead of calling `jit_init()`. Create a **new module** per eval (modules are cheap — `MIR_new_module()` is O(1)):
+   ```c
+   char mod_name[48];
+   snprintf(mod_name, 48, "eval_%d", js_dynamic_func_counter++);
+   mt->module = MIR_new_module(g_eval_mir_ctx, mod_name);
+   ```
+3. After execution, do **NOT** call `MIR_finish()`. Instead, leave the context alive. The accumulated module metadata grows ~200 bytes per eval call — at 65K calls that's ~13MB, acceptable for a single program run.
+4. Call `MIR_finish(g_eval_mir_ctx)` once at program shutdown (in `js_runtime_cleanup()` or equivalent).
+
+**Concern — MIR gen state growth:** `MIR_gen_init()` allocates register allocator tables and optimization structures. These grow with each `MIR_link()` call. Two mitigations:
+- Use **optimize level 0** for eval contexts (`MIR_gen_set_optimize_level(g_eval_mir_ctx, 0)`), which skips most optimization passes and reduces gen state growth.
+- If memory pressure is observed after many evals, add a **periodic reset**: after every N evals (e.g., 1000), call `MIR_finish()` + `jit_init()` to reclaim state. This amortizes the 0.9ms cost to 0.9µs/call.
+
+**Savings:** ~0.9ms/call → ~0µs/call (amortized). At 65K calls: **58 seconds saved**.
+
+### 11.3 Proposal 2: Compiled Function Cache
+
+**Problem:** When the same source string is passed to `eval()` multiple times, we re-parse, re-build AST, re-transpile, and re-link identical code every time. The regexp 65K tests call `eval("/regexp/")` with unique regexps, but many real-world eval patterns (e.g., eval in a loop with template strings) produce repeated source.
+
+**Approach:**
+
+1. Add a **source → compiled function pointer cache**, keyed by a hash of the source string:
+   ```c
+   typedef struct {
+       uint64_t hash;        // FNV-1a or xxhash of source string
+       const char* source;   // for collision verification
+       size_t source_len;
+       void* fn_ptr;         // compiled js_main or wrapper function pointer
+       NamePool* name_pool;  // must stay alive while fn_ptr is valid
+   } EvalCacheEntry;
+
+   static HashMap* g_eval_cache = NULL;  // lazily created
+   ```
+
+2. **Cache lookup** at `js_builtin_eval()` entry, before any parsing:
+   ```
+   hash = hash_bytes(source, source_len)
+   entry = hashmap_get(g_eval_cache, &hash)
+   if (entry && entry->source_len == source_len && memcmp(entry->source, source, source_len) == 0)
+       → call entry->fn_ptr directly, skip steps 1-7
+   ```
+
+3. **Cache insertion** after successful compilation:
+   - Store the compiled `fn_ptr` and keep the `NamePool` alive (JIT code embeds interned `String*` pointers).
+   - **Free the tree-sitter tree and AST pool** — they are only needed during compilation. Once `MIR_link()` produces native code, the `TSTree` and `JsAstNode` tree are dead data. This recovers the memory cost of caching.
+
+4. **Cache invalidation:** For a single program execution, no invalidation is needed (eval'd code has no mutable source). Clear the cache at program shutdown alongside the eval MIR context.
+
+**Memory lifecycle with caching:**
+
+| Resource | After compile | After cache | Reason |
+|----------|--------------|-------------|--------|
+| `TSTree` | ✅ kept | ❌ **freed** | Only needed by `build_js_ast()` |
+| `ast_pool` (JsAstNode tree) | ✅ kept | ❌ **freed** | Only needed by `transpile_js_mir_ast()` |
+| `NamePool` | ✅ kept | ✅ **kept** | JIT code embeds interned `String*` pointers |
+| MIR module | ✅ kept | ✅ **kept** | Contains native code pointed to by `fn_ptr` |
+| `JsMirTranspiler` hashmaps | ❌ freed | ❌ freed | Only needed during transpilation |
+
+**Savings per cache hit:** Steps 1-7 skipped entirely → ~1.1ms saved/call. Cache miss cost: one `hashmap_get` lookup (~10ns).
+
+**Note:** The regexp 65K tests use *unique* eval strings (65K different regexp literals), so this cache won't help them directly. But it benefits real-world patterns and any test that evals the same string repeatedly.
+
+### 11.4 Proposal 3: Additional Speedups
+
+#### 11.4.1 Tree-sitter Parser Reuse
+
+**Current:** `js_transpiler_create()` calls `ts_parser_new()` + `ts_parser_set_language()` on every eval — allocating parser tables and internal structures. `js_transpiler_destroy()` calls `ts_parser_delete()`.
+
+**Proposal:** Keep a **global reusable parser** for eval:
+```c
+static TSParser* g_eval_parser = NULL;  // lazily created
+```
+On each eval, reuse it: `ts_parser_parse_string(g_eval_parser, NULL, source, len)`. Tree-sitter parsers are designed for reuse — `ts_parser_parse_string()` resets state on each call. The `TSTree*` output is independent of the parser and can be freed separately.
+
+**Savings:** ~0.05ms/call (parser alloc + language init). Small per call but meaningful at 65K calls: **~3 seconds**.
+
+#### 11.4.2 Lightweight Eval Transpiler Setup
+
+**Current:** Each eval allocates a full `JsTranspiler` (pools, scopes, buffers, counters) and full `JsMirTranspiler` (4 hashmaps).
+
+**Proposal:** Create a **slim eval transpiler** constructor that:
+- Reuses the global eval `NamePool` (or creates a per-eval lightweight one that chains to the cached pool)
+- Skips `StrBuf` allocation for `code_buf`/`func_buf` (eval doesn't generate code text)
+- Uses a single pre-allocated hashmap array instead of per-call `hashmap_new()`
+
+**Savings:** ~0.1ms/call. At 65K calls: **~6 seconds**.
+
+#### 11.4.3 Optimize Level 0 for Eval
+
+**Current:** Eval uses `g_js_mir_optimize_level` (default 2), which runs full optimization passes (dead code elimination, constant folding, register allocation).
+
+**Proposal:** Always use `MIR_gen_set_optimize_level(ctx, 0)` for eval code. Eval snippets are typically small — optimization gains are negligible, but optimization *costs* are real. Level 0 skips all gen passes, going straight to machine code emission.
+
+**Savings:** ~0.1ms/call in `MIR_link()`. At 65K calls: **~6 seconds**.
+
+#### 11.4.4 Expression Fast Path (No JIT)
+
+**Current:** Even `eval("42")` goes through full parse → AST → MIR → codegen → execute.
+
+**Proposal:** For **trivial expressions** (numeric literal, string literal, boolean, null, identifier lookup), bypass JIT entirely:
+- After `ts_parser_parse_string()`, check if the root has a single child that is a `number`, `string`, `true`, `false`, `null`, or `identifier`.
+- If so, directly construct the corresponding `Item` value without transpilation.
+- This handles patterns like `eval("42")`, `eval("'hello'")`, `eval("true")`.
+
+**Savings:** ~1.4ms/call for trivial expressions (skips steps 4-10). Won't help the regexp 65K tests (which eval regexp literals), but benefits common real-world eval patterns.
+
+#### 11.4.5 Eval-to-RegExp Fast Path
+
+**Current:** `eval("/pattern/flags")` compiles and executes a full JIT function that returns a RegExp.
+
+**Proposal:** Detect the **regexp literal** pattern at the source string level (starts with `/`, ends with `/[gimsuy]*`, no other statements) and directly call the internal regexp constructor:
+```c
+if (source[0] == '/' && is_regexp_literal(source, source_len)) {
+    return js_create_regexp_from_source(source, source_len);
+}
+```
+This bypasses the entire JIT pipeline for the exact pattern used by the `S7.8.5_A*` tests.
+
+**Savings:** ~1.5ms/call → ~0.01ms/call. At 65K calls: **~96 seconds saved** — would bring these tests from TIMEOUT to well under 10 seconds.
+
+### 11.5 Combined Impact Estimate
+
+| Optimization | Per-call savings | 65K calls savings | Impl effort |
+|-------------|-----------------|-------------------|-------------|
+| **MIR context reuse** (§11.2) | ~0.9ms | ~58s | Medium |
+| **Compiled fn cache** (§11.3) | ~1.1ms (hit) | depends on hit rate | Medium |
+| **Parser reuse** (§11.4.1) | ~0.05ms | ~3s | Small |
+| **Slim transpiler** (§11.4.2) | ~0.1ms | ~6s | Medium |
+| **Optimize level 0** (§11.4.3) | ~0.1ms | ~6s | Trivial |
+| **Expr fast path** (§11.4.4) | ~1.4ms (literals) | varies | Small |
+| **RegExp fast path** (§11.4.5) | ~1.5ms (regexp) | ~96s | Small |
+
+**For the regexp 65K tests specifically**, the best strategy is:
+1. **RegExp fast path** (§11.4.5) — single biggest win, directly targets the bottleneck
+2. **MIR context reuse** (§11.2) — large general win
+3. **Optimize level 0** (§11.4.3) — trivial to implement
+
+These three alone would reduce 65K evals from ~97s to under **2 seconds**.
+
+**Implementation order:**
+1. §11.4.3 (optimize level 0) — one line change, immediate benefit
+2. §11.4.5 (regexp fast path) — small, targeted, transforms the 65K tests from TIMEOUT to PASS
+3. §11.2 (MIR context reuse) — bigger change, general benefit for all eval-heavy code
+4. §11.4.1 (parser reuse) — small, clean win
+5. §11.4.2 (slim transpiler) — moderate effort, moderate win
+6. §11.3 (compiled fn cache) — most complex, best payoff for repeated-eval patterns
+7. §11.4.4 (expr fast path) — nice to have for trivial evals

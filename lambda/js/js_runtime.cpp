@@ -23,6 +23,7 @@
 #include <string>
 #include <map>
 #include <re2/re2.h>
+#include <execinfo.h>
 
 // v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
 #define SPARSE_GAP_MAX 1000000
@@ -69,6 +70,15 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
+// TRACE: track last called function name for debugging
+static const char* _trace_last_fn = "(none)";
+static int _trace_last_fn_len = 6;
+static const char* _trace_setter_prop = "(none)";
+static int _trace_setter_prop_len = 6;
+static int _trace_call_id = 0;
+static int _trace_total_calls = 0;
+static int _trace_last_params = 0;
+static void* _trace_last_fptr = nullptr;
 
 // new.target: set to the constructor function when called via 'new', undefined otherwise.
 // Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
@@ -627,6 +637,8 @@ extern "C" Item js_build_arguments_object() {
     for (int i = 0; i < argc; i++) {
         js_array_push(arr, args ? args[i] : ItemNull);
     }
+    // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
+    arr.array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     Item companion = js_new_object();
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
@@ -2556,6 +2568,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     {
         js_pending_new_target = ItemNull;
         js_has_pending_new_target = false;
+        TypeId ct = get_type_id(callee);
+        void* ret_addr = __builtin_return_address(0);
+        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx)", (int)ct, argc, ret_addr, (unsigned long long)callee.item);
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
         js_throw_value(js_new_error_with_name(tn, msg));
@@ -2675,6 +2690,20 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     if (!tm || !tm->shape) return ItemNull;
     // P1: O(1) array lookup when slot_entries is populated
     if (tm->slot_entries && slot < tm->slot_count) {
+        // TRACE: detect when R slot reads as non-MAP
+        {
+            static int _gs_trace = 0;
+            ShapeEntry* e = tm->slot_entries[slot];
+            if (_gs_trace < 3 && e && e->name && e->name->length == 1 && e->name->str[0] == 'R') {
+                Item val = _map_read_field(e, m->data);
+                TypeId rt = get_type_id(val);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_NULL && rt != LMD_TYPE_UNDEFINED && rt != LMD_TYPE_FUNC) {
+                    log_error("TRACE get_shaped_slot R: type=%d entry_type=%d slot=%d total=%d",
+                        (int)rt, (int)e->type->type_id, (int)slot, _trace_total_calls);
+                    _gs_trace++;
+                }
+            }
+        }
         return _map_read_field(tm->slot_entries[slot], m->data);
     }
     // Fallback: O(n) linked-list walk
@@ -2781,6 +2810,15 @@ extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
     if (tm && tm->slot_entries && slot < tm->slot_count) {
         ShapeEntry* entry = tm->slot_entries[slot];
         if (entry && entry->type->type_id != LMD_TYPE_FLOAT) {
+            // TRACE: log type change from MAP to FLOAT
+            static int _tc_trace = 0;
+            if (_tc_trace < 10 && entry->type->type_id == LMD_TYPE_MAP) {
+                log_error("TRACE set_slot_f MAP->FLOAT: slot=%d name='%.*s' total=%d byte_off=%d",
+                    slot, entry->name ? (int)entry->name->length : 0,
+                    entry->name ? entry->name->str : "?",
+                    _trace_total_calls, (int)byte_offset);
+                _tc_trace++;
+            }
             entry->type = type_info[LMD_TYPE_FLOAT].type;
         }
     }
@@ -3872,6 +3910,17 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // TRACE: detect when .R gets a float value
+        {
+            static int _r_trace = 0;
+            if (_r_trace < 3 && get_type_id(key) == LMD_TYPE_STRING) {
+                String* rk = it2s(key);
+                if (rk && rk->len == 1 && rk->chars[0] == 'R' && get_type_id(value) == LMD_TYPE_FLOAT) {
+                    log_error("TRACE .R set to FLOAT: val=%f total=%d", it2d(value), _trace_total_calls);
+                    _r_trace++;
+                }
+            }
+        }
         // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
         TypeId kt = get_type_id(key);
         if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
@@ -3974,6 +4023,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     setter = js_prototype_lookup(object, sk);
                 }
                 if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
+                    _trace_call_id++;
                     Item args[1] = { value };
                     js_call_function(setter, object, args, 1);
                     return value;
@@ -4117,13 +4168,48 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
 }
 
 extern "C" Item js_property_access(Item object, Item key) {
+    // TRACE: ring buffer of last 8 property accesses for debugging
+    static struct { const char* key; int klen; TypeId obj_type; TypeId result_type; } _ring[8] = {
+        {"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},
+        {"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0}};
+    static int _ring_idx = 0;
+
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
+
+    // TRACE: detect .col1 on non-MAP
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
+        get_type_id(key) == LMD_TYPE_STRING) {
+        String* ck = it2s(key);
+        if (ck && ck->len == 4 && strncmp(ck->chars, "col1", 4) == 0) {
+            static int _col1_trace = 0;
+            if (_col1_trace < 3) {
+                double fval = 0.0;
+                if (type == LMD_TYPE_FLOAT) fval = it2d(object);
+                log_error("TRACE .col1 on type=%d hex=0x%llx fval=%g total=%d",
+                    (int)type, (unsigned long long)object.item, fval, _trace_total_calls);
+                _col1_trace++;
+            }
+        }
+    }
+
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
         char msg[256];
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
+            // TRACE: log first accesses on undefined for Box2D debugging
+            static int y_trace = 0;
+            if (y_trace < 2 && sk) {
+                log_error("TRACE undef .%.*s — last 8 accesses (obj_type→result_type):", (int)sk->len, sk->chars);
+                for (int ri = 8; ri >= 1; ri--) {
+                    int idx = (_ring_idx - ri + 8) % 8;
+                    log_error("  [-%d] .%.*s  obj_t=%d→res_t=%d", ri,
+                        _ring[idx].klen, _ring[idx].key,
+                        (int)_ring[idx].obj_type, (int)_ring[idx].result_type);
+                }
+                y_trace++;
+            }
             snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
                      type_str, sk ? (int)sk->len : 0, sk ? sk->chars : "");
         } else {
@@ -4136,6 +4222,32 @@ extern "C" Item js_property_access(Item object, Item key) {
         return make_js_undefined();
     }
     Item result = js_property_get(object, key);
+    // TRACE: update ring buffer with result type
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk) {
+            _ring[_ring_idx].key = sk->chars;
+            _ring[_ring_idx].klen = (int)sk->len;
+            _ring[_ring_idx].obj_type = type;
+            _ring[_ring_idx].result_type = get_type_id(result);
+            _ring_idx = (_ring_idx + 1) % 8;
+        }
+    }
+    // TRACE: detect when .R on MAP returns a non-MAP type
+    {
+        static int _r_read_trace = 0;
+        if (_r_read_trace < 3 && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+            String* rk = it2s(key);
+            if (rk && rk->len == 1 && rk->chars[0] == 'R') {
+                TypeId rt = get_type_id(result);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_NULL && rt != LMD_TYPE_UNDEFINED && rt != LMD_TYPE_FUNC) {
+                    log_error("TRACE .R on MAP returns type %d val=0x%llx total=%d",
+                        (int)rt, (unsigned long long)result.item, _trace_total_calls);
+                    _r_read_trace++;
+                }
+            }
+        }
+    }
     return result;
 }
 
@@ -4230,6 +4342,12 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
+        // TRACE: log first few .y accesses on undefined for Box2D debugging
+        static int y_trace2 = 0;
+        if (y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
+            log_error("TRACE js_property_get_str: .y on %s (trace %d) last_fn='%.*s'", type_str, y_trace2, _trace_last_fn_len, _trace_last_fn);
+            y_trace2++;
+        }
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
                  type_str, key_len, key);
@@ -5315,6 +5433,10 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             return js_encodeURIComponent(a0);
         if (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0)
             return js_decodeURIComponent(a0);
+        if (nl == 5 && strncmp(n, "print", 5) == 0) {
+            js_console_log(a0);
+            return make_js_undefined();
+        }
         return ItemNull;
     }
 
@@ -5374,6 +5496,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
         effective_args = padded_args;
+    } else if (arg_count > fn->param_count && fn->param_count >= 0) {
+        // Clamp to declared param count — excess args accessible via arguments object
+        effective_count = fn->param_count;
     }
 
     if (fn->env) {
@@ -7038,8 +7163,11 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
         if (error_count < 5) {
-            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d)",
-                get_type_id(func_item), arg_count, get_type_id(this_val));
+            void* ret_addr = __builtin_return_address(0);
+            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d ret_addr=%p func_raw=0x%llx",
+                get_type_id(func_item), arg_count, get_type_id(this_val),
+                _trace_last_fn_len, _trace_last_fn ? _trace_last_fn : "(null)", _trace_total_calls,
+                ret_addr, (unsigned long long)func_item.item);
             error_count++;
         }
         // Log args for context
@@ -7054,6 +7182,9 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
+    if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
+    else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
+    _trace_total_calls++; _trace_last_params = fn->param_count; _trace_last_fptr = fn->func_ptr;
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
@@ -7528,6 +7659,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // 3. Map unsupported Unicode property names to RE2-compatible equivalents
     {
+        // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.
+        // ES2018 specifies both canonical names and short aliases for property escapes.
+        static const struct { const char* alias; int alias_len; const char* canonical; int canonical_len; } prop_aliases[] = {
+            {"\\p{Ideo}",  8, "\\p{Ideographic}", 16},
+            {"\\P{Ideo}",  8, "\\P{Ideographic}", 16},
+        };
+        for (int pa = 0; pa < (int)(sizeof(prop_aliases)/sizeof(prop_aliases[0])); pa++) {
+            size_t pos = 0;
+            while ((pos = processed_pattern.find(prop_aliases[pa].alias, pos)) != std::string::npos) {
+                processed_pattern.replace(pos, prop_aliases[pa].alias_len, prop_aliases[pa].canonical);
+                pos += prop_aliases[pa].canonical_len;
+            }
+        }
         // \p{Ideographic} → \p{Han} (covers CJK Unified Ideographs)
         size_t pos = 0;
         while ((pos = processed_pattern.find("\\p{Ideographic}", pos)) != std::string::npos) {
@@ -7613,9 +7757,9 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
     memcpy(flg_buf, flags, flags_len);
     flg_buf[flags_len] = '\0';
-    // set visible properties
+    // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
-    Item source_val = (Item){.item = s2it(heap_create_name(src_buf))};
+    Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
@@ -7648,6 +7792,29 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
     return regex_obj;
+}
+
+// Create a RegExp from a source literal string like "/pattern/flags".
+// Used by eval() fast path to bypass JIT for regexp literals.
+extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
+    if (len < 2 || src[0] != '/') return ItemNull;
+    // Find the closing '/' (skip escaped chars and character classes)
+    size_t i = 1;
+    bool in_class = false;
+    while (i < len) {
+        char c = src[i];
+        if (c == '\\' && i + 1 < len) { i += 2; continue; }
+        if (c == '[') { in_class = true; i++; continue; }
+        if (c == ']' && in_class) { in_class = false; i++; continue; }
+        if (c == '/' && !in_class) break;
+        i++;
+    }
+    if (i >= len) return ItemNull;  // no closing '/'
+    const char* pattern = src + 1;
+    int pattern_len = (int)(i - 1);
+    const char* flags = src + i + 1;
+    int flags_len = (int)(len - i - 1);
+    return js_create_regex(pattern, pattern_len, flags, flags_len);
 }
 
 // new RegExp(pattern, flags) — construct regex from string arguments at runtime
@@ -8622,6 +8789,81 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     js_typed_array_set(obj, (Item){.item = i2it(j + 1)}, key);
                 }
                 return obj;
+            }
+            // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced
+            if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int idx = argc > 0 ? (int)js_get_number(args[0]) : 0;
+                if (idx < 0) idx += len;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (idx >= 0 && idx < len && argc > 1) {
+                    js_typed_array_set(result, (Item){.item = i2it(idx)}, args[1]);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toReversed() — returns new reversed copy
+            if (method->len == 10 && strncmp(method->chars, "toReversed", 10) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                for (int i = 0; i < len; i++) {
+                    Item val = js_typed_array_get(obj, (Item){.item = i2it(len - 1 - i)});
+                    js_typed_array_set(result, (Item){.item = i2it(i)}, val);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toSorted(comparefn?) — returns new sorted copy
+            if (method->len == 8 && strncmp(method->chars, "toSorted", 8) == 0) {
+                // Step 1: If comparefn is not undefined and IsCallable(comparefn) is false, throw TypeError
+                if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("comparefn is not a function");
+                }
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (len > 1) {
+                    // insertion sort on the copy
+                    for (int i = 1; i < len; i++) {
+                        Item key = js_typed_array_get(result, (Item){.item = i2it(i)});
+                        double key_val = js_get_number(key);
+                        int j = i - 1;
+                        while (j >= 0) {
+                            Item jval = js_typed_array_get(result, (Item){.item = i2it(j)});
+                            double jdbl = js_get_number(jval);
+                            if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED) {
+                                Item cmp_args[2] = {jval, key};
+                                Item cmp = js_call_function(args[0], make_js_undefined(), cmp_args, 2);
+                                if (js_exception_pending) return make_js_undefined();
+                                if (js_get_number(cmp) <= 0) break;
+                            } else {
+                                if (jdbl <= key_val) break;
+                            }
+                            js_typed_array_set(result, (Item){.item = i2it(j + 1)}, jval);
+                            j--;
+                        }
+                        js_typed_array_set(result, (Item){.item = i2it(j + 1)}, key);
+                    }
+                }
+                return result;
             }
         }
     }
@@ -12106,6 +12348,7 @@ static char js_typed_array_iter_marker;
 struct JsIterData {
     Item source;     // the iterable being iterated
     int64_t index;   // current position
+    int64_t length;  // v28: snapshot of source length at creation (prevents infinite loops)
 };
 
 // v28: Create lightweight fixed-layout array iterator (MAP_KIND_ITERATOR)
@@ -12117,6 +12360,10 @@ static Item js_create_array_iterator(Item source) {
     JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
     data->source = source;
     data->index = 0;
+    // Snapshot length for arguments objects (prevents infinite for-of when body extends arguments)
+    // Regular arrays use live length (-1 sentinel) per ES spec (mutations visible during iteration)
+    bool is_arguments = (get_type_id(source) == LMD_TYPE_ARRAY && source.array->is_content);
+    data->length = is_arguments ? source.array->length : -1;
     m->data = data;
     m->data_cap = sizeof(JsIterData);
     return (Item){.map = m};
@@ -12252,7 +12499,9 @@ extern "C" Item js_iterator_step(Item iterator) {
 
         if (m->type == (void*)&js_array_iter_marker) {
             // Array iterator: direct index read + increment
-            int len = (get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0;
+            // Use snapshot length for arguments (-1 means use live length for regular arrays)
+            int len = (d->length >= 0) ? (int)d->length
+                     : ((get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0);
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
             Item elem = js_property_access(d->source, (Item){.item = i2it((int)idx)});
             d->index = idx + 1;

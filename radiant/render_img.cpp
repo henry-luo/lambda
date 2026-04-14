@@ -240,6 +240,13 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     // Layout is in CSS logical pixels, so apply total_scale for physical output dimensions
     int output_width = (int)(layout_width * total_scale);
     int output_height = (int)(layout_height * total_scale);
+
+    // pixel threshold above which tiled rendering is used to avoid OOM on huge pages
+    // (32 M pixels × 4 bytes = 128 MB; e.g. 1200-px wide → ~26 000 px tall)
+    static const int64_t PNG_TILE_THRESHOLD = (int64_t)32 * 1024 * 1024;
+
+    bool rendered = false;  // set to true when tiled path handles rendering
+
     if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
         extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
         int content_max_x = 0, content_max_y = 0;
@@ -253,12 +260,10 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, scale=%.2f, pixel_ratio=%.2f)",
                  output_width, output_height, scale, pixel_ratio);
 
-        // Recreate surface with correct output dimensions
-        ui_context_create_surface(&ui_context, output_width, output_height);
-
         // Extend root element's overflow clip to match the auto-sized content area.
         // Without this, the root html element's overflow-y:auto clips rendering at
         // the original viewport height, hiding everything below it in the static output.
+        // This must happen for both tiled and normal paths.
         View* root_view = doc->view_tree->root;
         if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* root_block = (ViewBlock*)root_view;
@@ -267,15 +272,29 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
                 if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
             }
         }
+
+        if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
+            // Large page: render in tiles to avoid allocating a single huge surface
+            log_info("render_html_to_png: using tiled render (%dx%d exceeds %lld-pixel threshold)",
+                output_width, output_height, PNG_TILE_THRESHOLD);
+            render_html_doc_tiled(&ui_context, doc->view_tree, png_file,
+                output_width, output_height);
+            rendered = true;
+        } else {
+            // Normal path: allocate the full surface
+            ui_context_create_surface(&ui_context, output_width, output_height);
+        }
     }
 
-    // Render the document
-    if (doc && doc->view_tree) {
-        render_html_doc(&ui_context, doc->view_tree, png_file);
-    } else {
-        log_debug("No view tree to render");
-        ui_context_cleanup(&ui_context);
-        return 1;
+    // Render the document (normal path only)
+    if (!rendered) {
+        if (doc && doc->view_tree) {
+            render_html_doc(&ui_context, doc->view_tree, png_file);
+        } else {
+            log_debug("No view tree to render");
+            ui_context_cleanup(&ui_context);
+            return 1;
+        }
     }
 
     auto t_render = high_resolution_clock::now();

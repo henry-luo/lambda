@@ -1832,8 +1832,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             }
         }
 
-        // skip comments inside expressions
+        // skip comments and empty statements inside expressions
         if (strcmp(node_type, "comment") == 0) return NULL;
+        if (strcmp(node_type, "empty_statement") == 0) return NULL;
 
         log_error("Unsupported JavaScript expression type: %s (symbol: %d, content: %.*s)",
                   node_type, symbol, (int)source.length, source.str);

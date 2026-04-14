@@ -13,6 +13,7 @@ typedef struct {
     float measured_height;
     float content_width;
     float content_height;
+    float context_width;  // container content width used during measurement (for smart invalidation)
     uint32_t generation;  // layout generation when this entry was stored
 } MeasurementCacheEntry;
 
@@ -39,7 +40,7 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
 
 // Measurement cache functions
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
-void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height);
+void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
 void invalidate_measurement_cache_for_node(DomNode* node);
