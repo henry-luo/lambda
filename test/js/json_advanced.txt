@@ -1,0 +1,15 @@
+t1a:42
+t1b:"hello"
+t1c:true
+t1d:null
+t2:{"a":1,"b":"hi","c":true,"d":null}
+t3:[1,"two",true,null]
+t4:{"a":{"b":{"c":42}}}
+t5:{"a":1,"b":2}
+t6:John,30
+t7:10,20,30
+t8a:1,2,3
+t8b:hello,true,null
+t8c:10,20
+t9:5,1,three,true,null
+t10:{"a":1,"d":"ok"}
