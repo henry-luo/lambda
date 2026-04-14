@@ -337,12 +337,9 @@ void invalidate_measurement_cache_for_node(DomNode* node) {
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (!child) return;
 
-    log_debug("Measuring flex child content for %s", child->node_name());
-
     // Check if already measured
     MeasurementCacheEntry* cached = get_from_measurement_cache(child);
     if (cached) {
-        log_debug("Using cached measurement for %s", child->node_name());
         return;
     }
 
@@ -1192,25 +1189,19 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 // Lightweight View creation for flex items with measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     if (!node) return;
-    log_debug("=== TRACE: layout_flow_node_for_flex ENTRY for %s (node=%p)", node->node_name(), node);
     // Skip text nodes - flex layout only processes element nodes
     if (!node->is_element()) {
-        log_debug("TRACE: Skipping text node in flex container: %s", node->node_name());
         return;
     }
 
-    log_debug("TRACE: About to call init_flex_item_view for %s", node->node_name());
     // Create lightweight View for flex item element only (no child processing)
     init_flex_item_view(lycon, node);
-    log_debug("TRACE: Completed init_flex_item_view for %s", node->node_name());
 
     // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
-    log_debug("DEBUG: cached = %p", cached);
 
     if (cached && node->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* view = (ViewBlock*)node;
-        log_debug("DEBUG: view = %p, node = %p", view, node);
         if (view == node) {
             log_debug("Applying cached measurements to flex item: %.1fx%.1f",
                 cached->measured_width, cached->measured_height);
@@ -1236,10 +1227,8 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
             }
             log_debug("Applied measurements: view size now %.1fx%.1f (is_grid=%d)", view->width, view->height, node_is_grid);
         } else {
-            log_debug("DEBUG: Node mismatch - cached for different node");
         }
     } else {
-        log_debug("DEBUG: Failed measurement application - cached=%p, node=%p", cached, node);
     }
 }
 
@@ -1265,7 +1254,6 @@ void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* 
 void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
-    log_debug("*** TRACE: init_flex_item_view ENTRY for %s (node=%p)", node->node_name(), node);
     // Get display properties for the element
     DisplayValue display = resolve_display_value(node);
 
@@ -1295,7 +1283,6 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     }
 
     block->display = display;
-    log_debug("*** SET DISPLAY: node=%p (%s), display={%d,%d}", node, node->node_name(), display.outer, display.inner);
 
     // Set up basic CSS properties (minimal setup for flex items)
     dom_node_resolve_style(node, lycon);

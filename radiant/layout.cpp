@@ -485,7 +485,6 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // 'normal' line height
         lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
         lycon->block.line_height_is_normal = true;
-        log_debug("%s normal lineHeight: %f", block->source_loc(), lycon->block.line_height);
     } else {
         // Resolve var() if present
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
@@ -519,7 +518,6 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         } else {
             lycon->block.line_height = resolved_height;
             lycon->block.line_height_is_normal = false;
-            log_debug("%s resolved line height: %f", block->source_loc(), lycon->block.line_height);
         }
     }
 }
@@ -541,8 +539,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // because measurement passes should not permanently mark styles as resolved
             // and percentage values may need different containing block dimensions
             if (dom_elem->styles_resolved && !layout_context_is_measuring(lycon)) {
-                log_debug("%s [CSS] Skipping style resolution for <%s> - already resolved", node->source_loc(),
-                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 // Restore lycon->block dimensions from stored CSS values.
                 // layout_block resets lycon->block.given_width/height to -1 before
                 // calling us. When we skip resolution, these must be restored from
@@ -622,11 +618,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
             if (!layout_context_is_measuring(lycon)) {
                 dom_elem->styles_resolved = true;
-                log_debug("%s [CSS] Resolved styles for <%s> - marked as resolved", node->source_loc(),
-                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
-            } else {
-                log_debug("%s [CSS] Resolved styles for <%s> in measurement mode - not marking resolved", node->source_loc(),
-                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
             }
         } else {
             // No specified_style - still apply element default styles for HTML attributes
@@ -675,8 +666,6 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 }
 
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
-    log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f, offset=%f",
-        align, item_height, line_height, baseline_pos, item_baseline, valign_offset);
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
     // font metrics, not the block container's. parent_font_* is set by span_vertical_align
     // before recursing into children; defaults to block init values for top-level content.
@@ -704,8 +693,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
         return baseline_pos - x_height_half - item_height / 2.0f;
     }
     case CSS_VALUE_BOTTOM:
-        log_debug("bottom-aligned-text: line %d", line_height);
-        return line_height - item_height;
+            return line_height - item_height;
     case CSS_VALUE_TEXT_TOP:
         // CSS 2.1 §10.8.1: "Align the top of the box with the top of the parent's content area."
         // The parent's content top is at (baseline_pos - parent_ascender).
@@ -735,7 +723,6 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     float saved_pa_desc = lycon->line.parent_font_descender;
     float saved_pa_fsize = lycon->line.parent_font_size;
     struct FontHandle* saved_pa_handle = lycon->line.parent_font_handle;
-    log_debug("span_vertical_align");
     View* child = span->first_child;
     if (child) {
         // CSS 2.1 §10.8.1: Before updating to the span's own font, capture current font
@@ -769,7 +756,6 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
-    log_debug("view_vertical_align: view=%d", view->view_type);
     float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
     // CSS 2.1 §10.8.1: The strut is an invisible zero-width inline box with the
     // block element's font and line-height. Its half-leading-adjusted ascender
@@ -786,7 +772,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         while (rect) {
             float item_height = rect->height;
             // for text, baseline is at font.ascender
-            log_debug("text view font: %p", text_view->font);
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
                 line_height, baseline_pos, item_baseline, lycon->line.vertical_align_offset);
@@ -1375,8 +1360,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
     lycon->depth++;
 
-    log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
-
     // HTML spec §4.11.1: <details> without the 'open' attribute only renders
     // its first <summary> child. All other children (including text nodes) are
     // hidden. CSS selectors cannot target text nodes, so this must be handled
@@ -1501,13 +1484,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
-        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->source_loc(), display.outer, display.inner);
-
-        // Log IMG display resolution
-        if (node_tag == HTM_TAG_IMG) {
-            log_debug("%s [FLOW_NODE IMG] Resolved display for IMG: outer=%d, inner=%d (INLINE_BLOCK=%d, INLINE=%d)", node->source_loc(),
-                     display.outer, display.inner, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_INLINE);
-        }
+    
 
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)
@@ -1705,13 +1682,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("%s layout_text: '%t'", node->source_loc(), str);
         // Skip inter-element whitespace (whitespace between/around block elements)
         // CSS 2.2: "When white space is contained at the end of a block's content,
         // or at the start, or between block-level elements, it is rendered as nothing."
         if (should_collapse_inter_element_whitespace(node)) {
             node->view_type = RDT_VIEW_NONE;
-            log_debug("%s skipping inter-element whitespace text", node->source_loc());
         }
         else {
             layout_text(lycon, node);
@@ -1721,7 +1696,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("%s layout unknown node type: %d", node->source_loc(), node->node_type);
         // skip the node
     }
-    log_debug("%s end flow node, block advance_y: %.0f", node->source_loc(), lycon->block.advance_y);
     lycon->depth--;
 }
 
@@ -1730,13 +1704,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     auto t_start = high_resolution_clock::now();
 
     log_debug("layout html root");
-    log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? (int)elmt->node_type : -1);
-    //log_debug("DEBUG: About to call apply_header_style");
-    //apply_header_style(lycon);
-    log_debug("DEBUG: apply_header_style complete");
 
     // init context
-    log_debug("DEBUG: Initializing layout context");
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     // Layout uses physical pixels (lycon->width/height) for rendering surface compatibility.
@@ -1816,7 +1785,6 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     // navigate DomNode tree to find body
     DomNode* body_node = nullptr;
-    log_debug("Searching for body element in Lambda CSS document");
 
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
     // Detect if the root <html> element has explicit CSS width/height
@@ -2141,7 +2109,6 @@ static void reset_styles_resolved_recursive(DomNode* node) {
 // Public function to reset all styles_resolved flags in the document
 void reset_styles_resolved(DomDocument* doc) {
     if (!doc || !doc->root) return;
-    log_debug("[CSS] Resetting styles_resolved flags for all elements");
     reset_styles_resolved_recursive(doc->root);
 }
 
@@ -2204,7 +2171,6 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     scratch_init(&lycon->scratch, doc->view_tree->arena);
 
     // BlockContext floats are already initialized to NULL in memset
-    log_debug("DEBUG: Layout context initialized");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
@@ -2232,19 +2198,15 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (!doc) return;
     log_debug("layout html doc - start");
     if (is_reflow) {
-        // free existing view tree
-        log_debug("free existing views");
         // if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
         // view_pool_destroy(doc->view_tree);
     } else {
         doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
-        log_debug("allocated view tree");
     }
     // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.)
     if (!doc->incremental_layout) {
         view_pool_init(doc->view_tree);
     }
-    log_debug("initialized view pool");
     log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);
     log_debug("layout_init complete");
@@ -2254,10 +2216,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     // Get root node based on document type
     DomNode* root_node = nullptr;
     root_node = doc->root;
-    log_debug("DEBUG: Using root directly: %p", root_node);
     if (root_node) {
         // Validate pointer before calling virtual methods
-        log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);
         if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
             log_debug("layout lambda css html root %s", root_node->node_name());
         } else {
@@ -2279,13 +2239,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
     fprintf(stderr, "[LAYOUT_PROF] layout_html_root: %.1fms\n", layout_ms);
 
-    log_debug("layout_html_root complete");
-
-    log_debug("end layout");
-
     log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);
-    log_debug("layout_cleanup complete");
 
     // Serialization is handled by the caller (cmd_layout.cpp layout_single_file).
     // print_view_tree is NOT called here to avoid redundant file I/O.
@@ -2294,5 +2249,4 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());
     log_layout_timing_summary();
     log_info("[TIMING] layout_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
-    log_debug("layout_html_doc complete");
 }
