@@ -356,7 +356,8 @@ is_gtest_test() {
     case "$base_name" in
         test_flex_minimal|test_flex_new_features|test_css_system|test_css_style_node|test_avl_tree|test_avl_tree_perf|\
         test_compound_descendant_selectors|test_selector_groups|test_css_tokenizer_unit|test_css_parser_unit|\
-        test_css_integration_unit|test_css_engine_unit|test_css_formatter_unit|test_css_roundtrip_unit)
+        test_css_integration_unit|test_css_engine_unit|test_css_formatter_unit|test_css_roundtrip_unit|\
+        test_css_dom_crud|test_css_dom_integration|test_css_engine_negative)
             return 0
             ;;
     esac
