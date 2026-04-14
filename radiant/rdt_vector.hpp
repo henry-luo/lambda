@@ -132,6 +132,12 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform);
 void rdt_pop_clip(RdtVector* vec);
 
+// Save and restore clip stack depth for isolated rendering contexts.
+// rdt_clip_save_depth returns the current depth and resets to 0.
+// rdt_clip_restore_depth restores a previously saved depth.
+int rdt_clip_save_depth();
+void rdt_clip_restore_depth(int saved_depth);
+
 // ---------------------------------------------------------------------------
 // Image drawing (replaces tvg_picture_load_raw + push + draw)
 // ---------------------------------------------------------------------------
