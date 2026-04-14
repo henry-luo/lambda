@@ -2297,6 +2297,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                     rdcon->clip_shapes[rdcon->clip_shape_depth++] = &overflow_cs;
                 }
                 has_overflow_clip = true;
+                // Clear the flag so child elements don't redundantly push the same clip.
+                // The clip is already active in ThorVG and clip_shapes stacks.
+                rdcon->block.has_clip_radius = false;
                 log_debug("[CLIP] pushed overflow vector clip: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
                     clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
@@ -2485,6 +2488,10 @@ void render_svg(ImageSurface* surface) {
     RdtVector tmp_vec = {};
     rdt_vector_init(&tmp_vec, (uint32_t*)surface->pixels, width, height, width);
 
+    // Save and clear the global clip stack so parent clips don't leak into this
+    // isolated off-screen SVG rasterization
+    int saved_clip_depth = rdt_clip_save_depth();
+
     // Draw SVG picture at target size (takes ownership from surface)
     RdtPicture* pic = surface->pic;
     surface->pic = NULL;  // ownership transferred
@@ -2494,6 +2501,7 @@ void render_svg(ImageSurface* surface) {
         rdt_picture_free(pic);
     }
 
+    rdt_clip_restore_depth(saved_clip_depth);
     rdt_vector_destroy(&tmp_vec);
     surface->width = width;  surface->height = height;  surface->pitch = width * sizeof(uint32_t);
 }
