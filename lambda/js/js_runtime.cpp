@@ -11667,7 +11667,10 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     if (method->len == 4 && strncmp(method->chars, "cbrt", 4) == 0) {
         if (argc < 1) return ItemNull;
         double d = js_get_number(js_to_number(args[0]));
-        return js_make_number(cbrt(d));
+        double r = cbrt(d);
+        double ri = round(r);
+        if (ri != 0.0 && fabs(r - ri) < 1e-14 && ri * ri * ri == d) r = ri;
+        return js_make_number(r);
     }
     // Math.hypot
     if (method->len == 5 && strncmp(method->chars, "hypot", 5) == 0) {
