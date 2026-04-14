@@ -6839,8 +6839,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (lycon->block.given_width < 0
                     && (!block->blk || (block->blk->given_width < 0 && isnan(block->blk->given_width_percent)))) {
                     child_w = block->content_width;
+                    // content_width already includes border.left (via max_width which
+                    // includes padding.left and border.left). Only add border.right
+                    // to reconstruct the border-box width.
                     if (block->bound->border) {
-                        child_w += block->bound->border->width.left + block->bound->border->width.right;
+                        child_w += block->bound->border->width.right;
                     }
                 }
                 lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + child_w
