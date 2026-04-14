@@ -7756,9 +7756,9 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
     memcpy(flg_buf, flags, flags_len);
     flg_buf[flags_len] = '\0';
-    // set visible properties
+    // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
-    Item source_val = (Item){.item = s2it(heap_create_name(src_buf))};
+    Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
     js_property_set(regex_obj, source_key, source_val);
     Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
     Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
@@ -7791,6 +7791,29 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
     return regex_obj;
+}
+
+// Create a RegExp from a source literal string like "/pattern/flags".
+// Used by eval() fast path to bypass JIT for regexp literals.
+extern "C" Item js_create_regexp_from_source(const char* src, size_t len) {
+    if (len < 2 || src[0] != '/') return ItemNull;
+    // Find the closing '/' (skip escaped chars and character classes)
+    size_t i = 1;
+    bool in_class = false;
+    while (i < len) {
+        char c = src[i];
+        if (c == '\\' && i + 1 < len) { i += 2; continue; }
+        if (c == '[') { in_class = true; i++; continue; }
+        if (c == ']' && in_class) { in_class = false; i++; continue; }
+        if (c == '/' && !in_class) break;
+        i++;
+    }
+    if (i >= len) return ItemNull;  // no closing '/'
+    const char* pattern = src + 1;
+    int pattern_len = (int)(i - 1);
+    const char* flags = src + i + 1;
+    int flags_len = (int)(len - i - 1);
+    return js_create_regex(pattern, pattern_len, flags, flags_len);
 }
 
 // new RegExp(pattern, flags) — construct regex from string arguments at runtime

@@ -707,3 +707,190 @@ This is a `_FIXTURE.js` helper module imported by other dynamic-import tests. It
 5. **D (RegExp aliases)** — 1 test, small effort, spec compliance
 6. **C (IIFE parser)** — 2 tests, medium-high effort, impacts many other potential tests
 7. **E (eval 65K)** — 2 tests, high effort, marginal return
+
+---
+
+## 11. Proposal: Eval Performance Optimization
+
+The two `S7.8.5_A*` regexp tests each call `eval()` ~65,000 times, taking ~12 seconds before timing out. Each `eval()` call currently performs a full **create → parse → build AST → JIT init → transpile → link → execute → cleanup** cycle. This section proposes three avenues to reduce per-eval overhead.
+
+### 11.1 Current Per-Eval Cost Breakdown
+
+Each call to `js_builtin_eval()` or `js_new_function_from_string()` executes the following pipeline:
+
+| Step | Function | Allocations | Est. Cost |
+|------|----------|-------------|-----------|
+| 1. Create transpiler | `js_transpiler_create()` | `Pool`, `NamePool`, `TSParser`, 2× `StrBuf`, scope tree | ~0.1ms |
+| 2. Parse source | `ts_parser_parse_string()` | Tree-sitter `TSTree` | ~0.05ms |
+| 3. Build AST | `build_js_ast()` | `JsAstNode*` tree in `ast_pool` | ~0.05ms |
+| 4. Init MIR context | `jit_init()` → `MIR_init()` + `MIR_gen_init()` | MIR internal state, gen tables | ~0.6ms |
+| 5. Setup JsMirTranspiler | manual alloc + 4 hashmaps | `import_cache`, `local_funcs`, `var_scopes[0]`, `widen_to_float` | ~0.02ms |
+| 6. Transpile to MIR | `transpile_js_mir_ast()` | MIR instructions, modules | ~0.1ms |
+| 7. Link + codegen | `MIR_link()` | Native code (gen interface) | ~0.2ms |
+| 8. Execute | `js_main_fn()` / `js_call_function()` | varies | ~0.01ms |
+| 9. Cleanup hashmaps | 4-6× `hashmap_free()` | — | ~0.01ms |
+| 10. Finish MIR | `MIR_finish()` | — | ~0.3ms |
+| 11. Destroy transpiler | `js_transpiler_destroy()` | frees pools, parser, buffers | ~0.05ms |
+| **Total** | | | **~1.5ms** |
+
+At 65K calls, total overhead ≈ **97 seconds** — far above the 10-second timeout.
+
+### 11.2 Proposal 1: MIR Context Reuse
+
+**Problem:** `jit_init()` + `MIR_finish()` cost ~0.9ms per eval — 60% of per-call overhead. Prior research (Transpile_Js24 §1) attempted MIR context reuse across batch test262 runs and abandoned it after 4 versions: MIR's internal state (func maps, gen tables) grows without bound, and `MIR_finish()` is the only way to reclaim it.
+
+**Key difference for eval:** Unlike batch testing (thousands of independent scripts), eval within a single program runs many small code snippets that share the host's lifetime. The MIR context can be reused across eval calls within a *single program execution*, with one `MIR_finish()` at program exit.
+
+**Approach:**
+
+1. Add a **per-runtime eval MIR context** — initialize lazily on first `eval()` call, store in a global:
+   ```c
+   static MIR_context_t g_eval_mir_ctx = NULL;
+   ```
+2. On each `eval()`, reuse `g_eval_mir_ctx` instead of calling `jit_init()`. Create a **new module** per eval (modules are cheap — `MIR_new_module()` is O(1)):
+   ```c
+   char mod_name[48];
+   snprintf(mod_name, 48, "eval_%d", js_dynamic_func_counter++);
+   mt->module = MIR_new_module(g_eval_mir_ctx, mod_name);
+   ```
+3. After execution, do **NOT** call `MIR_finish()`. Instead, leave the context alive. The accumulated module metadata grows ~200 bytes per eval call — at 65K calls that's ~13MB, acceptable for a single program run.
+4. Call `MIR_finish(g_eval_mir_ctx)` once at program shutdown (in `js_runtime_cleanup()` or equivalent).
+
+**Concern — MIR gen state growth:** `MIR_gen_init()` allocates register allocator tables and optimization structures. These grow with each `MIR_link()` call. Two mitigations:
+- Use **optimize level 0** for eval contexts (`MIR_gen_set_optimize_level(g_eval_mir_ctx, 0)`), which skips most optimization passes and reduces gen state growth.
+- If memory pressure is observed after many evals, add a **periodic reset**: after every N evals (e.g., 1000), call `MIR_finish()` + `jit_init()` to reclaim state. This amortizes the 0.9ms cost to 0.9µs/call.
+
+**Savings:** ~0.9ms/call → ~0µs/call (amortized). At 65K calls: **58 seconds saved**.
+
+### 11.3 Proposal 2: Compiled Function Cache
+
+**Problem:** When the same source string is passed to `eval()` multiple times, we re-parse, re-build AST, re-transpile, and re-link identical code every time. The regexp 65K tests call `eval("/regexp/")` with unique regexps, but many real-world eval patterns (e.g., eval in a loop with template strings) produce repeated source.
+
+**Approach:**
+
+1. Add a **source → compiled function pointer cache**, keyed by a hash of the source string:
+   ```c
+   typedef struct {
+       uint64_t hash;        // FNV-1a or xxhash of source string
+       const char* source;   // for collision verification
+       size_t source_len;
+       void* fn_ptr;         // compiled js_main or wrapper function pointer
+       NamePool* name_pool;  // must stay alive while fn_ptr is valid
+   } EvalCacheEntry;
+
+   static HashMap* g_eval_cache = NULL;  // lazily created
+   ```
+
+2. **Cache lookup** at `js_builtin_eval()` entry, before any parsing:
+   ```
+   hash = hash_bytes(source, source_len)
+   entry = hashmap_get(g_eval_cache, &hash)
+   if (entry && entry->source_len == source_len && memcmp(entry->source, source, source_len) == 0)
+       → call entry->fn_ptr directly, skip steps 1-7
+   ```
+
+3. **Cache insertion** after successful compilation:
+   - Store the compiled `fn_ptr` and keep the `NamePool` alive (JIT code embeds interned `String*` pointers).
+   - **Free the tree-sitter tree and AST pool** — they are only needed during compilation. Once `MIR_link()` produces native code, the `TSTree` and `JsAstNode` tree are dead data. This recovers the memory cost of caching.
+
+4. **Cache invalidation:** For a single program execution, no invalidation is needed (eval'd code has no mutable source). Clear the cache at program shutdown alongside the eval MIR context.
+
+**Memory lifecycle with caching:**
+
+| Resource | After compile | After cache | Reason |
+|----------|--------------|-------------|--------|
+| `TSTree` | ✅ kept | ❌ **freed** | Only needed by `build_js_ast()` |
+| `ast_pool` (JsAstNode tree) | ✅ kept | ❌ **freed** | Only needed by `transpile_js_mir_ast()` |
+| `NamePool` | ✅ kept | ✅ **kept** | JIT code embeds interned `String*` pointers |
+| MIR module | ✅ kept | ✅ **kept** | Contains native code pointed to by `fn_ptr` |
+| `JsMirTranspiler` hashmaps | ❌ freed | ❌ freed | Only needed during transpilation |
+
+**Savings per cache hit:** Steps 1-7 skipped entirely → ~1.1ms saved/call. Cache miss cost: one `hashmap_get` lookup (~10ns).
+
+**Note:** The regexp 65K tests use *unique* eval strings (65K different regexp literals), so this cache won't help them directly. But it benefits real-world patterns and any test that evals the same string repeatedly.
+
+### 11.4 Proposal 3: Additional Speedups
+
+#### 11.4.1 Tree-sitter Parser Reuse
+
+**Current:** `js_transpiler_create()` calls `ts_parser_new()` + `ts_parser_set_language()` on every eval — allocating parser tables and internal structures. `js_transpiler_destroy()` calls `ts_parser_delete()`.
+
+**Proposal:** Keep a **global reusable parser** for eval:
+```c
+static TSParser* g_eval_parser = NULL;  // lazily created
+```
+On each eval, reuse it: `ts_parser_parse_string(g_eval_parser, NULL, source, len)`. Tree-sitter parsers are designed for reuse — `ts_parser_parse_string()` resets state on each call. The `TSTree*` output is independent of the parser and can be freed separately.
+
+**Savings:** ~0.05ms/call (parser alloc + language init). Small per call but meaningful at 65K calls: **~3 seconds**.
+
+#### 11.4.2 Lightweight Eval Transpiler Setup
+
+**Current:** Each eval allocates a full `JsTranspiler` (pools, scopes, buffers, counters) and full `JsMirTranspiler` (4 hashmaps).
+
+**Proposal:** Create a **slim eval transpiler** constructor that:
+- Reuses the global eval `NamePool` (or creates a per-eval lightweight one that chains to the cached pool)
+- Skips `StrBuf` allocation for `code_buf`/`func_buf` (eval doesn't generate code text)
+- Uses a single pre-allocated hashmap array instead of per-call `hashmap_new()`
+
+**Savings:** ~0.1ms/call. At 65K calls: **~6 seconds**.
+
+#### 11.4.3 Optimize Level 0 for Eval
+
+**Current:** Eval uses `g_js_mir_optimize_level` (default 2), which runs full optimization passes (dead code elimination, constant folding, register allocation).
+
+**Proposal:** Always use `MIR_gen_set_optimize_level(ctx, 0)` for eval code. Eval snippets are typically small — optimization gains are negligible, but optimization *costs* are real. Level 0 skips all gen passes, going straight to machine code emission.
+
+**Savings:** ~0.1ms/call in `MIR_link()`. At 65K calls: **~6 seconds**.
+
+#### 11.4.4 Expression Fast Path (No JIT)
+
+**Current:** Even `eval("42")` goes through full parse → AST → MIR → codegen → execute.
+
+**Proposal:** For **trivial expressions** (numeric literal, string literal, boolean, null, identifier lookup), bypass JIT entirely:
+- After `ts_parser_parse_string()`, check if the root has a single child that is a `number`, `string`, `true`, `false`, `null`, or `identifier`.
+- If so, directly construct the corresponding `Item` value without transpilation.
+- This handles patterns like `eval("42")`, `eval("'hello'")`, `eval("true")`.
+
+**Savings:** ~1.4ms/call for trivial expressions (skips steps 4-10). Won't help the regexp 65K tests (which eval regexp literals), but benefits common real-world eval patterns.
+
+#### 11.4.5 Eval-to-RegExp Fast Path
+
+**Current:** `eval("/pattern/flags")` compiles and executes a full JIT function that returns a RegExp.
+
+**Proposal:** Detect the **regexp literal** pattern at the source string level (starts with `/`, ends with `/[gimsuy]*`, no other statements) and directly call the internal regexp constructor:
+```c
+if (source[0] == '/' && is_regexp_literal(source, source_len)) {
+    return js_create_regexp_from_source(source, source_len);
+}
+```
+This bypasses the entire JIT pipeline for the exact pattern used by the `S7.8.5_A*` tests.
+
+**Savings:** ~1.5ms/call → ~0.01ms/call. At 65K calls: **~96 seconds saved** — would bring these tests from TIMEOUT to well under 10 seconds.
+
+### 11.5 Combined Impact Estimate
+
+| Optimization | Per-call savings | 65K calls savings | Impl effort |
+|-------------|-----------------|-------------------|-------------|
+| **MIR context reuse** (§11.2) | ~0.9ms | ~58s | Medium |
+| **Compiled fn cache** (§11.3) | ~1.1ms (hit) | depends on hit rate | Medium |
+| **Parser reuse** (§11.4.1) | ~0.05ms | ~3s | Small |
+| **Slim transpiler** (§11.4.2) | ~0.1ms | ~6s | Medium |
+| **Optimize level 0** (§11.4.3) | ~0.1ms | ~6s | Trivial |
+| **Expr fast path** (§11.4.4) | ~1.4ms (literals) | varies | Small |
+| **RegExp fast path** (§11.4.5) | ~1.5ms (regexp) | ~96s | Small |
+
+**For the regexp 65K tests specifically**, the best strategy is:
+1. **RegExp fast path** (§11.4.5) — single biggest win, directly targets the bottleneck
+2. **MIR context reuse** (§11.2) — large general win
+3. **Optimize level 0** (§11.4.3) — trivial to implement
+
+These three alone would reduce 65K evals from ~97s to under **2 seconds**.
+
+**Implementation order:**
+1. §11.4.3 (optimize level 0) — one line change, immediate benefit
+2. §11.4.5 (regexp fast path) — small, targeted, transforms the 65K tests from TIMEOUT to PASS
+3. §11.2 (MIR context reuse) — bigger change, general benefit for all eval-heavy code
+4. §11.4.1 (parser reuse) — small, clean win
+5. §11.4.2 (slim transpiler) — moderate effort, moderate win
+6. §11.3 (compiled fn cache) — most complex, best payoff for repeated-eval patterns
+7. §11.4.4 (expr fast path) — nice to have for trivial evals
