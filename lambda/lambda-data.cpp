@@ -389,8 +389,8 @@ String* it2s(Item itm) {
         return itm.get_string();
     }
     if (itm._type_id == LMD_TYPE_ERROR) {
-        static String str_err = {.len = 7, .is_ascii = 1, .chars = "<error>"};
-        return &str_err;
+        static struct { uint32_t len; uint8_t is_ascii; char chars[8]; } str_err_buf = {7, 1, "<error>"};
+        return (String*)&str_err_buf;
     }
     // For other types, we'd need to convert to string
     // For now, return a default string

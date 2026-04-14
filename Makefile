@@ -203,7 +203,7 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="$(CURDIR)/node_modules/.bin/tree-sitter" V=1 VERBOSE=1
 
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
