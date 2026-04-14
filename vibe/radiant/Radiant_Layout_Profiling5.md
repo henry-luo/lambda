@@ -307,14 +307,158 @@ The non-tiled (`render_html_doc`) path is completely unchanged; `tile_offset_y` 
 | `radiant/rdt_vector_tvg.cpp` | Added `tile_offset_y` to `RdtVectorImpl`; scene-wrap translation in `tvg_push_draw_remove`; added setter |
 | `radiant/render_img.cpp` | `render_html_to_png()` routes to tiled path when `output_width × output_height > 32 M` |
 
-### 7.3 `layout` Command Output Shows Minimal Height (132.8px)
+### 7.3 Centralized Layout Limits (implemented)
+
+Layout safety constants were previously scattered as `static const int` or `const int` locals across 5 source files, with duplicate definitions and redundant guards.
+
+**Before:**
+
+| Constant | Value | Location | Issue |
+|----------|-------|----------|-------|
+| `MAX_LAYOUT_DEPTH` | 300 | `layout.cpp` (local in `layout_flow_node`) | Only accessible in one function |
+| `MAX_LAYOUT_NODES` | 50000 | `layout.cpp` (local in `layout_flow_node`) | Only accessible in one function |
+| `MAX_ABS_DEPTH` | 300 | `layout_positioned.cpp` (local in `layout_abs_block`) | **Redundant** — same value AND same `lycon->depth` counter as `MAX_LAYOUT_DEPTH` |
+| `MAX_FLEX_DEPTH` | 16 | `layout_flex_multipass.cpp` (file-static) | Only accessible in one file |
+| `MAX_IFRAME_DEPTH` | 3 | `layout_flex_multipass.cpp` (local) | **Duplicate** — identical local in `layout_block.cpp` |
+| `MAX_IFRAME_DEPTH` | 3 | `layout_block.cpp` (local) | **Duplicate** |
+
+**After:** Single `radiant/layout_guards.h`, included transitively via `layout.hpp`:
+
+```c
+constexpr int MAX_LAYOUT_DEPTH = 300;    // DOM nesting depth (flow + abs paths share lycon->depth)
+constexpr int MAX_LAYOUT_NODES = 50000;  // total node count per layout pass
+constexpr int MAX_FLEX_DEPTH   = 16;     // flex-in-flex nesting limit
+constexpr int MAX_IFRAME_DEPTH = 3;      // iframe recursion limit
+```
+
+**Changes:**
+- Removed `MAX_ABS_DEPTH` entirely — replaced with `MAX_LAYOUT_DEPTH` in `layout_positioned.cpp`
+- Removed duplicate `MAX_IFRAME_DEPTH` locals from `layout_flex_multipass.cpp` and `layout_block.cpp`
+- Removed file-static `MAX_FLEX_DEPTH` from `layout_flex_multipass.cpp`
+- Removed local `MAX_LAYOUT_DEPTH` and `MAX_LAYOUT_NODES` from `layout.cpp`
+
+**Not centralized** (kept in place — algorithm-internal, single-file use):
+
+| Constant | Value | Location | Reason |
+|----------|-------|----------|--------|
+| `MAX_VALIDATE_DEPTH` | 32 | `layout_flex_multipass.cpp` | Debug-only coordinate validator |
+| `MAX_MEASURE_DEPTH` | 32 | `layout_flex_measurement.cpp` | Measurement recursion guard |
+| `MAX_GRID_SIZE` | 16 | `grid_utils.cpp` | Grid template parsing |
+| `MAX_GRID_ITEMS` | 256 | `grid_sizing_algorithm.hpp`, `grid_placement.hpp` | Grid-internal (duplicate, but self-contained in grid subsystem) |
+| `MAX_CSS_TREE_DEPTH` | 512 | `cmd_layout.cpp` | CSS command parsing |
+
+### 7.4 Nested Flex Layout Optimization (A, B, C implemented)
+
+For n deeply nested flex containers (each containing one flex child), the layout had redundant work at each nesting level. Three optimizations were implemented to eliminate this; a fourth (D) remains as a future architectural proposal.
+
+**Previous call chain per nesting level:**
+
+```
+layout_flex_content(D_i)                              // entry point
+  → init_flex_container(D_i)                          // PASS 1: alloc FlexContainerLayout A
+  → collect_and_prepare_flex_items(D_i)               //   measure each child → fills A
+  → layout_flex_container_with_nested_content(D_i)    // PASS 2: flex algorithm
+      → init_flex_container(D_i)                      //   alloc FlexContainerLayout B (A orphaned!)
+      → collect_and_prepare_flex_items(D_i)           //   ← REDUNDANT: same items, re-measured
+      → run_enhanced_flex_algorithm(D_i)              //   flexbox sizing (grow/shrink/wrap)
+      → layout_final_flex_content(D_i)                //   content layout
+          → layout_flex_item_content(D_{i+1})         //     ← RECURSE into child
+  → cleanup_flex_container (frees A)                  // A was never used
+  → layout_flex_absolute_children(D_i)                // PASS 3: abs/fixed children
+```
+
+Each level called `init_flex_container` + `collect_and_prepare_flex_items` **twice** — allocating two `FlexContainerLayout` structs and discarding the first. Each collection call does: CSS style re-resolution, measurement cache invalidation, `init_flex_item_view`, `measure_flex_child_content` (subtree traversal), percentage re-resolution, and flex property setup.
+
+**Optimized call chain (after A):**
+
+```
+layout_flex_content(D_i)                              // entry point
+  → layout_flex_container_with_nested_content(D_i)    // single pass: init + collect + algorithm
+      → init_flex_container(D_i)                      //   alloc FlexContainerLayout (once)
+      → collect_and_prepare_flex_items(D_i)           //   measure + prepare (once)
+      → run_enhanced_flex_algorithm(D_i)              //   flexbox sizing
+      → layout_final_flex_content(D_i)                //   content layout
+          → layout_flex_item_content(D_{i+1})         //     RECURSE
+      → cleanup_flex_container                        //   free
+  → layout_flex_absolute_children(D_i)                // abs/fixed children
+```
+
+#### A. Eliminate redundant re-collection (implemented)
+
+Removed `init_flex_container` + `collect_and_prepare_flex_items` + `cleanup_flex_container` from `layout_flex_content()`. Now `layout_flex_container_with_nested_content()` is the sole site that initializes, collects, runs the algorithm, and cleans up.
+
+**File:** `radiant/layout_flex_multipass.cpp` — removed ~15 lines from `layout_flex_content()`
+
+This eliminates one `mem_calloc(FlexContainerLayout)`, one full DOM traversal of all children (style re-resolution, view init, measurement, percentage resolution, flex property setup), and one `cleanup_flex_container` per flex container.
+
+#### B. Definite-size measurement fast path (implemented)
+
+In `collect_and_prepare_flex_items()`, skip `measure_flex_child_content()` when a flex item has both explicit non-percentage `width` and `height` from CSS. The item's dimensions are fully determined and don't need content measurement.
+
+**File:** `radiant/layout_flex.cpp` — added 6-line guard before `measure_flex_child_content(lycon, child)`
+
+```cpp
+bool has_definite_w = (item_block->blk && item_block->blk->given_width >= 0
+                       && isnan(item_block->blk->given_width_percent));
+bool has_definite_h = (item_block->blk && item_block->blk->given_height >= 0
+                       && isnan(item_block->blk->given_height_percent));
+if (!(has_definite_w && has_definite_h)) {
+    measure_flex_child_content(lycon, child);
+}
+```
+
+#### C. Smart measurement cache invalidation (implemented)
+
+Previously, `collect_and_prepare_flex_items()` unconditionally called `invalidate_measurement_cache_for_node(child)` on every child, forcing re-measurement even when the container's content width hadn't changed. This defeated the `MeasurementCache` for nodes measured in a earlier pass.
+
+**Fix:** Added `context_width` field to `MeasurementCacheEntry`. Now `store_in_measurement_cache()` records the container width used during measurement. The invalidation check compares the stored `context_width` against the current `container_content_width` and only invalidates when they differ by more than 0.5px.
+
+**Files:**
+- `radiant/layout_flex_measurement.hpp` — added `float context_width` to `MeasurementCacheEntry`
+- `radiant/layout_flex_measurement.cpp` — added `context_width` parameter to `store_in_measurement_cache()`; stores `saved_context.block.content_width` at the measurement call site
+- `radiant/layout_flex.cpp` — replaced unconditional `invalidate_measurement_cache_for_node(child)` with context-width comparison
+
+#### D. Bottom-up measurement with node-level memoization (future proposal)
+
+The Taffy/browser approach: measure nodes bottom-up. Each `DomElement` computes its intrinsic size once, caches the result on the node (not just in a global hash map), and parents read cached child sizes without re-entering children. The current code does top-down layout with trial `measure_flex_child_content` calls that re-traverse subtrees.
+
+**Implementation sketch:**
+1. Add `cached_intrinsic_width` / `cached_intrinsic_height` fields to `DomElement`
+2. In `measure_flex_child_content`, set these after measurement
+3. In `calculate_item_intrinsic_sizes` (flex algorithm), check node-level cache before re-measuring
+4. Invalidate only when CSS properties affecting sizing change (not on every collection pass)
+
+This is the architectural change for true O(n) but requires careful invalidation semantics.
+
+#### Benchmark results
+
+| Test case | Before | After | Speedup |
+|-----------|-------:|------:|--------:|
+| md_zod-readme.html (real page) | 180ms | 158ms | 1.14× |
+| crash_nested_fixed_flex (50 fixed+flex) | 2.2ms | 1.3ms | 1.7× |
+| nested_flex_200 (200 deep, 1 child) | 8.5ms | 9.0ms | ~1× (MAX_FLEX_DEPTH limits to 16) |
+| flex_200x5 (200 deep, 5 children) | 47ms | 46ms | ~1× (same depth limit) |
+| flex_16x50 (16 deep, 50 children) | 19ms | 17ms | 1.1× |
+
+The improvement is modest on synthetic deep-nesting tests because `MAX_FLEX_DEPTH=16` limits actual flex processing to 16 levels regardless of nesting depth. The 14% improvement on `md_zod-readme.html` reflects real-world savings where flex containers are shallow but wide (many items).
+
+#### Complexity summary
+
+| Optimization | Status | Impact |
+|-------------|--------|--------|
+| A. Skip re-collection | Implemented | Eliminates 1 alloc + 1 full DOM traversal per flex container |
+| B. Definite-size skip | Implemented | Skips measurement for items with explicit CSS dimensions |
+| C. Smart cache invalidation | Implemented | Preserves cache when container width unchanged |
+| D. Bottom-up memoization | Proposal | True O(n) for all nesting patterns |
+
+### 7.5 `layout` Command Output Shows Minimal Height (132.8px)
 
 The `layout` command produces a view tree with `hg:132.8` for the root `<html>` element on the zod README. This is because `overflow:auto` on the root clips the visible area to the viewport height. The full content is scrollable but the view tree only reflects the initial viewport dimensions for the root. This is correct CSS behavior but may surprise users expecting the full content height.
 
-### 7.4 No Lazy Decode for Data URIs
+### 7.6 No Lazy Decode for Data URIs
 
 Data URI images (`data:image/png;base64,...`) are still fully decoded immediately in `load_image()`. These are typically small (inline icons, badges) so the impact is negligible. If a document embeds large data URI images, they would not benefit from lazy decode. Supporting this would require storing the decoded base64 buffer, adding complexity for minimal gain.
 
-### 7.5 Debug Build Logging Overhead
+### 7.7 Debug Build Logging Overhead
 
 The debug build produces ~1M log lines (80 MB) for the zod README, adding ~1.8s overhead (2.86s debug vs 1.06s release, before lazy loading). With lazy loading, the debug build runs in ~2.1s (vs 0.16s release). The log I/O dominates debug build timing. This is by-design but worth noting — always use release build for performance testing.

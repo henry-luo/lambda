@@ -2201,8 +2201,17 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // CRITICAL: Also invalidate the measurement cache for this child so that
         // measure_flex_child_content re-measures it with the correct parent context
         // (correct container_content_width) after CSS has been re-resolved above.
-        // Without this, the cached measured_height (computed with wrong % parent) is reused.
-        invalidate_measurement_cache_for_node(child);
+        // Only invalidate when the container width actually changed — avoids forcing
+        // re-measurement when called multiple times with the same context.
+        {
+            MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+            if (cached && fabsf(cached->context_width - container_content_width) > 0.5f) {
+                invalidate_measurement_cache_for_node(child);
+            } else if (!cached) {
+                // no cache entry — nothing to invalidate
+            }
+            // else: context width unchanged, keep cache entry
+        }
         init_flex_item_view(lycon, child);
 
         // Check if init_flex_item_view skipped this child (display:none)
@@ -2214,7 +2223,16 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         }
 
         // Step 2: Measure content (uses resolved styles)
-        measure_flex_child_content(lycon, child);
+        // Skip measurement for items with both definite width and height from CSS —
+        // their dimensions are fully determined and won't come from content measurement.
+        ViewBlock* item_block = (ViewBlock*)item;
+        bool has_definite_w = (item_block->blk && item_block->blk->given_width >= 0
+                               && isnan(item_block->blk->given_width_percent));
+        bool has_definite_h = (item_block->blk && item_block->blk->given_height >= 0
+                               && isnan(item_block->blk->given_height_percent));
+        if (!(has_definite_w && has_definite_h)) {
+            measure_flex_child_content(lycon, child);
+        }
 
         // Now child IS the View (unified tree) - get as ViewGroup
 
