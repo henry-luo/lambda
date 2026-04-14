@@ -246,27 +246,37 @@ All tests pass with zero regressions:
 
 ## 7. Remaining Issues
 
-### 7.1 Fuzzy Crash: Nested `position:fixed display:flex` Timeout (pre-existing)
+### 7.1 Fuzzy Crash: Nested `position:fixed display:flex` Timeout (fixed)
 
-Two fuzzer test files fail (pre-existing, not caused by this change):
+Two fuzzer test files previously caused an exponential-blowup timeout:
 
-- `crash_nested_fixed_flex` — 100 nested `position:fixed display:flex` divs
-- `timeout_nested_fixed_flex_200` — 200 nested variant, times out after 15s
+- `crash_nested_fixed_flex` — 50 nested `position:fixed display:flex` divs (was >20s, now 0.5s)
+- `timeout_nested_fixed_flex_200` — 200 nested variant
 
-**Root cause:** `position:fixed` elements enter through `layout_abs_block()` → `layout_block()` → `layout_flex_content()`, which performs expensive multi-pass flex measurement before hitting the `MAX_FLEX_DEPTH` guard. The guard fires correctly but the setup work before it is O(n²) in nesting depth.
+**Root cause:** `layout_final_flex_content()` has a fallback DOM traversal path used when `flex->item_count == 0`. All 50 divs are `position:fixed`, so `should_skip_flex_item()` excludes them all from the flex items array (`item_count == 0`). However, `init_flex_item_view()` was called for each child first (for measurement), which sets `view_type = RDT_VIEW_BLOCK`. The fallback traversal iterates all DOM children checking `view_type == RDT_VIEW_BLOCK` — matching every `position:fixed` child — and calls `layout_flex_item_content()` on them. This causes each fixed child to be laid out twice (once via the fallback, once via `layout_flex_absolute_children()`), creating O(2^n) exponential blowup: D2 laid out twice, each D2 causes D3 twice, etc.
 
-**Current mitigations:**
-- `MAX_FLEX_DEPTH = 16` — limits recursive flex nesting
-- `MAX_ABS_DEPTH = 300` — limits positioned element recursion
-- Early guard in `layout_flex_content()` before expensive setup
-- Separate `flex_depth` / `flex_node_count` counters (not shared with normal `node_count`)
+**Fix:** In the fallback DOM traversal inside `layout_final_flex_content()`, added a skip check for `position:absolute` and `position:fixed` children before calling `layout_flex_item_content()`. These are always handled by `layout_flex_absolute_children()` and must never be laid out via the content path.
 
-**Possible improvements:**
-- Move the depth/node guard in `layout_flex_content()` to before `layout_flex_container_with_nested_content()` to avoid the multi-pass setup entirely
-- Add a fast path in `layout_abs_block()` that checks `flex_depth` before calling into block+flex layout
-- Profile the specific O(n²) pattern to find where the quadratic work occurs
+**File:** `radiant/layout_flex_multipass.cpp` — `else` branch of `layout_final_flex_content()`
 
-### 7.2 PNG Render of Large Pages Crashes on Auto-Sizing (pre-existing)
+**Result:** `crash_nested_fixed_flex.html` (50 divs) completes in 0.53s (was >20s).
+
+**Layout limits centralized:** All layout safety constants were moved to a new `radiant/layout_guards.h`, included transitively via `layout.hpp`:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MAX_LAYOUT_DEPTH` | 300 | DOM nesting depth limit (flow + abs path, same `lycon->depth` counter) |
+| `MAX_LAYOUT_NODES` | 50000 | Total node count per layout pass |
+| `MAX_FLEX_DEPTH` | 16 | Flex-in-flex nesting limit |
+| `MAX_IFRAME_DEPTH` | 3 | Iframe recursion limit |
+
+**Removed redundancies:**
+- `MAX_ABS_DEPTH = 300` in `layout_positioned.cpp` — identical value and same counter as `MAX_LAYOUT_DEPTH`; replaced with `MAX_LAYOUT_DEPTH`
+- Duplicate `const int MAX_IFRAME_DEPTH = 3` local variables in both `layout_flex_multipass.cpp` and `layout_block.cpp` — removed; constant now comes from `layout_guards.h`
+- File-static `MAX_FLEX_DEPTH = 16` in `layout_flex_multipass.cpp` — removed; constant now comes from `layout_guards.h`
+
+
+### 7.2 Tile-Based Rendering (implemented)
 
 ```
 ./release/lambda render md_zod-readme.html -o output.png
@@ -274,12 +284,28 @@ Two fuzzer test files fail (pre-existing, not caused by this change):
 → Segfault (5.3 GB surface allocation)
 ```
 
-The `render_html_to_png()` auto-sizing mode computes content bounds and creates a surface to fit. For long pages, this produces enormous surface allocations. This is not related to lazy loading — the same crash occurs without the optimization.
+**Implemented:** Tile-based rendering is now active for any auto-sized PNG output whose total pixel count exceeds **32 M pixels** (≈ 128 MB of RGBA; a 1200 px wide page triggers this at ~26 000 px tall).
 
-**Possible improvements:**
-- Cap maximum auto-size surface dimensions (e.g., 8192×8192 or 16384×16384)
-- Tile-based rendering: render in chunks and stitch the output
-- Warn or error when auto-sized dimensions exceed a threshold
+Instead of allocating a single surface for the full page, `render_html_doc_tiled()` renders horizontal strips of **4096 physical pixels** each, writing each strip's rows directly to an open `libpng` streaming context via `png_write_row()`. Peak pixel-buffer memory is `O(total_width × 4096)` regardless of page length — ~20 MB for a 1200 px wide page.
+
+**Coordinate translation** ensures each tile strip sees the correct subset of the view tree:
+- `ImageSurface::tile_offset_y` — subtracted from the absolute Y row index in `fill_surface_rect()`, `blit_surface_scaled()`, `draw_glyph()`, and `draw_color_glyph()` so direct pixel writes land in the tile buffer
+- `rdt_vector_set_tile_offset_y()` — wraps every ThorVG shape in a translated scene (`tvg_paint_translate(scene, 0, -tile_y)`) so vector graphics also render at the correct tile-relative position
+- The render clip (`rdcon.block.clip.top/bottom`) is set to the page-absolute tile bounds so out-of-tile content is naturally skipped
+
+The non-tiled (`render_html_doc`) path is completely unchanged; `tile_offset_y` defaults to 0 (zero-initialised) and the offset arithmetic is a no-op.
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `radiant/view.hpp` | Added `tile_offset_y` field to `ImageSurface` |
+| `radiant/surface.cpp` | `fill_surface_rect`, `blit_surface_scaled` subtract `tile_offset_y` from row index |
+| `radiant/render.cpp` | `draw_glyph`, `draw_color_glyph` subtract `tile_offset_y`; added `render_html_doc_tiled()` |
+| `radiant/render.hpp` | Declared `render_html_doc_tiled()` |
+| `radiant/rdt_vector.hpp` | Declared `rdt_vector_set_tile_offset_y()` |
+| `radiant/rdt_vector_tvg.cpp` | Added `tile_offset_y` to `RdtVectorImpl`; scene-wrap translation in `tvg_push_draw_remove`; added setter |
+| `radiant/render_img.cpp` | `render_html_to_png()` routes to tiled path when `output_width × output_height > 32 M` |
 
 ### 7.3 `layout` Command Output Shows Minimal Height (132.8px)
 

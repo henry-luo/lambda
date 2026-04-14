@@ -978,10 +978,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
     // layout_abs_block bypasses layout_flow_node so its depth guard doesn't apply here
-    static const int MAX_ABS_DEPTH = 300;
     lycon->depth++;
-    if (lycon->depth >= MAX_ABS_DEPTH) {
-        log_error("layout_abs_block: depth %d exceeded, skipping %s", MAX_ABS_DEPTH, elmt->source_loc());
+    if (lycon->depth >= MAX_LAYOUT_DEPTH) {
+        log_error("layout_abs_block: depth %d exceeded, skipping %s", MAX_LAYOUT_DEPTH, elmt->source_loc());
         lycon->depth--;
         log_leave();
         return;

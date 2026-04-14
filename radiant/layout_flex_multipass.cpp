@@ -10,11 +10,6 @@
 #include "../lib/strbuf.h"
 #include <cmath>
 
-// Flex-in-flex nesting limit — prevents O(n²) timeout from deeply nested flex
-// containers (e.g., 200 nested position:fixed display:flex divs).
-// MAX_LAYOUT_DEPTH (300) guards stack overflow; this guards exponential flex work.
-static const int MAX_FLEX_DEPTH = 16;
-
 // Forward declarations
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
@@ -1197,8 +1192,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             // Uses the same thread-local counter as layout_iframe in layout_block.cpp
             // Keep this low since each HTTP download can take seconds
             extern __thread int iframe_depth;
-            const int MAX_IFRAME_DEPTH = 3;
-
             if (iframe_depth >= MAX_IFRAME_DEPTH) {
                 log_warn("flex iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
                 return;
@@ -2045,6 +2038,15 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
                 child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
                 ViewBlock* flex_item = (ViewBlock*)child;
+                // skip abs/fixed items — they are laid out by layout_flex_absolute_children,
+                // not here. including them in the fallback causes O(2^n) exponential blowup
+                // (each item gets laid out twice, duplicating the entire subtree recursively).
+                if (flex_item->position && flex_item->position->position &&
+                    (flex_item->position->position == CSS_VALUE_ABSOLUTE ||
+                     flex_item->position->position == CSS_VALUE_FIXED)) {
+                    child = child->next();
+                    continue;
+                }
                 layout_flex_item_content(lycon, flex_item);
             }
             child = child->next();

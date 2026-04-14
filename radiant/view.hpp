@@ -368,6 +368,7 @@ typedef struct ImageSurface {
     char* source_path;     // local file path for lazy decode (NULL if already decoded or HTTP)
     unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
+    int tile_offset_y;   // tiled PNG rendering: physical-pixel Y start of this tile (0 = full-page surface)
 } ImageSurface;
 
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);

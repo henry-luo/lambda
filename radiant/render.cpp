@@ -20,6 +20,7 @@
 #include <string.h>
 #include <math.h>
 #include <chrono>
+#include <png.h>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
@@ -477,7 +478,7 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
                 py, left, right, &row_left, &row_right);
             if (row_left >= row_right) continue;
         }
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy) * surface->pitch;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy - surface->tile_offset_y) * surface->pitch;
         // map target row to source row with bilinear interpolation
         float src_y = dy * inv_scale;
         int sy0 = (int)src_y;
@@ -573,7 +574,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
             j_start = rl - x;
             j_end = rr - x;
         }
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i - surface->tile_offset_y) * surface->pitch;
         for (int j = j_start; j < j_end; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
@@ -3311,4 +3312,134 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] render_html_doc total: %.1fms%s", duration<double, std::milli>(t_end - t_start).count(),
         selective ? " (selective)" : "");
+}
+
+/**
+ * Tile-based PNG renderer for pages whose full-surface allocation would OOM.
+ *
+ * Instead of allocating a single (total_width × total_height) surface, this
+ * function renders the page in horizontal strips of TILE_H physical pixels each,
+ * writing each strip's rows directly to an already-open PNG stream.  Peak memory
+ * for pixel data is O(total_width × TILE_H) regardless of page length.
+ *
+ * @param uicon       UiContext with document + view-tree already set up.
+ *                    uicon->surface may be NULL or point to a smaller surface;
+ *                    tiled rendering creates its own tile surfaces internally.
+ * @param view_tree   Fully-laid-out view tree.
+ * @param output_file Destination PNG file path.
+ * @param total_width Physical pixel width of the full output image.
+ * @param total_height Physical pixel height of the full output image.
+ */
+void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
+                           const char* output_file,
+                           int total_width, int total_height) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    static const int TILE_H = 4096;  // physical pixels per strip
+    log_info("render_html_doc_tiled: %dx%d px -> %s (%d tiles of %d px)",
+        total_width, total_height, output_file,
+        (total_height + TILE_H - 1) / TILE_H, TILE_H);
+
+    // --- Open PNG for streaming write ---
+    FILE* fp = fopen(output_file, "wb");
+    if (!fp) {
+        log_error("render_html_doc_tiled: cannot open output file: %s", output_file);
+        return;
+    }
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) { fclose(fp); return; }
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_write_struct(&png, NULL); fclose(fp); return; }
+    if (setjmp(png_jmpbuf(png))) {
+        log_error("render_html_doc_tiled: PNG error during write");
+        png_destroy_write_struct(&png, &info); fclose(fp); return;
+    }
+    png_init_io(png, fp);
+    png_set_IHDR(png, info, total_width, total_height,
+                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, info);
+
+    uint32_t canvas_bg = get_canvas_background(view_tree->root);
+
+    // save surface pointer so we can restore it (uicon may not have a surface yet)
+    ImageSurface* saved_surface = uicon->surface;
+    int saved_window_height = uicon->window_height;
+
+    // --- Render each tile ---
+    for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
+        int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
+
+        ImageSurface* tile_surf = image_surface_create(total_width, tile_h);
+        if (!tile_surf) {
+            log_error("render_html_doc_tiled: failed to allocate tile surface %dx%d at y=%d",
+                total_width, tile_h, tile_y);
+            break;
+        }
+
+        // clear tile to background color before setting the tile offset
+        {
+            Bound tile_clip = {0, 0, (float)total_width, (float)tile_h};
+            fill_surface_rect(tile_surf, NULL, canvas_bg, &tile_clip);
+        }
+        // tile_offset_y must be set AFTER the clear (clear uses tile-relative coords)
+        tile_surf->tile_offset_y = tile_y;
+
+        // point uicon to the tile surface for the duration of this tile
+        uicon->surface = tile_surf;
+        uicon->window_height = tile_h;
+
+        RenderContext rdcon;
+        render_init(&rdcon, uicon, view_tree);
+
+        // override clip to page-absolute tile bounds so the rendering pipeline
+        // naturally skips content outside this strip
+        rdcon.block.clip = {0, (float)tile_y, (float)total_width, (float)(tile_y + tile_h)};
+
+        // tell ThorVG to translate all shapes upward by tile_y
+        rdt_vector_set_tile_offset_y(&rdcon.vec, (float)tile_y);
+
+        reset_render_stats();
+        View* root_view = view_tree->root;
+        if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* root_block = (ViewBlock*)root_view;
+            if (root_block->embed && root_block->embed->img) {
+                render_image_view(&rdcon, root_block);
+            } else {
+                render_block_view(&rdcon, root_block);
+            }
+            // render absolutely/fixed positioned children
+            if (root_block->position) {
+                ViewBlock* child = root_block->position->first_abs_child;
+                while (child) {
+                    render_block_view(&rdcon, child);
+                    child = child->position->next_abs_sibling;
+                }
+            }
+        }
+        render_clean_up(&rdcon);
+
+        // write this tile's rows into the PNG stream
+        for (int y = 0; y < tile_h; y++) {
+            uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;
+            png_write_row(png, row);
+        }
+
+        image_surface_destroy(tile_surf);
+        log_info("render_html_doc_tiled: tile y=%d..%d done", tile_y, tile_y + tile_h);
+    }
+
+    // restore uicon
+    uicon->surface = saved_surface;
+    uicon->window_height = saved_window_height;
+
+    // finalize PNG
+    png_write_end(png, NULL);
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] render_html_doc_tiled total: %.1fms (%dx%d)",
+        duration<double, std::milli>(t_end - t_start).count(), total_width, total_height);
 }
