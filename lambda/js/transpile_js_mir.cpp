@@ -121,7 +121,7 @@ struct JsFuncCollected {
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
-    char scope_env_names[64][128];   // variable names in scope env
+    char scope_env_names[128][128];   // variable names in scope env
     bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
     int reuse_env_slot_count;        // v16: slot count when reusing parent env
     // Phase 4: Type inference results
@@ -227,6 +227,7 @@ struct JsMirTranspiler {
     // Variable scopes: array of hashmaps, name -> JsMirVarEntry
     struct hashmap* var_scopes[64];
     int scope_depth;
+    int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
 
     // Loop label stack
     JsLoopLabels loop_stack[32];
@@ -267,6 +268,7 @@ struct JsMirTranspiler {
 
     // P9: Variable widening from INT→FLOAT (pre-scan)
     struct hashmap* widen_to_float;  // set of variable names that should be FLOAT
+    struct hashmap* force_boxed;     // set of variable names that must use boxed Item (non-numeric assignments)
 
     // Module-level constants: name -> value (for top-level const with literal init)
     struct hashmap* module_consts;   // name -> JsModuleConstEntry
@@ -552,7 +554,8 @@ static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         }
     }
 
-    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
+    hashmap_set(mt->var_scopes[target_depth], &entry);
 }
 
 static JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
@@ -1786,9 +1789,15 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         }
     }
 
-    // If the function has other captures (becoming a closure) AND references itself,
-    // it must also capture itself so recursive calls can find it at runtime.
-    if (has_self_ref && fc->capture_count > 0 && self_name[0]) {
+    // If the function references itself (e.g., recursive calls, or Box2D constructor
+    // pattern where F.method.apply(this, arguments) needs to find F), it must capture
+    // itself so the reference resolves to the correct function at runtime.
+    // This is critical when multiple IIFEs define functions with the same minified name
+    // (e.g., 'r', 'K') — without self-capture, the module_consts table would conflate them.
+    // Only add self-capture for non-top-level functions (parent_index >= 0) — top-level
+    // function declarations are hoisted and uniquely resolve via module var table.
+    // Keeping top-level functions capture-free preserves tail-call optimization.
+    if (has_self_ref && self_name[0] && fc->parent_index >= 0) {
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
             fc->captures[fc->capture_count].scope_env_slot = -1;
@@ -2931,6 +2940,13 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 if (p1_slot >= 0) {
                     TypeId field_type = p1_fc->ctor_prop_types[p1_slot];
                     int64_t byte_offset = (int64_t)p1_slot * (int64_t)sizeof(void*);
+                    // TRACE: log whenever R property is given a native slot read
+                    if (p1_prop->name->len == 1 && p1_prop->name->chars[0] == 'R') {
+                        log_error("TRACE P1 slot read .R: field_type=%d slot=%d offset=%d class='%s'",
+                            (int)field_type, p1_slot, (int)byte_offset,
+                            p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name ?
+                            p1_ce->constructor->fc->name : "anon");
+                    }
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
                     if (field_type == LMD_TYPE_FLOAT) {
                         // §7: Inline shape guard → direct memory load (no function call)
@@ -12045,6 +12061,15 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 TypeId field_type = p1_ce->constructor->fc->ctor_prop_types[p4_slot];
                 int64_t byte_offset = (int64_t)p4_slot * (int64_t)sizeof(void*);
 
+                // TRACE: log P4b slot reads for .R property
+                if (p4_prop->name->len == 1 && p4_prop->name->chars[0] == 'R') {
+                    log_error("TRACE P4b .R: field_type=%d slot=%d offset=%d class='%s' obj='%.*s'",
+                        (int)field_type, p4_slot, (int)byte_offset,
+                        p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name ?
+                        p1_ce->constructor->fc->name : "anon",
+                        (int)p4_obj->name->len, p4_obj->name->chars);
+                }
+
                 // P4b: Type-specialized slot read with guard.
                 // When shape_cache_ptr available: §7 inline shape guard → direct memory load + boxing.
                 // Otherwise: map_kind guard → js_get_slot_i/f + boxing.
@@ -12754,9 +12779,27 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
             int env_alloc_size = has_remapped ? mt->scope_env_slot_count : fc->capture_count;
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
+
+            // Detect self-capture: if the function references its own name, we must
+            // defer filling that env slot until after the closure is created, then
+            // patch it to point to the closure itself.
+            char self_vname[128] = {0};
+            int self_ref_slot = -1;
+            if (fc->node && fc->node->name && fc->node->name->chars) {
+                snprintf(self_vname, sizeof(self_vname), "_js_%.*s",
+                    (int)fc->node->name->len, fc->node->name->chars);
+            }
+
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
                 if (slot < 0) continue;
+
+                // Skip self-capture — will be patched after closure creation
+                if (self_vname[0] && strcmp(fc->captures[ci].name, self_vname) == 0) {
+                    self_ref_slot = slot;
+                    continue;
+                }
+
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
                 MIR_reg_t val;
                 if (var) {
@@ -12801,6 +12844,13 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
+
+            // Patch self-reference: store the closure itself in its own env slot
+            if (self_ref_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, self_ref_slot * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, fn_reg)));
+            }
         }
     } else {
         fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,
@@ -14097,6 +14147,12 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 // ============================================================================
 
 static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
+    // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
+    // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
+    int saved_hoist = mt->var_hoist_depth;
+    if (var->kind == JS_VAR_VAR && mt->scope_depth > 1) {
+        mt->var_hoist_depth = 1;
+    }
     JsAstNode* decl = var->declarations;
     while (decl) {
         if (decl->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
@@ -14443,6 +14499,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
         }
         decl = decl->next;
     }
+    mt->var_hoist_depth = saved_hoist;
 }
 
 // Phase 3.5: Detect `typeof x === "number"/"string"/"boolean"` pattern.
@@ -14747,10 +14804,23 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 }
 
 static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
+    // JS spec: 'var' declarations in for-init are function-scoped — they must be
+    // visible after the loop ends. Only push a new scope for 'let'/'const' inits.
+    bool init_is_var = false;
+    if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
+        if (vd->kind == JS_VAR_VAR) init_is_var = true;
+    }
+
+    // Transpile 'var' init BEFORE pushing scope so vars live in the parent scope
+    if (init_is_var && for_node->init) {
+        jm_transpile_statement(mt, for_node->init);
+    }
+
     jm_push_scope(mt);
 
-    // Init
-    if (for_node->init) {
+    // Init (let/const or expression inits transpile inside the for scope)
+    if (for_node->init && !init_is_var) {
         jm_transpile_statement(mt, for_node->init);
     }
 
@@ -17761,10 +17831,22 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             sm_param_node = sm_param_node ? sm_param_node->next : NULL;
         }
 
+        // Build self-capture name for detecting self-references
+        char gen_self_capture_name[128] = {0};
+        if (fn->name && fn->name->chars) {
+            snprintf(gen_self_capture_name, sizeof(gen_self_capture_name), "_js_%.*s",
+                (int)fn->name->len, fn->name->chars);
+        }
+
         // Load captured variables from env
         for (int ci = 0; ci < fc->capture_count; ci++) {
-            // Skip MCONST_MODVAR captures: read from module var table instead (always live)
-            if (mt->module_consts) {
+            // Skip MCONST_MODVAR captures only for non-scope-env captures:
+            // Per-closure envs have stale snapshots, so module vars read live.
+            // Scope_env captures are live (shared env), so always load from env.
+            bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
+            bool is_self_capture = (gen_self_capture_name[0] &&
+                strcmp(fc->captures[ci].name, gen_self_capture_name) == 0);
+            if (!has_scope_slot && !is_self_capture && mt->module_consts) {
                 JsModuleConstEntry mclookup;
                 snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
@@ -18127,10 +18209,20 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 sm_param_node = sm_param_node ? sm_param_node->next : NULL;
             }
 
+            // Build self-capture name for detecting self-references
+            char async_self_capture_name[128] = {0};
+            if (fn->name && fn->name->chars) {
+                snprintf(async_self_capture_name, sizeof(async_self_capture_name), "_js_%.*s",
+                    (int)fn->name->len, fn->name->chars);
+            }
+
             // Load captured variables from env
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                // Skip MCONST_MODVAR captures: read from module var table instead (always live)
-                if (mt->module_consts) {
+                // Skip MCONST_MODVAR captures only for non-scope-env captures.
+                bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
+                bool is_self_capture = (async_self_capture_name[0] &&
+                    strcmp(fc->captures[ci].name, async_self_capture_name) == 0);
+                if (!has_scope_slot && !is_self_capture && mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
@@ -18615,14 +18707,26 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // For closures: get env register and load captured variables from env slots
     {
         MIR_reg_t env_reg = 0;
+        // Build self-capture name for detecting self-references
+        char self_capture_name[128] = {0};
+        if (fn->name && fn->name->chars) {
+            snprintf(self_capture_name, sizeof(self_capture_name), "_js_%.*s",
+                (int)fn->name->len, fn->name->chars);
+        }
         if (has_captures) {
             env_reg = MIR_reg(mt->ctx, "_js_env", func);
             for (int i = 0; i < fc->capture_count; i++) {
                 // Skip captures that are MCONST_MODVAR (IIFE-promoted vars):
-                // The scope_env may hold a STALE snapshot from when it was allocated.
-                // Module vars are always live in the module var table, so let
-                // identifier resolution fall through to js_get_module_var() instead.
-                if (mt->module_consts) {
+                // For PER-CLOSURE envs (scope_env_slot < 0), the env holds stale
+                // snapshots, so module vars should be read live via js_get_module_var.
+                // For SHARED scope_envs (scope_env_slot >= 0), the env is live
+                // (updated by jm_scope_env_mark_and_writeback on assignment), so
+                // always load from env — the module var table may be stale or wrong
+                // for IIFE-internal function declarations.
+                bool has_scope_slot = (fc->captures[i].scope_env_slot >= 0);
+                bool is_self_capture = (self_capture_name[0] &&
+                    strcmp(fc->captures[i].name, self_capture_name) == 0);
+                if (!has_scope_slot && !is_self_capture && mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[i].name);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
@@ -21255,7 +21359,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     const char* cname = child->captures[k].name;
                     if (!jm_name_set_has(scope_vars, cname)) {
                         jm_name_set_add(scope_vars, cname);
-                        if (slot_count < 64) {
+                        if (slot_count < 128) {
                             snprintf(parent_fc->scope_env_names[slot_count], 128, "%s", cname);
                             slot_count++;
                         }
@@ -21808,6 +21912,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, self_ref_slot * (int)sizeof(uint64_t), env, 0, 1),
                             MIR_new_reg_op(mt->ctx, var_reg)));
+                    }
+
+                    // Persist to module var table so sibling closures that read
+                    // via MCONST_MODVAR see the correct function value
+                    {
+                        JsModuleConstEntry pmlookup;
+                        snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
+                        JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);
+                        if (pmc && pmc->const_type == MCONST_MODVAR) {
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pmc->int_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                        }
                     }
                 }
             }
@@ -22628,6 +22745,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
@@ -22892,6 +23010,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
@@ -23155,6 +23274,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 8, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
@@ -23493,6 +23613,7 @@ extern "C" Item js_builtin_eval(Item code_item) {
         mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 8, 0, 0,
             js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
         mt->scope_depth = 0;
+        mt->var_hoist_depth = -1;
         mt->collect_parent_func_index = -1;
         mt->scope_env_reg = 0;
         mt->scope_env_slot_count = 0;
@@ -23632,6 +23753,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
@@ -23912,6 +24034,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
     mt->scope_depth = 0;
+    mt->var_hoist_depth = -1;
     mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
