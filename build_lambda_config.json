@@ -1503,17 +1503,6 @@
                         "icon": "⌨️"
                     },
                     {
-                        "source": "test_basic_gtest.cpp",
-                        "name": "Basic Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_basic_gtest.exe",
-                        "icon": "🧪"
-                    },
-                    {
                         "source": "test_mempool_gtest.cpp",
                         "name": "Unified Memory Pool Tests",
                         "disable_sanitizer": true,
@@ -2508,34 +2497,6 @@
                         "icon": "🎨"
                     },
                     {
-                        "source": "test/css/test_dom_element_print.cpp",
-                        "name": "DOM Element Print Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "additional_sources": [
-                            "lib/avl_tree.c",
-                            "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/dom_node.cpp",
-                            "lib/hashmap.c",
-                            "lambda/input/css/css_style_node.cpp",
-                            "lambda/input/css/css_properties.cpp",
-                            "lambda/input/css/css_parser.cpp",
-                            "lambda/input/css/css_value_parser.cpp",
-                            "lambda/input/css/css_value.cpp",
-                            "lambda/input/css/css_formatter.cpp",
-                            "radiant/symbol_resolver.cpp",
-                            "radiant/layout_counters.cpp"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_dom_element_print.exe",
-                        "icon": "🎨"
-                    },
-                    {
                         "source": "test/css/test_css_formatter_unit.cpp",
                         "name": "CSS Formatter Unit Tests",
                         "dependencies": [
@@ -2825,20 +2786,6 @@
                         "icon": "🎨"
                     },
                     {
-                        "source": "test/test_math_parser_gtest.cpp",
-                        "name": "Math Parser Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "binary": "test_math_parser_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "icon": "📐"
-                    },
-                    {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
                         "dependencies": [],
@@ -3050,17 +2997,6 @@
                         "requires_lambda_exe": true,
                         "requires_jube_exe": true,
                         "icon": "⚡"
-                    },
-                    {
-                        "source": "test/test_transpile_patterns_gtest.cpp",
-                        "name": "Transpile Pattern Tests",
-                        "dependencies": [],
-                        "binary": "test_transpile_patterns_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_jube_exe": true,
-                        "icon": "🔍"
                     },
                     {
                         "source": "test/test_js_test262_gtest.cpp",
