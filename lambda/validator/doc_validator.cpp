@@ -41,8 +41,35 @@ Transpiler* transpiler_create(Pool* pool) {
 }
 
 void transpiler_destroy(Transpiler* transpiler) {
-    // Placeholder - memory handled by pool
-    (void)transpiler;
+    if (!transpiler) return;
+
+    // free tree-sitter resources (heap-allocated, not pool-managed)
+    if (transpiler->syntax_tree) {
+        ts_tree_delete(transpiler->syntax_tree);
+        transpiler->syntax_tree = nullptr;
+    }
+    if (transpiler->parser) {
+        ts_parser_delete(transpiler->parser);
+        transpiler->parser = nullptr;
+    }
+
+    // free arraylists (heap-allocated via arraylist_new)
+    if (transpiler->type_list) {
+        arraylist_free(transpiler->type_list);
+        transpiler->type_list = nullptr;
+    }
+    if (transpiler->const_list) {
+        arraylist_free(transpiler->const_list);
+        transpiler->const_list = nullptr;
+    }
+
+    // release name pool (frees internal hashmap)
+    if (transpiler->name_pool) {
+        name_pool_release(transpiler->name_pool);
+        transpiler->name_pool = nullptr;
+    }
+
+    // transpiler struct itself is pool-allocated, freed when pool is destroyed
 }
 
 AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
@@ -96,6 +123,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
         for (int i = 0; i < parse_errors->length; i++) {
             err_print((LambdaError*)parse_errors->data[i]);
         }
+        arraylist_free(parse_errors);
         return nullptr;
     }
 
