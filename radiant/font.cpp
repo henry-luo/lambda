@@ -44,6 +44,42 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
     else if (fprop->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
 
+    // Font5 §4.1: If the parent fbox already has a handle with identical font
+    // properties, reuse it directly — skip font_resolve() entirely.
+    FontHandle* parent_handle = fbox->font_handle;
+    if (parent_handle && fprop->family) {
+        const char* ph_family = NULL;
+        float ph_size = 0;
+        FontWeight ph_weight = FONT_WEIGHT_NORMAL;
+        FontSlant ph_slant = FONT_SLANT_NORMAL;
+        if (font_handle_get_style(parent_handle, &ph_family, &ph_size, &ph_weight, &ph_slant)) {
+            if (ph_family && strcmp(ph_family, fprop->family) == 0 &&
+                ph_size == fprop->font_size &&
+                ph_weight == fw &&
+                ph_slant == fs) {
+                // identical font — reuse parent handle
+                font_handle_retain(parent_handle);
+                fbox->font_handle = parent_handle;
+                fprop->font_handle = parent_handle;
+                const FontMetrics* m = font_get_metrics(parent_handle);
+                if (m) {
+                    fprop->space_width = m->space_width;
+                    {
+                        GlyphInfo sp = font_get_glyph(parent_handle, (uint32_t)' ');
+                        if (sp.advance_x > 0.0f) fprop->space_width = sp.advance_x;
+                    }
+                    float _lh_asc, _lh_desc;
+                    font_get_normal_lh_split(parent_handle, &_lh_asc, &_lh_desc);
+                    fprop->ascender    = _lh_asc;
+                    fprop->descender   = _lh_desc;
+                    fprop->font_height = m->hhea_line_height;
+                    fprop->has_kerning = m->has_kerning;
+                }
+                return;
+            }
+        }
+    }
+
     FontStyleDesc style = {};
     style.family  = fprop->family;
     style.size_px = fprop->font_size;

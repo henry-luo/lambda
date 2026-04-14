@@ -36,6 +36,34 @@ static double g_render_draw_glyph_time = 0;
 static int64_t g_render_setup_font_count = 0;
 static double g_render_setup_font_time = 0;
 
+// Extended profiling counters
+static double g_render_bound_time = 0;       // backgrounds + borders + shadows + outline
+static int64_t g_render_bound_count = 0;
+static double g_render_text_total_time = 0;  // full render_text_view time
+static int64_t g_render_text_count = 0;
+static double g_render_image_time = 0;       // render_image_view time
+static int64_t g_render_image_count = 0;
+static double g_render_svg_time = 0;         // render_inline_svg time
+static int64_t g_render_svg_count = 0;
+static double g_render_filter_time = 0;      // CSS filter time
+static int64_t g_render_filter_count = 0;
+static double g_render_clip_time = 0;        // clip mask save/apply time
+static int64_t g_render_clip_count = 0;
+static double g_render_opacity_time = 0;     // opacity blending time
+static int64_t g_render_opacity_count = 0;
+static double g_render_blend_time = 0;       // mix-blend-mode time
+static int64_t g_render_blend_count = 0;
+static int64_t g_render_block_count = 0;     // total render_block_view calls
+static double g_render_inline_time = 0;      // render_inline_view time
+static int64_t g_render_inline_count = 0;
+static int64_t g_render_dispatch_count = 0;  // render_children iterations
+static double g_render_block_self_time = 0;  // render_block_view self-time (excl. children)
+static double g_render_children_time = 0;    // total time in render_children function
+static double g_render_overflow_clip_time = 0; // overflow clip mask save+apply time
+static int64_t g_render_overflow_clip_count = 0;
+static double g_render_font_metrics_time = 0;  // font_get_rendering_ascender time
+static int64_t g_render_font_metrics_count = 0;
+
 void reset_render_stats() {
     g_render_glyph_count = 0;
     g_render_draw_count = 0;
@@ -43,6 +71,32 @@ void reset_render_stats() {
     g_render_draw_glyph_time = 0;
     g_render_setup_font_count = 0;
     g_render_setup_font_time = 0;
+    g_render_bound_time = 0;
+    g_render_bound_count = 0;
+    g_render_text_total_time = 0;
+    g_render_text_count = 0;
+    g_render_image_time = 0;
+    g_render_image_count = 0;
+    g_render_svg_time = 0;
+    g_render_svg_count = 0;
+    g_render_filter_time = 0;
+    g_render_filter_count = 0;
+    g_render_clip_time = 0;
+    g_render_clip_count = 0;
+    g_render_opacity_time = 0;
+    g_render_opacity_count = 0;
+    g_render_blend_time = 0;
+    g_render_blend_count = 0;
+    g_render_block_count = 0;
+    g_render_inline_time = 0;
+    g_render_inline_count = 0;
+    g_render_dispatch_count = 0;
+    g_render_block_self_time = 0;
+    g_render_children_time = 0;
+    g_render_overflow_clip_time = 0;
+    g_render_overflow_clip_count = 0;
+    g_render_font_metrics_time = 0;
+    g_render_font_metrics_count = 0;
 }
 
 void log_render_stats() {
@@ -50,6 +104,30 @@ void log_render_stats() {
         g_render_glyph_count, g_render_load_glyph_time,
         g_render_draw_count, g_render_draw_glyph_time,
         g_render_setup_font_count, g_render_setup_font_time);
+}
+
+// Stderr-based timing output that works with --no-log
+void stderr_render_stats() {
+    fprintf(stderr, "[RENDER_PROF] font: load_glyph=%lld(%.1fms) draw_glyph=%lld(%.1fms) setup_font=%lld(%.1fms)\n",
+        g_render_glyph_count, g_render_load_glyph_time,
+        g_render_draw_count, g_render_draw_glyph_time,
+        g_render_setup_font_count, g_render_setup_font_time);
+    fprintf(stderr, "[RENDER_PROF] bound=%lld(%.1fms) text=%lld(%.1fms) image=%lld(%.1fms) svg=%lld(%.1fms)\n",
+        g_render_bound_count, g_render_bound_time,
+        g_render_text_count, g_render_text_total_time,
+        g_render_image_count, g_render_image_time,
+        g_render_svg_count, g_render_svg_time);
+    fprintf(stderr, "[RENDER_PROF] filter=%lld(%.1fms) clip=%lld(%.1fms) opacity=%lld(%.1fms) blend=%lld(%.1fms)\n",
+        g_render_filter_count, g_render_filter_time,
+        g_render_clip_count, g_render_clip_time,
+        g_render_opacity_count, g_render_opacity_time,
+        g_render_blend_count, g_render_blend_time);
+    fprintf(stderr, "[RENDER_PROF] blocks=%lld(self=%.1fms) inlines=%lld(%.1fms) dispatches=%lld children=%.1fms\n",
+        g_render_block_count, g_render_block_self_time,
+        g_render_inline_count, g_render_inline_time, g_render_dispatch_count, g_render_children_time);
+    fprintf(stderr, "[RENDER_PROF] overflow_clip=%lld(%.1fms) font_metrics=%lld(%.1fms)\n",
+        g_render_overflow_clip_count, g_render_overflow_clip_time,
+        g_render_font_metrics_count, g_render_font_metrics_time);
 }
 
 /**
@@ -194,148 +272,41 @@ static RdtPath* create_per_corner_rounded_rect_path(
     return p;
 }
 
-// ============================================================================
-// Pixel-level clip masking for CSS clip-path and rounded overflow
-// ============================================================================
-
-// Clip mask: saves pixels before element rendering and restores outside clip region after
-struct ClipMask {
-    int x0, y0, w, h;        // pixel bounding rect
-    uint32_t* saved;          // saved pixel data (w * h)
-};
-
-static ClipMask* save_clip_region(ScratchArena* sa, ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
-    if (!surface || !surface->pixels) return nullptr;
-    int x0 = (int)fx0, y0 = (int)fy0;
-    int x1 = (int)(fx0 + fw + 0.5f), y1 = (int)(fy0 + fh + 0.5f);
-    if (x0 < 0) x0 = 0;  if (y0 < 0) y0 = 0;
-    if (x1 > surface->width) x1 = surface->width;
-    if (y1 > surface->height) y1 = surface->height;
-    int w = x1 - x0, h = y1 - y0;
-    if (w <= 0 || h <= 0) return nullptr;
-
-    ClipMask* mask = (ClipMask*)scratch_alloc(sa, sizeof(ClipMask));
-    mask->x0 = x0; mask->y0 = y0; mask->w = w; mask->h = h;
-    mask->saved = (uint32_t*)scratch_alloc(sa, (size_t)w * h * sizeof(uint32_t));
-    for (int row = 0; row < h; row++) {
-        uint32_t* src = (uint32_t*)((uint8_t*)surface->pixels + (y0 + row) * surface->pitch) + x0;
-        memcpy(mask->saved + row * w, src, w * sizeof(uint32_t));
-    }
-    return mask;
-}
-
-// Point-in-polygon test (ray casting algorithm)
-static bool point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
-    bool inside = false;
-    for (int i = 0, j = count - 1; i < count; j = i++) {
-        if (((vy[i] > py) != (vy[j] > py)) &&
-            (px < (vx[j] - vx[i]) * (py - vy[i]) / (vy[j] - vy[i]) + vx[i])) {
-            inside = !inside;
+// Create a ThorVG RdtPath from a ClipShape for use with rdt_push_clip
+static RdtPath* create_clip_shape_path(ClipShape* cs) {
+    if (!cs) return nullptr;
+    RdtPath* p = rdt_path_new();
+    switch (cs->type) {
+        case CLIP_SHAPE_ROUNDED_RECT: {
+            auto& rr = cs->rounded_rect;
+            rdt_path_free(p);
+            return create_per_corner_rounded_rect_path(rr.x, rr.y, rr.w, rr.h,
+                rr.r_tl, rr.r_tr, rr.r_br, rr.r_bl);
         }
-    }
-    return inside;
-}
-
-// Point-in-rounded-rect test
-static bool point_in_rounded_rect(float px, float py,
-    float rx, float ry, float rw, float rh,
-    float r_tl, float r_tr, float r_br, float r_bl) {
-    // outside bounding rect?
-    if (px < rx || px > rx + rw || py < ry || py > ry + rh) return false;
-    // check each corner
-    // top-left corner
-    if (px < rx + r_tl && py < ry + r_tl) {
-        float dx = px - (rx + r_tl), dy = py - (ry + r_tl);
-        if (dx * dx + dy * dy > r_tl * r_tl) return false;
-    }
-    // top-right corner
-    if (px > rx + rw - r_tr && py < ry + r_tr) {
-        float dx = px - (rx + rw - r_tr), dy = py - (ry + r_tr);
-        if (dx * dx + dy * dy > r_tr * r_tr) return false;
-    }
-    // bottom-right corner
-    if (px > rx + rw - r_br && py > ry + rh - r_br) {
-        float dx = px - (rx + rw - r_br), dy = py - (ry + rh - r_br);
-        if (dx * dx + dy * dy > r_br * r_br) return false;
-    }
-    // bottom-left corner
-    if (px < rx + r_bl && py > ry + rh - r_bl) {
-        float dx = px - (rx + r_bl), dy = py - (ry + rh - r_bl);
-        if (dx * dx + dy * dy > r_bl * r_bl) return false;
-    }
-    return true;
-}
-
-// Clip shape types
-enum ClipShapeType {
-    CLIP_SHAPE_NONE = 0,
-    CLIP_SHAPE_POLYGON,
-    CLIP_SHAPE_CIRCLE,
-    CLIP_SHAPE_ELLIPSE,
-    CLIP_SHAPE_INSET,
-    CLIP_SHAPE_ROUNDED_RECT
-};
-
-struct ClipShape {
-    ClipShapeType type;
-    union {
-        struct { float* vx; float* vy; int count; } polygon;
-        struct { float cx, cy, r; } circle;
-        struct { float cx, cy, rx, ry; } ellipse;
-        struct { float x, y, w, h, rx, ry; } inset;
-        struct { float x, y, w, h, r_tl, r_tr, r_br, r_bl; } rounded_rect;
-    };
-};
-
-// Apply clip mask: restore saved pixels where point is outside clip shape
-static void apply_clip_mask(ImageSurface* surface, ClipMask* mask, ClipShape* shape) {
-    if (!mask || !shape || !surface || !surface->pixels) return;
-    for (int row = 0; row < mask->h; row++) {
-        uint32_t* dst = (uint32_t*)((uint8_t*)surface->pixels + (mask->y0 + row) * surface->pitch) + mask->x0;
-        uint32_t* saved = mask->saved + row * mask->w;
-        float py = (float)(mask->y0 + row) + 0.5f;  // pixel center
-        for (int col = 0; col < mask->w; col++) {
-            float px = (float)(mask->x0 + col) + 0.5f;
-            bool inside = false;
-            switch (shape->type) {
-                case CLIP_SHAPE_POLYGON:
-                    inside = point_in_polygon(px, py, shape->polygon.vx, shape->polygon.vy, shape->polygon.count);
-                    break;
-                case CLIP_SHAPE_CIRCLE: {
-                    float dx = px - shape->circle.cx, dy = py - shape->circle.cy;
-                    inside = (dx * dx + dy * dy <= shape->circle.r * shape->circle.r);
-                    break;
+        case CLIP_SHAPE_CIRCLE:
+            rdt_path_add_circle(p, cs->circle.cx, cs->circle.cy, cs->circle.r, cs->circle.r);
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            rdt_path_add_circle(p, cs->ellipse.cx, cs->ellipse.cy, cs->ellipse.rx, cs->ellipse.ry);
+            break;
+        case CLIP_SHAPE_INSET:
+            rdt_path_add_rect(p, cs->inset.x, cs->inset.y, cs->inset.w, cs->inset.h, 0, 0);
+            break;
+        case CLIP_SHAPE_POLYGON:
+            if (cs->polygon.count >= 3) {
+                rdt_path_move_to(p, cs->polygon.vx[0], cs->polygon.vy[0]);
+                for (int i = 1; i < cs->polygon.count; i++) {
+                    rdt_path_line_to(p, cs->polygon.vx[i], cs->polygon.vy[i]);
                 }
-                case CLIP_SHAPE_ELLIPSE: {
-                    float dx = (px - shape->ellipse.cx) / shape->ellipse.rx;
-                    float dy = (py - shape->ellipse.cy) / shape->ellipse.ry;
-                    inside = (dx * dx + dy * dy <= 1.0f);
-                    break;
-                }
-                case CLIP_SHAPE_INSET:
-                    inside = (px >= shape->inset.x && px <= shape->inset.x + shape->inset.w &&
-                              py >= shape->inset.y && py <= shape->inset.y + shape->inset.h);
-                    break;
-                case CLIP_SHAPE_ROUNDED_RECT:
-                    inside = point_in_rounded_rect(px, py,
-                        shape->rounded_rect.x, shape->rounded_rect.y,
-                        shape->rounded_rect.w, shape->rounded_rect.h,
-                        shape->rounded_rect.r_tl, shape->rounded_rect.r_tr,
-                        shape->rounded_rect.r_br, shape->rounded_rect.r_bl);
-                    break;
-                default: inside = true; break;
+                rdt_path_close(p);
             }
-            if (!inside) {
-                dst[col] = saved[col];  // restore original pixel
-            }
-        }
+            break;
+        default: break;
     }
+    return p;
 }
 
-static void free_clip_mask(ScratchArena* sa, ClipMask* mask) {
-    if (mask) { scratch_free(sa, mask->saved); scratch_free(sa, mask); }
-}
-
+// Free a scratch-allocated ClipShape
 static void free_clip_shape(ScratchArena* sa, ClipShape* shape) {
     if (shape) {
         if (shape->type == CLIP_SHAPE_POLYGON) {
@@ -489,10 +460,23 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     int bottom = min(rdcon->block.clip.bottom, y + target_h);
     if (left >= right || top >= bottom) return; // glyph outside the surface
 
+    // Check if per-row clip shape clipping is needed
+    bool need_shape_clip = (rdcon->clip_shape_depth > 0) &&
+        !clip_shapes_rect_inside(rdcon->clip_shapes, rdcon->clip_shape_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1));
+
     ImageSurface* surface = rdcon->ui_context->surface;
     float inv_scale = 1.0f / bscale; // map target pixels back to source pixels
 
     for (int dy = top - y; dy < bottom - y; dy++) {
+        int row_left = left, row_right = right;
+        if (need_shape_clip) {
+            float py = (float)(y + dy) + 0.5f;
+            clip_shapes_scanline_bounds(rdcon->clip_shapes, rdcon->clip_shape_depth,
+                py, left, right, &row_left, &row_right);
+            if (row_left >= row_right) continue;
+        }
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy) * surface->pitch;
         // map target row to source row with bilinear interpolation
         float src_y = dy * inv_scale;
@@ -502,7 +486,7 @@ void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
         if (sy0 >= (int)bitmap->height) sy0 = bitmap->height - 1;
         if (sy1 >= (int)bitmap->height) sy1 = bitmap->height - 1;
 
-        for (int dx = left - x; dx < right - x; dx++) {
+        for (int dx = row_left - x; dx < row_right - x; dx++) {
             if (x + dx < 0 || x + dx >= surface->width) continue;
 
             float src_x = dx * inv_scale;
@@ -568,12 +552,29 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
         x, y, bitmap->width, bitmap->height, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c, bitmap->pixel_mode);
     ImageSurface* surface = rdcon->ui_context->surface;
 
+    // Check if per-row clip shape clipping is needed
+    bool need_shape_clip = (rdcon->clip_shape_depth > 0) &&
+        !clip_shapes_rect_inside(rdcon->clip_shapes, rdcon->clip_shape_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1));
+
     // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
     bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
 
     for (int i = top - y; i < bottom - y; i++) {
+        int j_start = left - x;
+        int j_end = right - x;
+        if (need_shape_clip) {
+            float py = (float)(y + i) + 0.5f;
+            int rl = left, rr = right;
+            clip_shapes_scanline_bounds(rdcon->clip_shapes, rdcon->clip_shape_depth,
+                py, left, right, &rl, &rr);
+            if (rl >= rr) continue;
+            j_start = rl - x;
+            j_end = rr - x;
+        }
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
-        for (int j = left - x; j < right - x; j++) {
+        for (int j = j_start; j < j_end; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
 
             uint32_t intensity;
@@ -930,7 +931,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 rdt_fill_path(&rdcon->vec, p, *bg_color, RDT_FILL_WINDING, NULL);
                 rdt_path_free(p);
             } else {
-                fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+                fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         }
 
@@ -1068,7 +1069,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         continue;
                     }
 
-                    float s_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                    float s_ascend;
+                    {
+                        auto tfm1 = std::chrono::high_resolution_clock::now();
+                        s_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                        auto tfm2 = std::chrono::high_resolution_clock::now();
+                        g_render_font_metrics_time += std::chrono::duration<double, std::milli>(tfm2 - tfm1).count();
+                        g_render_font_metrics_count++;
+                    }
                     Color saved_color = rdcon->color;
                     TextShadow* ts = text_shadow;
                     while (ts) {
@@ -1122,7 +1130,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // Draw selection background for selected space
                     if (is_selected) {
                         Rect sel_rect = {x, y, space_width, text_rect->height * s};
-                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
+                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                     }
 
                     // Render space by advancing x position
@@ -1195,7 +1203,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     const FontMetrics* _m = font_get_metrics(rdcon->font.font_handle);
                     float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->scale / 1.2f) : 16.0f);
                     Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
-                    fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
+                    fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                     x += scaled_space_width;
                 }
                 else {
@@ -1206,10 +1214,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // fprop->ascender (= init_ascender, which INCLUDES half-leading) for CSS vertical-
                     // align math, but text_rect.y already incorporates lead_y so the absolute baseline
                     // y = text_rect.y + rendering_ascender == init_ascender + lead_y  is correct.
-                    float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
-
-
-                    // Debug: log per-character advance for first 15 chars when selection active
+                    float ascend;
+                    {
+                        auto tfm1 = std::chrono::high_resolution_clock::now();
+                        ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                        auto tfm2 = std::chrono::high_resolution_clock::now();
+                        g_render_font_metrics_time += std::chrono::duration<double, std::milli>(tfm2 - tfm1).count();
+                        g_render_font_metrics_count++;
+                    }
                     if (has_selection && char_index <= 15) {
                         log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f",
                             char_index, codepoint, (codepoint >= 32 && codepoint < 127) ? (char)codepoint : '?',
@@ -1220,7 +1232,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     if (is_selected) {
                         float glyph_width = glyph->advance_x;
                         Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
-                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
+                        fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                     }
 
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
@@ -1331,7 +1343,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     while (dx < rect.x + rect.width) {
                         float seg_w = fminf(dash_len, rect.x + rect.width - dx);
                         Rect seg = {dx, rect.y, seg_w, thickness};
-                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip);
+                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         dx += dash_len + gap_len;
                     }
                 } else if (deco_style == CSS_VALUE_DOTTED) {
@@ -1340,16 +1352,16 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     while (dx < rect.x + rect.width) {
                         float seg_w = fminf(thickness, rect.x + rect.width - dx);
                         Rect seg = {dx, rect.y, seg_w, thickness};
-                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip);
+                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         dx += thickness * 2.0f;
                     }
                 } else if (deco_style == CSS_VALUE_DOUBLE) {
                     // Double line: two lines at 1/3 thickness with 1/3 gap
                     float line_t = fmaxf(1.0f, thickness / 3.0f);
                     Rect top_line = {rect.x, rect.y, rect.width, line_t};
-                    fill_surface_rect(rdcon->ui_context->surface, &top_line, deco_color.c, &rdcon->block.clip);
+                    fill_surface_rect(rdcon->ui_context->surface, &top_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                     Rect bot_line = {rect.x, rect.y + thickness - line_t, rect.width, line_t};
-                    fill_surface_rect(rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip);
+                    fill_surface_rect(rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                 } else if (deco_style == CSS_VALUE_WAVY) {
                     // Wavy line using RdtVector path
                     float wave_amp = thickness * 1.5f;
@@ -1375,7 +1387,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     rdt_path_free(p);
                 } else {
                     // Solid (default)
-                    fill_surface_rect(rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip);
+                    fill_surface_rect(rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                 }
             }
         }
@@ -1711,7 +1723,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.width = rect.height = 5 * ratio;
-        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
     else if (rdcon->list.list_style_type == CSS_VALUE_DECIMAL) {
         log_debug("render list decimal");
@@ -1919,24 +1931,24 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
                 Rect border_rect = rect;
                 border_rect.width = resolved_left->width * s;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_left->color.c, &rdcon->block.clip);
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_left->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_right && resolved_right->style != CSS_VALUE_NONE && resolved_right->color.a) {
                 Rect border_rect = rect;
                 border_rect.x = rect.x + rect.width - resolved_right->width * s;
                 border_rect.width = resolved_right->width * s;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_right->color.c, &rdcon->block.clip);
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_right->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_top && resolved_top->style != CSS_VALUE_NONE && resolved_top->color.a) {
                 Rect border_rect = rect;
                 border_rect.height = resolved_top->width * s;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_top->color.c, &rdcon->block.clip);
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_top->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_bottom && resolved_bottom->style != CSS_VALUE_NONE && resolved_bottom->color.a) {
                 Rect border_rect = rect;
                 border_rect.y = rect.y + rect.height - resolved_bottom->width * s;
                 border_rect.height = resolved_bottom->width * s;
-                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip);
+                fill_surface_rect(rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         } else {
             // Use new comprehensive border rendering
@@ -2034,6 +2046,9 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
+    auto rbv_start = std::chrono::high_resolution_clock::now();
+    double children_time = 0; // will accumulate time in child render calls
+    g_render_block_count++;
     // Phase 18: Early exit if block is entirely outside all dirty regions
     if (rdcon->dirty_tracker && !rdcon->dirty_tracker->full_repaint && rdcon->dirty_tracker->dirty_list) {
         float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
@@ -2130,8 +2145,8 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
     }
     // Push CSS clip-path if specified on this element (clips backgrounds, borders, content, children)
-    ClipMask* css_clip_mask = nullptr;
     ClipShape* css_clip_shape = nullptr;
+    bool has_css_clip = false;
     {
         CssDeclaration* clip_decl = dom_element_get_specified_value((DomElement*)block, CSS_PROPERTY_CLIP_PATH);
         if (clip_decl && clip_decl->value_text && clip_decl->value_text_len > 0) {
@@ -2144,7 +2159,17 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 float abs_y = pa_block.y + block->y * s;
                 css_clip_shape = parse_css_clip_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
                 if (css_clip_shape) {
-                    css_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
+                    // Push ThorVG clip path for vector operations
+                    RdtPath* clip_path = create_clip_shape_path(css_clip_shape);
+                    if (clip_path) {
+                        rdt_push_clip(&rdcon->vec, clip_path, nullptr);
+                        rdt_path_free(clip_path);
+                    }
+                    // Push clip shape for direct-pixel operations
+                    if (rdcon->clip_shape_depth < RDT_MAX_CLIP_SHAPES) {
+                        rdcon->clip_shapes[rdcon->clip_shape_depth++] = css_clip_shape;
+                    }
+                    has_css_clip = true;
                     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
                 }
             }
@@ -2203,7 +2228,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
 
         if (!skip_bound) {
+            auto tb1 = std::chrono::high_resolution_clock::now();
             render_bound(rdcon, block);
+            auto tb2 = std::chrono::high_resolution_clock::now();
+            g_render_bound_time += std::chrono::duration<double, std::milli>(tb2 - tb1).count();
+            g_render_bound_count++;
         }
     }
 
@@ -2225,6 +2254,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     }
 
     View* view = block->first_child;
+    auto rc_start = std::chrono::high_resolution_clock::now();
     if (view) {
         if (block->in_line && block->in_line->color.c) {
             log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
@@ -2243,22 +2273,31 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             setup_scroller(rdcon, block);
         }
 
-        // Save pixels for rounded overflow clip (pixel masking for border-radius clipping)
-        ClipMask* overflow_clip_mask = nullptr;
-        ClipShape* overflow_clip_shape = nullptr;
+        // Vector clip for overflow with border-radius
+        ClipShape overflow_cs = {};
+        bool has_overflow_clip = false;
         if (rdcon->block.has_clip_radius) {
             Bound* clip = &rdcon->block.clip;
             Corner* cr = &rdcon->block.clip_radius;
             float cw = clip->right - clip->left;
             float ch = clip->bottom - clip->top;
             if (cw > 0 && ch > 0) {
-                overflow_clip_mask = save_clip_region(&rdcon->scratch, rdcon->ui_context->surface,
-                    clip->left, clip->top, cw, ch);
-                overflow_clip_shape = (ClipShape*)scratch_calloc(&rdcon->scratch, sizeof(ClipShape));
-                overflow_clip_shape->type = CLIP_SHAPE_ROUNDED_RECT;
-                overflow_clip_shape->rounded_rect = {clip->left, clip->top, cw, ch,
+                // Push ThorVG clip path for vector operations
+                RdtPath* clip_path = create_per_corner_rounded_rect_path(
+                    clip->left, clip->top, cw, ch,
+                    cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
+                rdt_push_clip(&rdcon->vec, clip_path, nullptr);
+                rdt_path_free(clip_path);
+
+                // Push clip shape for direct-pixel operations
+                overflow_cs.type = CLIP_SHAPE_ROUNDED_RECT;
+                overflow_cs.rounded_rect = {clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
-                log_debug("[CLIP] saved overflow clip region for rounded mask: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
+                if (rdcon->clip_shape_depth < RDT_MAX_CLIP_SHAPES) {
+                    rdcon->clip_shapes[rdcon->clip_shape_depth++] = &overflow_cs;
+                }
+                has_overflow_clip = true;
+                log_debug("[CLIP] pushed overflow vector clip: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
                     clip->left, clip->top, cw, ch,
                     cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
             }
@@ -2298,16 +2337,21 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             }
         }
 
-        // Apply rounded overflow clip mask
-        if (overflow_clip_mask && overflow_clip_shape) {
-            apply_clip_mask(rdcon->ui_context->surface, overflow_clip_mask, overflow_clip_shape);
-            free_clip_mask(&rdcon->scratch, overflow_clip_mask);
-            free_clip_shape(&rdcon->scratch, overflow_clip_shape);
+        // Pop overflow vector clip
+        if (has_overflow_clip) {
+            auto toc1 = std::chrono::high_resolution_clock::now();
+            rdt_pop_clip(&rdcon->vec);
+            if (rdcon->clip_shape_depth > 0) rdcon->clip_shape_depth--;
+            auto toc2 = std::chrono::high_resolution_clock::now();
+            g_render_overflow_clip_time += std::chrono::duration<double, std::milli>(toc2 - toc1).count();
+            g_render_overflow_clip_count++;
         }
     }
     else {
         log_debug("view has no child");
     }
+    auto rc_end = std::chrono::high_resolution_clock::now();
+    children_time = std::chrono::duration<double, std::milli>(rc_end - rc_start).count();
 
     // render scrollbars
     if (block->scroller) {
@@ -2322,6 +2366,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // Apply CSS filters after all content is rendered
     // Filters are applied to the rendered pixel data in the element's region
     if (block->filter && block->filter->functions) {
+        auto tf1 = std::chrono::high_resolution_clock::now();
 
         // Calculate the element's bounding rect
         Rect filter_rect;
@@ -2335,10 +2380,15 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
         // Apply the filter chain to the rendered pixels
         apply_css_filters(&rdcon->scratch, rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+
+        auto tf2 = std::chrono::high_resolution_clock::now();
+        g_render_filter_time += std::chrono::duration<double, std::milli>(tf2 - tf1).count();
+        g_render_filter_count++;
     }
 
     // Apply CSS opacity: multiply alpha of all pixels in the element's region
     if (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f) {
+        auto to1 = std::chrono::high_resolution_clock::now();
 
         float opacity = block->in_line->opacity;
         float s = rdcon->scale;
@@ -2365,10 +2415,16 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
                       opacity, block->node_name(), x0, y0, x1, y1);
         }
+
+        auto to2 = std::chrono::high_resolution_clock::now();
+        g_render_opacity_time += std::chrono::duration<double, std::milli>(to2 - to1).count();
+        g_render_opacity_count++;
     }
 
     // Apply mix-blend-mode: composite rendered element onto saved backdrop
     if (mix_blend_backdrop && mbw > 0 && mbh > 0) {
+        auto tm1 = std::chrono::high_resolution_clock::now();
+
         ImageSurface* surface = rdcon->ui_context->surface;
         uint32_t* px = (uint32_t*)surface->pixels;
         int pitch = surface->pitch / 4;
@@ -2382,13 +2438,21 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
         scratch_free(&rdcon->scratch, mix_blend_backdrop);
         log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
+
+        auto tm2 = std::chrono::high_resolution_clock::now();
+        g_render_blend_time += std::chrono::duration<double, std::milli>(tm2 - tm1).count();
+        g_render_blend_count++;
     }
 
-    // Apply CSS clip-path mask (pixel-level masking)
-    if (css_clip_mask && css_clip_shape) {
-        apply_clip_mask(rdcon->ui_context->surface, css_clip_mask, css_clip_shape);
-        free_clip_mask(&rdcon->scratch, css_clip_mask);
+    // Pop CSS clip-path
+    if (has_css_clip) {
+        auto tc1 = std::chrono::high_resolution_clock::now();
+        rdt_pop_clip(&rdcon->vec);
+        if (rdcon->clip_shape_depth > 0) rdcon->clip_shape_depth--;
         free_clip_shape(&rdcon->scratch, css_clip_shape);
+        auto tc2 = std::chrono::high_resolution_clock::now();
+        g_render_clip_time += std::chrono::duration<double, std::milli>(tc2 - tc1).count();
+        g_render_clip_count++;
     }
 
     // Restore transform state
@@ -2397,6 +2461,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
     log_leave();
+
+    auto rbv_end = std::chrono::high_resolution_clock::now();
+    double this_total = std::chrono::duration<double, std::milli>(rbv_end - rbv_start).count();
+    // Self-time = total minus children traversal time
+    g_render_block_self_time += (this_total - children_time);
 }
 
 void render_svg(ImageSurface* surface) {
@@ -2504,14 +2573,15 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         }
     } else {
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
+        blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
+            rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     // Render blue selection overlay if image is within a cross-view selection
     if (rdcon->selection && is_view_in_selection(rdcon->selection, (View*)view)) {
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
-        fill_surface_rect(rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
         log_debug("[IMAGE SELECTION] Rendered blue overlay on image at (%.0f,%.0f) size %.0fx%.0f",
                   rect.x, rect.y, rect.width, rect.height);
     }
@@ -2614,6 +2684,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
+    g_render_inline_count++;
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
 
@@ -2656,7 +2727,9 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 }
 
 void render_children(RenderContext* rdcon, View* view) {
+    auto trc_start = std::chrono::high_resolution_clock::now();
     do {
+        g_render_dispatch_count++;
         if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
             view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
             view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
@@ -2676,12 +2749,19 @@ void render_children(RenderContext* rdcon, View* view) {
             else if (block->tag_id == HTM_TAG_SVG) {
                 // Inline SVG element - render via ThorVG
                 log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
-                // Skip render_block_view to avoid painting background behind SVG
-                render_inline_svg(rdcon, block);  // render SVG content with transparent background
+                auto ts1 = std::chrono::high_resolution_clock::now();
+                render_inline_svg(rdcon, block);
+                auto ts2 = std::chrono::high_resolution_clock::now();
+                g_render_svg_time += std::chrono::duration<double, std::milli>(ts2 - ts1).count();
+                g_render_svg_count++;
             }
             else if (block->embed && block->embed->img) {
                 log_debug("[RENDER DISPATCH] calling render_image_view");
+                auto ti1 = std::chrono::high_resolution_clock::now();
                 render_image_view(rdcon, block);
+                auto ti2 = std::chrono::high_resolution_clock::now();
+                g_render_image_time += std::chrono::duration<double, std::milli>(ti2 - ti1).count();
+                g_render_image_count++;
             }
             else if (block->embed && block->embed->doc) {
                 render_embed_doc(rdcon, block);
@@ -2706,11 +2786,18 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
+            auto tiv1 = std::chrono::high_resolution_clock::now();
             render_inline_view(rdcon, span);
+            auto tiv2 = std::chrono::high_resolution_clock::now();
+            g_render_inline_time += std::chrono::duration<double, std::milli>(tiv2 - tiv1).count();
         }
         else if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
+            auto tt1 = std::chrono::high_resolution_clock::now();
             render_text_view(rdcon, text);
+            auto tt2 = std::chrono::high_resolution_clock::now();
+            g_render_text_total_time += std::chrono::duration<double, std::milli>(tt2 - tt1).count();
+            g_render_text_count++;
         }
         else if (view->view_type == RDT_VIEW_MARKER) {
             // List marker (bullet/number) with fixed width and vector graphics
@@ -2722,6 +2809,8 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         view = view->next();
     } while (view);
+    auto trc_end = std::chrono::high_resolution_clock::now();
+    g_render_children_time += std::chrono::duration<double, std::milli>(trc_end - trc_start).count();
 }
 
 // ============================================================================
@@ -3167,6 +3256,12 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     auto t_render = high_resolution_clock::now();
     log_info("[TIMING] render_block_view: %.1fms", duration<double, std::milli>(t_render - t_init).count());
     log_render_stats();  // log detailed render statistics
+
+    // Stderr-based profiling output (works with --no-log)
+    double render_ms = duration<double, std::milli>(t_render - t_init).count();
+    fprintf(stderr, "[RENDER_PROF] render_block_view: %.1fms  surface: %dx%d\n",
+        render_ms, uicon->surface->width, uicon->surface->height);
+    stderr_render_stats();
 
     // Render UI overlays (focus outline, caret, selection) on top of content
     if (uicon->document && uicon->document->state) {

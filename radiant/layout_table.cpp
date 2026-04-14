@@ -381,6 +381,34 @@ static bool is_visibility_collapse(ViewBlock* element) {
     return false;
 }
 
+// CSS 2.1 §10.6.3: Find the maximum bottom extent of any float descendants
+// relative to a given ancestor. Table cells are BFCs, so their content height
+// must include floats for vertical-align calculations.
+static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
+    float max_y = 0;
+    for (View* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->view_type) continue;
+        if (child->view_type == RDT_VIEW_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM) {
+            ViewBlock* block = (ViewBlock*)child;
+            float abs_y = y_offset + child->y;
+            // check if this child is a float
+            if (block->position &&
+                (block->position->float_prop == CSS_VALUE_LEFT ||
+                 block->position->float_prop == CSS_VALUE_RIGHT)) {
+                float bottom = abs_y + child->height;
+                if (bottom > max_y) max_y = bottom;
+            }
+            // recurse into block children to find nested floats
+            if (block->is_element()) {
+                float nested = find_descendant_float_max_y((ViewElement*)block, abs_y);
+                if (nested > max_y) max_y = nested;
+            }
+        }
+    }
+    return max_y;
+}
+
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     bool has_block_content = false;
@@ -530,6 +558,20 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
               inline_content_min_y, inline_content_max_y,
               has_block_content ? (block_content_max_y - block_content_min_y) : 0.0f,
               block_content_min_y, block_content_max_y, content_height);
+
+    // CSS 2.1 §10.6.3: BFC height includes float descendants.
+    // Table cells are BFCs, so recursively find any float descendants whose
+    // bottom edge extends beyond the measured direct-child content extent.
+    float float_max_y = find_descendant_float_max_y((ViewElement*)tcell, 0);
+    if (float_max_y > 0) {
+        if (!has_any || float_max_y > overall_max_y) {
+            overall_max_y = float_max_y;
+            has_any = true;
+        }
+        content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
+        log_debug("%s measure_cell_content: float_max_y=%.1f, adjusted content_height=%.1f", tcell->source_loc(),
+                  float_max_y, content_height);
+    }
 
     // Return measured content height (no artificial minimum)
     return content_height;

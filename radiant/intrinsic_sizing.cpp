@@ -1116,7 +1116,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // min-content of the element's content, NOT the specified CSS width.
     // CSS Tables §4.1: Table content-box inline size is never smaller than its minimum
     // content inline size, so tables skip the explicit width shortcut and measure content.
-    if (element->specified_style && !content_only && !is_table_display) {
+    // CSS 2.1 §10.3.1: 'width' does not apply to non-replaced inline elements.
+    // Use resolve_display_value() to get the computed display with blockification
+    // (CSS 2.1 §9.7: floated/abspos elements are blockified and DO get width).
+    bool is_inline_non_replaced = false;
+    {
+        DisplayValue resolved_display = resolve_display_value((void*)element);
+        if (resolved_display.outer == CSS_VALUE_INLINE && resolved_display.inner == CSS_VALUE_FLOW) {
+            is_inline_non_replaced = true;
+        }
+    }
+    if (element->specified_style && !content_only && !is_table_display && !is_inline_non_replaced) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&

@@ -5998,9 +5998,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (display.outer == CSS_VALUE_INLINE_BLOCK && !is_float_element) {
             if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
 
-            // Update effective line bounds for floats at current Y position
-            // This is critical for inline-blocks to wrap around floats correctly
-            update_line_for_bfc_floats(lycon);
+            // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
+            // full height, not just the line-height.  A float whose top is below
+            // the current line but within the inline-block's height must still
+            // reduce the available width.
+            float inline_block_height = block->height;
+            update_line_for_bfc_floats(lycon, inline_block_height);
 
             // Check available width considering floats
             float effective_left = lycon->line.has_float_intrusion ?
@@ -6039,7 +6042,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
                     line_break(lycon);
                     // After line break, update effective bounds for new Y
-                    update_line_for_bfc_floats(lycon);
+                    update_line_for_bfc_floats(lycon, inline_block_height);
                     effective_left = lycon->line.has_float_intrusion ?
                         lycon->line.effective_left : lycon->line.left;
                     block->x = effective_left;
@@ -6049,12 +6052,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     BlockContext* bfc = block_context_find_bfc(&lycon->block);
                     if (bfc) {
                         float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
-                        float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y);
+                        float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y, inline_block_height);
                         float local_new_y = new_y - lycon->block.bfc_offset_y;
                         if (local_new_y > lycon->block.advance_y) {
                             lycon->block.advance_y = local_new_y;
                             line_reset(lycon);
-                            update_line_for_bfc_floats(lycon);
+                            update_line_for_bfc_floats(lycon, inline_block_height);
                         }
                         effective_left = lycon->line.has_float_intrusion ?
                             lycon->line.effective_left : lycon->line.left;

@@ -249,6 +249,17 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->data_zone) gc_data_zone_destroy(gc->data_zone);
     if (gc->tenured_data) gc_data_zone_destroy(gc->tenured_data);
 
+    // free remaining large objects (allocated with malloc, not pool)
+    gc_header_t* obj = gc->all_objects;
+    while (obj) {
+        gc_header_t* next = obj->next;
+        if (obj->gc_flags & GC_FLAG_LARGE) {
+            free(obj);
+        }
+        obj = next;
+    }
+    gc->all_objects = NULL;
+
     // pool_destroy bulk-frees all pool-allocated memory
     if (gc->pool) pool_destroy(gc->pool);
 
@@ -275,17 +286,19 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
         return ptr;
     }
 
-    // large object: fall back to direct pool allocation with GCHeader
+    // large object: use malloc to avoid address conflicts with pool allocations
+    // (the pool may be shared with other subsystems that allocate map data buffers)
     size_t total = sizeof(gc_header_t) + size;
-    gc_header_t* header = (gc_header_t*)pool_alloc(gc->pool, total);
+    gc_header_t* header = (gc_header_t*)malloc(total);
     if (!header) {
-        log_error("gc_heap_alloc: pool_alloc failed for %zu bytes (large object)", total);
+        log_error("gc_heap_alloc: malloc failed for %zu bytes (large object)", total);
         return NULL;
     }
+    memset(header, 0, total);
     // initialize header
     header->next = gc->all_objects;
     header->type_tag = type_tag;
-    header->gc_flags = 0;
+    header->gc_flags = GC_FLAG_LARGE;
     header->marked = 0;
     header->alloc_size = (uint32_t)size;
 
@@ -299,15 +312,8 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 
 void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     void* ptr = gc_heap_alloc(gc, size, type_tag);
-    if (ptr) {
-        // Object zone allocations (size <= GC_LARGE_OBJECT_THRESHOLD = 256) already
-        // return zeroed memory from either fresh slab slots (zeroed at slab creation)
-        // or free-list pop (memset in gc_object_zone_alloc). Only large objects
-        // allocated via pool_alloc need explicit zeroing.
-        if (size > GC_LARGE_OBJECT_THRESHOLD) {
-            memset(ptr, 0, size);
-        }
-    }
+    // gc_heap_alloc already zeroes large objects (malloc + memset)
+    // and object zone allocates from zeroed slabs, so no additional zeroing needed
     return ptr;
 }
 
@@ -1052,6 +1058,8 @@ static void gc_sweep(gc_heap_t* gc) {
             // return to object zone free list for reuse
             if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
                 gc_object_zone_free(gc->object_zone, current);
+            } else if (current->gc_flags & GC_FLAG_LARGE) {
+                free(current);
             }
             current = next_obj;
             continue;
@@ -1075,8 +1083,11 @@ static void gc_sweep(gc_heap_t* gc) {
             // return to object zone free list
             if (gc_object_zone_owns(gc->object_zone, (void*)(current + 1))) {
                 gc_object_zone_free(gc->object_zone, current);
+            } else if (current->gc_flags & GC_FLAG_LARGE) {
+                // large objects allocated with malloc — free directly
+                free(current);
             }
-            // large objects: memory stays in pool until pool_destroy
+            // pool-allocated objects (bump blocks): freed in bulk on pool_destroy
         }
 
         current = next_obj;

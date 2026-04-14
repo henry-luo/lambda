@@ -370,8 +370,10 @@ typedef struct ImageSurface {
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
-extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip);
-extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode);
+extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
+                              struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
+extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
+                                struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
 extern bool can_break(char c);
 extern bool is_space(char c);
