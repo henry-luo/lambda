@@ -5010,6 +5010,20 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
         pc > 3 ? ",..." : "");
 }
 
+// check if a + expression chain contains a string literal operand
+static bool jm_add_chain_has_string(JsAstNode* expr) {
+    if (!expr) return false;
+    if (expr->node_type == JS_AST_NODE_LITERAL)
+        return ((JsLiteralNode*)expr)->literal_type == JS_LITERAL_STRING;
+    if (expr->node_type == JS_AST_NODE_TEMPLATE_LITERAL) return true;
+    if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        if (bin->op == JS_OP_ADD)
+            return jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right);
+    }
+    return false;
+}
+
 // Infer return type by collecting types from all return statements.
 // For recursive calls to self, assume result type matches the base-case return type.
 static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
@@ -5049,7 +5063,14 @@ static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
             case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
             case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
                 t = LMD_TYPE_BOOL; break;
-            case JS_OP_ADD: case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
+            case JS_OP_ADD:
+                // + is string concat when any operand is a string
+                if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
+                    t = LMD_TYPE_STRING;
+                else
+                    t = LMD_TYPE_INT;
+                break;
+            case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
                 t = LMD_TYPE_INT; break; // approximate — may be float
             case JS_OP_DIV: case JS_OP_EXP:
                 t = LMD_TYPE_FLOAT; break;
@@ -21573,6 +21594,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         for (int i = 0; i < mt->func_count; i++) {
             JsFuncCollected* fc = &mt->func_entries[i];
             if (fc->node && (fc->node->is_generator || fc->node->is_async)) continue;
+            if (fc->has_scope_env) continue; // params may be captured by child closures — don't narrow
             bool narrowed = false;
             for (int p = 0; p < fc->param_count && p < 16; p++) {
                 if (fc->param_types[p] != LMD_TYPE_ANY) continue;
