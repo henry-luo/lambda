@@ -2568,6 +2568,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     {
         js_pending_new_target = ItemNull;
         js_has_pending_new_target = false;
+        TypeId ct = get_type_id(callee);
+        void* ret_addr = __builtin_return_address(0);
+        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx)", (int)ct, argc, ret_addr, (unsigned long long)callee.item);
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
         js_throw_value(js_new_error_with_name(tn, msg));
@@ -5430,6 +5433,10 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             return js_encodeURIComponent(a0);
         if (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0)
             return js_decodeURIComponent(a0);
+        if (nl == 5 && strncmp(n, "print", 5) == 0) {
+            js_console_log(a0);
+            return make_js_undefined();
+        }
         return ItemNull;
     }
 
@@ -5489,6 +5496,9 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
         effective_args = padded_args;
+    } else if (arg_count > fn->param_count && fn->param_count >= 0) {
+        // Clamp to declared param count — excess args accessible via arguments object
+        effective_count = fn->param_count;
     }
 
     if (fn->env) {
@@ -7153,8 +7163,11 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
         if (error_count < 5) {
-            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d)",
-                get_type_id(func_item), arg_count, get_type_id(this_val));
+            void* ret_addr = __builtin_return_address(0);
+            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d ret_addr=%p func_raw=0x%llx",
+                get_type_id(func_item), arg_count, get_type_id(this_val),
+                _trace_last_fn_len, _trace_last_fn ? _trace_last_fn : "(null)", _trace_total_calls,
+                ret_addr, (unsigned long long)func_item.item);
             error_count++;
         }
         // Log args for context
@@ -7172,18 +7185,6 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++; _trace_last_params = fn->param_count; _trace_last_fptr = fn->func_ptr;
-    // TRACE: log anon 2-param calls near the error point
-    {
-        static int _anon_trace = 0;
-        if (_anon_trace < 5 && fn && !fn->name && fn->param_count == 2 && _trace_total_calls >= 33505 && _trace_total_calls <= 33510) {
-            TypeId t0 = arg_count >= 1 ? get_type_id(args[0]) : (TypeId)0;
-            TypeId t1 = arg_count >= 2 ? get_type_id(args[1]) : (TypeId)0;
-            TypeId tt = get_type_id(this_val);
-            log_error("TRACE anon-call: fptr=%p total=%d argc=%d this_type=%d arg0_type=%d arg1_type=%d",
-                fn->func_ptr, _trace_total_calls, arg_count, (int)tt, (int)t0, (int)t1);
-            _anon_trace++;
-        }
-    }
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
