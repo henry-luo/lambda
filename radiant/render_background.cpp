@@ -1421,6 +1421,10 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
 
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
+    if (!is_svg) {
+        // ensure raster image pixels are decoded (lazy loading)
+        image_surface_ensure_decoded(img);
+    }
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
             Rect tile_rect;

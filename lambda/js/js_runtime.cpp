@@ -23,6 +23,7 @@
 #include <string>
 #include <map>
 #include <re2/re2.h>
+#include <execinfo.h>
 
 // v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
 #define SPARSE_GAP_MAX 1000000
@@ -69,6 +70,15 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
+// TRACE: track last called function name for debugging
+static const char* _trace_last_fn = "(none)";
+static int _trace_last_fn_len = 6;
+static const char* _trace_setter_prop = "(none)";
+static int _trace_setter_prop_len = 6;
+static int _trace_call_id = 0;
+static int _trace_total_calls = 0;
+static int _trace_last_params = 0;
+static void* _trace_last_fptr = nullptr;
 
 // new.target: set to the constructor function when called via 'new', undefined otherwise.
 // Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
@@ -2677,6 +2687,20 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     if (!tm || !tm->shape) return ItemNull;
     // P1: O(1) array lookup when slot_entries is populated
     if (tm->slot_entries && slot < tm->slot_count) {
+        // TRACE: detect when R slot reads as non-MAP
+        {
+            static int _gs_trace = 0;
+            ShapeEntry* e = tm->slot_entries[slot];
+            if (_gs_trace < 3 && e && e->name && e->name->length == 1 && e->name->str[0] == 'R') {
+                Item val = _map_read_field(e, m->data);
+                TypeId rt = get_type_id(val);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_NULL && rt != LMD_TYPE_UNDEFINED && rt != LMD_TYPE_FUNC) {
+                    log_error("TRACE get_shaped_slot R: type=%d entry_type=%d slot=%d total=%d",
+                        (int)rt, (int)e->type->type_id, (int)slot, _trace_total_calls);
+                    _gs_trace++;
+                }
+            }
+        }
         return _map_read_field(tm->slot_entries[slot], m->data);
     }
     // Fallback: O(n) linked-list walk
@@ -2783,6 +2807,15 @@ extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
     if (tm && tm->slot_entries && slot < tm->slot_count) {
         ShapeEntry* entry = tm->slot_entries[slot];
         if (entry && entry->type->type_id != LMD_TYPE_FLOAT) {
+            // TRACE: log type change from MAP to FLOAT
+            static int _tc_trace = 0;
+            if (_tc_trace < 10 && entry->type->type_id == LMD_TYPE_MAP) {
+                log_error("TRACE set_slot_f MAP->FLOAT: slot=%d name='%.*s' total=%d byte_off=%d",
+                    slot, entry->name ? (int)entry->name->length : 0,
+                    entry->name ? entry->name->str : "?",
+                    _trace_total_calls, (int)byte_offset);
+                _tc_trace++;
+            }
             entry->type = type_info[LMD_TYPE_FLOAT].type;
         }
     }
@@ -3874,6 +3907,17 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // TRACE: detect when .R gets a float value
+        {
+            static int _r_trace = 0;
+            if (_r_trace < 3 && get_type_id(key) == LMD_TYPE_STRING) {
+                String* rk = it2s(key);
+                if (rk && rk->len == 1 && rk->chars[0] == 'R' && get_type_id(value) == LMD_TYPE_FLOAT) {
+                    log_error("TRACE .R set to FLOAT: val=%f total=%d", it2d(value), _trace_total_calls);
+                    _r_trace++;
+                }
+            }
+        }
         // JS semantics: non-string keys are coerced to strings (ToPropertyKey)
         TypeId kt = get_type_id(key);
         if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
@@ -3976,6 +4020,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     setter = js_prototype_lookup(object, sk);
                 }
                 if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
+                    _trace_call_id++;
                     Item args[1] = { value };
                     js_call_function(setter, object, args, 1);
                     return value;
@@ -4119,13 +4165,48 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
 }
 
 extern "C" Item js_property_access(Item object, Item key) {
+    // TRACE: ring buffer of last 8 property accesses for debugging
+    static struct { const char* key; int klen; TypeId obj_type; TypeId result_type; } _ring[8] = {
+        {"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},
+        {"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0},{"?",1,(TypeId)0,(TypeId)0}};
+    static int _ring_idx = 0;
+
     // v18: throw TypeError when accessing properties on null or undefined
     TypeId type = get_type_id(object);
+
+    // TRACE: detect .col1 on non-MAP
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_NULL && type != LMD_TYPE_UNDEFINED &&
+        get_type_id(key) == LMD_TYPE_STRING) {
+        String* ck = it2s(key);
+        if (ck && ck->len == 4 && strncmp(ck->chars, "col1", 4) == 0) {
+            static int _col1_trace = 0;
+            if (_col1_trace < 3) {
+                double fval = 0.0;
+                if (type == LMD_TYPE_FLOAT) fval = it2d(object);
+                log_error("TRACE .col1 on type=%d hex=0x%llx fval=%g total=%d",
+                    (int)type, (unsigned long long)object.item, fval, _trace_total_calls);
+                _col1_trace++;
+            }
+        }
+    }
+
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
         char msg[256];
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
+            // TRACE: log first accesses on undefined for Box2D debugging
+            static int y_trace = 0;
+            if (y_trace < 2 && sk) {
+                log_error("TRACE undef .%.*s — last 8 accesses (obj_type→result_type):", (int)sk->len, sk->chars);
+                for (int ri = 8; ri >= 1; ri--) {
+                    int idx = (_ring_idx - ri + 8) % 8;
+                    log_error("  [-%d] .%.*s  obj_t=%d→res_t=%d", ri,
+                        _ring[idx].klen, _ring[idx].key,
+                        (int)_ring[idx].obj_type, (int)_ring[idx].result_type);
+                }
+                y_trace++;
+            }
             snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
                      type_str, sk ? (int)sk->len : 0, sk ? sk->chars : "");
         } else {
@@ -4138,6 +4219,32 @@ extern "C" Item js_property_access(Item object, Item key) {
         return make_js_undefined();
     }
     Item result = js_property_get(object, key);
+    // TRACE: update ring buffer with result type
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* sk = it2s(key);
+        if (sk) {
+            _ring[_ring_idx].key = sk->chars;
+            _ring[_ring_idx].klen = (int)sk->len;
+            _ring[_ring_idx].obj_type = type;
+            _ring[_ring_idx].result_type = get_type_id(result);
+            _ring_idx = (_ring_idx + 1) % 8;
+        }
+    }
+    // TRACE: detect when .R on MAP returns a non-MAP type
+    {
+        static int _r_read_trace = 0;
+        if (_r_read_trace < 3 && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+            String* rk = it2s(key);
+            if (rk && rk->len == 1 && rk->chars[0] == 'R') {
+                TypeId rt = get_type_id(result);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_NULL && rt != LMD_TYPE_UNDEFINED && rt != LMD_TYPE_FUNC) {
+                    log_error("TRACE .R on MAP returns type %d val=0x%llx total=%d",
+                        (int)rt, (unsigned long long)result.item, _trace_total_calls);
+                    _r_read_trace++;
+                }
+            }
+        }
+    }
     return result;
 }
 
@@ -4232,6 +4339,12 @@ extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
+        // TRACE: log first few .y accesses on undefined for Box2D debugging
+        static int y_trace2 = 0;
+        if (y_trace2 < 3 && key_len == 1 && key[0] == 'y') {
+            log_error("TRACE js_property_get_str: .y on %s (trace %d) last_fn='%.*s'", type_str, y_trace2, _trace_last_fn_len, _trace_last_fn);
+            y_trace2++;
+        }
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
                  type_str, key_len, key);
@@ -7056,6 +7169,21 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
+    if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
+    else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
+    _trace_total_calls++; _trace_last_params = fn->param_count; _trace_last_fptr = fn->func_ptr;
+    // TRACE: log anon 2-param calls near the error point
+    {
+        static int _anon_trace = 0;
+        if (_anon_trace < 5 && fn && !fn->name && fn->param_count == 2 && _trace_total_calls >= 33505 && _trace_total_calls <= 33510) {
+            TypeId t0 = arg_count >= 1 ? get_type_id(args[0]) : (TypeId)0;
+            TypeId t1 = arg_count >= 2 ? get_type_id(args[1]) : (TypeId)0;
+            TypeId tt = get_type_id(this_val);
+            log_error("TRACE anon-call: fptr=%p total=%d argc=%d this_type=%d arg0_type=%d arg1_type=%d",
+                fn->func_ptr, _trace_total_calls, arg_count, (int)tt, (int)t0, (int)t1);
+            _anon_trace++;
+        }
+    }
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;

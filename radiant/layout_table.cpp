@@ -1035,9 +1035,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     cell->width = cell_width;
 
     // Layout cell content now that width is set
-    log_debug("[PROCESS_TABLE_CELL] About to call layout_table_cell_content for cell: %s", cell->source_loc());
     layout_table_cell_content(lycon, cell, table);
-    log_debug("%s [PROCESS_TABLE_CELL] Returned from layout_table_cell_content", tcell->source_loc());
 
     float explicit_cell_height = get_explicit_css_height(lycon, cell);
 
@@ -2493,32 +2491,26 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     if (cellNode->node_type == DOM_NODE_ELEMENT) {
         // Lambda CSS path
         DomElement* dom_elem = cellNode->as_element();
-        log_debug("Lambda CSS: parse_cell_attributes for element type=%d", cellNode->node_type);
 
         // Parse colspan attribute
         const char* colspan_str = dom_element_get_attribute(dom_elem, "colspan");
-        log_debug("Lambda CSS: colspan_str = %s", colspan_str ? colspan_str : "NULL");
         if (colspan_str && colspan_str[0] != '\0') {
             int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0); // INT_CAST_OK: string length
             if (span > 0 && span <= 1000) {
                 cell->td->col_span = span;
-                log_debug("Lambda CSS: Parsed colspan=%d", span);
             }
         }
 
         // Parse rowspan attribute
         const char* rowspan_str = dom_element_get_attribute(dom_elem, "rowspan");
-        log_debug("Lambda CSS: rowspan_str = %s", rowspan_str ? rowspan_str : "NULL");
         if (rowspan_str && rowspan_str[0] != '\0') {
             int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0); // INT_CAST_OK: string length
             if (span == 0) {
                 // HTML spec: rowspan=0 means "span all remaining rows in the row group"
                 // Store as 0 sentinel - resolved in analyze_table_structure
                 cell->td->row_span = 0;
-                log_debug("Lambda CSS: rowspan=0 (span all remaining rows)");
             } else if (span > 0 && span <= 65534) {
                 cell->td->row_span = span;
-                log_debug("Lambda CSS: Parsed rowspan=%d from attribute value '%s'", span, rowspan_str);
             }
         }
 
@@ -4258,23 +4250,6 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table) {
     ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
     if (!tcell) return;
-
-    // Debug: count children and log their types
-    if (tcell->is_element()) {
-        int child_count = 0;
-        int img_count = 0;
-        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
-        for (; cc; cc = cc->next_sibling) {
-            child_count++;
-            if (cc->tag() == HTM_TAG_IMG) {
-                img_count++;
-                log_debug("%s [TABLE CELL CHILDREN] Found IMG child #%d: %s", cell->source_loc(), img_count, cc->node_name());
-            } else {
-                log_debug("%s [TABLE CELL CHILDREN] Child #%d: %s (tag=%lu)", cell->source_loc(), child_count, cc->node_name(), cc->tag());
-            }
-        }
-        log_debug("%s [TABLE CELL CHILDREN] Total children: %d, IMG elements: %d", cell->source_loc(), child_count, img_count);
-    }
 
     // No need to clear text rectangles - this is the first and only layout pass!
 
@@ -8937,8 +8912,6 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
         log_debug("layout_table_content: null tableNode, returning");
         return;
     }
-    log_debug("=== TABLE LAYOUT START ===");
-    log_debug("%s Starting table layout", tableNode->source_loc());
     log_debug("%s Initial layout context - line.left=%d, advance_y=%d", tableNode->source_loc(), lycon->line.left, lycon->block.advance_y);
 
     // CRITICAL: Save the table's font-size BEFORE building table tree.
@@ -8991,13 +8964,11 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     }
 
     // Step 1: Build table structure from DOM
-    log_debug("%s Step 1 - Building table tree", tableNode->source_loc());
     ViewTable* table = build_table_tree(lycon, tableNode);
     if (!table) {
-        log_debug("%s ERROR: Failed to build table structure", tableNode->source_loc());
+        log_error("%s Failed to build table structure", tableNode->source_loc());
         return;
     }
-    log_debug("%s Table tree built successfully", tableNode->source_loc());
 
     // Store the table's font-size in TableProp for use during height resolution
     if (table->tb) {
@@ -9008,10 +8979,8 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     detect_anonymous_boxes(table);
 
     // Step 2: Calculate layout
-    log_debug("%s Step 2 - Calculating table layout (table ptr=%p)", tableNode->source_loc(), table);
     table_auto_layout(lycon, table);
-    log_debug("%s Table layout calculated - size: %dx%d (table ptr=%p)", tableNode->source_loc(), table->width, table->height, table);
-    log_debug("%s Table final position: x=%d, y=%d (trusting block layout positioning)", tableNode->source_loc(), table->x, table->y);
+    log_debug("%s Table layout calculated: %dx%d", tableNode->source_loc(), table->width, table->height);
 
     // Step 3: Update layout context for proper block integration
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
@@ -9084,5 +9053,4 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
         }
     }
 
-    log_debug("=== TABLE LAYOUT COMPLETE ===");
 }

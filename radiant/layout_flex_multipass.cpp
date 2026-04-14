@@ -10,9 +10,10 @@
 #include "../lib/strbuf.h"
 #include <cmath>
 
-// Limits for flex layout recursion
+// Flex-in-flex nesting limit — prevents O(n²) timeout from deeply nested flex
+// containers (e.g., 200 nested position:fixed display:flex divs).
+// MAX_LAYOUT_DEPTH (300) guards stack overflow; this guards exponential flex work.
 static const int MAX_FLEX_DEPTH = 16;
-static const int MAX_FLEX_NODES = 5000;
 
 // Forward declarations
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
@@ -78,13 +79,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
     log_enter();
     log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
 
-    // guard: skip if flex node budget is exhausted (reuse flex limit)
-    if (lycon->node_count > MAX_FLEX_NODES) {
-        log_debug("layout_flex_absolute_children: node budget exhausted (%d), skipping",
-                  lycon->node_count);
-        log_leave();
-        return;
-    }
+
 
     // Get flex direction from the container parameter directly (not lycon->flex_container!)
     // This is critical for nested flex containers - lycon->flex_container points to the
@@ -493,12 +488,11 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container) return;
 
-    // guard against excessive recursive flex nesting (fuzzer-found timeout)
+    // guard against exponential flex-in-flex nesting (fuzzer-found O(n²) timeout)
     lycon->flex_depth++;
-    lycon->node_count++;
-    if (lycon->flex_depth > MAX_FLEX_DEPTH || lycon->node_count > MAX_FLEX_NODES) {
-        log_error("layout_flex: flex_depth=%d nodes=%d exceeds limit (max_depth=%d, max_nodes=%d), skipping %s",
-                  lycon->flex_depth, lycon->node_count, MAX_FLEX_DEPTH, MAX_FLEX_NODES,
+    if (lycon->flex_depth > MAX_FLEX_DEPTH) {
+        log_error("layout_flex: flex_depth=%d exceeds limit (%d), skipping %s",
+                  lycon->flex_depth, MAX_FLEX_DEPTH,
                   flex_container->source_loc());
         lycon->flex_depth--;
         return;
@@ -538,7 +532,6 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // the correct direction, wrap, justify, etc. from CSS
     init_flex_container(lycon, flex_container);
 
-    log_debug("ENHANCED FLEX LAYOUT STARTING");
     log_debug("Starting enhanced flex layout for container %p", flex_container);
 
     // NOTE: Do NOT clear measurement cache here!
@@ -549,9 +542,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // CRITICAL: Collect and prepare flex items with percentage re-resolution
     // This ensures percentage widths/heights are resolved relative to THIS container's
     // content area, not the ancestor container that was in scope during CSS resolution.
-    log_debug("Collecting and preparing flex items for nested/enhanced container");
     int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, flex_container);
-    log_debug("Collected %d flex items with percentage re-resolution", item_count);
 
     // AUTO-HEIGHT CALCULATION: After items are measured, recalculate container's
     // cross-axis size for row flex (or main-axis size for column flex) if not explicit.
@@ -866,6 +857,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 
     log_info("ENHANCED FLEX ALGORITHM END: container=%p", flex_container);
     log_leave();
+    lycon->flex_depth--;
 }
 // Enhanced flex algorithm with auto margin support
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container) {
@@ -883,17 +875,12 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
     // Then apply auto margin enhancements
     apply_auto_margin_centering(lycon, flex_container);
 
-    log_debug("ENHANCED FLEX ALGORITHM COMPLETED for %s", flex_container->node_name());
-    log_debug("Enhanced flex algorithm completed");
+    log_debug("%s ENHANCED FLEX ALGORITHM COMPLETED", flex_container->node_name());
     log_leave();
-    lycon->flex_depth--;
 }
 
 // Apply auto margin centering after flex algorithm
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container) {
-    log_debug("AUTO MARGIN CENTERING STARTING");
-    log_debug("Applying auto margin centering");
-
     if (!flex_container || !flex_container->first_child) return;
 
     FlexContainerLayout* flex_layout = lycon->flex_container;
@@ -906,10 +893,8 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* item = (ViewBlock*)child;
             item_count++;
-            log_debug("Checking item %d for auto margins", item_count);
 
             if (has_auto_margins(item)) {
-                log_debug("Found item with auto margins: %p", item);
 
                 // Calculate centering position
                 int container_width = flex_container->width;
@@ -942,7 +927,6 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                         }
                     }
                     item->x = center_x;
-                    log_debug("Centered item horizontally at x=%d (cross-axis for column flex)", center_x);
                 }
 
                 if (is_horizontal && item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO && item->bound->margin.bottom_type == CSS_VALUE_AUTO) {
@@ -955,14 +939,12 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                         }
                     }
                     item->y = center_y;
-                    log_debug("Centered item vertically at y=%d (cross-axis for row flex)", center_y);
                 }
             }
         }
         child = child->next();
     }
 
-    log_debug("Auto margin centering completed");
 }
 
 // Check if an item has auto margins
@@ -976,33 +958,25 @@ bool has_auto_margins(ViewBlock* item) {
 
 // Collect flex items with measured sizes
 void collect_flex_items_with_measurements(FlexContainerLayout* flex_layout, ViewBlock* container) {
-    log_debug("Collecting flex items with measurements");
-
     // Use existing implementation for now
     // TODO: Add measurement-based flex item collection in the future
 }
 
 // Calculate flex basis using measured content
 void calculate_flex_basis_with_measurements(FlexContainerLayout* flex_layout) {
-    log_debug("Calculating flex basis with measurements - using existing implementation");
     // In the future, we can enhance this to use measured content sizes
 }
 
 // Enhanced flexible length resolution
 void resolve_flexible_lengths_with_measurements(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    log_debug("Resolving flexible lengths with measurements");
-
     if (!line || line->item_count == 0) return;
 
     // Use existing resolve_flexible_lengths function as base
     resolve_flexible_lengths(flex_layout, line);
-
-    log_debug("Flexible length resolution completed");
 }
 
 // Enhanced main axis alignment with proper auto margin handling
 void align_items_main_axis_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    log_debug("Enhanced main axis alignment");
 
     if (!line || line->item_count == 0) return;
 
@@ -1027,8 +1001,6 @@ bool has_main_axis_auto_margins(FlexLineInfo* line) {
 
 // Handle main axis auto margins
 void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    log_debug("Handling main axis auto margins");
-
     // For now, implement simple centering for items with auto margins
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
@@ -1044,7 +1016,6 @@ void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInf
             int item_size = get_main_axis_size(item, flex_layout);
             int center_pos = (container_size - item_size) / 2;
 
-            log_debug("Centering item %d at position %d", i, center_pos);
             set_main_axis_position(item, center_pos, flex_layout);
         }
     }
@@ -1128,10 +1099,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         // per CSS Flexbox spec. We handle them via layout_flow_node after the flex algorithm.
         DomNode* child = flex_item->first_child;
         if (child) {
-            log_debug("Creating lightweight Views for nested flex children");
             do {
                 if (child->is_element()) {
-                    log_debug("NESTED FLEX: Creating lightweight View for child %s", child->node_name());
                     // CRITICAL: Just create the View structure without layout
                     init_flex_item_view(lycon, child);
                 } else if (child->is_text()) {
@@ -1140,7 +1109,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     const char* text = (const char*)child->text_data();
                     bool is_whitespace_only = is_only_whitespace(text);
                     if (!is_whitespace_only) {
-                        log_debug("NESTED FLEX: Found text flex item: '%.30s...'", text ? text : "(null)");
                     }
                 }
                 child = child->next_sibling;
@@ -1363,7 +1331,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     } else {
         // Layout all nested content using standard flow algorithm
         // This handles: text nodes, nested blocks, inline elements, images, etc.
-        log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
 
         // CRITICAL FIX: Generate pseudo-element content for flex items with ::before/::after
         // This ensures icons (e.g., FontAwesome) and other CSS-generated content are created
@@ -1423,10 +1390,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             }
 
             do {
-                log_debug("*** PASS3 TRACE: Layout child %s of flex item", child->node_name());
-                // Use standard layout flow - this handles all HTML content types
                 layout_flow_node(lycon, child);
-                log_debug("*** PASS3 TRACE: Completed layout of child %s", child->node_name());
                 child = child->next_sibling;
             } while (child);
 
@@ -1538,11 +1502,13 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
     }
 
-    // Restore parent context, but preserve depth and node_count guards
+    // Restore parent context, but preserve depth, flex_depth, and node_count guards
     int current_depth = lycon->depth;
+    int current_flex_depth = lycon->flex_depth;
     int current_node_count = lycon->node_count;
     *lycon = saved_context;
     lycon->depth = current_depth;
+    lycon->flex_depth = current_flex_depth;
     lycon->node_count = current_node_count;
 
     log_info("SUB-PASS 2 END: item=%p, content=%dx%d",
@@ -2069,8 +2035,6 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (fchild->view_type == RDT_VIEW_BLOCK || fchild->view_type == RDT_VIEW_INLINE_BLOCK ||
                 fchild->view_type == RDT_VIEW_LIST_ITEM || fchild->view_type == RDT_VIEW_TABLE) {
                 ViewBlock* flex_item = (ViewBlock*)fchild;
-                log_debug("Final layout for flex item %p (order-sorted %d): %.1fx%.1f",
-                          flex_item, i, flex_item->width, flex_item->height);
                 layout_flex_item_content(lycon, flex_item);
             }
         }
@@ -2081,7 +2045,6 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
                 child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
                 ViewBlock* flex_item = (ViewBlock*)child;
-                log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
                 layout_flex_item_content(lycon, flex_item);
             }
             child = child->next();
@@ -2503,6 +2466,17 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_enter();
     log_info("FLEX LAYOUT START: container=%p (%s)", block, block->node_name());
 
+    // Early flex depth guard — prevent expensive setup work (item collection,
+    // view tree snapshots) for deeply nested flex containers that will be skipped anyway.
+    // The detailed guard is also in layout_flex_container_with_nested_content but that
+    // runs AFTER collect_and_prepare_flex_items, which is expensive for pathological inputs.
+    if (lycon->flex_depth >= MAX_FLEX_DEPTH) {
+        log_error("layout_flex_content: flex_depth=%d at limit, skipping %s",
+                  lycon->flex_depth, block->source_loc());
+        log_leave();
+        return;
+    }
+
     // =========================================================================
     // CACHE LOOKUP: Check if we have a cached result for these constraints
     // This avoids redundant layout for repeated measurements with same inputs
@@ -2536,7 +2510,6 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
             return;
         }
         g_layout_cache_misses++;
-        log_debug("FLEX CACHE MISS: container=%p, mode=%d", block, (int)lycon->run_mode); // INT_CAST_OK: enum for log
     }
 
     // =========================================================================
@@ -2564,25 +2537,10 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // CRITICAL: Update font context before processing flex items
     // This ensures children inherit the correct computed font-size from the flex container.
     // Without this, lycon->font.style would still point to the parent's font.
-    log_debug("Flex font context check: block=%p, block->font=%p, lycon->font.style=%p, lycon->font.style->font_size=%.1f",
-        (void*)block, block ? (void*)block->font : nullptr,
-        (void*)lycon->font.style, lycon->font.style ? lycon->font.style->font_size : -1.0f);
     if (block && block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
         log_debug("Updated font context for flex container: font-size=%.1f", block->font->font_size);
     }
-
-    // DEBUG: Dump the DOM tree structure before flex layout
-    log_debug("DOM STRUCTURE: Dumping children of container %s", block->node_name());
-    int dom_child_count = 0;
-    DomNode* dom_child = block->first_child;
-    while (dom_child) {
-        log_debug("DOM CHILD %d: node=%p, name=%s, is_element=%d, next_sibling=%p",
-                  dom_child_count, dom_child, dom_child->node_name(), dom_child->is_element(), dom_child->next_sibling);
-        dom_child = dom_child->next_sibling;
-        dom_child_count++;
-    }
-    log_debug("DOM STRUCTURE: Total %d children found", dom_child_count);
 
     FlexContainerLayout* pa_flex = lycon->flex_container;
     init_flex_container(lycon, block);
