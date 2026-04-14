@@ -170,20 +170,21 @@ function getTestCategory(config, baseName) {
     return 'baseline';
 }
 
-/** Check if a test executable is GTest-based */
-function isGtestTest(baseName) {
+/** Check if a test executable is GTest-based (from config libraries) */
+function isGtestTest(baseName, config) {
     if (baseName.endsWith('_gtest')) return true;
-    const knownGtest = new Set([
-        'test_flex_minimal', 'test_flex_new_features', 'test_css_system',
-        'test_css_style_node', 'test_avl_tree', 'test_avl_tree_perf',
-        'test_compound_descendant_selectors', 'test_selector_groups',
-        'test_css_tokenizer_unit', 'test_css_parser_unit',
-        'test_css_integration_unit', 'test_css_engine_unit',
-        'test_css_formatter_unit', 'test_css_roundtrip_unit',
-        'test_css_dom_crud', 'test_css_dom_integration',
-        'test_css_engine_negative',
-    ]);
-    return knownGtest.has(baseName);
+    for (const suite of config.test.test_suites) {
+        if (suite.disabled) continue;
+        for (const t of (suite.tests || [])) {
+            if (t.disabled) continue;
+            const srcBase = path.basename(t.source || '').replace(/\.(c|cpp)$/, '');
+            if (srcBase === baseName) {
+                const libs = t.libraries || [];
+                return libs.includes('gtest') || libs.includes('gtest_main');
+            }
+        }
+    }
+    return false;
 }
 
 // ─── Test discovery ─────────────────────────────────────────────────────────────
@@ -222,6 +223,7 @@ function discoverTests(config) {
             const srcPath = path.join(ROOT_DIR, src.startsWith('test/') ? src : `test/${src}`);
 
             if (fs.existsSync(exePath) || fs.existsSync(srcPath)) {
+                const libs = t.libraries || [];
                 tests.push({
                     baseName,
                     exePath,
@@ -229,6 +231,7 @@ function discoverTests(config) {
                     category: t.category || suite.category || 'baseline',
                     displayName: t.name || baseName,
                     icon: t.icon || '🧪',
+                    isGtest: baseName.endsWith('_gtest') || libs.includes('gtest') || libs.includes('gtest_main'),
                 });
             }
         }
@@ -288,7 +291,7 @@ function runTest(testInfo) {
             testArgs = ['--test-dir', 'test/std', '--format', 'both',
                         '--json-output', jsonFile, '--tap-output', tapFile];
             if (rawOutput) testArgs.push('--verbose');
-        } else if (isGtestTest(baseName)) {
+        } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
             testArgs = [`--gtest_output=json:${jsonPath}`];
             // Special filter for input roundtrip
