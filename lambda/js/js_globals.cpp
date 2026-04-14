@@ -29,6 +29,9 @@ extern Item parse_json_to_item_strict(Input* input, const char* json_string, boo
 // v24: strict mode flag from js_runtime.cpp
 extern bool js_strict_mode;
 
+// forward declarations
+static bool js_is_symbol_item(Item item);
+
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -1082,6 +1085,13 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
 }
 
 extern "C" Item js_number_method(Item num, Item method_name, Item* args, int argc) {
+    // Symbols are encoded as negative ints — route to generic property dispatch
+    if (js_is_symbol_item(num)) {
+        Item fn = js_property_get(num, method_name);
+        if (get_type_id(fn) == LMD_TYPE_FUNC)
+            return js_call_function(fn, num, args, argc);
+        return ItemNull;
+    }
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
     if (!method) return ItemNull;
@@ -7077,7 +7087,8 @@ extern "C" Item js_symbol_for(Item key) {
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
-    if (!js_is_symbol_item(sym)) return ItemNull;
+    if (!js_is_symbol_item(sym))
+        return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
     js_symbol_init_registry();
     uint64_t id = js_symbol_item_id(sym);
 
@@ -7090,7 +7101,7 @@ extern "C" Item js_symbol_key_for(Item sym) {
             return (Item){.item = s2it(heap_create_name(e->key, strlen(e->key)))};
         }
     }
-    return ItemNull;  // not in global registry
+    return make_js_undefined();  // not in global registry → undefined per spec
 }
 
 extern "C" Item js_symbol_to_string(Item sym) {
@@ -7191,9 +7202,16 @@ extern "C" Item js_symbol_get_description(Item sym) {
 // Return a well-known symbol by its property name on the Symbol constructor.
 // e.g. Symbol.iterator → fixed ID=1, Symbol.toPrimitive → fixed ID=2, etc.
 // Unlike js_symbol_create(), this always returns the SAME item for a given name.
+extern "C" Item js_symbol_builtin_method(int which);
+
 extern "C" Item js_symbol_well_known(Item name) {
     String* s = it2s(name);
     if (s) {
+        // Symbol static methods — return builtin functions, not well-known symbols
+        if (s->len == 3 && strncmp(s->chars, "for", 3) == 0)
+            return js_symbol_builtin_method(0);
+        if (s->len == 6 && strncmp(s->chars, "keyFor", 6) == 0)
+            return js_symbol_builtin_method(1);
         if (s->len == 8 && strncmp(s->chars, "iterator", 8) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_ITERATOR);
         if (s->len == 11 && strncmp(s->chars, "toPrimitive", 11) == 0)
