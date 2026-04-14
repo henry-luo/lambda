@@ -1,5 +1,16 @@
-/* Define POSIX feature test macro for fileno() */
+/* Enable POSIX/XSI interfaces used by nftw(), realpath(), and fileno(). */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <string.h>
 #include "memtrack.h"

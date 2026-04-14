@@ -31,7 +31,7 @@ extern __thread EvalContext* context;
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
 
 // forward declaration of static error string (defined later in this file)
-extern String STR_ERROR;
+extern String& STR_ERROR;
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
@@ -1719,10 +1719,15 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.len = 4, .is_ascii = 1, .chars = "null"};
-String STR_TRUE = {.len = 4, .is_ascii = 1, .chars = "true"};
-String STR_FALSE = {.len = 5, .is_ascii = 1, .chars = "false"};
-String STR_ERROR = {.len = 7, .is_ascii = 1, .chars = "<error>"};
+// use struct overlays for static String with flexible array member
+static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_null  = {4, 1, "null"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_true  = {4, 1, "true"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[6]; } _str_false = {5, 1, "false"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[8]; } _str_error = {7, 1, "<error>"};
+String& STR_NULL  = reinterpret_cast<String&>(_str_null);
+String& STR_TRUE  = reinterpret_cast<String&>(_str_true);
+String& STR_FALSE = reinterpret_cast<String&>(_str_false);
+String& STR_ERROR = reinterpret_cast<String&>(_str_error);
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);

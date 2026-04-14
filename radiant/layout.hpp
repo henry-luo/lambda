@@ -345,6 +345,9 @@ typedef struct LayoutContext {
     // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
     int depth;
 
+    // Flex-specific nesting depth guard (flex-in-flex recursion)
+    int flex_depth;
+
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
 } LayoutContext;

@@ -15,6 +15,17 @@ extern "C" {
     Url* get_current_dir(void);
 }
 
+static String* jsx_type_string(void) {
+    typedef struct {
+        uint32_t len;
+        uint8_t is_ascii;
+        char chars[4];
+    } FixedJsxString;
+
+    static FixedJsxString jsx_type = {4, 1, {'j', 's', 'x', '\0'}};
+    return (String*)&jsx_type;
+}
+
 class JsxRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -121,9 +132,7 @@ static void test_jsx_roundtrip_file(const char* filename) {
     Url* url = parse_url(cwd, filepath);
     ASSERT_NE(url, nullptr) << "Failed to parse URL";
 
-    // Create a simple JSX type string structure
-    static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
-    String* jsx_type = &jsx_type_struct;
+    String* jsx_type = jsx_type_string();
 
     Input* input = input_from_source(original_content, url, jsx_type, NULL);
     ASSERT_NE(input, nullptr) << "Failed to create input from JSX source";
@@ -185,9 +194,7 @@ TEST(JsxParsingTest, JsxExpressions) {
 
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
-    // Create a simple JSX type string structure
-    static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
-    String* jsx_type = &jsx_type_struct;
+    String* jsx_type = jsx_type_string();
 
     Input* input = input_from_source(jsx_with_expressions, url, jsx_type, NULL);
 
@@ -208,9 +215,7 @@ TEST(JsxParsingTest, JsxAttributes) {
 
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
-    // Create a simple JSX type string structure
-    static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
-    String* jsx_type = &jsx_type_struct;
+    String* jsx_type = jsx_type_string();
 
     Input* input = input_from_source(jsx_with_attrs, url, jsx_type, NULL);
 

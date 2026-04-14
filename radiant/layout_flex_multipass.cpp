@@ -494,13 +494,13 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     if (!flex_container) return;
 
     // guard against excessive recursive flex nesting (fuzzer-found timeout)
-    lycon->depth++;
+    lycon->flex_depth++;
     lycon->node_count++;
-    if (lycon->depth > MAX_FLEX_DEPTH || lycon->node_count > MAX_FLEX_NODES) {
-        log_error("layout_flex: depth=%d nodes=%d exceeds limit (max_depth=%d, max_nodes=%d), skipping %s",
-                  lycon->depth, lycon->node_count, MAX_FLEX_DEPTH, MAX_FLEX_NODES,
+    if (lycon->flex_depth > MAX_FLEX_DEPTH || lycon->node_count > MAX_FLEX_NODES) {
+        log_error("layout_flex: flex_depth=%d nodes=%d exceeds limit (max_depth=%d, max_nodes=%d), skipping %s",
+                  lycon->flex_depth, lycon->node_count, MAX_FLEX_DEPTH, MAX_FLEX_NODES,
                   flex_container->source_loc());
-        lycon->depth--;
+        lycon->flex_depth--;
         return;
     }
 
@@ -886,7 +886,7 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
     log_debug("ENHANCED FLEX ALGORITHM COMPLETED for %s", flex_container->node_name());
     log_debug("Enhanced flex algorithm completed");
     log_leave();
-    lycon->depth--;
+    lycon->flex_depth--;
 }
 
 // Apply auto margin centering after flex algorithm
