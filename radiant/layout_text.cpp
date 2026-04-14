@@ -1073,7 +1073,7 @@ static inline bool should_break_line(LayoutContext* lycon, float current_x, floa
  *
  * Uses the new unified BlockContext API instead of the old BFC system.
  */
-void update_line_for_bfc_floats(LayoutContext* lycon) {
+void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     // Find the BFC root for this layout context
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
 
@@ -1100,13 +1100,17 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
 
     float current_y_local = lycon->block.advance_y;
     float current_y_bfc = current_y_local + offset_y;
-    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
+    // CSS 2.1 §9.5.1: For inline-blocks, query using the element's full height
+    // so floats whose top is below the line start but within the element's height
+    // are properly accounted for.
+    float effective_height = query_height > 0 ? query_height :
+        (lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f);
 
     log_debug("  DEBUG: line adjustment, y_local=%.1f, offset_y=%.1f, y_bfc=%.1f",
         current_y_local, offset_y, current_y_bfc);
 
     // Query available space at this Y using BlockContext API (in BFC coordinates)
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, line_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height);
 
     // Convert from BFC coordinates to local coordinates
     float local_space_left = space.left - offset_x;

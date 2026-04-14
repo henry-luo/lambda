@@ -519,6 +519,8 @@ static void discover_tests_recursive(const std::string& dir, const std::string& 
         if (fd.attrib & _A_SUBDIR) {
             discover_tests_recursive(full, category, subcategory, out);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".js") {
+            // skip _FIXTURE.js helper modules — not standalone tests
+            if (name.size() > 11 && name.substr(name.size() - 11) == "_FIXTURE.js") continue;
             Test262Param p;
             p.test_path = full;
             p.category = category;
@@ -552,6 +554,8 @@ static void discover_tests_recursive(const std::string& dir, const std::string& 
         if (S_ISDIR(st.st_mode)) {
             discover_tests_recursive(full, category, subcategory, out);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".js") {
+            // skip _FIXTURE.js helper modules — not standalone tests
+            if (name.size() > 11 && name.substr(name.size() - 11) == "_FIXTURE.js") continue;
             Test262Param p;
             p.test_path = full;
             p.category = category;

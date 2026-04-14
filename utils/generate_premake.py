@@ -987,6 +987,8 @@ class PremakeGenerator:
         # Add build options
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
+        if lib.get('pic') and '-fPIC' not in build_opts:
+            build_opts.append('-fPIC')
 
         # Check if this project has mixed C/C++ files
         c_files_present = any(f.endswith('.c') for f in source_files)
@@ -1436,6 +1438,8 @@ class PremakeGenerator:
         # Get compiler-specific build options
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
+        if lib.get('pic') and '-fPIC' not in build_opts:
+            build_opts.append('-fPIC')
 
         # Filter out C++ standard flags since this is a C-only meta-library
         build_opts = [opt for opt in build_opts if not opt.startswith('-std=c++')]

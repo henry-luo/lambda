@@ -2703,7 +2703,7 @@ int main(int argc, char *argv[]) {
         // signal handler tries to run on the same overflowed stack and triggers
         // a double fault. With sigaltstack, the handler runs on a separate
         // allocation and can safely siglongjmp back to the recovery point.
-        static char alt_stack_mem[SIGSTKSZ + 65536];  // generous alt stack
+        static char alt_stack_mem[131072];  // 128KB generous alt stack
         stack_t alt_stack;
         alt_stack.ss_sp = alt_stack_mem;
         alt_stack.ss_size = sizeof(alt_stack_mem);

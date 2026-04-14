@@ -1030,7 +1030,7 @@ DisplayValue resolve_display_value(void* child) {
         }
 
         // Fall back to default display values based on tag ID
-        if (tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
+        if (tag_id == HTM_TAG_HTML || tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
             tag_id == HTM_TAG_H2 || tag_id == HTM_TAG_H3 ||
             tag_id == HTM_TAG_H4 || tag_id == HTM_TAG_H5 ||
             tag_id == HTM_TAG_H6 || tag_id == HTM_TAG_P ||
@@ -1143,8 +1143,10 @@ DisplayValue resolve_display_value(void* child) {
                 display.inner = CSS_VALUE_FLOW;
             }
         }
-        // TODO: Check for CSS display property in child->style (DomElement)
-        // For now, using tag-based defaults is sufficient
+        // CSS 2.1 §9.7: Apply blockification to tag-based defaults too.
+        // Floated or absolutely positioned elements become block-level
+        // regardless of how their display value was determined.
+        return needs_blockify ? blockify_display(display) : display;
     }
     return display;
 }
@@ -1549,6 +1551,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (keyword == CSS_VALUE_AUTO) {
             log_info("length value: auto");
             result = 0.0f;  // auto represented as 0, caller should check keyword separately
+        } else if (keyword == CSS_VALUE_THIN) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thin' → 1px
+            result = 1.0f;
+        } else if (keyword == CSS_VALUE_MEDIUM) {
+            // CSS 2.1 §8.5.1: border-width keyword 'medium' → 3px
+            result = 3.0f;
+        } else if (keyword == CSS_VALUE_THICK) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thick' → 5px
+            result = 5.0f;
         } else {
             const CssEnumInfo* info = css_enum_info(keyword);
             log_debug("length keyword: %s (treating as 0)", info ? info->name : "unknown");
@@ -2649,6 +2660,16 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
             }
 
+            // Special case: font shorthand sets line-height directly on span->blk
+            // without creating a CssDeclaration, so also check if line_height is set
+            if (prop_id == CSS_PROPERTY_LINE_HEIGHT) {
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (span->blk && span->blk->line_height) {
+                    log_debug("[FONT INHERIT] Skipping inheritance - line-height already set via shorthand");
+                    continue;
+                }
+            }
+
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
             DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
@@ -2959,6 +2980,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+
+    // CSS 2.1 §10.3.1, §10.6.2: 'width' and 'height' do not apply to
+    // non-replaced inline elements. However, the computed values are still
+    // preserved on blk->given_width/given_height so that children can
+    // inherit them (CSS 2.1 §6.2.1). The actual enforcement happens in
+    // intrinsic_sizing.cpp (measure_element_intrinsic_widths skips the
+    // explicit width shortcut) and in layout (inline elements don't use
+    // given_width for their own sizing).
 
     // HTML UA stylesheet: <table> elements default to box-sizing: border-box.
     // CSS Tables 3 §5: The table grid box uses border-box sizing by default.

@@ -1,3 +1,10 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include "mempool.h"
 #include "log.h"
 #define RPMALLOC_FIRST_CLASS_HEAPS 1
@@ -8,6 +15,12 @@
 #include <unistd.h>  // for _exit
 #include <pthread.h> // for thread-safe initialization
 #include <sys/mman.h> // for mmap/munmap
+
+#ifndef MAP_ANONYMOUS
+#ifdef MAP_ANON
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#endif
 
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
 

@@ -504,6 +504,7 @@ enum MapKind {
     MAP_KIND_DATAVIEW    = 3,  // DataView
     MAP_KIND_DOM         = 4,  // DOM nodes, Document proxy, ComputedStyle
     MAP_KIND_CSSOM       = 5,  // Stylesheet, CSSRule, RuleStyleDeclaration
+    MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
 };
 
 // Array and List struct defintions needed for for-loop

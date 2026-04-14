@@ -637,6 +637,8 @@ extern "C" Item js_build_arguments_object() {
     for (int i = 0; i < argc; i++) {
         js_array_push(arr, args ? args[i] : ItemNull);
     }
+    // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
+    arr.array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     Item companion = js_new_object();
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
@@ -3052,6 +3054,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
                 if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
                 return js_cssom_rule_decl_get_property(object, key);
+            case MAP_KIND_ITERATOR:
+                // v28: iterators are opaque engine-internal objects
+                return make_js_undefined();
             }
         }
         // Regular Lambda map (including JS objects)
@@ -3857,10 +3862,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             arr->items = new_items;
                             arr->capacity = new_cap;
                         }
-                        // Fill new slots with undefined
-                        Item undef = make_js_undefined();
+                        // Fill new slots with holes (deleted sentinel)
+                        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
                         for (int64_t i = arr->length; i < new_len; i++) {
-                            arr->items[i] = undef;
+                            arr->items[i] = hole;
                         }
                         arr->length = new_len;
                     } else if (new_len < arr->length) {
@@ -3993,6 +3998,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     map_put(m, tag_key, (Item){.item = i2it((int64_t)(uintptr_t)native_ptr)}, js_input);
                 }
                 break;  // fall through to regular property set
+            case MAP_KIND_ITERATOR:
+                // v28: iterators are opaque — ignore external property writes
+                return value;
             default:
                 break;  // typed arrays fall through to regular set
             }
@@ -4741,10 +4749,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
                       (long long)index, (long long)gap);
             return value;
         }
-        // Expand array: fill gaps with undefined, then set the value
-        Item undef = make_js_undefined();
+        // Expand array: fill gaps with holes (deleted sentinel), then set the value
+        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
         while (arr->length < index) {
-            js_array_push_item_direct(arr, undef);
+            js_array_push_item_direct(arr, hole);
         }
         if (index == arr->length) {
             js_array_push_item_direct(arr, value);
@@ -4791,10 +4799,10 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
                       (long long)idx, (long long)gap);
             return value;
         }
-        // Expand array: fill gaps with undefined, then set the value
-        Item undef = make_js_undefined();
+        // Expand array: fill gaps with holes (deleted sentinel), then set the value
+        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
         while (arr->length < idx) {
-            js_array_push_item_direct(arr, undef);
+            js_array_push_item_direct(arr, hole);
         }
         if (idx == arr->length) {
             js_array_push_item_direct(arr, value);
@@ -7650,6 +7658,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // 3. Map unsupported Unicode property names to RE2-compatible equivalents
     {
+        // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.
+        // ES2018 specifies both canonical names and short aliases for property escapes.
+        static const struct { const char* alias; int alias_len; const char* canonical; int canonical_len; } prop_aliases[] = {
+            {"\\p{Ideo}",  8, "\\p{Ideographic}", 16},
+            {"\\P{Ideo}",  8, "\\P{Ideographic}", 16},
+        };
+        for (int pa = 0; pa < (int)(sizeof(prop_aliases)/sizeof(prop_aliases[0])); pa++) {
+            size_t pos = 0;
+            while ((pos = processed_pattern.find(prop_aliases[pa].alias, pos)) != std::string::npos) {
+                processed_pattern.replace(pos, prop_aliases[pa].alias_len, prop_aliases[pa].canonical);
+                pos += prop_aliases[pa].canonical_len;
+            }
+        }
         // \p{Ideographic} → \p{Han} (covers CJK Unified Ideographs)
         size_t pos = 0;
         while ((pos = processed_pattern.find("\\p{Ideographic}", pos)) != std::string::npos) {
@@ -8744,6 +8765,81 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     js_typed_array_set(obj, (Item){.item = i2it(j + 1)}, key);
                 }
                 return obj;
+            }
+            // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced
+            if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int idx = argc > 0 ? (int)js_get_number(args[0]) : 0;
+                if (idx < 0) idx += len;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (idx >= 0 && idx < len && argc > 1) {
+                    js_typed_array_set(result, (Item){.item = i2it(idx)}, args[1]);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toReversed() — returns new reversed copy
+            if (method->len == 10 && strncmp(method->chars, "toReversed", 10) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                for (int i = 0; i < len; i++) {
+                    Item val = js_typed_array_get(obj, (Item){.item = i2it(len - 1 - i)});
+                    js_typed_array_set(result, (Item){.item = i2it(i)}, val);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toSorted(comparefn?) — returns new sorted copy
+            if (method->len == 8 && strncmp(method->chars, "toSorted", 8) == 0) {
+                // Step 1: If comparefn is not undefined and IsCallable(comparefn) is false, throw TypeError
+                if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("comparefn is not a function");
+                }
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (len > 1) {
+                    // insertion sort on the copy
+                    for (int i = 1; i < len; i++) {
+                        Item key = js_typed_array_get(result, (Item){.item = i2it(i)});
+                        double key_val = js_get_number(key);
+                        int j = i - 1;
+                        while (j >= 0) {
+                            Item jval = js_typed_array_get(result, (Item){.item = i2it(j)});
+                            double jdbl = js_get_number(jval);
+                            if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED) {
+                                Item cmp_args[2] = {jval, key};
+                                Item cmp = js_call_function(args[0], make_js_undefined(), cmp_args, 2);
+                                if (js_exception_pending) return make_js_undefined();
+                                if (js_get_number(cmp) <= 0) break;
+                            } else {
+                                if (jdbl <= key_val) break;
+                            }
+                            js_typed_array_set(result, (Item){.item = i2it(j + 1)}, jval);
+                            j--;
+                        }
+                        js_typed_array_set(result, (Item){.item = i2it(j + 1)}, key);
+                    }
+                }
+                return result;
             }
         }
     }
@@ -12217,6 +12313,66 @@ extern "C" bool js_is_generator(Item obj) {
 // For objects with [Symbol.iterator]: calls it and returns the result.
 // =============================================================================
 
+// v28: Iterator sub-type sentinel markers (for MAP_KIND_ITERATOR dispatch)
+static char js_array_iter_marker;
+static char js_string_iter_marker;
+static char js_typed_array_iter_marker;
+
+// v28: Fixed-layout iterator data (16 bytes, 2 slots)
+// Slot 0 (offset 0): source Item (array, string, or typed array)
+// Slot 1 (offset 8): current index (int64_t)
+struct JsIterData {
+    Item source;     // the iterable being iterated
+    int64_t index;   // current position
+    int64_t length;  // v28: snapshot of source length at creation (prevents infinite loops)
+};
+
+// v28: Create lightweight fixed-layout array iterator (MAP_KIND_ITERATOR)
+static Item js_create_array_iterator(Item source) {
+    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
+    m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ITERATOR;
+    m->type = (void*)&js_array_iter_marker;
+    JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
+    data->source = source;
+    data->index = 0;
+    // Snapshot length for arguments objects (prevents infinite for-of when body extends arguments)
+    // Regular arrays use live length (-1 sentinel) per ES spec (mutations visible during iteration)
+    bool is_arguments = (get_type_id(source) == LMD_TYPE_ARRAY && source.array->is_content);
+    data->length = is_arguments ? source.array->length : -1;
+    m->data = data;
+    m->data_cap = sizeof(JsIterData);
+    return (Item){.map = m};
+}
+
+// v28: Create lightweight fixed-layout string iterator
+static Item js_create_string_iterator(Item source) {
+    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
+    m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ITERATOR;
+    m->type = (void*)&js_string_iter_marker;
+    JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
+    data->source = source;
+    data->index = 0;
+    m->data = data;
+    m->data_cap = sizeof(JsIterData);
+    return (Item){.map = m};
+}
+
+// v28: Create lightweight fixed-layout typed array iterator
+static Item js_create_typed_array_iterator(Item source) {
+    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
+    m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ITERATOR;
+    m->type = (void*)&js_typed_array_iter_marker;
+    JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
+    data->source = source;
+    data->index = 0;
+    m->data = data;
+    m->data_cap = sizeof(JsIterData);
+    return (Item){.map = m};
+}
+
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
@@ -12230,20 +12386,14 @@ extern "C" Item js_get_iterator(Item iterable) {
         return ItemNull;
     }
 
-    // Arrays: wrap in array iterator
+    // Arrays: wrap in lightweight array iterator (v28: MAP_KIND_ITERATOR)
     if (tid == LMD_TYPE_ARRAY) {
-        Item iter = js_object_create(ItemNull);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__arr__", 7))}, iterable);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
-        return iter;
+        return js_create_array_iterator(iterable);
     }
 
-    // Strings: wrap in string iterator
+    // Strings: wrap in lightweight string iterator (v28: MAP_KIND_ITERATOR)
     if (tid == LMD_TYPE_STRING) {
-        Item iter = js_object_create(ItemNull);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__str__", 7))}, iterable);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
-        return iter;
+        return js_create_string_iterator(iterable);
     }
 
     // Generators: return as-is (they implement iterator protocol natively)
@@ -12251,12 +12401,9 @@ extern "C" Item js_get_iterator(Item iterable) {
         return iterable;
     }
 
-    // Typed arrays: wrap in typed array iterator
+    // Typed arrays: wrap in lightweight typed array iterator (v28: MAP_KIND_ITERATOR)
     if (js_is_typed_array(iterable)) {
-        Item iter = js_object_create(ItemNull);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__tarr__", 8))}, iterable);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
-        return iter;
+        return js_create_typed_array_iterator(iterable);
     }
 
     // Map/Set collections
@@ -12265,10 +12412,7 @@ extern "C" Item js_get_iterator(Item iterable) {
         if (cd) {
             // Drain to array and wrap in array iterator (collections are small enough)
             Item arr = js_iterable_to_array(iterable);
-            Item iter = js_object_create(ItemNull);
-            js_property_set(iter, (Item){.item = s2it(heap_create_name("__arr__", 7))}, arr);
-            js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
-            return iter;
+            return js_create_array_iterator(arr);
         }
 
         // Check for [Symbol.iterator]()
@@ -12323,7 +12467,61 @@ extern "C" Item js_iterator_step(Item iterator) {
     if (get_type_id(iterator) == LMD_TYPE_NULL || iterator.item == ITEM_JS_UNDEFINED)
         return (Item){.item = JS_ITER_DONE_SENTINEL};
 
-    // Synthetic array iterator
+    // v28: MAP_KIND_ITERATOR fast path — direct memory access, zero property lookups
+    if (get_type_id(iterator) == LMD_TYPE_MAP && iterator.map->map_kind == MAP_KIND_ITERATOR) {
+        Map* m = iterator.map;
+        JsIterData* d = (JsIterData*)m->data;
+        int64_t idx = d->index;
+
+        if (m->type == (void*)&js_array_iter_marker) {
+            // Array iterator: direct index read + increment
+            // Use snapshot length for arguments (-1 means use live length for regular arrays)
+            int len = (d->length >= 0) ? (int)d->length
+                     : ((get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0);
+            if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
+            Item elem = js_property_access(d->source, (Item){.item = i2it((int)idx)});
+            d->index = idx + 1;
+            return elem;
+        }
+        if (m->type == (void*)&js_string_iter_marker) {
+            // String iterator: UTF-8 code point advance
+            String* str = it2s(d->source);
+            if (idx >= (int64_t)str->len) return (Item){.item = JS_ITER_DONE_SENTINEL};
+            unsigned char lead = (unsigned char)str->chars[idx];
+            int cp_len = 1;
+            if (lead >= 0xF0 && idx + 4 <= (int64_t)str->len)      cp_len = 4;
+            else if (lead >= 0xE0 && idx + 3 <= (int64_t)str->len)  cp_len = 3;
+            else if (lead >= 0xC0 && idx + 2 <= (int64_t)str->len)  cp_len = 2;
+            int total_len = cp_len;
+            // combine WTF-8/CESU-8 surrogate pairs
+            if (cp_len == 3 && lead == 0xED && idx + 1 < (int64_t)str->len) {
+                unsigned char second = (unsigned char)str->chars[idx + 1];
+                if (second >= 0xA0 && second <= 0xAF) {
+                    int next = (int)idx + 3;
+                    if (next + 2 < (int)str->len &&
+                        (unsigned char)str->chars[next] == 0xED) {
+                        unsigned char ns = (unsigned char)str->chars[next + 1];
+                        if (ns >= 0xB0 && ns <= 0xBF) {
+                            total_len = 6;
+                        }
+                    }
+                }
+            }
+            String* ch = heap_create_name(str->chars + idx, total_len);
+            d->index = idx + total_len;
+            return (Item){.item = s2it(ch)};
+        }
+        if (m->type == (void*)&js_typed_array_iter_marker) {
+            // Typed array iterator: direct index read + increment
+            int len = js_typed_array_length(d->source);
+            if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
+            Item elem = js_typed_array_get(d->source, (Item){.item = i2it((int)idx)});
+            d->index = idx + 1;
+            return elem;
+        }
+    }
+
+    // Legacy synthetic array iterator (property-based, for backwards compatibility)
     bool has_arr = false;
     Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);
     if (has_arr) {

@@ -445,6 +445,16 @@ void rdt_pop_clip(RdtVector* vec) {
     entry->path = nullptr;
 }
 
+int rdt_clip_save_depth() {
+    int saved = s_clip_depth;
+    s_clip_depth = 0;
+    return saved;
+}
+
+void rdt_clip_restore_depth(int saved_depth) {
+    s_clip_depth = saved_depth;
+}
+
 // Apply active clip masks to a shape (called before tvg_push_draw_remove)
 static void apply_clip_masks(Tvg_Paint shape) {
     for (int i = 0; i < s_clip_depth; i++) {
