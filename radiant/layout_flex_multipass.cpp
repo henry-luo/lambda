@@ -10,9 +10,10 @@
 #include "../lib/strbuf.h"
 #include <cmath>
 
-// Limits for flex layout recursion
+// Flex-in-flex nesting limit — prevents O(n²) timeout from deeply nested flex
+// containers (e.g., 200 nested position:fixed display:flex divs).
+// MAX_LAYOUT_DEPTH (300) guards stack overflow; this guards exponential flex work.
 static const int MAX_FLEX_DEPTH = 16;
-static const int MAX_FLEX_NODES = 5000;
 
 // Forward declarations
 void layout_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
@@ -78,13 +79,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
     log_enter();
     log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
 
-    // guard: skip if flex node budget is exhausted (reuse flex limit)
-    if (lycon->node_count > MAX_FLEX_NODES) {
-        log_debug("layout_flex_absolute_children: node budget exhausted (%d), skipping",
-                  lycon->node_count);
-        log_leave();
-        return;
-    }
+
 
     // Get flex direction from the container parameter directly (not lycon->flex_container!)
     // This is critical for nested flex containers - lycon->flex_container points to the
@@ -493,12 +488,11 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container) return;
 
-    // guard against excessive recursive flex nesting (fuzzer-found timeout)
+    // guard against exponential flex-in-flex nesting (fuzzer-found O(n²) timeout)
     lycon->flex_depth++;
-    lycon->node_count++;
-    if (lycon->flex_depth > MAX_FLEX_DEPTH || lycon->node_count > MAX_FLEX_NODES) {
-        log_error("layout_flex: flex_depth=%d nodes=%d exceeds limit (max_depth=%d, max_nodes=%d), skipping %s",
-                  lycon->flex_depth, lycon->node_count, MAX_FLEX_DEPTH, MAX_FLEX_NODES,
+    if (lycon->flex_depth > MAX_FLEX_DEPTH) {
+        log_error("layout_flex: flex_depth=%d exceeds limit (%d), skipping %s",
+                  lycon->flex_depth, MAX_FLEX_DEPTH,
                   flex_container->source_loc());
         lycon->flex_depth--;
         return;
@@ -866,6 +860,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 
     log_info("ENHANCED FLEX ALGORITHM END: container=%p", flex_container);
     log_leave();
+    lycon->flex_depth--;
 }
 // Enhanced flex algorithm with auto margin support
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container) {
@@ -886,7 +881,6 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
     log_debug("ENHANCED FLEX ALGORITHM COMPLETED for %s", flex_container->node_name());
     log_debug("Enhanced flex algorithm completed");
     log_leave();
-    lycon->flex_depth--;
 }
 
 // Apply auto margin centering after flex algorithm
@@ -1538,11 +1532,13 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
     }
 
-    // Restore parent context, but preserve depth and node_count guards
+    // Restore parent context, but preserve depth, flex_depth, and node_count guards
     int current_depth = lycon->depth;
+    int current_flex_depth = lycon->flex_depth;
     int current_node_count = lycon->node_count;
     *lycon = saved_context;
     lycon->depth = current_depth;
+    lycon->flex_depth = current_flex_depth;
     lycon->node_count = current_node_count;
 
     log_info("SUB-PASS 2 END: item=%p, content=%dx%d",
@@ -2502,6 +2498,17 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_enter();
     log_info("FLEX LAYOUT START: container=%p (%s)", block, block->node_name());
+
+    // Early flex depth guard — prevent expensive setup work (item collection,
+    // view tree snapshots) for deeply nested flex containers that will be skipped anyway.
+    // The detailed guard is also in layout_flex_container_with_nested_content but that
+    // runs AFTER collect_and_prepare_flex_items, which is expensive for pathological inputs.
+    if (lycon->flex_depth >= MAX_FLEX_DEPTH) {
+        log_error("layout_flex_content: flex_depth=%d at limit, skipping %s",
+                  lycon->flex_depth, block->source_loc());
+        log_leave();
+        return;
+    }
 
     // =========================================================================
     // CACHE LOOKUP: Check if we have a cached result for these constraints

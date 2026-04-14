@@ -980,9 +980,20 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     log_debug("layout_abs_block");  log_enter();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", elmt->node_name(), block->x, block->y, pa_block->advance_y);
 
+    // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
+    // layout_abs_block bypasses layout_flow_node so its depth guard doesn't apply here
+    static const int MAX_ABS_DEPTH = 300;
+    lycon->depth++;
+    if (lycon->depth >= MAX_ABS_DEPTH) {
+        log_error("layout_abs_block: depth %d exceeded, skipping %s", MAX_ABS_DEPTH, elmt->source_loc());
+        lycon->depth--;
+        log_leave();
+        return;
+    }
+
     // find containing block
     ViewBlock* cb = find_containing_block(block, block->position->position);
-    if (!cb) { log_error("Missing containing block");  return; }
+    if (!cb) { log_error("Missing containing block");  lycon->depth--;  log_leave();  return; }
     log_debug("found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d",
         cb, cb->width, cb->height, cb->content_width, cb->content_height);
     // link to containing block's float context
@@ -1734,6 +1745,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
         block->x, block->y, block->width,  block->height);
+    lycon->depth--;
     log_leave();
 }
 

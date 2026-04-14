@@ -1355,7 +1355,7 @@ void line_align(LayoutContext* lycon) {
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // guard against stack overflow from deeply nested DOM (fuzzer-found)
-    static const int MAX_LAYOUT_DEPTH = 128;
+    static const int MAX_LAYOUT_DEPTH = 300;
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
         log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
                   MAX_LAYOUT_DEPTH, node->source_loc());
@@ -1394,6 +1394,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     elem->height = 0;
                 }
                 log_debug("%s skipping non-summary child of closed <details>", node->source_loc());
+                lycon->depth--;
                 return;
             }
         }
@@ -1409,6 +1410,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     const char* node_name = node->node_name();
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
         log_debug("%s skipping HTML comment node", node->source_loc());
+        lycon->depth--;
         return;
     }
 
@@ -1486,12 +1488,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                              marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }
             }
+            lycon->depth--;
             return;
         }
 
         // Skip floats that were pre-laid in the float pre-pass
         if (elem->float_prelaid) {
             log_debug("%s skipping pre-laid float: %s", node->source_loc(), node->node_name());
+            lycon->depth--;
             return;
         }
 
@@ -1587,6 +1591,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             if (resolved.outer == CSS_VALUE_NONE) {
                 // Run-in was merged into following block, skip layout
                 log_debug("%s run-in merged into following block, skipping", node->source_loc());
+                lycon->depth--;
                 return;
             }
             // Run-in becomes block
@@ -1598,6 +1603,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // When orphaned (outside a table context), they should not be rendered.
         if (display.inner == CSS_VALUE_TABLE_COLUMN || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
             log_debug("%s skipping table-column/table-column-group element (no visual rendering)", node->source_loc());
+            lycon->depth--;
             return;
         }
 

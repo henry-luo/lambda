@@ -2580,6 +2580,8 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             log_debug("failed to render svg image");
         }
     } else {
+        // ensure raster image pixels are decoded (lazy loading)
+        image_surface_ensure_decoded(img);
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
             rdcon->clip_shapes, rdcon->clip_shape_depth);

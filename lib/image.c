@@ -534,3 +534,136 @@ void image_free(unsigned char* data) {
         mem_free(data);
     }
 }
+
+// ============================================================================
+// Header-only dimension reading (no pixel decode)
+// ============================================================================
+
+// Get PNG dimensions from file (reads only IHDR chunk header)
+static int get_png_dimensions(const char* filename, int* width, int* height) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) return 0;
+
+    // PNG header: 8-byte signature + 4-byte chunk length + 4-byte "IHDR" + 4-byte width + 4-byte height = 24 bytes
+    unsigned char header[24];
+    if (fread(header, 1, 24, fp) != 24) {
+        fclose(fp);
+        return 0;
+    }
+    fclose(fp);
+
+    // Verify PNG signature
+    if (png_sig_cmp(header, 0, 8)) return 0;
+
+    // Width and height are big-endian uint32 at offsets 16 and 20
+    *width  = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+    *height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+    return (*width > 0 && *height > 0) ? 1 : 0;
+}
+
+// Get JPEG dimensions from file (reads only header via TurboJPEG)
+static int get_jpeg_dimensions(const char* filename, int* width, int* height) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) return 0;
+
+    // Read enough for JPEG header (typically < 1KB)
+    // We read a small buffer; tjDecompressHeader3 only needs the header
+    unsigned char buf[4096];
+    size_t nread = fread(buf, 1, sizeof(buf), fp);
+    fclose(fp);
+    if (nread < 3) return 0;
+
+    tjhandle tj = tjInitDecompress();
+    if (!tj) return 0;
+
+    int w, h, subsamp, colorspace;
+    int ok = (tjDecompressHeader3(tj, buf, nread, &w, &h, &subsamp, &colorspace) == 0);
+    tjDestroy(tj);
+
+    if (ok) {
+        *width = w;
+        *height = h;
+    }
+    return ok;
+}
+
+// Get GIF dimensions from file (reads only header)
+static int get_gif_dimensions(const char* filename, int* width, int* height) {
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) return 0;
+
+    // GIF header: 6-byte signature + 2-byte width + 2-byte height (little-endian)
+    unsigned char header[10];
+    if (fread(header, 1, 10, fp) != 10) {
+        fclose(fp);
+        return 0;
+    }
+    fclose(fp);
+
+    // Verify GIF signature
+    if (header[0] != 'G' || header[1] != 'I' || header[2] != 'F' ||
+        header[3] != '8' || (header[4] != '7' && header[4] != '9') || header[5] != 'a') {
+        return 0;
+    }
+
+    *width  = header[6] | (header[7] << 8);
+    *height = header[8] | (header[9] << 8);
+    return (*width > 0 && *height > 0) ? 1 : 0;
+}
+
+int image_get_dimensions(const char* filename, int* width, int* height) {
+    if (!filename || !width || !height) return 0;
+
+    ImageType type = get_image_type(filename);
+    switch (type) {
+        case IMAGE_TYPE_PNG:  return get_png_dimensions(filename, width, height);
+        case IMAGE_TYPE_JPEG: return get_jpeg_dimensions(filename, width, height);
+        case IMAGE_TYPE_GIF:  return get_gif_dimensions(filename, width, height);
+        default: return 0;
+    }
+}
+
+// Get PNG dimensions from memory
+static int get_png_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
+    if (length < 24) return 0;
+    if (png_sig_cmp((png_const_bytep)data, 0, 8)) return 0;
+    *width  = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
+    *height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    return (*width > 0 && *height > 0) ? 1 : 0;
+}
+
+// Get JPEG dimensions from memory
+static int get_jpeg_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
+    if (length < 3) return 0;
+    tjhandle tj = tjInitDecompress();
+    if (!tj) return 0;
+    int w, h, subsamp, colorspace;
+    int ok = (tjDecompressHeader3(tj, data, length, &w, &h, &subsamp, &colorspace) == 0);
+    tjDestroy(tj);
+    if (ok) { *width = w; *height = h; }
+    return ok;
+}
+
+// Get GIF dimensions from memory
+static int get_gif_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
+    if (length < 10) return 0;
+    if (data[0] != 'G' || data[1] != 'I' || data[2] != 'F' ||
+        data[3] != '8' || (data[4] != '7' && data[4] != '9') || data[5] != 'a') {
+        return 0;
+    }
+    *width  = data[6] | (data[7] << 8);
+    *height = data[8] | (data[9] << 8);
+    return (*width > 0 && *height > 0) ? 1 : 0;
+}
+
+int image_get_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
+    if (!data || length == 0 || !width || !height) return 0;
+
+    ImageType type = get_image_type_from_memory(data, length);
+    switch (type) {
+        case IMAGE_TYPE_PNG:  return get_png_dimensions_from_memory(data, length, width, height);
+        case IMAGE_TYPE_JPEG: return get_jpeg_dimensions_from_memory(data, length, width, height);
+        case IMAGE_TYPE_GIF:  return get_gif_dimensions_from_memory(data, length, width, height);
+        default: return 0;
+    }
+}

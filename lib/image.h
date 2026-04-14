@@ -21,6 +21,14 @@ unsigned char* image_load_from_memory(const unsigned char* data, size_t length, 
 // Free image data returned by image_load or image_load_from_memory
 void image_free(unsigned char* data);
 
+// Get image dimensions without decoding pixel data (header-only read)
+// Returns 1 on success, 0 on failure
+int image_get_dimensions(const char* filename, int* width, int* height);
+
+// Get image dimensions from memory buffer without decoding pixel data
+// Returns 1 on success, 0 on failure
+int image_get_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height);
+
 #ifdef __cplusplus
 }
 #endif
