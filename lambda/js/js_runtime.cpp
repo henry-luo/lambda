@@ -627,6 +627,8 @@ extern "C" Item js_build_arguments_object() {
     for (int i = 0; i < argc; i++) {
         js_array_push(arr, args ? args[i] : ItemNull);
     }
+    // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
+    arr.array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     Item companion = js_new_object();
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
@@ -7528,6 +7530,19 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // 3. Map unsupported Unicode property names to RE2-compatible equivalents
     {
+        // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.
+        // ES2018 specifies both canonical names and short aliases for property escapes.
+        static const struct { const char* alias; int alias_len; const char* canonical; int canonical_len; } prop_aliases[] = {
+            {"\\p{Ideo}",  8, "\\p{Ideographic}", 16},
+            {"\\P{Ideo}",  8, "\\P{Ideographic}", 16},
+        };
+        for (int pa = 0; pa < (int)(sizeof(prop_aliases)/sizeof(prop_aliases[0])); pa++) {
+            size_t pos = 0;
+            while ((pos = processed_pattern.find(prop_aliases[pa].alias, pos)) != std::string::npos) {
+                processed_pattern.replace(pos, prop_aliases[pa].alias_len, prop_aliases[pa].canonical);
+                pos += prop_aliases[pa].canonical_len;
+            }
+        }
         // \p{Ideographic} → \p{Han} (covers CJK Unified Ideographs)
         size_t pos = 0;
         while ((pos = processed_pattern.find("\\p{Ideographic}", pos)) != std::string::npos) {
@@ -8622,6 +8637,81 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     js_typed_array_set(obj, (Item){.item = i2it(j + 1)}, key);
                 }
                 return obj;
+            }
+            // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced
+            if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int idx = argc > 0 ? (int)js_get_number(args[0]) : 0;
+                if (idx < 0) idx += len;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (idx >= 0 && idx < len && argc > 1) {
+                    js_typed_array_set(result, (Item){.item = i2it(idx)}, args[1]);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toReversed() — returns new reversed copy
+            if (method->len == 10 && strncmp(method->chars, "toReversed", 10) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                for (int i = 0; i < len; i++) {
+                    Item val = js_typed_array_get(obj, (Item){.item = i2it(len - 1 - i)});
+                    js_typed_array_set(result, (Item){.item = i2it(i)}, val);
+                }
+                return result;
+            }
+            // ES2023: TypedArray.prototype.toSorted(comparefn?) — returns new sorted copy
+            if (method->len == 8 && strncmp(method->chars, "toSorted", 8) == 0) {
+                // Step 1: If comparefn is not undefined and IsCallable(comparefn) is false, throw TypeError
+                if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("comparefn is not a function");
+                }
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                JsTypedArray* dst = (JsTypedArray*)result.map->data;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memcpy(dst->data, ta->data, len * elem_size);
+                if (len > 1) {
+                    // insertion sort on the copy
+                    for (int i = 1; i < len; i++) {
+                        Item key = js_typed_array_get(result, (Item){.item = i2it(i)});
+                        double key_val = js_get_number(key);
+                        int j = i - 1;
+                        while (j >= 0) {
+                            Item jval = js_typed_array_get(result, (Item){.item = i2it(j)});
+                            double jdbl = js_get_number(jval);
+                            if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED) {
+                                Item cmp_args[2] = {jval, key};
+                                Item cmp = js_call_function(args[0], make_js_undefined(), cmp_args, 2);
+                                if (js_exception_pending) return make_js_undefined();
+                                if (js_get_number(cmp) <= 0) break;
+                            } else {
+                                if (jdbl <= key_val) break;
+                            }
+                            js_typed_array_set(result, (Item){.item = i2it(j + 1)}, jval);
+                            j--;
+                        }
+                        js_typed_array_set(result, (Item){.item = i2it(j + 1)}, key);
+                    }
+                }
+                return result;
             }
         }
     }
@@ -12106,6 +12196,7 @@ static char js_typed_array_iter_marker;
 struct JsIterData {
     Item source;     // the iterable being iterated
     int64_t index;   // current position
+    int64_t length;  // v28: snapshot of source length at creation (prevents infinite loops)
 };
 
 // v28: Create lightweight fixed-layout array iterator (MAP_KIND_ITERATOR)
@@ -12117,6 +12208,10 @@ static Item js_create_array_iterator(Item source) {
     JsIterData* data = (JsIterData*)mem_alloc(sizeof(JsIterData), MEM_CAT_JS_RUNTIME);
     data->source = source;
     data->index = 0;
+    // Snapshot length for arguments objects (prevents infinite for-of when body extends arguments)
+    // Regular arrays use live length (-1 sentinel) per ES spec (mutations visible during iteration)
+    bool is_arguments = (get_type_id(source) == LMD_TYPE_ARRAY && source.array->is_content);
+    data->length = is_arguments ? source.array->length : -1;
     m->data = data;
     m->data_cap = sizeof(JsIterData);
     return (Item){.map = m};
@@ -12252,7 +12347,9 @@ extern "C" Item js_iterator_step(Item iterator) {
 
         if (m->type == (void*)&js_array_iter_marker) {
             // Array iterator: direct index read + increment
-            int len = (get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0;
+            // Use snapshot length for arguments (-1 means use live length for regular arrays)
+            int len = (d->length >= 0) ? (int)d->length
+                     : ((get_type_id(d->source) == LMD_TYPE_ARRAY) ? (int)d->source.array->length : 0);
             if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};
             Item elem = js_property_access(d->source, (Item){.item = i2it((int)idx)});
             d->index = idx + 1;
