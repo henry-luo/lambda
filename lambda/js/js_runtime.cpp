@@ -10281,7 +10281,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
         if (argc < 2) return (Item){.item = i2it(fn_last_index_of(str, search_val))};
         // lastIndexOf with start position - search backwards from position
-        int end_pos = (int)js_get_number(args[1]);
+        double dpos = js_get_number(args[1]);
+        // ES spec: NaN → +Infinity (search from end)
+        int end_pos = isnan(dpos) ? INT32_MAX : (int)dpos;
         String* s = it2s(str);
         String* sub = it2s(search_val);
         if (!s || !sub) return (Item){.item = i2it(-1)};
