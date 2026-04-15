@@ -1,0 +1,13 @@
+true
+true
+true
+true
+copy me
+access ok
+chmod ok
+true
+false
+true
+false
+false
+done

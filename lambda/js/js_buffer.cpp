@@ -1,0 +1,471 @@
+/**
+ * js_buffer.cpp — Node.js-style 'buffer' module for LambdaJS
+ *
+ * Provides Buffer class backed by Uint8Array (TypedArray infrastructure).
+ * Buffer.alloc, Buffer.from, Buffer.concat, buf.toString, buf.write,
+ * buf.copy, buf.slice, buf.fill, buf.compare, buf.equals, buf.indexOf,
+ * buf.byteLength.
+ */
+#include "js_runtime.h"
+#include "js_typed_array.h"
+#include "../lambda-data.hpp"
+#include "../transpiler.hpp"
+#include "../../lib/log.h"
+#include "../../lib/mem.h"
+
+#include <cstring>
+#include <cstdlib>
+
+extern Input* js_input;
+
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static Item make_string_item(const char* str, int len) {
+    if (!str) return ItemNull;
+    String* s = heap_create_name(str, (size_t)len);
+    return (Item){.item = s2it(s)};
+}
+
+static Item make_string_item(const char* str) {
+    if (!str) return ItemNull;
+    return make_string_item(str, (int)strlen(str));
+}
+
+// Helper: get raw data pointer and length from a typed array Item
+static uint8_t* buffer_data(Item buf, int* out_len) {
+    if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
+    // typed array keeps JsTypedArray* in map->data
+    Map* m = buf.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta || !ta->data) { *out_len = 0; return NULL; }
+    *out_len = ta->byte_length;
+    return (uint8_t*)ta->data;
+}
+
+// Helper: create a Buffer (Uint8Array)
+// We cannot set string properties on typed arrays (MAP_KIND_TYPED_ARRAY routes
+// property_set to typed_array_set which only handles numeric indices).
+// Instead, Buffer identity is checked via js_is_typed_array().
+static Item create_buffer(int size) {
+    return js_typed_array_new(JS_TYPED_UINT8, size);
+}
+
+// ─── Buffer.alloc(size, fill?, encoding?) ───────────────────────────────────
+extern "C" Item js_buffer_alloc(Item size_item) {
+    int64_t size = 0;
+    TypeId tid = get_type_id(size_item);
+    if (tid == LMD_TYPE_INT) size = it2i(size_item);
+    else if (tid == LMD_TYPE_FLOAT) size = (int64_t)it2d(size_item);
+    if (size < 0) size = 0;
+    if (size > 1048576) size = 1048576; // 1MB limit for safety
+
+    Item buf = create_buffer((int)size);
+    // alloc zero-fills by default via typed_array_new
+    return buf;
+}
+
+// ─── Buffer.from(data, encoding?) ───────────────────────────────────────────
+// data can be: string (utf-8), array of bytes, another Buffer/TypedArray
+extern "C" Item js_buffer_from(Item data, Item encoding) {
+    TypeId tid = get_type_id(data);
+
+    if (tid == LMD_TYPE_STRING) {
+        // string → utf-8 bytes
+        String* s = it2s(data);
+
+        // check encoding
+        char enc_buf[32] = "utf8";
+        if (get_type_id(encoding) == LMD_TYPE_STRING) {
+            String* enc = it2s(encoding);
+            int elen = (int)enc->len;
+            if (elen >= (int)sizeof(enc_buf)) elen = (int)sizeof(enc_buf) - 1;
+            memcpy(enc_buf, enc->chars, elen);
+            enc_buf[elen] = '\0';
+        }
+
+        if (strcmp(enc_buf, "hex") == 0) {
+            // hex decode
+            int hex_len = (int)s->len;
+            int byte_len = hex_len / 2;
+            Item buf = create_buffer(byte_len);
+            int buf_len = 0;
+            uint8_t* bdata = buffer_data(buf, &buf_len);
+            if (bdata) {
+                for (int i = 0; i < byte_len && i * 2 + 1 < hex_len; i++) {
+                    char hi = s->chars[i * 2];
+                    char lo = s->chars[i * 2 + 1];
+                    auto hex_digit = [](char c) -> int {
+                        if (c >= '0' && c <= '9') return c - '0';
+                        if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+                        if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+                        return 0;
+                    };
+                    bdata[i] = (uint8_t)((hex_digit(hi) << 4) | hex_digit(lo));
+                }
+            }
+            return buf;
+        }
+
+        if (strcmp(enc_buf, "base64") == 0) {
+            // base64 decode — use atob-style decode
+            // simple base64 decode
+            static const int b64_table[256] = {
+                ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,
+                ['I']=8,['J']=9,['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,
+                ['Q']=16,['R']=17,['S']=18,['T']=19,['U']=20,['V']=21,['W']=22,['X']=23,
+                ['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,['e']=30,['f']=31,
+                ['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
+                ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,
+                ['w']=48,['x']=49,['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,
+                ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63
+            };
+            int in_len = (int)s->len;
+            int out_len = in_len * 3 / 4;
+            if (in_len > 0 && s->chars[in_len - 1] == '=') out_len--;
+            if (in_len > 1 && s->chars[in_len - 2] == '=') out_len--;
+
+            Item buf = create_buffer(out_len);
+            int buf_byte_len = 0;
+            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            if (bdata) {
+                int j = 0;
+                for (int i = 0; i < in_len; i += 4) {
+                    uint32_t sextet_a = (i < in_len) ? b64_table[(unsigned char)s->chars[i]] : 0;
+                    uint32_t sextet_b = (i+1 < in_len) ? b64_table[(unsigned char)s->chars[i+1]] : 0;
+                    uint32_t sextet_c = (i+2 < in_len) ? b64_table[(unsigned char)s->chars[i+2]] : 0;
+                    uint32_t sextet_d = (i+3 < in_len) ? b64_table[(unsigned char)s->chars[i+3]] : 0;
+                    uint32_t triple = (sextet_a << 18) | (sextet_b << 12) | (sextet_c << 6) | sextet_d;
+                    if (j < out_len) bdata[j++] = (triple >> 16) & 0xFF;
+                    if (j < out_len) bdata[j++] = (triple >> 8) & 0xFF;
+                    if (j < out_len) bdata[j++] = triple & 0xFF;
+                }
+            }
+            return buf;
+        }
+
+        // default: utf-8
+        int byte_len = (int)s->len;
+        Item buf = create_buffer(byte_len);
+        int buf_byte_len = 0;
+        uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+        if (bdata && byte_len > 0) {
+            memcpy(bdata, s->chars, byte_len);
+        }
+        return buf;
+    }
+
+    // array of numbers
+    if (js_array_length(data) >= 0) {
+        int64_t arr_len = js_array_length(data);
+        if (arr_len > 1048576) arr_len = 1048576;
+        Item buf = create_buffer((int)arr_len);
+        int buf_byte_len = 0;
+        uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+        if (bdata) {
+            for (int64_t i = 0; i < arr_len; i++) {
+                Item elem = js_array_get_int(data, i);
+                int64_t v = 0;
+                TypeId et = get_type_id(elem);
+                if (et == LMD_TYPE_INT) v = it2i(elem);
+                else if (et == LMD_TYPE_FLOAT) v = (int64_t)it2d(elem);
+                bdata[i] = (uint8_t)(v & 0xFF);
+            }
+        }
+        return buf;
+    }
+
+    // typed array / buffer → copy
+    if (js_is_typed_array(data)) {
+        int src_len = 0;
+        uint8_t* src_data = buffer_data(data, &src_len);
+        Item buf = create_buffer(src_len);
+        int dst_len = 0;
+        uint8_t* dst_data = buffer_data(buf, &dst_len);
+        if (src_data && dst_data && src_len > 0) {
+            memcpy(dst_data, src_data, src_len);
+        }
+        return buf;
+    }
+
+    return create_buffer(0);
+}
+
+// ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
+extern "C" Item js_buffer_concat(Item list) {
+    if (js_array_length(list) < 0) return create_buffer(0);
+
+    int64_t count = js_array_length(list);
+    // compute total length
+    int total = 0;
+    for (int64_t i = 0; i < count; i++) {
+        Item buf = js_array_get_int(list, i);
+        int blen = 0;
+        buffer_data(buf, &blen);
+        total += blen;
+    }
+    if (total > 1048576) total = 1048576;
+
+    Item result = create_buffer(total);
+    int dst_len = 0;
+    uint8_t* dst = buffer_data(result, &dst_len);
+    int offset = 0;
+    for (int64_t i = 0; i < count && offset < total; i++) {
+        Item buf = js_array_get_int(list, i);
+        int blen = 0;
+        uint8_t* bdata = buffer_data(buf, &blen);
+        if (bdata && blen > 0) {
+            int copy = blen;
+            if (offset + copy > total) copy = total - offset;
+            memcpy(dst + offset, bdata, copy);
+            offset += copy;
+        }
+    }
+    return result;
+}
+
+// ─── Buffer.isBuffer(obj) ───────────────────────────────────────────────────
+extern "C" Item js_buffer_isBuffer(Item obj) {
+    if (!js_is_typed_array(obj)) return (Item){.item = b2it(false)};
+    // Buffer is a Uint8Array — check element type
+    Map* m = obj.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (ta && ta->element_type == JS_TYPED_UINT8)
+        return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
+// ─── Buffer.byteLength(string, encoding?) ───────────────────────────────────
+extern "C" Item js_buffer_byteLength(Item str_item) {
+    if (get_type_id(str_item) == LMD_TYPE_STRING) {
+        String* s = it2s(str_item);
+        return (Item){.item = i2it((int64_t)s->len)};
+    }
+    if (js_is_typed_array(str_item)) {
+        int blen = 0;
+        buffer_data(str_item, &blen);
+        return (Item){.item = i2it(blen)};
+    }
+    return (Item){.item = i2it(0)};
+}
+
+// ─── buf.toString(encoding?, start?, end?) ──────────────────────────────────
+extern "C" Item js_buffer_toString(Item buf, Item encoding) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen == 0) return make_string_item("");
+
+    char enc_buf[32] = "utf8";
+    if (get_type_id(encoding) == LMD_TYPE_STRING) {
+        String* enc = it2s(encoding);
+        int elen = (int)enc->len;
+        if (elen >= (int)sizeof(enc_buf)) elen = (int)sizeof(enc_buf) - 1;
+        memcpy(enc_buf, enc->chars, elen);
+        enc_buf[elen] = '\0';
+    }
+
+    if (strcmp(enc_buf, "hex") == 0) {
+        char* hex = (char*)mem_alloc(blen * 2 + 1, MEM_CAT_JS_RUNTIME);
+        for (int i = 0; i < blen; i++) {
+            static const char hx[] = "0123456789abcdef";
+            hex[i * 2] = hx[data[i] >> 4];
+            hex[i * 2 + 1] = hx[data[i] & 0xf];
+        }
+        hex[blen * 2] = '\0';
+        Item result = make_string_item(hex, blen * 2);
+        mem_free(hex);
+        return result;
+    }
+
+    if (strcmp(enc_buf, "base64") == 0) {
+        static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        int out_len = 4 * ((blen + 2) / 3);
+        char* b64_str = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
+        int j = 0;
+        for (int i = 0; i < blen; i += 3) {
+            uint32_t a = data[i];
+            uint32_t b_val = (i + 1 < blen) ? data[i + 1] : 0;
+            uint32_t c = (i + 2 < blen) ? data[i + 2] : 0;
+            uint32_t triple = (a << 16) | (b_val << 8) | c;
+            b64_str[j++] = b64[(triple >> 18) & 0x3F];
+            b64_str[j++] = b64[(triple >> 12) & 0x3F];
+            b64_str[j++] = (i + 1 < blen) ? b64[(triple >> 6) & 0x3F] : '=';
+            b64_str[j++] = (i + 2 < blen) ? b64[triple & 0x3F] : '=';
+        }
+        b64_str[j] = '\0';
+        Item result = make_string_item(b64_str, j);
+        mem_free(b64_str);
+        return result;
+    }
+
+    // default: utf-8
+    return make_string_item((const char*)data, blen);
+}
+
+// ─── buf.write(string, offset?, length?, encoding?) ─────────────────────────
+extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen == 0) return (Item){.item = i2it(0)};
+    if (get_type_id(str_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+
+    String* s = it2s(str_item);
+    int offset = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
+    if (offset < 0) offset = 0;
+    if (offset >= blen) return (Item){.item = i2it(0)};
+
+    int write_len = (int)s->len;
+    if (offset + write_len > blen) write_len = blen - offset;
+    memcpy(data + offset, s->chars, write_len);
+    return (Item){.item = i2it(write_len)};
+}
+
+// ─── buf.copy(target, targetStart?, sourceStart?, sourceEnd?) ───────────────
+extern "C" Item js_buffer_copy(Item src_buf, Item dst_buf, Item target_start_item) {
+    int src_len = 0, dst_len = 0;
+    uint8_t* src = buffer_data(src_buf, &src_len);
+    uint8_t* dst = buffer_data(dst_buf, &dst_len);
+    if (!src || !dst) return (Item){.item = i2it(0)};
+
+    int target_start = 0;
+    if (get_type_id(target_start_item) == LMD_TYPE_INT)
+        target_start = (int)it2i(target_start_item);
+    if (target_start < 0) target_start = 0;
+
+    int copy_len = src_len;
+    if (target_start + copy_len > dst_len) copy_len = dst_len - target_start;
+    if (copy_len <= 0) return (Item){.item = i2it(0)};
+
+    memcpy(dst + target_start, src, copy_len);
+    return (Item){.item = i2it(copy_len)};
+}
+
+// ─── buf.equals(otherBuffer) ────────────────────────────────────────────────
+extern "C" Item js_buffer_equals(Item a, Item b) {
+    int alen = 0, blen = 0;
+    uint8_t* adata = buffer_data(a, &alen);
+    uint8_t* bdata = buffer_data(b, &blen);
+    if (alen != blen) return (Item){.item = b2it(false)};
+    if (alen == 0) return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(memcmp(adata, bdata, alen) == 0)};
+}
+
+// ─── buf.compare(otherBuffer) ───────────────────────────────────────────────
+extern "C" Item js_buffer_compare(Item a, Item b) {
+    int alen = 0, blen = 0;
+    uint8_t* adata = buffer_data(a, &alen);
+    uint8_t* bdata = buffer_data(b, &blen);
+    int min_len = alen < blen ? alen : blen;
+    int cmp = min_len > 0 ? memcmp(adata, bdata, min_len) : 0;
+    if (cmp == 0) cmp = alen - blen;
+    if (cmp < 0) return (Item){.item = i2it(-1)};
+    if (cmp > 0) return (Item){.item = i2it(1)};
+    return (Item){.item = i2it(0)};
+}
+
+// ─── buf.indexOf(value) ────────────────────────────────────────────────────
+extern "C" Item js_buffer_indexOf(Item buf, Item value) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen == 0) return (Item){.item = i2it(-1)};
+
+    if (get_type_id(value) == LMD_TYPE_INT) {
+        int byte_val = (int)(it2i(value) & 0xFF);
+        for (int i = 0; i < blen; i++) {
+            if (data[i] == byte_val) return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+
+    if (get_type_id(value) == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        if ((int)s->len > blen) return (Item){.item = i2it(-1)};
+        for (int i = 0; i <= blen - (int)s->len; i++) {
+            if (memcmp(data + i, s->chars, s->len) == 0)
+                return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+
+    return (Item){.item = i2it(-1)};
+}
+
+// ─── buf.slice(start?, end?) — returns a new Buffer ─────────────────────────
+extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen == 0) return create_buffer(0);
+
+    int start = 0, end = blen;
+    if (get_type_id(start_item) == LMD_TYPE_INT) start = (int)it2i(start_item);
+    if (get_type_id(end_item) == LMD_TYPE_INT) end = (int)it2i(end_item);
+    if (start < 0) start = blen + start;
+    if (end < 0) end = blen + end;
+    if (start < 0) start = 0;
+    if (end > blen) end = blen;
+    if (start >= end) return create_buffer(0);
+
+    int slice_len = end - start;
+    Item result = create_buffer(slice_len);
+    int dst_len = 0;
+    uint8_t* dst = buffer_data(result, &dst_len);
+    if (dst) memcpy(dst, data + start, slice_len);
+    return result;
+}
+
+// ─── buf.fill(value, offset?, end?) ─────────────────────────────────────────
+extern "C" Item js_buffer_fill(Item buf, Item value) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen == 0) return buf;
+
+    uint8_t fill_byte = 0;
+    if (get_type_id(value) == LMD_TYPE_INT) fill_byte = (uint8_t)(it2i(value) & 0xFF);
+    memset(data, fill_byte, blen);
+    return buf;
+}
+
+// ─── Namespace ───────────────────────────────────────────────────────────────
+
+static Item buffer_namespace = {0};
+
+static void buf_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    Item key = make_string_item(name);
+    Item fn = js_new_function(func_ptr, param_count);
+    js_property_set(ns, key, fn);
+}
+
+extern "C" Item js_get_buffer_namespace(void) {
+    if (buffer_namespace.item != 0) return buffer_namespace;
+
+    buffer_namespace = js_new_object();
+
+    // static methods (Buffer.alloc, Buffer.from, etc.)
+    buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 1);
+    buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 2);
+    buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 1);
+    buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);
+    buf_set_method(buffer_namespace, "byteLength", (void*)js_buffer_byteLength, 1);
+
+    // instance methods (called as Buffer methods with 'this' as first arg)
+    buf_set_method(buffer_namespace, "toString",   (void*)js_buffer_toString, 2);
+    buf_set_method(buffer_namespace, "write",      (void*)js_buffer_write, 3);
+    buf_set_method(buffer_namespace, "copy",       (void*)js_buffer_copy, 3);
+    buf_set_method(buffer_namespace, "equals",     (void*)js_buffer_equals, 2);
+    buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare, 2);
+    buf_set_method(buffer_namespace, "indexOf",    (void*)js_buffer_indexOf, 2);
+    buf_set_method(buffer_namespace, "slice",      (void*)js_buffer_slice, 3);
+    buf_set_method(buffer_namespace, "fill",       (void*)js_buffer_fill, 2);
+
+    // Buffer is the default export
+    js_property_set(buffer_namespace, make_string_item("Buffer"), buffer_namespace);
+    js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
+
+    return buffer_namespace;
+}
+
+extern "C" void js_reset_buffer_module(void) {
+    buffer_namespace = (Item){0};
+}
