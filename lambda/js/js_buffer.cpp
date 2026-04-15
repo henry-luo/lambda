@@ -53,7 +53,7 @@ static Item create_buffer(int size) {
 }
 
 // ─── Buffer.alloc(size, fill?, encoding?) ───────────────────────────────────
-extern "C" Item js_buffer_alloc(Item size_item) {
+extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
     int64_t size = 0;
     TypeId tid = get_type_id(size_item);
     if (tid == LMD_TYPE_INT) size = it2i(size_item);
@@ -63,6 +63,28 @@ extern "C" Item js_buffer_alloc(Item size_item) {
 
     Item buf = create_buffer((int)size);
     // alloc zero-fills by default via typed_array_new
+
+    // fill support
+    TypeId fill_type = get_type_id(fill_item);
+    if (fill_type == LMD_TYPE_INT) {
+        int fill_val = (int)(it2i(fill_item) & 0xFF);
+        if (fill_val != 0) {
+            int blen = 0;
+            uint8_t* data = buffer_data(buf, &blen);
+            if (data) memset(data, fill_val, blen);
+        }
+    } else if (fill_type == LMD_TYPE_STRING) {
+        String* s = it2s(fill_item);
+        if (s && s->len > 0) {
+            int blen = 0;
+            uint8_t* data = buffer_data(buf, &blen);
+            if (data) {
+                for (int i = 0; i < blen; i++)
+                    data[i] = (uint8_t)s->chars[i % s->len];
+            }
+        }
+    }
+
     return buf;
 }
 
@@ -141,6 +163,31 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
                     if (j < out_len) bdata[j++] = (triple >> 8) & 0xFF;
                     if (j < out_len) bdata[j++] = triple & 0xFF;
                 }
+            }
+            return buf;
+        }
+
+        if (strcmp(enc_buf, "ascii") == 0) {
+            // ASCII: mask to 7 bits
+            int byte_len = (int)s->len;
+            Item buf = create_buffer(byte_len);
+            int buf_byte_len = 0;
+            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            if (bdata) {
+                for (int i = 0; i < byte_len; i++)
+                    bdata[i] = (uint8_t)(s->chars[i] & 0x7F);
+            }
+            return buf;
+        }
+
+        if (strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
+            // Latin1/binary: each char → one byte (identity mapping)
+            int byte_len = (int)s->len;
+            Item buf = create_buffer(byte_len);
+            int buf_byte_len = 0;
+            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            if (bdata && byte_len > 0) {
+                memcpy(bdata, s->chars, byte_len);
             }
             return buf;
         }
@@ -236,6 +283,29 @@ extern "C" Item js_buffer_isBuffer(Item obj) {
     return (Item){.item = b2it(false)};
 }
 
+// ─── Buffer.isEncoding(encoding) ────────────────────────────────────────────
+extern "C" Item js_buffer_isEncoding(Item enc_item) {
+    if (get_type_id(enc_item) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* enc = it2s(enc_item);
+    if (!enc || enc->len == 0) return (Item){.item = b2it(false)};
+
+    char buf[32];
+    int len = (int)enc->len;
+    if (len >= (int)sizeof(buf)) return (Item){.item = b2it(false)};
+    for (int i = 0; i < len; i++)
+        buf[i] = (enc->chars[i] >= 'A' && enc->chars[i] <= 'Z') ? enc->chars[i] + 32 : enc->chars[i];
+    buf[len] = '\0';
+
+    if (strcmp(buf, "utf8") == 0 || strcmp(buf, "utf-8") == 0 ||
+        strcmp(buf, "hex") == 0 || strcmp(buf, "base64") == 0 ||
+        strcmp(buf, "ascii") == 0 || strcmp(buf, "latin1") == 0 ||
+        strcmp(buf, "binary") == 0 || strcmp(buf, "ucs2") == 0 ||
+        strcmp(buf, "ucs-2") == 0 || strcmp(buf, "utf16le") == 0 ||
+        strcmp(buf, "utf-16le") == 0 || strcmp(buf, "base64url") == 0)
+        return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
 // ─── Buffer.byteLength(string, encoding?) ───────────────────────────────────
 extern "C" Item js_buffer_byteLength(Item str_item) {
     if (get_type_id(str_item) == LMD_TYPE_STRING) {
@@ -251,10 +321,21 @@ extern "C" Item js_buffer_byteLength(Item str_item) {
 }
 
 // ─── buf.toString(encoding?, start?, end?) ──────────────────────────────────
-extern "C" Item js_buffer_toString(Item buf, Item encoding) {
+extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Item end_item) {
     int blen = 0;
     uint8_t* data = buffer_data(buf, &blen);
     if (!data || blen == 0) return make_string_item("");
+
+    // range support: start/end default to 0/blen
+    int start = 0, end = blen;
+    if (get_type_id(start_item) == LMD_TYPE_INT) start = (int)it2i(start_item);
+    if (get_type_id(end_item) == LMD_TYPE_INT) end = (int)it2i(end_item);
+    if (start < 0) start = 0;
+    if (end > blen) end = blen;
+    if (start >= end) return make_string_item("");
+
+    uint8_t* slice = data + start;
+    int slice_len = end - start;
 
     char enc_buf[32] = "utf8";
     if (get_type_id(encoding) == LMD_TYPE_STRING) {
@@ -266,32 +347,32 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding) {
     }
 
     if (strcmp(enc_buf, "hex") == 0) {
-        char* hex = (char*)mem_alloc(blen * 2 + 1, MEM_CAT_JS_RUNTIME);
-        for (int i = 0; i < blen; i++) {
+        char* hex = (char*)mem_alloc(slice_len * 2 + 1, MEM_CAT_JS_RUNTIME);
+        for (int i = 0; i < slice_len; i++) {
             static const char hx[] = "0123456789abcdef";
-            hex[i * 2] = hx[data[i] >> 4];
-            hex[i * 2 + 1] = hx[data[i] & 0xf];
+            hex[i * 2] = hx[slice[i] >> 4];
+            hex[i * 2 + 1] = hx[slice[i] & 0xf];
         }
-        hex[blen * 2] = '\0';
-        Item result = make_string_item(hex, blen * 2);
+        hex[slice_len * 2] = '\0';
+        Item result = make_string_item(hex, slice_len * 2);
         mem_free(hex);
         return result;
     }
 
-    if (strcmp(enc_buf, "base64") == 0) {
+    if (strcmp(enc_buf, "base64") == 0 || strcmp(enc_buf, "base64url") == 0) {
         static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        int out_len = 4 * ((blen + 2) / 3);
+        int out_len = 4 * ((slice_len + 2) / 3);
         char* b64_str = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
         int j = 0;
-        for (int i = 0; i < blen; i += 3) {
-            uint32_t a = data[i];
-            uint32_t b_val = (i + 1 < blen) ? data[i + 1] : 0;
-            uint32_t c = (i + 2 < blen) ? data[i + 2] : 0;
+        for (int i = 0; i < slice_len; i += 3) {
+            uint32_t a = slice[i];
+            uint32_t b_val = (i + 1 < slice_len) ? slice[i + 1] : 0;
+            uint32_t c = (i + 2 < slice_len) ? slice[i + 2] : 0;
             uint32_t triple = (a << 16) | (b_val << 8) | c;
             b64_str[j++] = b64[(triple >> 18) & 0x3F];
             b64_str[j++] = b64[(triple >> 12) & 0x3F];
-            b64_str[j++] = (i + 1 < blen) ? b64[(triple >> 6) & 0x3F] : '=';
-            b64_str[j++] = (i + 2 < blen) ? b64[triple & 0x3F] : '=';
+            b64_str[j++] = (i + 1 < slice_len) ? b64[(triple >> 6) & 0x3F] : '=';
+            b64_str[j++] = (i + 2 < slice_len) ? b64[triple & 0x3F] : '=';
         }
         b64_str[j] = '\0';
         Item result = make_string_item(b64_str, j);
@@ -299,8 +380,13 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding) {
         return result;
     }
 
+    if (strcmp(enc_buf, "ascii") == 0 || strcmp(enc_buf, "latin1") == 0 || strcmp(enc_buf, "binary") == 0) {
+        // latin1: each byte maps directly to a char (ISO 8859-1)
+        return make_string_item((const char*)slice, slice_len);
+    }
+
     // default: utf-8
-    return make_string_item((const char*)data, blen);
+    return make_string_item((const char*)slice, slice_len);
 }
 
 // ─── buf.write(string, offset?, length?, encoding?) ─────────────────────────
@@ -933,15 +1019,16 @@ extern "C" Item js_get_buffer_namespace(void) {
     buffer_namespace = js_new_object();
 
     // static methods (Buffer.alloc, Buffer.from, etc.)
-    buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 1);
+    buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);
     buf_set_method(buffer_namespace, "allocUnsafe", (void*)js_buffer_allocUnsafe, 1);
     buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 2);
     buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 1);
     buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);
+    buf_set_method(buffer_namespace, "isEncoding", (void*)js_buffer_isEncoding, 1);
     buf_set_method(buffer_namespace, "byteLength", (void*)js_buffer_byteLength, 1);
 
     // instance methods (called as Buffer methods with 'this' as first arg)
-    buf_set_method(buffer_namespace, "toString",   (void*)js_buffer_toString, 2);
+    buf_set_method(buffer_namespace, "toString",   (void*)js_buffer_toString, 4);
     buf_set_method(buffer_namespace, "write",      (void*)js_buffer_write, 3);
     buf_set_method(buffer_namespace, "copy",       (void*)js_buffer_copy, 3);
     buf_set_method(buffer_namespace, "equals",     (void*)js_buffer_equals, 2);

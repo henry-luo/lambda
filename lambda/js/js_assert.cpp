@@ -180,6 +180,47 @@ extern "C" Item js_assert_notDeepStrictEqual(Item actual, Item expected, Item me
     return make_js_undefined();
 }
 
+// assert.deepEqual(actual, expected[, message]) — legacy loose deep equality
+// In modern Node.js (v16+), deepEqual behaves like deepStrictEqual
+extern "C" Item js_assert_deepEqual(Item actual, Item expected, Item message) {
+    extern Item js_util_isDeepStrictEqual(Item a, Item b);
+    Item result = js_util_isDeepStrictEqual(actual, expected);
+    bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
+                 (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
+    if (!equal) {
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* s = it2s(message);
+            char buf[512];
+            int len = (int)s->len < 500 ? (int)s->len : 500;
+            memcpy(buf, s->chars, len);
+            buf[len] = '\0';
+            return throw_assertion_error(buf);
+        }
+        return throw_assertion_error("assert.deepEqual: values are not deep-equal");
+    }
+    return make_js_undefined();
+}
+
+// assert.notDeepEqual(actual, expected[, message])
+extern "C" Item js_assert_notDeepEqual(Item actual, Item expected, Item message) {
+    extern Item js_util_isDeepStrictEqual(Item a, Item b);
+    Item result = js_util_isDeepStrictEqual(actual, expected);
+    bool equal = (get_type_id(result) == LMD_TYPE_INT && it2i(result) == 1) ||
+                 (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
+    if (equal) {
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* s = it2s(message);
+            char buf[512];
+            int len = (int)s->len < 500 ? (int)s->len : 500;
+            memcpy(buf, s->chars, len);
+            buf[len] = '\0';
+            return throw_assertion_error(buf);
+        }
+        return throw_assertion_error("assert.notDeepEqual: values are deep-equal");
+    }
+    return make_js_undefined();
+}
+
 // assert.fail([message])
 extern "C" Item js_assert_fail(Item message) {
     if (get_type_id(message) == LMD_TYPE_STRING) {
@@ -309,6 +350,8 @@ extern "C" Item js_get_assert_namespace(void) {
     assert_set_method(assert_namespace, "notStrictEqual",      (void*)js_assert_notStrictEqual, 3);
     assert_set_method(assert_namespace, "deepStrictEqual",     (void*)js_assert_deepStrictEqual, 3);
     assert_set_method(assert_namespace, "notDeepStrictEqual",  (void*)js_assert_notDeepStrictEqual, 3);
+    assert_set_method(assert_namespace, "deepEqual",           (void*)js_assert_deepEqual, 3);
+    assert_set_method(assert_namespace, "notDeepEqual",        (void*)js_assert_notDeepEqual, 3);
     assert_set_method(assert_namespace, "fail",                (void*)js_assert_fail, 1);
     assert_set_method(assert_namespace, "throws",              (void*)js_assert_module_throws, 3);
     assert_set_method(assert_namespace, "doesNotThrow",        (void*)js_assert_module_doesNotThrow, 3);

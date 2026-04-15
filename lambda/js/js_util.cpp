@@ -395,6 +395,74 @@ extern "C" Item js_util_types_isError(Item obj) {
     return (Item){.item = b2it(false)};
 }
 
+// ─── util.debuglog(section) ─────────────────────────────────────────────────
+// Returns a logging function gated by NODE_DEBUG environment variable.
+// If NODE_DEBUG contains the section name (case-insensitive), the returned
+// function logs to stderr. Otherwise it's a no-op.
+static Item js_debuglog_noop(Item args_rest) {
+    (void)args_rest;
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+extern "C" Item js_json_stringify(Item val);
+
+static Item js_debuglog_active(Item args_rest) {
+    // simple: log first argument to stderr
+    if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
+        int64_t argc = js_array_length(args_rest);
+        if (argc > 0) {
+            Item arg0 = js_array_get_int(args_rest, 0);
+            Item str = js_json_stringify(arg0);
+            if (get_type_id(str) == LMD_TYPE_STRING) {
+                String* s = it2s(str);
+                if (s) fprintf(stderr, "%.*s\n", (int)s->len, s->chars);
+            }
+        }
+    }
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+extern "C" Item js_util_debuglog(Item section) {
+    if (get_type_id(section) != LMD_TYPE_STRING) {
+        return js_new_function((void*)js_debuglog_noop, -1);
+    }
+    String* sec = it2s(section);
+    if (!sec || sec->len == 0) {
+        return js_new_function((void*)js_debuglog_noop, -1);
+    }
+
+    // check NODE_DEBUG env var
+    const char* node_debug = getenv("NODE_DEBUG");
+    if (!node_debug) {
+        return js_new_function((void*)js_debuglog_noop, -1);
+    }
+
+    // case-insensitive search for section name in NODE_DEBUG
+    // NODE_DEBUG can be comma or space separated
+    char sec_upper[128];
+    int slen = (int)sec->len < 127 ? (int)sec->len : 127;
+    for (int i = 0; i < slen; i++) {
+        char c = sec->chars[i];
+        sec_upper[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+    }
+    sec_upper[slen] = '\0';
+
+    char debug_upper[1024];
+    int dlen = (int)strlen(node_debug);
+    if (dlen > 1023) dlen = 1023;
+    for (int i = 0; i < dlen; i++) {
+        char c = node_debug[i];
+        debug_upper[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+    }
+    debug_upper[dlen] = '\0';
+
+    if (strstr(debug_upper, sec_upper)) {
+        return js_new_function((void*)js_debuglog_active, -1);
+    }
+
+    return js_new_function((void*)js_debuglog_noop, -1);
+}
+
 // =============================================================================
 // util Module Namespace Object
 // =============================================================================
@@ -419,6 +487,7 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
     js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
     js_util_set_method(util_namespace, "isDeepStrictEqual",   (void*)js_util_isDeepStrictEqual, 2);
+    js_util_set_method(util_namespace, "debuglog",            (void*)js_util_debuglog, 1);
 
     // util.types sub-namespace
     Item types = js_new_object();
