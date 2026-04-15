@@ -17,6 +17,7 @@
 #include "js_transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
+#include "../lib/utf.h"
 #include <cstring>
 #include <cstdio>
 
@@ -130,27 +131,8 @@ static bool normalize_unicode_escapes(const char* src, int src_len, char* out, i
                 }
             }
             // encode as UTF-8
-            if (codepoint < 0x80) {
-                out[oi++] = (char)codepoint;
-            } else if (codepoint < 0x800) {
-                if (oi + 1 < out_size) {
-                    out[oi++] = (char)(0xC0 | (codepoint >> 6));
-                    out[oi++] = (char)(0x80 | (codepoint & 0x3F));
-                }
-            } else if (codepoint < 0x10000) {
-                if (oi + 2 < out_size) {
-                    out[oi++] = (char)(0xE0 | (codepoint >> 12));
-                    out[oi++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                    out[oi++] = (char)(0x80 | (codepoint & 0x3F));
-                }
-            } else {
-                if (oi + 3 < out_size) {
-                    out[oi++] = (char)(0xF0 | (codepoint >> 18));
-                    out[oi++] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-                    out[oi++] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-                    out[oi++] = (char)(0x80 | (codepoint & 0x3F));
-                }
-            }
+            if (oi + 4 < out_size)
+                oi += (int)utf8_encode(codepoint, out + oi);
         } else {
             out[oi++] = src[i++];
         }

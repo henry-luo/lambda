@@ -19,6 +19,7 @@
 #include "../../lib/font/font.h"
 #include <string.h>
 #include "../../lib/mem.h"
+#include "../../lib/url.h"
 #include <strings.h>  // for strcasecmp
 
 // Helper: Read file contents into a string
@@ -76,6 +77,61 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 }
 
 // CSS resource handler
+
+// Helper: resolve a relative URL in a CssValue against a base URL
+static void resolve_css_value_urls(CssValue* value, const Url* base_url, Pool* pool) {
+    if (!value || !base_url || !pool) return;
+
+    if (value->type == CSS_VALUE_TYPE_URL && value->data.url) {
+        if (!url_is_absolute_url(value->data.url)) {
+            Url* resolved = url_parse_with_base(value->data.url, base_url);
+            if (resolved) {
+                const char* href = url_get_href(resolved);
+                if (href) {
+                    value->data.url = pool_strdup(pool, href);
+                }
+            }
+        }
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        CssFunction* func = value->data.function;
+        if (func->name && strcmp(func->name, "url") == 0) {
+            for (int i = 0; i < func->arg_count; i++) {
+                resolve_css_value_urls(func->args[i], base_url, pool);
+            }
+        }
+    } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            resolve_css_value_urls(value->data.list.values[i], base_url, pool);
+        }
+    }
+}
+
+// Helper: walk all rules and resolve url() values against stylesheet origin
+static void resolve_stylesheet_urls(CssStylesheet* sheet) {
+    if (!sheet || !sheet->origin_url || !sheet->pool) return;
+
+    // skip resolution for local file stylesheets
+    if (!url_is_absolute_url(sheet->origin_url)) return;
+
+    Url* base_url = url_parse(sheet->origin_url);
+    if (!base_url) return;
+
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        CssRule* rule = sheet->rules[i];
+        if (!rule) continue;
+
+        // resolve urls in style rules
+        if (rule->type == CSS_RULE_STYLE) {
+            for (size_t j = 0; j < rule->data.style_rule.declaration_count; j++) {
+                CssDeclaration* decl = rule->data.style_rule.declarations[j];
+                if (decl && decl->value) {
+                    resolve_css_value_urls(decl->value, base_url, sheet->pool);
+                }
+            }
+        }
+    }
+}
+
 void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     if (!res || res->state != STATE_COMPLETED || !doc) return;
 
@@ -117,6 +173,9 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     }
 
     log_debug("network: parsed CSS stylesheet with %zu rules", sheet->rule_count);
+
+    // resolve relative url() values against the stylesheet's source URL
+    resolve_stylesheet_urls(sheet);
 
     // add stylesheet to document
     if (!add_stylesheet_to_document(doc, sheet)) {
@@ -208,40 +267,49 @@ void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* f
 
     log_debug("network: processing font resource %s from %s", res->url, res->local_path);
 
-    // need UiContext for FreeType access
+    // need UiContext for font system access
     if (!res->manager || !res->manager->ui_context) {
         log_error("network: no UI context available for font loading");
         return;
     }
 
     UiContext* uicon = (UiContext*)res->manager->ui_context;
-
-    // load font file using the unified font module
-    FontStyleDesc style = {};
-    style.family = font_face->family_name ? font_face->family_name : "unknown";
-    style.size_px = 16.0f;  // default size, will be scaled per-use
-    style.weight = FONT_WEIGHT_NORMAL;
-    style.slant = (font_face->font_style == CSS_VALUE_ITALIC) ? FONT_SLANT_ITALIC : FONT_SLANT_NORMAL;
-
-    FontHandle* handle = font_load_from_file(uicon->font_ctx, res->local_path, &style);
-    if (!handle) {
-        log_error("network: failed to load font: %s", res->local_path);
+    if (!uicon->font_ctx) {
+        log_error("network: no font context available");
         return;
     }
 
-    const FontMetrics* m = font_get_metrics(handle);
-    log_debug("network: loaded font: family='%s', size=%.0f",
-              style.family, style.size_px);
+    // map CSS weight/style → FontWeight/FontSlant (same as font_face.cpp)
+    FontWeight fw = FONT_WEIGHT_NORMAL;
+    if (font_face->font_weight == CSS_VALUE_BOLD)
+        fw = FONT_WEIGHT_BOLD;
+    else if (font_face->font_weight != CSS_VALUE_NORMAL &&
+             font_face->font_weight >= 100 && font_face->font_weight <= 900)
+        fw = (FontWeight)font_face->font_weight;
 
-    // update font_face descriptor with the loaded path
-    // so that future text layout can find this font
-    if (!font_face->src_url) {
-        // set the successful source URL
-        font_face->src_url = mem_strdup(res->local_path, MEM_CAT_NETWORK);
+    FontSlant fs = FONT_SLANT_NORMAL;
+    if (font_face->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
+    else if (font_face->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+
+    // re-register @font-face with the downloaded local cache path as source
+    // font_face_register() merges sources into existing entries
+    FontFaceSource source = {};
+    source.path = res->local_path;
+    source.format = NULL;
+
+    FontFaceDesc face_desc = {};
+    face_desc.family = font_face->family_name ? font_face->family_name : "unknown";
+    face_desc.weight = fw;
+    face_desc.slant = fs;
+    face_desc.sources = &source;
+    face_desc.source_count = 1;
+
+    if (font_face_register(uicon->font_ctx, &face_desc)) {
+        log_debug("network: registered font local path for '%s': %s",
+                  face_desc.family, res->local_path);
     }
 
     // schedule reflow for document to apply new font
-    // note: need a way to get the document from the font_face or manager
     if (res->manager && res->manager->document) {
         DomDocument* doc = (DomDocument*)res->manager->document;
         if (doc->root) {
@@ -316,6 +384,20 @@ void process_html_resource(NetworkResource* res, struct DomDocument* doc) {
     // 4. trigger layout of iframe element
 
     log_info("network: HTML resource available at: %s", res->local_path);
+}
+
+// Script resource handler
+// Downloaded scripts are stored in cache — execution happens via script_runner
+// when the document reaches script execution phase (or on late arrival)
+void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
+    if (!res || res->state != STATE_COMPLETED || !doc) return;
+
+    log_debug("network: script resource downloaded: %s -> %s", res->url, res->local_path);
+
+    // Script execution will happen:
+    // 1. During initial page load via execute_document_scripts() which reads from cache
+    // 2. For late-arriving async/defer scripts, via flush_layout_updates() triggering reflow
+    // For now, just log success — the script runner will find the cached file via resource_manager_lookup
 }
 
 // Resource failure handler

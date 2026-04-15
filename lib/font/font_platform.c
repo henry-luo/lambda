@@ -15,6 +15,7 @@
 #include "../strbuf.h"
 #include "../memtrack.h"
 #include "../str.h"
+#include "../utf.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -495,19 +496,8 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
 
     // encode codepoint as UTF-16 for CFString
     UniChar utf16[2];
-    CFIndex utf16_len;
-    if (codepoint <= 0xFFFF) {
-        utf16[0] = (UniChar)codepoint;
-        utf16_len = 1;
-    } else if (codepoint <= 0x10FFFF) {
-        // surrogate pair
-        uint32_t cp = codepoint - 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
-        utf16_len = 2;
-    } else {
-        return NULL;
-    }
+    CFIndex utf16_len = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (utf16_len == 0) return NULL;
 
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
     if (!str) return NULL;
@@ -594,16 +584,8 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
     // Build UTF-16 string: codepoint + VS16 (U+FE0F) to force emoji presentation.
     // CoreText uses the VS16 to select Apple Color Emoji for dual-presentation chars.
     UniChar utf16[4];
-    CFIndex utf16_len = 0;
-    if (codepoint <= 0xFFFF) {
-        utf16[utf16_len++] = (UniChar)codepoint;
-    } else if (codepoint <= 0x10FFFF) {
-        uint32_t cp = codepoint - 0x10000;
-        utf16[utf16_len++] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[utf16_len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
-    } else {
-        return NULL;
-    }
+    CFIndex utf16_len = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (utf16_len == 0) return NULL;
     utf16[utf16_len++] = 0xFE0F;  // VS16 — emoji presentation selector
 
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
@@ -815,18 +797,8 @@ float font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint) {
 
     // encode codepoint as UTF-16
     UniChar utf16[2];
-    CFIndex char_count;
-    if (codepoint <= 0xFFFF) {
-        utf16[0] = (UniChar)codepoint;
-        char_count = 1;
-    } else if (codepoint <= 0x10FFFF) {
-        uint32_t cp = codepoint - 0x10000;
-        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
-        char_count = 2;
-    } else {
-        return -1.0f;
-    }
+    CFIndex char_count = utf16_encode(codepoint, (uint16_t*)utf16);
+    if (char_count == 0) return -1.0f;
 
     // get glyph id — for a surrogate pair, CoreText fills glyphs[0] with the
     // real glyph and glyphs[1] with 0; we only need glyphs[0]
@@ -852,27 +824,15 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
     UniChar utf16[4];
     CFIndex len = 0;
 
-    if (left_cp <= 0xFFFF) {
-        utf16[len++] = (UniChar)left_cp;
-    } else if (left_cp <= 0x10FFFF) {
-        uint32_t cp = left_cp - 0x10000;
-        utf16[len++] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
-    } else {
-        return 0.0f;
-    }
+    int n = utf16_encode(left_cp, (uint16_t*)(utf16 + len));
+    if (n == 0) return 0.0f;
+    len += n;
 
     CFIndex left_len = len;
 
-    if (right_cp <= 0xFFFF) {
-        utf16[len++] = (UniChar)right_cp;
-    } else if (right_cp <= 0x10FFFF) {
-        uint32_t cp = right_cp - 0x10000;
-        utf16[len++] = (UniChar)(0xD800 + (cp >> 10));
-        utf16[len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
-    } else {
-        return 0.0f;
-    }
+    n = utf16_encode(right_cp, (uint16_t*)(utf16 + len));
+    if (n == 0) return 0.0f;
+    len += n;
 
     // get nominal advance for left glyph
     CGGlyph left_glyph;

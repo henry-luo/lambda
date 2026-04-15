@@ -5,6 +5,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/avl_tree.h"
 #include "../lib/font/font.h"
+#include "../lib/utf.h"
 
 #include "../lib/log.h"
 #include <chrono>
@@ -439,21 +440,8 @@ static inline bool is_lang_japanese(const char* lang) {
 // CSS white-space Property Helpers
 // ============================================================================
 
-/**
- * Check if a codepoint is a CJK character (Han/Kana/Hangul).
- * Used for CJK-specific font metrics tracking (line-height blending).
- */
 static inline bool is_cjk_character(uint32_t codepoint) {
-    return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
-           (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||  // CJK Extension A
-           (codepoint >= 0x20000 && codepoint <= 0x2A6DF) || // CJK Extension B
-           (codepoint >= 0x2A700 && codepoint <= 0x2B73F) || // CJK Extension C
-           (codepoint >= 0x2B740 && codepoint <= 0x2B81F) || // CJK Extension D
-           (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
-           (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
-           (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
-           (codepoint >= 0xAC00 && codepoint <= 0xD7AF) ||  // Hangul Syllables
-           (codepoint >= 0xFF65 && codepoint <= 0xFF9F);    // Halfwidth Katakana
+    return utf_is_cjk(codepoint);
 }
 
 /**
@@ -842,12 +830,7 @@ static uint32_t peek_next_inline_codepoint(DomNode* node) {
  * Reference: Unicode Technical Standard #51 (Emoji), UAX #29 (Grapheme Clusters)
  */
 static inline bool is_emoji_for_zwj(uint32_t cp) {
-    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks (Emoticons, Symbols, Transport, etc.)
-           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
-           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical (hourglass, keyboard, etc.)
-           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
-           cp == 0x200D ||                        // ZWJ itself
-           cp == 0x2764;                          // Heavy heart (used in heart ZWJ sequences)
+    return utf_is_emoji_for_zwj(cp);
 }
 
 /**
@@ -858,13 +841,7 @@ static inline bool is_emoji_for_zwj(uint32_t cp) {
  * Reference: Unicode UTS #51, emoji-zwj-sequences.txt
  */
 static inline bool is_zwj_composition_base(uint32_t cp) {
-    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
-           cp == 0x1F9D1 ||                       // Person (gender-neutral)
-           cp == 0x1F441 ||                       // Eye
-           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
-           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
-           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
-           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+    return utf_is_zwj_composition_base(cp);
 }
 
 /**
@@ -927,11 +904,7 @@ static inline bool is_east_asian_fw(uint32_t cp) {
  * when either side is Hangul.
  */
 static inline bool is_hangul(uint32_t cp) {
-    return (cp >= 0x1100 && cp <= 0x11FF) ||   // Hangul Jamo
-           (cp >= 0x3130 && cp <= 0x318F) ||   // Hangul Compatibility Jamo
-           (cp >= 0xA960 && cp <= 0xA97F) ||   // Hangul Jamo Extended-A
-           (cp >= 0xAC00 && cp <= 0xD7AF) ||   // Hangul Syllables
-           (cp >= 0xD7B0 && cp <= 0xD7FF);     // Hangul Jamo Extended-B
+    return utf_is_hangul(cp);
 }
 
 /**

@@ -14,6 +14,10 @@
 #include "state_store.hpp"
 #include "event_sim.hpp"
 #include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/network_integration.h"
+#include "../lambda/network/network_thread_pool.h"
+#include "../lambda/network/enhanced_file_cache.h"
+#include "../lambda/network/network_downloader.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -90,6 +94,12 @@ static DocFormat detect_doc_format(const char* filename) {
 
 // Load document based on detected format
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
+    // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
+    if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
+        log_debug("Loading as remote HTML document (HTTP/HTTPS)");
+        return load_html_doc(base_url, (char*)filename, width, height);
+    }
+
     DocFormat format = detect_doc_format(filename);
 
     switch (format) {
@@ -428,6 +438,28 @@ void render(GLFWwindow* window) {
     // This handles resource completions and triggers reflows/repaints for loaded resources
     if (ui_context.document && ui_context.document->resource_manager) {
         resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+
+        // Detect fully loaded state and trigger final stabilization reflow
+        if (!ui_context.document->fully_loaded &&
+            resource_manager_is_fully_loaded(ui_context.document->resource_manager)) {
+            ui_context.document->fully_loaded = true;
+            log_info("view: all network resources loaded, triggering final reflow");
+            reflow_html_doc(ui_context.document);
+
+            // restore original window title
+            if (ui_context.document->url) {
+                const char* doc_href = url_get_href(ui_context.document->url);
+                char title[512];
+                snprintf(title, sizeof(title), "Lambda - %s", doc_href ? doc_href : "");
+                glfwSetWindowTitle(window, title);
+            }
+        } else if (!ui_context.document->fully_loaded) {
+            // show loading progress in window title
+            float progress = resource_manager_get_load_progress(ui_context.document->resource_manager);
+            char title[512];
+            snprintf(title, sizeof(title), "Loading... %.0f%%", progress * 100.0f);
+            glfwSetWindowTitle(window, title);
+        }
     }
 
     // reflow the document if window size has changed
@@ -566,11 +598,18 @@ int run_layout(const char* html_file) {
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless) {
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
+                                    const char** font_dirs, int font_dir_count) {
     log_init_wrapper();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
     ui_context_init(&ui_context, headless);
+
+    // Add custom font scan directories (must be done before any font resolution)
+    for (int i = 0; i < font_dir_count; i++) {
+        font_context_add_scan_directory(ui_context.font_ctx, font_dirs[i]);
+        log_debug("view: Added font directory: %s", font_dirs[i]);
+    }
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
               ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
     GLFWwindow* window = ui_context.window;
@@ -630,6 +669,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     // Recreate surface with correct dimensions
     ui_context_create_surface(&ui_context, width, height);
 
+    // Network resources (owned by this function, shared across document lifetime)
+    NetworkThreadPool* thread_pool = nullptr;
+    EnhancedFileCache* file_cache = nullptr;
+
     Url* cwd = get_current_dir();
     if (cwd) {
         // Use provided document file or default to test HTML file
@@ -682,6 +725,19 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         ui_context.document = doc;
 
+        // Initialize network support for HTTP-loaded documents
+        // This enables async resource loading (CSS, images, fonts) during rendering
+        if (doc->html_root && file_to_load &&
+            (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
+            network_downloader_init_shared();
+            thread_pool = thread_pool_create(4);
+            file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+            if (thread_pool) {
+                radiant_init_network_support(doc, thread_pool, file_cache);
+                log_info("view: network support initialized for HTTP document");
+            }
+        }
+
         // Create RadiantState for interactive state management (caret, selection, focus, etc.)
         if (!doc->state) {
             doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
@@ -690,6 +746,33 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Process @font-face rules before layout
         process_document_font_faces(&ui_context, doc);
+
+        // Discover and queue network resources BEFORE layout
+        // This starts async downloads for CSS, images, fonts early
+        if (doc->resource_manager) {
+            radiant_discover_document_resources(doc);
+            log_info("view: network resource discovery complete");
+
+            // Wait for render-blocking CSS (up to 5 seconds)
+            // CSS in <head> must be loaded before first meaningful layout
+            double wait_start = glfwGetTime();
+            const double CSS_TIMEOUT = 5.0;
+            while (!resource_manager_is_fully_loaded(doc->resource_manager)) {
+                double elapsed = glfwGetTime() - wait_start;
+                if (elapsed >= CSS_TIMEOUT) {
+                    log_warn("view: CSS load timeout after %.1fs, proceeding with layout", elapsed);
+                    break;
+                }
+                // Process any completed resources (CSS parsed → stylesheets added)
+                resource_manager_flush_layout_updates(doc->resource_manager);
+                // Brief sleep to avoid busy-waiting
+                glfwWaitEventsTimeout(0.05);  // 50ms poll
+            }
+            double wait_time = glfwGetTime() - wait_start;
+            if (wait_time > 0.01) {
+                log_info("view: waited %.2fs for network resources before layout", wait_time);
+            }
+        }
 
         // Layout document (for HTML-based documents)
         // PDF documents have pre-built view trees and skip this
@@ -737,6 +820,11 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             event_sim_free(sim_ctx);
         }
         log_info("End of headless document viewer");
+        // Cleanup network resources before ui_context
+        if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+        if (thread_pool) thread_pool_destroy(thread_pool);
+        if (file_cache) enhanced_cache_destroy(file_cache);
+        network_downloader_cleanup_shared();
         ui_context_cleanup(&ui_context);
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
@@ -816,6 +904,11 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     }
 
     log_info("End of document viewer");
+    // Cleanup network resources before ui_context
+    if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    if (thread_pool) thread_pool_destroy(thread_pool);
+    if (file_cache) enhanced_cache_destroy(file_cache);
+    network_downloader_cleanup_shared();
     ui_context_cleanup(&ui_context);
     log_cleanup();
 
@@ -825,7 +918,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0);
 }
 
 int window_main(int argc, char* argv[]) {

@@ -7,6 +7,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/utf.h"
 #include <ctype.h>
 #include "../../lib/mem.h"
 #include <string.h>
@@ -15,40 +16,12 @@
 
 int codepoint_to_utf8(uint32_t codepoint, char out[5]) {
     if (!out) return 0;
-
-    if (codepoint < 0x80) {
-        out[0] = (char)codepoint;
-        out[1] = '\0';
-        return 1;
-    } else if (codepoint < 0x800) {
-        out[0] = (char)(0xC0 | (codepoint >> 6));
-        out[1] = (char)(0x80 | (codepoint & 0x3F));
-        out[2] = '\0';
-        return 2;
-    } else if (codepoint < 0x10000) {
-        out[0] = (char)(0xE0 | (codepoint >> 12));
-        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (codepoint & 0x3F));
-        out[3] = '\0';
-        return 3;
-    } else if (codepoint < 0x110000) {
-        out[0] = (char)(0xF0 | (codepoint >> 18));
-        out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        out[3] = (char)(0x80 | (codepoint & 0x3F));
-        out[4] = '\0';
-        return 4;
-    }
-
-    // invalid codepoint
-    out[0] = '\0';
-    return 0;
+    size_t n = utf8_encode_z(codepoint, out);
+    return (int)n;
 }
 
 uint32_t decode_surrogate_pair(uint16_t high, uint16_t low) {
-    if (high < 0xD800 || high > 0xDBFF) return 0;
-    if (low  < 0xDC00 || low  > 0xDFFF) return 0;
-    return 0x10000 + ((uint32_t)(high - 0xD800) << 10) + (low - 0xDC00);
+    return utf16_decode_pair(high, low);
 }
 
 uint32_t parse_hex_codepoint(const char** pos, int ndigits) {

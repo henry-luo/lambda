@@ -1008,199 +1008,33 @@ uint64_t str_ihash(const char* s, size_t len) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
- *  13. UTF-8 utilities
+ *  13. UTF-8 utilities — thin wrappers around lib/utf.h
  * ══════════════════════════════════════════════════════════════════════ */
 
-size_t str_utf8_char_len(unsigned char lead) {
-    if (lead < 0x80) return 1;
-    if ((lead & 0xE0) == 0xC0) return 2;
-    if ((lead & 0xF0) == 0xE0) return 3;
-    if ((lead & 0xF8) == 0xF0) return 4;
-    return 0; /* invalid lead byte */
-}
+#include "utf.h"
 
-size_t str_utf8_count(const char* s, size_t len) {
-    if (!s) return 0;
-    size_t count = 0;
-    /* SWAR: count bytes that are NOT continuation bytes (0x80..0xBF).
-     * a continuation byte has the top two bits = 10.
-     * fast check: ((byte + 0x40) & 0x80) == 0 for continuation bytes. */
-    size_t i = 0;
-    for (; i + 8 <= len; i += 8) {
-        uint64_t w = _load_u64(s + i);
-        /* continuation bytes: 10xxxxxx → top bits are 10.
-         * detect: byte & 0xC0 == 0x80, i.e. (~byte & 0x80) && (byte & 0x40) == 0
-         * equivalently: ((byte + 0x40) & 0x80) == 0 for continuations.
-         * count starts (non-continuations): ~continuation bits set in high pos. */
-        /* Method: flip bit 6, check high bit:
-         *   if original byte is 10xxxxxx → bit6=0 → flip → 11xxxxxx → high bit=1
-         *   if original byte is 0xxxxxxx → bit6 varies → flip → high bit = 0 (ASCII) → count
-         *   actually this doesn't work cleanly. simpler approach: */
-        /* just count bytes where (byte & 0xC0) != 0x80 */
-        uint64_t a = w & 0x8080808080808080ULL;          /* high bit of each byte */
-        uint64_t b = (w << 1) & 0x8080808080808080ULL;   /* bit 6 shifted to high */
-        /* continuation = high bit set AND bit 6 clear:  a & ~b */
-        uint64_t cont = a & ~b;
-        /* each continuation byte sets exactly 1 bit in cont (its 0x80 bit),
-         * so popcount gives the number of continuation bytes directly. */
-#if defined(__GNUC__) || defined(__clang__)
-        count += 8 - (size_t)__builtin_popcountll(cont);
-#else
-        /* fallback: iterate each byte */
-        for (int j = 0; j < 8; j++) {
-            if (((unsigned char)s[i + j] & 0xC0) != 0x80) count++;
-        }
-#endif
-    }
-    for (; i < len; i++) {
-        if (((unsigned char)s[i] & 0xC0) != 0x80) count++;
-    }
-    return count;
-}
-
-bool str_utf8_valid(const char* s, size_t len) {
-    if (!s) return true;
-    size_t i = 0;
-    while (i < len) {
-        unsigned char b = (unsigned char)s[i];
-        size_t seq_len;
-        uint32_t cp;
-
-        if (b < 0x80) {
-            i++; continue;
-        } else if ((b & 0xE0) == 0xC0) {
-            seq_len = 2; cp = b & 0x1F;
-            if (cp < 2) return false;  /* overlong */
-        } else if ((b & 0xF0) == 0xE0) {
-            seq_len = 3; cp = b & 0x0F;
-        } else if ((b & 0xF8) == 0xF0) {
-            seq_len = 4; cp = b & 0x07;
-        } else {
-            return false; /* invalid lead byte */
-        }
-
-        if (i + seq_len > len) return false; /* truncated */
-
-        for (size_t j = 1; j < seq_len; j++) {
-            unsigned char c = (unsigned char)s[i + j];
-            if ((c & 0xC0) != 0x80) return false;
-            cp = (cp << 6) | (c & 0x3F);
-        }
-
-        /* check overlong encodings and range */
-        if (seq_len == 2 && cp < 0x80) return false;
-        if (seq_len == 3 && cp < 0x800) return false;
-        if (seq_len == 4 && cp < 0x10000) return false;
-        if (cp > 0x10FFFF) return false;
-        /* reject surrogates */
-        if (cp >= 0xD800 && cp <= 0xDFFF) return false;
-
-        i += seq_len;
-    }
-    return true;
-}
-
-int str_utf8_decode(const char* s, size_t len, uint32_t* codepoint) {
-    if (!s || len == 0 || !codepoint) return -1;
-    unsigned char b = (unsigned char)s[0];
-
-    if (b < 0x80) {
-        *codepoint = b;
-        return 1;
-    }
-    if ((b & 0xE0) == 0xC0) {
-        if (len < 2) return -1;
-        if (((unsigned char)s[1] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((b & 0x1F) << 6) | ((unsigned char)s[1] & 0x3F);
-        if (cp < 0x80) return -1;  /* overlong */
-        *codepoint = cp;
-        return 2;
-    }
-    if ((b & 0xF0) == 0xE0) {
-        if (len < 3) return -1;
-        if (((unsigned char)s[1] & 0xC0) != 0x80 ||
-            ((unsigned char)s[2] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((b & 0x0F) << 12) |
-                      (((unsigned char)s[1] & 0x3F) << 6) |
-                      ((unsigned char)s[2] & 0x3F);
-        if (cp < 0x800) return -1;  /* overlong */
-        if (cp >= 0xD800 && cp <= 0xDFFF) return -1;  /* surrogate */
-        *codepoint = cp;
-        return 3;
-    }
-    if ((b & 0xF8) == 0xF0) {
-        if (len < 4) return -1;
-        if (((unsigned char)s[1] & 0xC0) != 0x80 ||
-            ((unsigned char)s[2] & 0xC0) != 0x80 ||
-            ((unsigned char)s[3] & 0xC0) != 0x80) return -1;
-        uint32_t cp = ((b & 0x07) << 18) |
-                      (((unsigned char)s[1] & 0x3F) << 12) |
-                      (((unsigned char)s[2] & 0x3F) << 6) |
-                      ((unsigned char)s[3] & 0x3F);
-        if (cp < 0x10000) return -1;  /* overlong */
-        if (cp > 0x10FFFF) return -1; /* out of range */
-        *codepoint = cp;
-        return 4;
-    }
-    return -1;  /* invalid lead byte */
-}
+size_t str_utf8_char_len(unsigned char lead) { return utf8_char_len(lead); }
+size_t str_utf8_count(const char* s, size_t len) { return utf8_count(s, len); }
+bool   str_utf8_valid(const char* s, size_t len) { return utf8_valid(s, len); }
+int    str_utf8_decode(const char* s, size_t len, uint32_t* cp) { return utf8_decode(s, len, cp); }
 
 size_t str_utf8_encode(uint32_t codepoint, char* buf, size_t cap) {
+    /* str_utf8_encode has a cap parameter; utf8_encode always writes up to 4 */
     if (!buf) return 0;
-    if (codepoint < 0x80) {
-        if (cap < 1) return 0;
-        buf[0] = (char)codepoint;
-        return 1;
-    }
-    if (codepoint < 0x800) {
-        if (cap < 2) return 0;
-        buf[0] = (char)(0xC0 | (codepoint >> 6));
-        buf[1] = (char)(0x80 | (codepoint & 0x3F));
-        return 2;
-    }
-    if (codepoint < 0x10000) {
-        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) return 0; /* surrogate */
-        if (cap < 3) return 0;
-        buf[0] = (char)(0xE0 | (codepoint >> 12));
-        buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (codepoint & 0x3F));
-        return 3;
-    }
-    if (codepoint <= 0x10FFFF) {
-        if (cap < 4) return 0;
-        buf[0] = (char)(0xF0 | (codepoint >> 18));
-        buf[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (codepoint & 0x3F));
-        return 4;
-    }
-    return 0;  /* invalid codepoint */
+    char tmp[4];
+    size_t n = utf8_encode(codepoint, tmp);
+    if (n == 0 || n > cap) return 0;
+    memcpy(buf, tmp, n);
+    return n;
 }
 
 size_t str_utf8_char_to_byte(const char* s, size_t len, size_t char_index) {
-    if (!s || len == 0) return char_index == 0 ? 0 : STR_NPOS;
-    size_t ci = 0;
-    size_t bi = 0;
-    while (bi < len && ci < char_index) {
-        unsigned char b = (unsigned char)s[bi];
-        size_t seq;
-        if (b < 0x80) seq = 1;
-        else if ((b & 0xE0) == 0xC0) seq = 2;
-        else if ((b & 0xF0) == 0xE0) seq = 3;
-        else if ((b & 0xF8) == 0xF0) seq = 4;
-        else seq = 1;  /* invalid lead → skip one byte */
-        if (bi + seq > len) seq = 1;  /* truncated → skip one byte */
-        bi += seq;
-        ci++;
-    }
-    return (ci == char_index) ? bi : STR_NPOS;
+    size_t r = utf8_char_to_byte(s, len, char_index);
+    return r == (size_t)-1 ? STR_NPOS : r;
 }
 
 size_t str_utf8_byte_to_char(const char* s, size_t len, size_t byte_offset) {
-    if (!s) return 0;
-    if (byte_offset > len) byte_offset = len;
-    /* just count non-continuation bytes in [0, byte_offset) */
-    return str_utf8_count(s, byte_offset);
+    return utf8_byte_to_char(s, len, byte_offset);
 }
 
 /* ══════════════════════════════════════════════════════════════════════

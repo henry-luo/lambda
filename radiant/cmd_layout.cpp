@@ -2129,7 +2129,13 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         return NULL;
     }
 
-    // Detect file type by extension
+    // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
+    if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
+        log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
+        return load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    }
+
+    // Detect file type by extension (local files only)
     const char* ext = strrchr(doc_url, '.');
     DomDocument* doc = nullptr;
 
