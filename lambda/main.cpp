@@ -2994,6 +2994,9 @@ int main(int argc, char *argv[]) {
                     }
                     js_batch_reset();
                     heap_destroy();
+                    // Clean up deferred MIR contexts from previous tests — heap objects
+                    // referencing their code pages are now gone after heap_destroy().
+                    jm_cleanup_deferred_mir();
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;
@@ -3054,6 +3057,9 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_DIAG unexpected_exit tests=%d\n", batch_test_count);
             fflush(stdout);
         }
+
+        // Clean up deferred MIR contexts from test runs (must happen before heap teardown)
+        jm_cleanup_deferred_mir();
 
         // Clean up preamble MIR context (must happen before heap teardown)
         if (has_preamble) {
