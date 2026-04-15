@@ -809,6 +809,17 @@ if [ ! -f "$DEPS_DIR/lib/libmir.a" ]; then
         echo "Building MIR from: $MIR_SRC"
         cd "$MIR_SRC"
 
+        # Apply MIR alloca-branch fix patch
+        PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
+        if [ -f "$PATCH_FILE" ]; then
+            echo "Applying MIR patches..."
+            git apply "$PATCH_FILE" 2>/dev/null || {
+                git apply --check "$PATCH_FILE" 2>/dev/null && true || {
+                    echo "  (patch already applied or skipped)"
+                }
+            }
+        fi
+
         # Clean previous builds
         make clean 2>/dev/null || true
 

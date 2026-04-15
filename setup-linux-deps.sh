@@ -823,6 +823,17 @@ build_mir_for_linux() {
 
     cd "build_temp/mir"
 
+    # Apply MIR alloca-branch fix patch
+    PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
+    if [ -f "$PATCH_FILE" ]; then
+        echo "Applying MIR patches..."
+        git apply "$PATCH_FILE" 2>/dev/null || {
+            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
+                echo "  (patch already applied or skipped)"
+            }
+        }
+    fi
+
     # Check if GNUmakefile exists (MIR uses GNUmakefile, not Makefile)
     if [ ! -f "GNUmakefile" ]; then
         echo "Warning: GNUmakefile not found in MIR directory"

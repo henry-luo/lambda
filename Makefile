@@ -148,6 +148,19 @@ TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
+# MIR JIT library (platform-specific paths match build_lambda_config.json)
+ifeq ($(OS),Darwin)
+    MIR_LIB = mac-deps/mir/libmir.a
+    MIR_BUILD_DIR = mac-deps/mir
+else ifeq ($(IS_MSYS2),yes)
+    MIR_LIB = win-native-deps/lib/libmir.a
+    MIR_BUILD_DIR = build_temp/mir
+else
+    MIR_LIB = /usr/local/lib/libmir.a
+    MIR_BUILD_DIR = build_temp/mir
+endif
+MIR_PATCH = patches/mir-alloca-branch-fix.patch
+
 # JavaScript scanner dependencies
 JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
 
@@ -306,6 +319,36 @@ $(RE2_LIB):
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
+# Build MIR JIT library (clone, patch, compile)
+$(MIR_LIB):
+	@echo "Building MIR library..."
+	@if [ ! -d "$(MIR_BUILD_DIR)" ]; then \
+		echo "Cloning MIR repository..."; \
+		mkdir -p $(dir $(MIR_BUILD_DIR)); \
+		git clone https://github.com/vnmakarov/mir.git $(MIR_BUILD_DIR); \
+	fi
+	@if [ -f "$(MIR_PATCH)" ]; then \
+		echo "Applying MIR patches..."; \
+		cd $(MIR_BUILD_DIR) && git apply "$(CURDIR)/$(MIR_PATCH)" 2>/dev/null || \
+		echo "  (MIR patch already applied or skipped)"; \
+	fi
+ifeq ($(IS_MSYS2),yes)
+	@cd $(MIR_BUILD_DIR) && CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \
+		CFLAGS="-O2 -DNDEBUG -fPIC" make libmir.a
+	@mkdir -p win-native-deps/lib && cp $(MIR_BUILD_DIR)/libmir.a win-native-deps/lib/
+else
+	@$(MAKE) -C $(MIR_BUILD_DIR) -j$(JOBS)
+endif
+ifeq ($(OS),Linux)
+	@echo "Installing MIR to system location (requires sudo)..."
+	@sudo mkdir -p /usr/local/lib /usr/local/include
+	@sudo cp $(MIR_BUILD_DIR)/libmir.a /usr/local/lib/
+	@sudo cp $(MIR_BUILD_DIR)/mir.h /usr/local/include/ 2>/dev/null || true
+endif
+	@echo "✅ MIR built: $(MIR_LIB)"
+
+build-mir: $(MIR_LIB)
+
 # Toolchain Validation Functions
 define toolchain_verify
 	@echo "🔍 Verifying toolchain..."
@@ -408,7 +451,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart \
+	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    test-ui-automation test-reactive-ui test-redex-baseline
 
 # Help target - shows available commands
@@ -423,6 +466,7 @@ help:
 	@echo "  build-release - Build optimized release version using Premake"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  build-mir     - Build MIR JIT library (clone, patch, compile)"
 	@echo "  build-jube    - Build polyglot runtime (Lambda + JS/TS + Python + Bash + Ruby + Radiant)"
 	@echo "  release-jube  - Build optimized polyglot release version"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -538,7 +582,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."

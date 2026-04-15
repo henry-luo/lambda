@@ -1082,6 +1082,9 @@ int main(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "--mir-interp") == 0) {
                     g_mir_interp_mode = 1;
+                } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
+                    int level = atoi(argv[i] + 12);
+                    if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
                 } else if (argv[i][0] != '-') {
                     if (!js_file) js_file = argv[i];
                 }
