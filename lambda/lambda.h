@@ -1296,6 +1296,7 @@ extern "C" {
     Item js_math_sign(Item x);
     Item js_math_floor(Item x);
     Item js_math_ceil(Item x);
+    double js_math_ceil_d(double d);
     Item js_math_round_item(Item x);
 
     // String.raw tagged template literal

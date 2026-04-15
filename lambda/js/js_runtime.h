@@ -300,6 +300,13 @@ void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
 Item js_reflect_construct(Item target, Item args_array, Item new_target);
+Item js_reflect_apply(Item target, Item this_arg, Item args_array);
+Item js_reflect_define_property(Item obj, Item key, Item desc);
+Item js_reflect_delete_property(Item obj, Item key);
+Item js_reflect_own_keys(Item obj);
+Item js_reflect_prevent_extensions(Item obj);
+Item js_reflect_set(Item obj, Item key, Item value);
+Item js_reflect_set_prototype_of(Item obj, Item proto);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
