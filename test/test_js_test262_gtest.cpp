@@ -1807,14 +1807,14 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // skip timeout tests — they are already above, don't re-emit as CRASH_
             written.insert(timeout_names.begin(), timeout_names.end());
 
-            // Retain previously-quarantined crashers.
-            // CRASH entries are kept even if they pass individually in Phase 2a,
-            // because they may only crash when running in batch context (shared
-            // heap state causes SIGSEGV/SIGBUS). Removing and re-adding them each
-            // run causes quarantine oscillation — they crash in batch, get quarantined,
-            // pass individually, get un-quarantined, crash again in batch, etc.
+            // Re-evaluate previously-quarantined crashers.
+            // CRASH entries that still crash (exit > 128) stay quarantined.
+            // CRASH entries that pass individually (exit <= 128) are RELEASED from
+            // quarantine — they return to batch execution next run. If they crash
+            // in batch again, they'll be re-quarantined as BATCH_KILL.
             // MISSING entries are removed if they pass individually (they were likely
             // collateral from a batch kill, not inherently crashing).
+            size_t crash_released = 0;
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
@@ -1829,15 +1829,16 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
-                    // Was a CRASH entry — keep quarantined even though it passed individually.
-                    // The original crash tag is preserved so it can be re-quarantined next run.
-                    fprintf(crasher_log, "%s\t%s\t%s\n",
-                            known_crasher_tags[p.test_name].c_str(),
-                            p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    crash_exit++;
+                    // Was a CRASH entry but now passes individually — release from quarantine.
+                    // It will return to batch execution next run. If it causes a batch crash,
+                    // the BATCH_KILL detection will re-quarantine it.
+                    crash_released++;
                 }
                 // else: MISSING/SLOW test passed individually → removed from quarantine
+            }
+            if (crash_released > 0) {
+                fprintf(stderr, "[test262] Released %zu formerly-crashing tests from quarantine (now pass individually)\n",
+                        crash_released);
             }
 
             // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
