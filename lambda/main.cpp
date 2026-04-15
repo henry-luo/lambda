@@ -9,6 +9,7 @@
 #include "../lib/arena.h"   // For arena allocator
 #include "../lib/file.h"    // For file_exists, file_delete, file_getcwd
 #include "../lib/shell.h"   // For shell_getenv
+#include "npm/npm_installer.h"  // For npm install/uninstall
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
@@ -1039,6 +1040,97 @@ int main(int argc, char *argv[]) {
         log_debug("exec_validation completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
         return exit_code;
+    }
+
+    // Handle Node.js package manager command
+    if (argc >= 2 && strcmp(argv[1], "node") == 0) {
+        log_debug("Entering Node.js command handler");
+
+        if (argc < 3 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0) {
+            printf("Lambda Node.js Package Manager\n\n");
+            printf("Usage: %s node <command> [options]\n", argv[0]);
+            printf("\nCommands:\n");
+            printf("  install [pkg]           Install dependencies (or a specific package)\n");
+            printf("  install -D <pkg>        Install as dev dependency\n");
+            printf("  uninstall <pkg>         Remove a dependency\n");
+            printf("  info <pkg>              Show package info\n");
+            printf("\nOptions:\n");
+            printf("  --production            Skip devDependencies\n");
+            printf("  --dry-run               Print what would be installed\n");
+            printf("  -h, --help              Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s node install              # Install from package.json\n", argv[0]);
+            printf("  %s node install lodash       # Add lodash\n", argv[0]);
+            printf("  %s node install -D jest      # Add jest as dev dep\n", argv[0]);
+            printf("  %s node uninstall lodash     # Remove lodash\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        const char* subcmd = argv[2];
+        char* cwd = file_getcwd();
+
+        if (strcmp(subcmd, "install") == 0) {
+            NpmInstallOptions opts = {};
+            const char* pkg_name = NULL;
+            const char* version_range = NULL;
+            bool is_dev = false;
+
+            for (int i = 3; i < argc; i++) {
+                if (strcmp(argv[i], "--production") == 0) opts.production = true;
+                else if (strcmp(argv[i], "--dry-run") == 0) opts.dry_run = true;
+                else if (strcmp(argv[i], "--verbose") == 0) opts.verbose = true;
+                else if (strcmp(argv[i], "-D") == 0) is_dev = true;
+                else if (argv[i][0] != '-') {
+                    // parse name[@range]
+                    pkg_name = argv[i];
+                    const char* at = strchr(pkg_name, '@');
+                    if (at && at != pkg_name) { // not scoped package
+                        // split at @
+                        static char name_buf[256];
+                        int name_len = (int)(at - pkg_name);
+                        snprintf(name_buf, sizeof(name_buf), "%.*s", name_len, pkg_name);
+                        pkg_name = name_buf;
+                        version_range = at + 1;
+                    }
+                }
+            }
+
+            NpmInstallResult* result;
+            if (pkg_name) {
+                result = npm_install_package(cwd, pkg_name, version_range, is_dev, &opts);
+            } else {
+                result = npm_install(cwd, &opts);
+            }
+
+            int exit_code = result->success ? 0 : 1;
+            if (!result->success && result->error) {
+                fprintf(stderr, "Error: %s\n", result->error);
+            }
+            npm_install_result_free(result);
+            free(cwd);
+            log_finish();
+            return exit_code;
+
+        } else if (strcmp(subcmd, "uninstall") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "Usage: %s node uninstall <package>\n", argv[0]);
+                free(cwd);
+                log_finish();
+                return 1;
+            }
+            int ret = npm_uninstall(cwd, argv[3]);
+            free(cwd);
+            log_finish();
+            return ret;
+
+        } else {
+            fprintf(stderr, "Unknown node command: %s\n", subcmd);
+            fprintf(stderr, "Run '%s node --help' for usage.\n", argv[0]);
+            free(cwd);
+            log_finish();
+            return 1;
+        }
     }
 
     // Handle JavaScript command

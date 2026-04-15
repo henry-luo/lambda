@@ -27,6 +27,7 @@
         "lambda/validator",
         "lambda/js",
         "lambda/ts",
+        "lambda/npm",
         "lambda/network",
         "radiant",
         "radiant/pdf",
@@ -1545,6 +1546,28 @@
                         ],
                         "binary": "test_memtrack_gtest.exe",
                         "icon": "🔍"
+                    },
+                    {
+                        "source": "test_npm_semver_gtest.cpp",
+                        "name": "NPM Semver Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/npm/semver.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/str.c",
+                            "lib/utf.c",
+                            "lib/log.c"
+                        ],
+                        "binary": "test_npm_semver_gtest.exe",
+                        "icon": "📦"
                     },
                     {
                         "source": "test_avl_tree.cpp",
