@@ -1,0 +1,15 @@
+Readable exists: true
+Writable exists: true
+Duplex exists: true
+Transform exists: true
+PassThrough exists: true
+pipeline exists: true
+finished exists: true
+Readable.from exists: true
+Readable has on: true
+Writable has write: true
+Writable has end: true
+Readable has pipe: true
+Readable has read: true
+Readable has push: true
+Writable has destroy: true

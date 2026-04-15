@@ -44,10 +44,9 @@ fs.readFile("./temp/fs_test1.txt", function(err, data) {
     } else {
         console.log("async:" + data);
     }
+    // Cleanup after async completes
+    fs.unlinkSync("./temp/fs_testdir/b.txt");
+    fs.rmdirSync("./temp/fs_testdir");
+    fs.unlinkSync("./temp/fs_test1.txt");
 });
-
-// Cleanup
-fs.unlinkSync("./temp/fs_testdir/b.txt");
-fs.rmdirSync("./temp/fs_testdir");
-fs.unlinkSync("./temp/fs_test1.txt");
 0;

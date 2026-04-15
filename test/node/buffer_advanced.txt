@@ -1,0 +1,21 @@
+toJSON exists: true
+swap16 [0]: 2
+swap16 [1]: 1
+swap16 [2]: 4
+swap16 [3]: 3
+swap32 [0]: 4
+swap32 [3]: 1
+lastIndexOf c: 5
+readFloatBE: 1.5
+readFloatLE: 2.5
+readDoubleBE: 123.456
+readDoubleLE: 789.012
+readUInt16BE: 4660
+readInt32LE: -12345
+readUIntLE 2: 513
+readIntBE neg: -1
+isBuffer true: true
+isBuffer false: false
+isEncoding utf8: true
+isEncoding hex: true
+fill byte: AAA
