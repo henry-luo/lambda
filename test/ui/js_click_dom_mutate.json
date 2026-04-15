@@ -1,0 +1,36 @@
+{
+  "name": "JS onclick: DOM structure mutation (appendChild, removeChild)",
+  "html": "test/ui/js_click_dom_mutate.html",
+  "description": "Tests onclick handlers that add/remove DOM elements. Verifies appendChild creates new elements and removeChild removes them, with correct relayout.",
+  "events": [
+    {"type": "log", "message": "=== js_click_dom_mutate: DOM structure mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify container is initially empty"},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 0},
+
+    {"type": "log", "message": "Step 2: Add first item"},
+    {"type": "click", "target": {"selector": "#btn-add"}},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 1, "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#item-1"}, "equals": "Item 1"},
+
+    {"type": "log", "message": "Step 3: Add second item"},
+    {"type": "click", "target": {"selector": "#btn-add"}},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 2, "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#item-2"}, "equals": "Item 2"},
+
+    {"type": "log", "message": "Step 4: Add third item"},
+    {"type": "click", "target": {"selector": "#btn-add"}},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 3, "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 5: Remove first item"},
+    {"type": "click", "target": {"selector": "#btn-remove-first"}},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 2, "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 6: Remove last item"},
+    {"type": "click", "target": {"selector": "#btn-remove-last"}},
+    {"type": "assert_count", "target": {"selector": "#container .item"}, "count": 1, "assert_timeout": 500},
+
+    {"type": "log", "message": "=== js_click_dom_mutate complete ==="}
+  ]
+}

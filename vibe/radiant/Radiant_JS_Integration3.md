@@ -20,6 +20,7 @@
 10. [Implementation Order](#10-implementation-order)
 11. [Files Modified](#11-files-modified)
 12. [Risk Assessment](#12-risk-assessment)
+13. [Implementation Progress](#13-implementation-progress)
 
 ---
 
@@ -757,14 +758,14 @@ For the CSS2.1 tests, full rebuild is fast enough (<20ms). Incremental optimizat
 
 ## 10. Implementation Order
 
-| Phase | Description | Dependency | Estimated Scope |
-|-------|-------------|------------|-----------------|
-| **Phase 1** | Retain MIR context | None | `script_runner.cpp`, `dom_node.hpp` |
-| **Phase 2** | Event handler collection + compilation | Phase 1 | New `event_handler_registry.cpp/.h` |
-| **Phase 3** | Event dispatch in `handle_event` | Phase 2 | `event.cpp` |
-| **Phase 4** | Post-handler rebuild pipeline | Phase 3 | `cmd_layout.cpp`, `js_dom.cpp` |
-| **Phase 5** | Automated UI test specs | Phase 4 | `test/layout/js_interactive/*.json`, Makefile |
-| **Phase 6** | Incremental reflow (optimization) | Phase 4 | `cmd_layout.cpp`, `event.cpp`, `js_dom.cpp` |
+| Phase | Description | Dependency | Estimated Scope | Status |
+|-------|-------------|------------|-----------------|--------|
+| **Phase 1** | Retain MIR context | None | `script_runner.cpp`, `dom_node.hpp` | ✅ Done |
+| **Phase 2** | Event handler collection + compilation | Phase 1 | New `event_handler_registry.cpp/.h` | ✅ Done |
+| **Phase 3** | Event dispatch in `handle_event` | Phase 2 | `event.cpp` | ✅ Done |
+| **Phase 4** | Post-handler rebuild pipeline | Phase 3 | `cmd_layout.cpp`, `js_dom.cpp` | ✅ Done |
+| **Phase 5** | Automated UI test specs | Phase 4 | `test/ui/js_*.json`, `test/ui/js_*.html` | ✅ Done |
+| **Phase 6** | Incremental reflow (optimization) | Phase 4 | `cmd_layout.cpp`, `event.cpp`, `js_dom.cpp` | Not started |
 
 Phases 1–4 form the minimum viable feature. Phase 5 adds test coverage. Phase 6 is optimization.
 
@@ -775,18 +776,16 @@ Phases 1–4 form the minimum viable feature. Phase 5 adds test coverage. Phase 
 
 ## 11. Files Modified
 
-| File | Changes |
-|------|---------|
-| `radiant/script_runner.cpp` | Use preamble mode; retain MIR ctx + Runtime on DomDocument |
-| `radiant/script_runner.h` | New function: `collect_event_handlers()` |
-| `radiant/dom_node.hpp` | New fields on DomDocument: js_mir_ctx, js_runtime_*, js_event_registry |
-| `radiant/event.cpp` | New: `dispatch_html_event_handler()`; hook into `handle_event()` |
-| `radiant/cmd_layout.cpp` | New: `post_handler_rebuild()`, `re_cascade_styles()` |
-| `lambda/js/js_dom.cpp` | Set `js_dom_dirty` flag on mutations |
-| `lambda/js/js_dom.h` | Expose DOM mutation tracking |
-| New: `radiant/event_handler_registry.cpp/.h` | JsEventRegistry, handler collection, compilation, lookup |
-| `test/layout/js_interactive/*.json` | Event_sim test specs (36 files) |
-| `Makefile` | New target: `make layout suite=js_interactive` |
+| File | Changes | Phase |
+|------|---------|-------|
+| `lambda/runner.cpp` | Fixed `runtime_cleanup()` and `runtime_reset_heap()` — moved `name_pool_release()` before `heap_destroy()` to fix use-after-free (NamePool struct is pool_calloc'd from heap's Pool) | Bug fix |
+| `lambda/js/transpile_js_mir.cpp` | Restored accidentally deleted lines (`_lambda_rt`, `js_input`, `js_runtime_set_input`) | Bug fix |
+| `radiant/script_runner.cpp` | Use preamble mode; retain MIR ctx + Runtime on DomDocument | Phase 1 |
+| `radiant/dom_node.hpp` | New fields on DomDocument: js_mir_ctx, js_runtime_*, js_event_registry | Phase 1 |
+| `radiant/event.cpp` | New: `dispatch_html_event_handler()`; hook into `handle_event()` for 6 event types (click, mousedown, mouseover, focus, blur, keydown) | Phase 2–3 |
+| `lambda/js/js_dom.cpp` | Set `js_dom_dirty` / `js_mutation_count` on mutations | Phase 4 |
+| `test/ui/js_*.html` | 12 new HTML test documents | Phase 5 |
+| `test/ui/js_*.json` | 12 new JSON event_sim test specs (+ 2 existing block-in-inline) | Phase 5 |
 
 ---
 
@@ -806,3 +805,63 @@ Phases 1–4 form the minimum viable feature. Phase 5 adds test coverage. Phase 
 - **`setTimeout` in event handlers**: Some tests use `setTimeout(fn, delay)` in onclick handlers (e.g., `dom-hover-001`). The current stub calls `fn()` immediately, which is correct for most cases. But if a handler depends on actual timing (execute after repaint), the immediate call may produce different results than a real browser.
 - **Event handler re-compilation after DOM mutation**: If JS creates new elements with event handlers (e.g., `elem.setAttribute('onclick', 'foo()')`), those need to be registered after the mutation. Phase 4's DOM dirty tracking doesn't cover this. Mitigation: re-scan event handlers after mutations if needed. Not required for the 36 CSS2.1 tests.
 - **Re-entrant handler invocation**: If a handler triggers a DOM change that fires another handler (e.g., `focus` triggers `blur` on another element), we need to prevent infinite loops. Mitigation: set a `dispatching_event` flag and skip nested dispatch, or limit recursion depth.
+
+---
+
+## 13. Implementation Progress
+
+### Phase 1–4: Core Pipeline — ✅ Complete
+
+All four core phases are implemented and verified:
+
+- **Phase 1**: MIR compilation context retained on DomDocument via preamble mode. JS runtime (heap, nursery, name_pool) persists across events.
+- **Phase 2**: 17 HTML event handler attributes are scanned and compiled at page load: `onclick`, `ondblclick`, `onmousedown`, `onmouseup`, `onmouseover`, `onmouseout`, `onmousemove`, `onkeydown`, `onkeyup`, `onkeypress`, `onfocus`, `onblur`, `onchange`, `oninput`, `onsubmit`, `onreset`, `onscroll`.
+- **Phase 3**: `dispatch_html_event_handler()` hooks into `handle_event()` for 6 dispatched event types: click (line 3140), mousedown (line 2728), mouseover (line 1133), focus (line 1904), blur (lines 1892/1922), keydown (line 3396) in `event.cpp`.
+- **Phase 4**: Post-handler pipeline detects `js_mutation_count`, re-cascades CSS, destroys/rebuilds view tree, and repaints.
+
+**Lambda baseline**: 588/588 PASS (was 583/588 before Bug 5 fix).
+
+### Bug 5: NamePool Use-After-Free — ✅ Fixed
+
+**Root cause**: `runtime_cleanup()` and `runtime_reset_heap()` in `lambda/runner.cpp` called `name_pool_release()` **after** `heap_destroy()`. The NamePool struct was allocated via `pool_calloc()` from the heap's Pool, and `pool_destroy()` (inside `gc_heap_destroy()`) bulk-freed all pool memory first — leaving a dangling pointer.
+
+**Fix**: Moved `name_pool_release()` to execute **before** `heap_destroy()` in both functions.
+
+**Secondary fix**: Restored accidentally deleted lines in `lambda/js/transpile_js_mir.cpp` (`_lambda_rt = (Context*)context`, `Input* js_input = Input::create(context->pool)`, `js_runtime_set_input(js_input)`) that were removed when cleaning up debug logging.
+
+### Phase 5: Automated UI Tests — ✅ Complete
+
+12 new automated UI tests created in `test/ui/`, covering all 6 dispatched event types with various DOM mutation patterns. All tests pass in the UI automation test runner (`test_ui_automation_gtest.exe`).
+
+**Test inventory (12 new + 2 existing = 14 JS tests)**:
+
+| Test | Event Type | Assertions | DOM Pattern |
+|------|-----------|------------|-------------|
+| `js_click_classname` | onclick | 5 | className toggle (inactive↔active) |
+| `js_click_style` | onclick | 4 | inline style.width, style.backgroundColor |
+| `js_click_dom_mutate` | onclick | 8 | appendChild, removeChild |
+| `js_click_batch_style` | onclick | 6 | getElementsByTagName batch style update |
+| `js_click_textcontent` | onclick | 6 | textContent mutation, counter |
+| `js_click_display_toggle` | onclick | 6 | display:none toggle via className |
+| `js_click_bubbling` | onclick | 4 | event bubbling from child to parent |
+| `js_mouseover` | onmouseover | 4 | hover triggers className + textContent |
+| `js_mousedown` | onmousedown | 4 | press handler with counter |
+| `js_focus_blur` | onfocus | 4 | focus sets className and log text |
+| `js_keydown` | onkeydown | 4 | keyboard handler on focusable element |
+| `js_multi_event` | mouseover+click | 5 | combined event pipeline |
+| `js_block_in_inline_005` | onclick | 3 | className toggle (existing) |
+| `js_block_in_inline_006` | onclick | 3 | className toggle (existing) |
+
+**Total**: 66 assertions across all 14 tests. **All 14 pass.**
+
+**Full UI automation suite**: 61/61 tests pass (no regressions).
+
+### Test Observations
+
+- **Empty class attribute**: The HTML parser / DomElement does not store `class=""` — reading an unset `class` attribute returns `(null)`, not empty string. Tests use non-empty initial class values (e.g., `class="inactive"`, `class="idle"`) to avoid this mismatch.
+- **Computed style values**: `assert_style` returns computed CSS values, not authored values. Colors return `rgb(R, G, B)` format (e.g., `rgb(255, 0, 0)` not `red`). Dimensions include padding unless `box-sizing: border-box` is set.
+- **Focus/blur dispatch**: The `focus` event_sim type is dispatched via simulated click. Implicit blur (clicking another element triggers blur on the previously focused element) does not fire `onblur` handlers through the JS event handler dispatch path.
+
+### Phase 6: Incremental Reflow — Not Started
+
+Current post-handler rebuild uses full re-cascade + full relayout. This is adequate for the CSS2.1 interactive tests (<100 elements, <20ms per rebuild). Phase 6 optimization deferred until needed for larger documents.

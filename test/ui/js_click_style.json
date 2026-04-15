@@ -1,0 +1,24 @@
+{
+  "name": "JS onclick: inline style mutation via element.style",
+  "html": "test/ui/js_click_style.html",
+  "description": "Tests onclick handler that sets inline style properties (width, backgroundColor). Verifies style changes propagate through CSS cascade and relayout.",
+  "events": [
+    {"type": "log", "message": "=== js_click_style: inline style mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Click 'Set Width 200' — #target width should change"},
+    {"type": "click", "target": {"selector": "#btn-width"}},
+    {"type": "assert_style", "target": {"selector": "#target"}, "property": "width", "equals": "200px", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 2: Click 'Set Color Red' — #target background should change"},
+    {"type": "click", "target": {"selector": "#btn-color"}},
+    {"type": "assert_style", "target": {"selector": "#target"}, "property": "background-color", "equals": "rgb(255, 0, 0)", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 3: Click 'Set Both' — #target width and height should change"},
+    {"type": "click", "target": {"selector": "#btn-both"}},
+    {"type": "assert_style", "target": {"selector": "#target"}, "property": "width", "equals": "300px", "assert_timeout": 500},
+    {"type": "assert_style", "target": {"selector": "#target"}, "property": "height", "equals": "100px"},
+
+    {"type": "log", "message": "=== js_click_style complete ==="}
+  ]
+}

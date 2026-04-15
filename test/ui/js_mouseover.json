@@ -1,0 +1,25 @@
+{
+  "name": "JS onmouseover: hover triggers className and textContent change",
+  "html": "test/ui/js_mouseover.html",
+  "description": "Tests onmouseover handler that sets className and textContent on hover. Verifies CSS re-cascade and relayout after hover-triggered DOM mutation.",
+  "events": [
+    {"type": "log", "message": "=== js_mouseover: hover handler ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#indicator"}, "equals": "Not hovered"},
+
+    {"type": "log", "message": "Step 2: Move mouse over #hover-target"},
+    {"type": "mouse_move", "target": {"selector": "#hover-target"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify #hover-target has class 'hovered'"},
+    {"type": "assert_attribute", "target": {"selector": "#hover-target"}, "attribute": "class", "equals": "hovered", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 4: Verify #indicator text changed"},
+    {"type": "assert_text", "target": {"selector": "#indicator"}, "equals": "Hovered!"},
+    {"type": "assert_attribute", "target": {"selector": "#indicator"}, "attribute": "class", "equals": "active"},
+
+    {"type": "log", "message": "=== js_mouseover complete ==="}
+  ]
+}

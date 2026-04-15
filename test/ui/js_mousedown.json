@@ -1,0 +1,26 @@
+{
+  "name": "JS onmousedown: press handler with counter",
+  "html": "test/ui/js_mousedown.html",
+  "description": "Tests onmousedown handler that increments a counter and sets className. Verifies mousedown fires on press (before release), and that textContent updates with counter.",
+  "events": [
+    {"type": "log", "message": "=== js_mousedown: press handler ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#counter"}, "equals": "Presses: 0"},
+
+    {"type": "log", "message": "Step 2: Press #press-area — should fire onmousedown"},
+    {"type": "click", "target": {"selector": "#press-area"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify counter incremented and class set"},
+    {"type": "assert_text", "target": {"selector": "#counter"}, "equals": "Presses: 1", "assert_timeout": 500},
+    {"type": "assert_attribute", "target": {"selector": "#press-area"}, "attribute": "class", "equals": "pressed"},
+
+    {"type": "log", "message": "Step 4: Press again — counter should increment to 2"},
+    {"type": "click", "target": {"selector": "#press-area"}},
+    {"type": "assert_text", "target": {"selector": "#counter"}, "equals": "Presses: 2", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== js_mousedown complete ==="}
+  ]
+}

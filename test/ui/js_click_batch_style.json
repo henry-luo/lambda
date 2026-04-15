@@ -1,0 +1,23 @@
+{
+  "name": "JS onclick: getElementsByTagName batch style update",
+  "html": "test/ui/js_click_batch_style.html",
+  "description": "Tests onclick handler that uses getElementsByTagName to batch-update style.fontFamily on multiple elements. Mirrors the CSS2.1 text-transform-bicameral pattern.",
+  "events": [
+    {"type": "log", "message": "=== js_click_batch_style: getElementsByTagName batch update ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Click 'Set Monospace' — all divs should get font-family: monospace"},
+    {"type": "click", "target": {"selector": "#btn-mono"}},
+    {"type": "assert_style", "target": {"selector": "#box1"}, "property": "font-family", "equals": "monospace", "assert_timeout": 500},
+    {"type": "assert_style", "target": {"selector": "#box2"}, "property": "font-family", "equals": "monospace"},
+    {"type": "assert_style", "target": {"selector": "#box3"}, "property": "font-family", "equals": "monospace"},
+
+    {"type": "log", "message": "Step 2: Click 'Reset Font' — all divs should get font-family: serif"},
+    {"type": "click", "target": {"selector": "#btn-reset"}},
+    {"type": "assert_style", "target": {"selector": "#box1"}, "property": "font-family", "equals": "serif", "assert_timeout": 500},
+    {"type": "assert_style", "target": {"selector": "#box2"}, "property": "font-family", "equals": "serif"},
+    {"type": "assert_style", "target": {"selector": "#box3"}, "property": "font-family", "equals": "serif"},
+
+    {"type": "log", "message": "=== js_click_batch_style complete ==="}
+  ]
+}

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Click: className toggle</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #box { width: 100px; height: 100px; background: red; }
+  #box.active { background: green; width: 200px; }
+  #status { margin-top: 10px; }
+  #status.on { background: yellow; }
+</style>
+<script>
+  function toggleBox() {
+    var box = document.getElementById('box');
+    if (box.className === 'active') {
+      box.className = 'inactive';
+    } else {
+      box.className = 'active';
+    }
+  }
+  function updateStatus() {
+    var box = document.getElementById('box');
+    document.getElementById('status').className = box.className === 'active' ? 'on' : 'off';
+  }
+</script>
+</head>
+<body>
+  <button id="toggle-btn" onclick="toggleBox()">Toggle Box</button>
+  <button id="status-btn" onclick="updateStatus()">Update Status</button>
+  <div id="box" class="inactive"></div>
+  <div id="status" class="off">Status indicator</div>
+</body>
+</html>
