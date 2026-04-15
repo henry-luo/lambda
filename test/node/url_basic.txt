@@ -1,0 +1,9 @@
+https:
+example.com
+8080
+/path
+?query=1
+#hash
+https://example.com/c
+https://example.com/a/c
+https://example.com/path?q=1

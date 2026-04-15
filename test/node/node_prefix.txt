@@ -1,0 +1,4 @@
+bar.txt
+/
+string
+string

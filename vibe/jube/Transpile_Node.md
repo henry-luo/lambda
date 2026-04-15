@@ -1,0 +1,824 @@
+# Transpile_Node: Node.js Compatibility Layer for Lambda Runtime
+
+## 1. Scope & Relationship to JS Track
+
+This proposal covers **Node.js-specific features beyond standard JavaScript**. Core JS language support (ES6+ syntax, classes, generators, async/await, Promises, etc.) is tracked separately in the `Transpile_Js*` series.
+
+This track focuses on:
+- **Node.js built-in modules** (`node:fs`, `node:path`, `node:os`, etc.)
+- **Node.js globals** (`process`, `Buffer`, `__dirname`, `__filename`, `require`)
+- **npm package management** (resolution, installation, `node_modules` layout)
+- **CommonJS `require()` interop** with ES modules
+- **`package.json` semantics** (exports, main, type, bin, scripts)
+
+### What This Track Does NOT Cover
+- JS language features (covered by Transpile_Js1–Js28)
+- Event loop and libuv integration (covered by Transpile_Js15)
+- HTTP server implementation (covered by Transpile_Js15)
+- DOM/CSSOM APIs (covered by js_dom.cpp / js_cssom.cpp)
+
+## 2. CLI Namespace Convention
+
+Lambda uses a **language subcommand** convention for polyglot operations:
+
+| Command | Language | Mnemonic |
+|---------|----------|----------|
+| `lambda js` | JavaScript | Universal abbreviation |
+| `lambda ts` | TypeScript | Universal abbreviation |
+| `lambda node` | Node.js (npm ecosystem) | Already a short word |
+| `lambda py` | Python | Standard (`py` is official on Windows) |
+| `lambda rb` | Ruby | Standard (`.rb` file extension) |
+| `lambda sh` | Bash / Shell | Standard (`sh` binary and extension) |
+
+The `node` subcommand manages npm packages and Node.js-specific features:
+
+```bash
+lambda node install              # Install npm dependencies
+lambda node run app.js           # Run with Node.js compat layer
+lambda node task start           # Run package.json script
+```
+
+Automatic language detection (`lambda run file.js`) still works — the language subcommand is only needed for language-specific operations like package management.
+
+Lock file: `lambda-node.lock` (hyphenated, scoped to the node ecosystem).
+
+## 3. Current State
+
+Lambda's JS runtime already implements partial Node.js support:
+
+| Feature | Status | Implementation |
+|---------|--------|---------------|
+| `node:fs` (sync) | ✅ Partial | `js_fs.cpp` — readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, mkdirSync, rmdirSync, renameSync, readdirSync, statSync, copyFileSync, symlinkSync, chmodSync |
+| `node:fs` (async) | ✅ Partial | readFile, writeFile (callback-based) |
+| `node:child_process` | ✅ Partial | `js_child_process.cpp` — exec, execSync via libuv uv_spawn |
+| `node:crypto` | ✅ Partial | `js_crypto.cpp` — SHA-256/384/512 (native) |
+| `node:path` | ⚠️ Embedded | Path ops inlined in runtime, no standalone module |
+| `node:url` | ⚠️ Embedded | URL parsing via `lib/url.c` (WHATWG), not exposed as module |
+| `process` global | ✅ Partial | argv, env, exit, cwd, platform, arch |
+| `Buffer` | ✅ Via Uint8Array | TypedArray-backed, no full Buffer API |
+| `__dirname` / `__filename` | ✅ | Set per-module during transpilation |
+| `require()` | ✅ Partial | CJS require shim, resolves relative + node_modules |
+| ES Modules | ✅ | import/export with module registry |
+| npm packages | ❌ | No package manager, no resolution algorithm |
+
+### Existing C Library Foundations
+
+Lambda already has C libraries that map directly to Node.js module functionality:
+
+| C Module | Node.js Equivalent | Status |
+|----------|-------------------|--------|
+| `lib/file.c` + `lib/file_utils.c` | `node:fs` | ✅ 37+ functions, fully operational |
+| `lib/shell.c` | `node:child_process` | ✅ exec, spawn, env, process management |
+| `lib/url.c` | `node:url` | ✅ WHATWG URL parser |
+| `lambda/lambda-path.h` + `lib/file.c` path utils | `node:path` | ✅ join, dirname, basename, ext, resolve |
+| `lambda/sysinfo.cpp` | `node:os` | ✅ platform, arch, hostname, cpus, memory |
+| Native SHA in `js_crypto.cpp` | `node:crypto` (subset) | ✅ SHA family |
+
+## 4. Node.js Built-in Modules — Tiered Implementation Plan
+
+Modules are prioritized by how many npm packages depend on them (based on npm ecosystem analysis and Deno/Bun experience).
+
+### Tier 1: Critical (required by 80%+ of npm packages)
+
+These modules are needed to run the vast majority of npm packages.
+
+#### `node:fs` — Complete File System
+
+**Backing**: `lib/file.c` + `lib/file_utils.c` (already implemented)
+
+Extend `js_fs.cpp` to expose the full `lib/file.c` API surface:
+
+| API | C Backing | Status |
+|-----|-----------|--------|
+| `readFileSync` / `readFile` | `read_text_file`, `read_binary_file` | ✅ Done |
+| `writeFileSync` / `writeFile` | `write_text_file`, `write_binary_file` | ✅ Done |
+| `appendFileSync` | `append_text_file` | ✅ Done |
+| `existsSync` | `file_exists` | ✅ Done |
+| `statSync` / `stat` | `file_stat` → `FileStat` struct | ✅ Done |
+| `mkdirSync` (recursive) | `create_dir` | ✅ Done |
+| `unlinkSync` | `file_delete` | ✅ Done |
+| `renameSync` | `file_rename` | ✅ Done |
+| `readdirSync` | `dir_list` | ✅ Done |
+| `copyFileSync` | `file_copy` | ✅ Done |
+| `symlinkSync` | `file_symlink` | ✅ Done |
+| `chmodSync` | `file_chmod` | ✅ Done |
+| `realpathSync` | `file_realpath` | 🔲 Wire up |
+| `accessSync` | `file_is_readable/writable/executable` | 🔲 Wire up |
+| `rmSync` (recursive) | `file_delete_recursive`, `dir_delete` | 🔲 Wire up |
+| `mkdtempSync` | `dir_temp_create` | 🔲 Wire up |
+| `readlinkSync` | POSIX `readlink` | 🔲 New |
+| `lstatSync` | `lstat()` (no symlink follow) | 🔲 New |
+| `watch` / `watchFile` | libuv `uv_fs_event_t` | 🔲 New (Js15) |
+| `createReadStream` / `createWriteStream` | Requires `node:stream` | 🔲 Phase 2 |
+| `fs/promises` | Async wrappers via libuv `uv_fs_*` | 🔲 Phase 2 |
+
+The heavy lifting is done — `lib/file.c` already implements the underlying operations. Wiring to JS is straightforward.
+
+#### `node:path`
+
+**Backing**: `lib/file.c` path utilities + `lambda/path.c`
+
+New file: `lambda/js/js_path.cpp`
+
+| API | C Backing | Notes |
+|-----|-----------|-------|
+| `path.join(...)` | `file_path_join` | Handle variadic args |
+| `path.resolve(...)` | `file_realpath` + cwd | Resolve to absolute |
+| `path.dirname(p)` | `file_path_dirname` | |
+| `path.basename(p, ext?)` | `file_path_basename` | |
+| `path.extname(p)` | `file_path_ext` | |
+| `path.normalize(p)` | New | Collapse `..` and `.` |
+| `path.isAbsolute(p)` | New | Check leading `/` or drive |
+| `path.relative(from, to)` | New | Compute relative path |
+| `path.parse(p)` | Composition | Returns `{root, dir, base, ext, name}` |
+| `path.format(obj)` | Composition | Inverse of parse |
+| `path.sep` | `'/'` or `'\\'` | Platform-specific |
+| `path.delimiter` | `':'` or `';'` | Platform-specific |
+| `path.posix` / `path.win32` | Namespaced variants | Low priority |
+
+#### `node:os`
+
+**Backing**: `lambda/sysinfo.cpp` + POSIX/Win32 APIs
+
+New file: `lambda/js/js_os.cpp`
+
+| API | Backing | Notes |
+|-----|---------|-------|
+| `os.platform()` | `LAMBDA_PLATFORM` macro | `"darwin"`, `"linux"`, `"win32"` |
+| `os.arch()` | Compile-time detect | `"x64"`, `"arm64"` |
+| `os.type()` | `uname().sysname` | `"Darwin"`, `"Linux"`, `"Windows_NT"` |
+| `os.release()` | `uname().release` | |
+| `os.hostname()` | `shell_hostname()` | |
+| `os.homedir()` | `shell_home_dir()` | |
+| `os.tmpdir()` | `"./temp/"` | Per project rules, never `/tmp` |
+| `os.cpus()` | `sysconf(_SC_NPROCESSORS_ONLN)` | Array of `{model, speed, times}` |
+| `os.totalmem()` | `sysctl` / `sysinfo` | |
+| `os.freemem()` | `sysctl` / `sysinfo` | |
+| `os.uptime()` | `sysctl` / `/proc/uptime` | |
+| `os.userInfo()` | `getpwuid` | `{username, uid, gid, shell, homedir}` |
+| `os.networkInterfaces()` | `getifaddrs` | Phase 2 |
+| `os.EOL` | `"\n"` or `"\r\n"` | |
+| `os.endianness()` | Compile-time | `"LE"` or `"BE"` |
+
+#### `node:process` (global + module)
+
+Extend existing `process` global with full module semantics.
+
+| API | Status | Notes |
+|-----|--------|-------|
+| `process.argv` | ✅ Done | |
+| `process.env` | ✅ Done | Via `shell_getenv/setenv` |
+| `process.exit(code)` | ✅ Done | |
+| `process.cwd()` | ✅ Done | Via `file_getcwd` |
+| `process.platform` | ✅ Done | |
+| `process.arch` | ✅ Done | |
+| `process.pid` | 🔲 | `getpid()` |
+| `process.ppid` | 🔲 | `getppid()` |
+| `process.version` | 🔲 | Lambda version string |
+| `process.versions` | 🔲 | `{lambda: "x.y", mir: "...", ...}` |
+| `process.hrtime()` / `.bigint()` | 🔲 | `uv_hrtime()` or `clock_gettime` |
+| `process.memoryUsage()` | 🔲 | GC stats from `lambda-mem.cpp` |
+| `process.cpuUsage()` | 🔲 | `getrusage()` |
+| `process.nextTick(cb)` | 🔲 | Queue before microtasks |
+| `process.stdout` / `.stderr` | 🔲 | Writable stream objects |
+| `process.stdin` | 🔲 | Readable stream (Phase 2) |
+| `process.on('exit', cb)` | 🔲 | EventEmitter pattern |
+| `process.on('uncaughtException')` | 🔲 | Requires EventEmitter |
+| `process.chdir(dir)` | 🔲 | `chdir()` |
+| `process.umask()` | 🔲 | `umask()` |
+| `process.uptime()` | 🔲 | Time since process start |
+
+#### `node:events` — EventEmitter
+
+Core dependency for `process`, streams, HTTP, and most Node.js patterns.
+
+New file: `lambda/js/js_events.cpp`
+
+**Implementation**: Pure JS (transpiled), not native C. EventEmitter is a class with:
+- `on(event, listener)` / `addListener`
+- `once(event, listener)`
+- `off(event, listener)` / `removeListener`
+- `emit(event, ...args)`
+- `removeAllListeners(event?)`
+- `listeners(event)` / `listenerCount(event)`
+- `eventNames()`
+- `setMaxListeners(n)` / `getMaxListeners()`
+- `prependListener` / `prependOnceListener`
+
+**Strategy**: Ship as a JS polyfill (`lambda/js/polyfills/events.js`) compiled into the runtime, rather than implementing in C. This matches Deno's approach.
+
+#### `node:util`
+
+Commonly imported for `promisify`, `inspect`, `types`, `TextEncoder`/`TextDecoder`.
+
+| API | Priority | Notes |
+|-----|----------|-------|
+| `util.promisify(fn)` | High | Convert callback-style to Promise |
+| `util.callbackify(fn)` | Medium | Inverse of promisify |
+| `util.inspect(obj, opts)` | High | Object pretty-printing |
+| `util.format(fmt, ...)` | High | printf-style string formatting |
+| `util.deprecate(fn, msg)` | Medium | Wrap with deprecation warning |
+| `util.types.isDate/isRegExp/...` | Medium | Type checking functions |
+| `util.inherits(ctor, super)` | Low | Legacy, use class extends |
+| `util.TextEncoder/TextDecoder` | High | Already in Web APIs |
+
+#### `node:buffer`
+
+Extend Uint8Array with Node.js Buffer semantics.
+
+| API | Priority | Notes |
+|-----|----------|-------|
+| `Buffer.from(str, enc)` | High | String → bytes with encoding |
+| `Buffer.alloc(size)` | High | Zero-filled allocation |
+| `Buffer.allocUnsafe(size)` | Medium | Uninitialized (performance) |
+| `Buffer.concat(list)` | High | Join multiple buffers |
+| `buf.toString(enc)` | High | Decode to string (utf8, hex, base64, ascii) |
+| `buf.slice` / `buf.subarray` | High | View into underlying memory |
+| `buf.write(str, off, len, enc)` | Medium | |
+| `buf.readUInt32BE/LE` etc. | Medium | Endian-aware reads |
+| `buf.writeUInt32BE/LE` etc. | Medium | Endian-aware writes |
+| `buf.compare` / `buf.equals` | Medium | |
+| `buf.copy(target)` | Medium | |
+| `buf.fill(val)` | Medium | |
+
+**Strategy**: Implement Buffer as a subclass of Uint8Array with additional methods. Encodings backed by native C helpers (base64 from existing `atob`/`btoa`, hex trivial).
+
+### Tier 2: Important (required by popular frameworks and tools)
+
+#### `node:stream`
+
+Required by `fs.createReadStream`, HTTP, and many npm packages.
+
+| Type | Priority | Notes |
+|------|----------|-------|
+| `Readable` | High | Pull-based data source |
+| `Writable` | High | Push-based data sink |
+| `Transform` | Medium | Read+Write with transformation |
+| `Duplex` | Medium | Read+Write independently |
+| `PassThrough` | Low | No-op Transform |
+| `pipeline(...)` | Medium | Chain streams with error handling |
+| `finished(stream, cb)` | Medium | Detect stream completion |
+
+**Strategy**: Implement as JS polyfills. The Web Streams API (`ReadableStream`/`WritableStream`) from Transpile_Js15 can serve as the underlying mechanism.
+
+#### `node:http` / `node:https`
+
+**Backing**: libuv TCP (from Transpile_Js15) + mbedTLS
+
+| API | Priority | Notes |
+|-----|----------|-------|
+| `http.createServer(handler)` | High | Replaces current libevent server |
+| `http.request(opts, cb)` | High | Outgoing HTTP client |
+| `http.get(url, cb)` | High | Shorthand for GET |
+| `https.createServer` | Medium | TLS via mbedTLS |
+| `https.request` / `https.get` | Medium | TLS client |
+| `IncomingMessage` / `ServerResponse` | High | Request/response objects |
+
+Depends on Transpile_Js15 (libuv migration). Server already partially exists via `lib/serve/`.
+
+#### `node:child_process`
+
+**Backing**: `lib/shell.c` + `js_child_process.cpp` (already partially implemented)
+
+| API | Status | Notes |
+|-----|--------|-------|
+| `exec(cmd, cb)` | ✅ Done | Via libuv uv_spawn |
+| `execSync(cmd)` | ✅ Done | |
+| `spawn(cmd, args, opts)` | 🔲 | Streaming I/O, more control |
+| `execFile(file, args, cb)` | 🔲 | Direct executable, no shell |
+| `fork(modulePath)` | ❌ Skip | Requires multi-process Lambda |
+| `spawnSync` / `execFileSync` | 🔲 | Blocking variants |
+
+#### `node:crypto`
+
+**Backing**: mbedTLS (already linked for TLS) + native SHA
+
+| API | Priority | C Backing |
+|-----|----------|-----------|
+| `createHash(alg)` | ✅ Done | Native SHA-256/384/512 |
+| `createHmac(alg, key)` | High | mbedTLS HMAC |
+| `randomBytes(n)` | High | `uv_random` or `/dev/urandom` |
+| `randomUUID()` | High | UUID v4 from random bytes |
+| `createCipheriv` / `createDecipheriv` | Medium | mbedTLS AES |
+| `pbkdf2` / `scrypt` | Medium | mbedTLS KDF |
+| `subtle` (Web Crypto) | Low | SubtleCrypto API |
+
+#### `node:url`
+
+**Backing**: `lib/url.c` (WHATWG URL parser, already implemented)
+
+Wire existing `lib/url.c` to JS `URL` class (largely done via Web APIs). Add legacy `url.parse()` / `url.format()` / `url.resolve()` for Node.js compat.
+
+#### `node:querystring`
+
+| API | Notes |
+|-----|-------|
+| `qs.parse(str)` | Parse `a=1&b=2` to `{a:"1", b:"2"}` |
+| `qs.stringify(obj)` | Inverse |
+| `qs.escape(str)` | URL-encode |
+| `qs.unescape(str)` | URL-decode |
+
+Small module, can be pure JS.
+
+### Tier 3: Nice to Have
+
+| Module | Notes | Priority |
+|--------|-------|----------|
+| `node:string_decoder` | Handles multi-byte UTF-8 across chunks | Medium |
+| `node:assert` | Test assertions — pure JS | Medium |
+| `node:timers` | `setTimeout` etc. already global | Low (alias) |
+| `node:console` | Already implemented as global | Low (alias) |
+| `node:readline` | Line-by-line input; `file_read_lines` helps | Medium |
+| `node:zlib` | gzip/deflate; needs zlib dependency | Medium |
+| `node:dns` | DNS resolution; `uv_getaddrinfo` | Medium |
+| `node:net` | TCP sockets; libuv `uv_tcp_t` | Medium |
+| `node:tls` | TLS sockets; mbedTLS | Medium |
+| `node:perf_hooks` | `performance.now()` etc. | Low |
+| `node:worker_threads` | Threading; out of scope initially | Low |
+| `node:module` | `createRequire`, module metadata | Medium |
+
+### Tier 4: Explicitly Out of Scope
+
+| Module | Reason |
+|--------|--------|
+| `node:cluster` | Multi-process coordination; complex, rarely needed |
+| `node:v8` | V8-specific; Lambda uses MIR JIT |
+| `node:vm` | Sandboxed execution; requires VM isolation |
+| `node:http2` | HTTP/2 protocol; low priority |
+| `node:dgram` | UDP sockets; niche |
+| `node:inspector` | Debugger protocol; V8-specific |
+| `node:trace_events` | V8 tracing; not applicable |
+| `node:repl` | Lambda has its own REPL |
+| `node:domain` | Deprecated in Node.js |
+| `node:punycode` | Deprecated in Node.js |
+
+## 5. Node.js Globals
+
+| Global | Status | Implementation |
+|--------|--------|---------------|
+| `process` | ✅ Partial | Extend per Tier 1 plan |
+| `Buffer` | ⚠️ Partial | Extend per Tier 1 plan |
+| `__dirname` | ✅ Done | Set per-module |
+| `__filename` | ✅ Done | Set per-module |
+| `require()` | ✅ Partial | CJS shim exists; extend resolution |
+| `module` | ⚠️ Partial | `module.exports` works |
+| `exports` | ⚠️ Partial | Alias to `module.exports` |
+| `global` / `globalThis` | ✅ Done | |
+| `setTimeout` / `setInterval` | ✅ Done | Via event loop |
+| `setImmediate` | 🔲 | `uv_check_t` or microtask |
+| `queueMicrotask` | ✅ Done | Via microtask queue |
+| `console` | ✅ Done | |
+| `URL` / `URLSearchParams` | ✅ | Via `lib/url.c` |
+| `TextEncoder` / `TextDecoder` | ✅ | |
+| `structuredClone` | 🔲 | Deep clone |
+| `fetch` | 🔲 | Transpile_Js15 scope |
+| `AbortController` / `AbortSignal` | 🔲 | |
+| `performance` | 🔲 | `uv_hrtime` backed |
+
+## 6. npm Compatibility
+
+### 6.1 Design Philosophy
+
+Lambda should support running npm packages **without requiring Node.js to be installed**. The approach draws on lessons from Deno and Bun:
+
+| Aspect          | Node.js                     | Deno                   | Bun                  | **Lambda (proposed)**            |
+| --------------- | --------------------------- | ---------------------- | -------------------- | -------------------------------- |
+| Package source  | npm registry                | npm registry + JSR     | npm registry         | npm registry                     |
+| Specifier style | bare `"lodash"`             | `npm:lodash@4`         | bare `"lodash"`      | bare `"lodash"` (package.json)   |
+| Install step    | `npm install`               | Auto on first run      | `bun install`        | `lambda node install`            |
+| node_modules    | Nested (npm) or flat (pnpm) | Global cache (default) | Flat + symlinks      | **Flat + symlinks** (pnpm-style) |
+| Lock file       | `package-lock.json`         | `deno.lock`            | `bun.lockb` (binary) | `lambda-node.lock` (JSON)        |
+| Config file     | `package.json`              | `deno.json`            | `package.json`       | `package.json`                   |
+
+### 6.2 `node_modules` Layout: Flat + Symlinks (pnpm Model)
+
+**Recommendation: Follow pnpm's content-addressable flat layout**, not npm's nested layout or Deno's global cache-only approach.
+
+#### Why Not Nested (npm v2 style)?
+- Massive disk usage from duplicate packages
+- Deep directory trees hit OS path length limits on Windows
+- Slow installation
+
+#### Why Not Fully Flat (npm v3+ hoisted)?
+- Phantom dependencies: packages can accidentally import undeclared dependencies that were hoisted
+- Non-deterministic: different install orders can produce different layouts
+- Version conflicts result in occasional nesting anyway
+
+#### Why Not Global Cache Only (Deno style)?
+- Many npm packages hard-code paths relative to `node_modules`
+- PostInstall scripts expect `node_modules` to exist
+- Build tools (webpack, vite, esbuild) probe `node_modules`
+
+#### Why pnpm-Style Flat + Symlinks?
+
+```
+node_modules/
+├── .lambda/                        # content-addressable store (flat)
+│   ├── lodash@4.17.21/
+│   │   └── node_modules/
+│   │       └── lodash/             # actual package files
+│   ├── express@4.18.2/
+│   │   └── node_modules/
+│   │       ├── express/            # actual package files
+│   │       ├── body-parser -> ../../body-parser@1.20.2/node_modules/body-parser
+│   │       └── cookie -> ../../cookie@0.6.0/node_modules/cookie
+│   ├── body-parser@1.20.2/
+│   │   └── node_modules/
+│   │       └── body-parser/        # actual files
+│   └── cookie@0.6.0/
+│       └── node_modules/
+│           └── cookie/             # actual files
+├── lodash -> .lambda/lodash@4.17.21/node_modules/lodash       # symlink
+└── express -> .lambda/express@4.18.2/node_modules/express     # symlink
+```
+
+**Benefits:**
+1. **No phantom dependencies** — only declared dependencies are symlinked to the top level
+2. **No duplication** — each version of a package exists exactly once in `.lambda/`
+3. **Deterministic** — same `package.json` + `lambda-node.lock` always produces same layout
+4. **Efficient** — symlinks are cheap; global cache can be added later for cross-project sharing
+5. **Compatible** — packages resolve their own dependencies via their local `node_modules/` symlinks
+6. **Battle-tested** — pnpm has proven this works with the entire npm ecosystem
+
+### 6.3 Global Package Cache
+
+In addition to per-project `node_modules/`, implement a global cache for downloaded tarballs:
+
+```
+~/.lambda/
+├── cache/
+│   ├── registry.npmjs.org/
+│   │   ├── lodash/
+│   │   │   ├── 4.17.21.tgz          # downloaded tarball
+│   │   │   └── 4.17.21/             # extracted contents
+│   │   └── express/
+│   │       ├── 4.18.2.tgz
+│   │       └── 4.18.2/
+│   └── metadata/
+│       ├── lodash.json               # package metadata cache
+│       └── express.json
+└── config.json                       # registry URL, auth tokens
+```
+
+**Resolution flow:**
+1. Check global cache for exact version
+2. If not cached, fetch tarball from registry
+3. Extract to cache
+4. Create symlink structure in project's `node_modules/`
+
+### 6.4 Package Resolution Algorithm
+
+Implement the Node.js module resolution algorithm with these extensions:
+
+```
+resolve(specifier, parent_path):
+  1. If specifier starts with "node:" → return built-in module
+  2. If specifier starts with "/" or "./" or "../" → resolve as file/directory
+  3. If specifier is bare (e.g. "lodash"):
+     a. Check package.json "imports" field (self-referencing)
+     b. Walk up from parent_path, checking each node_modules/:
+        - Check package.json "exports" field (conditional exports)
+        - Check "main" field
+        - Check index.js / index.json
+  4. Error: MODULE_NOT_FOUND
+```
+
+**Conditional exports support** (critical for modern packages):
+```json
+{
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.js"
+    },
+    "./utils": "./dist/utils.js"
+  }
+}
+```
+
+Lambda should resolve with conditions: `["lambda", "node", "import", "default"]` — matching Deno's approach of including a runtime-specific condition alongside standard Node.js conditions.
+
+### 6.5 Lock File Format
+
+`lambda-node.lock` — JSON format for human readability and easy diffing (unlike Bun's binary lockb):
+
+```json
+{
+  "version": 1,
+  "packages": {
+    "lodash@4.17.21": {
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "integrity": "sha512-v2kDEe57leczF...",
+      "dependencies": {}
+    },
+    "express@4.18.2": {
+      "resolved": "https://registry.npmjs.org/express/-/express-4.18.2.tgz",
+      "integrity": "sha512-...",
+      "dependencies": {
+        "body-parser": "1.20.2",
+        "cookie": "0.6.0"
+      }
+    }
+  }
+}
+```
+
+### 6.6 `package.json` Support
+
+Lambda reads but does not require `package.json`. Support these fields:
+
+| Field | Purpose | Priority |
+|-------|---------|----------|
+| `name` | Package identity | High |
+| `version` | Package version | High |
+| `main` | CJS entry point | High |
+| `module` | ESM entry point (de facto) | High |
+| `type` | `"module"` or `"commonjs"` | High |
+| `exports` | Conditional exports map | High |
+| `imports` | Self-referencing imports | Medium |
+| `dependencies` | Runtime dependencies | High |
+| `devDependencies` | Dev-only dependencies | Medium |
+| `scripts` | Run via `lambda node task` | Medium |
+| `bin` | CLI executables | Medium |
+| `files` | Published file whitelist | Low |
+| `engines` | Version constraints | Low (advisory) |
+| `peerDependencies` | Peer dep declarations | Medium |
+
+### 6.7 CLI Commands
+
+```bash
+lambda node install                # Install all dependencies from package.json
+lambda node install lodash         # Add a dependency
+lambda node install -D jest        # Add dev dependency
+lambda node uninstall lodash       # Remove a dependency
+lambda node task <script>          # Run a script from package.json
+lambda node exec <pkg>             # Run package binary (like npx)
+lambda node info <pkg>             # Show dependency tree
+lambda node outdated               # Check for newer versions
+lambda node update                 # Update to latest within semver range
+```
+
+### 6.8 CommonJS / ESM Interop
+
+| Scenario | Behavior |
+|----------|----------|
+| ESM imports ESM | Standard ES module resolution |
+| ESM imports CJS | Auto-wrap: `module.exports` becomes default export |
+| CJS requires CJS | Standard `require()` |
+| CJS requires ESM | Supported if ESM has no top-level await (match Node.js 22+) |
+| `.mjs` file | Always ESM regardless of package.json |
+| `.cjs` file | Always CJS regardless of package.json |
+| `.js` file | Check nearest package.json `"type"` field |
+
+## 7. Architecture
+
+### 7.1 Component Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        Lambda CLI                                     │
+│  lambda node install │ lambda node run app.js │ lambda node task start    │
+└────────┬─────────────────┬──────────────────┬────────────────────────┘
+         │                 │                  │
+    ┌────▼────┐     ┌──────▼──────┐    ┌──────▼──────┐
+    │ Package │     │ Module      │    │ Script      │
+    │ Manager │     │ Resolver    │    │ Runner      │
+    │ (npm)   │     │ (CJS+ESM)  │    │(package.json│
+    └────┬────┘     └──────┬──────┘    │  scripts)   │
+         │                 │           └─────────────┘
+    ┌────▼────┐     ┌──────▼──────┐
+    │ Registry│     │ Module      │
+    │ Client  │     │ Registry    │        (existing module_registry.cpp)
+    │ (HTTP)  │     │             │
+    └────┬────┘     └──────┬──────┘
+         │                 │
+    ┌────▼────┐     ┌──────▼──────┐
+    │ Global  │     │ Node.js     │
+    │ Cache   │     │ Built-in    │
+    │ (~/.λ/) │     │ Modules     │
+    └─────────┘     └──────┬──────┘
+                           │
+              ┌────────────┼────────────────┐
+              │            │                │
+        ┌─────▼───┐  ┌────▼────┐   ┌──────▼──────┐
+        │lib/file.c│  │lib/     │   │ lib/url.c   │
+        │file_utils│  │shell.c  │   │ sysinfo     │
+        └─────────┘  └─────────┘   └─────────────┘
+```
+
+### 7.2 New Source Files
+
+```
+lambda/js/
+├── js_node_modules.cpp     # Built-in module dispatcher (node: prefix handling)
+├── js_path.cpp             # node:path implementation
+├── js_os.cpp               # node:os implementation
+├── js_buffer.cpp           # Buffer class (extends TypedArray)
+├── js_util.cpp             # node:util (promisify, inspect, format)
+├── js_querystring.cpp      # node:querystring
+├── js_string_decoder.cpp   # node:string_decoder
+├── js_assert.cpp           # node:assert
+├── polyfills/
+│   └── events.js           # EventEmitter (pure JS)
+│
+lambda/npm/
+├── npm_registry.cpp        # HTTP client for registry API
+├── npm_resolver.cpp        # Dependency resolution (semver)
+├── npm_installer.cpp       # Download, extract, link
+├── npm_lockfile.cpp         # lambda-node.lock read/write
+├── npm_package_json.cpp    # package.json parser
+├── npm_resolve_module.cpp  # Node.js module resolution algorithm
+└── semver.cpp              # Semver parsing and matching
+```
+
+### 7.3 Module Registration
+
+When JS code does `import path from "node:path"` or `const path = require("path")`:
+
+```c
+// lambda/js/js_node_modules.cpp
+
+Item js_resolve_node_builtin(const char* module_name) {
+    // strip "node:" prefix if present
+    if (strncmp(module_name, "node:", 5) == 0)
+        module_name += 5;
+
+    if (strcmp(module_name, "fs") == 0)          return js_get_fs_module();
+    if (strcmp(module_name, "path") == 0)        return js_get_path_module();
+    if (strcmp(module_name, "os") == 0)          return js_get_os_module();
+    if (strcmp(module_name, "events") == 0)      return js_get_events_module();
+    if (strcmp(module_name, "util") == 0)        return js_get_util_module();
+    if (strcmp(module_name, "buffer") == 0)      return js_get_buffer_module();
+    if (strcmp(module_name, "crypto") == 0)      return js_get_crypto_module();
+    if (strcmp(module_name, "child_process") == 0) return js_get_child_process_module();
+    if (strcmp(module_name, "url") == 0)         return js_get_url_module();
+    if (strcmp(module_name, "querystring") == 0) return js_get_querystring_module();
+    if (strcmp(module_name, "http") == 0)        return js_get_http_module();
+    if (strcmp(module_name, "https") == 0)       return js_get_https_module();
+    if (strcmp(module_name, "stream") == 0)      return js_get_stream_module();
+    if (strcmp(module_name, "assert") == 0)      return js_get_assert_module();
+    if (strcmp(module_name, "process") == 0)     return js_get_process_module();
+    // ...
+
+    return ItemNull; // unknown module
+}
+```
+
+## 8. Implementation Phases
+
+### Phase 1: Core Modules (Tier 1)
+
+Wire existing C libraries to JS module objects.
+
+| Task | Effort | Dependencies |
+|------|--------|-------------|
+| `node:path` module | Small | `lib/file.c` path utils |
+| `node:os` module | Small | `sysinfo.cpp`, POSIX APIs |
+| `node:process` extensions | Medium | Existing process global |
+| `node:buffer` full API | Medium | Existing TypedArray |
+| `node:util` (promisify, inspect, format) | Medium | Existing JS runtime |
+| `node:events` polyfill | Medium | Pure JS |
+| `node:fs` remaining sync APIs | Small | `lib/file.c` already done |
+| `node:querystring` | Small | Pure JS |
+| Module dispatcher (`node:` prefix) | Small | Module registry |
+
+### Phase 2: npm Package Manager
+
+| Task | Effort | Dependencies |
+|------|--------|-------------|
+| Registry HTTP client | Medium | `lib/http` or libcurl |
+| Semver parser & matcher | Medium | New `semver.cpp` |
+| Dependency tree resolver | Large | Registry client, semver |
+| Tarball download & extract | Medium | HTTP client, zlib/tar |
+| Flat symlink layout installer | Medium | `lib/file.c`, symlinks |
+| `lambda-node.lock` read/write | Small | JSON parser |
+| `package.json` field support | Medium | Existing JSON parser |
+| `lambda node install` CLI command | Small | Above components |
+| Node.js module resolution | Medium | Package.json exports |
+
+### Phase 3: Interop & Ecosystem
+
+| Task | Effort | Dependencies |
+|------|--------|-------------|
+| CJS/ESM interop (full) | Large | Module resolver |
+| `require()` with node_modules walk | Medium | Module resolution |
+| Conditional exports resolution | Medium | Package.json parser |
+| `lambda node task` (scripts runner) | Small | `lib/shell.c` |
+| `lambda node exec` (npx equivalent) | Medium | Package manager |
+
+### Phase 4: Extended Modules (Tier 2)
+
+| Task | Effort | Dependencies |
+|------|--------|-------------|
+| `node:stream` (Readable/Writable) | Large | EventEmitter |
+| `node:http` client + server | Large | libuv (Js15), streams |
+| `node:crypto` (HMAC, random, cipher) | Medium | mbedTLS |
+| `node:child_process` (spawn) | Medium | libuv (Js15) |
+| `node:dns` | Small | libuv `uv_getaddrinfo` |
+| `node:net` / `node:tls` | Large | libuv, mbedTLS |
+| `node:zlib` | Medium | zlib dependency |
+| `node:readline` | Small | `file_read_lines`, tty |
+
+## 9. Testing Strategy
+
+### Unit Tests
+
+```
+test/test_js_node_path.cpp     # node:path — join, resolve, dirname, basename, etc.
+test/test_js_node_os.cpp       # node:os — platform, arch, cpus, memory
+test/test_js_node_buffer.cpp   # Buffer — from, alloc, toString, encoding
+test/test_npm_semver.cpp       # Semver parsing and range matching
+test/test_npm_resolver.cpp     # Dependency tree resolution
+test/test_npm_installer.cpp    # Symlink layout creation
+```
+
+### Integration Tests (Lambda scripts)
+
+```
+test/lambda/node_path.js       # const path = require('path'); assert(path.join('a','b') === 'a/b')
+test/lambda/node_os.js         # import os from 'node:os'; assert(os.platform() !== undefined)
+test/lambda/node_fs_ext.js     # fs.realpathSync, fs.accessSync, fs.rmSync
+test/lambda/node_buffer.js     # Buffer.from('hello').toString('hex') === '68656c6c6f'
+test/lambda/npm_install.js     # Install lodash, require it, verify it works
+test/lambda/npm_resolve.js     # Package resolution with exports field
+```
+
+### Compatibility Testing
+
+Run selected test suites from real npm packages:
+- `lodash` — pure JS utility library (baseline)
+- `minimist` — argument parser (small, pure JS)
+- `chalk` — terminal colors (conditional exports, ESM)
+- `semver` — semver range parser (dogfooding)
+- `express` (stretch goal) — HTTP framework (streams, http, path, fs)
+
+## 10. Reference Analysis: Deno vs Bun Approaches
+
+### What to Learn from Deno
+
+| Aspect | Deno's Approach | Lambda Takeaway |
+|--------|----------------|-----------------|
+| `npm:` specifier | Inline in import: `import x from "npm:chalk@5"` | Skip — use package.json like Bun/Node |
+| Global cache | Default: no local node_modules | Use global cache for tarballs, but always create local node_modules |
+| `node:` prefix | Required for built-in modules | Support both `"fs"` and `"node:fs"` (match Node.js) |
+| Built-in modules | JS polyfills for most | Mix: C-backed where we have libs, JS polyfills for pure logic |
+| Lock file | JSON `deno.lock` | JSON `lambda-node.lock` (good for diffing) |
+| Permissions | `--allow-read`, `--allow-net` | Consider for future; not Phase 1 |
+
+### What to Learn from Bun
+
+| Aspect | Bun's Approach | Lambda Takeaway |
+|--------|---------------|-----------------|
+| Install speed | Binary lockfile, global cache, hard links | Global tarball cache; symlinks over hard links (simpler) |
+| node_modules | Flat + symlinks | Adopt this (pnpm-style) |
+| package.json first | Native support | Match this — package.json is the single config |
+| CJS/ESM interop | Transparent, automatic | Match this behavior |
+| Built-in modules | 90%+ native in Zig/C++ | Match where we have C backing |
+| Workspaces | Supported | Phase 2+ |
+
+### Key Decision Summary
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| node_modules layout | Flat + symlinks (pnpm) | No phantoms, no duplication, deterministic |
+| Config file | `package.json` | npm ecosystem compatibility; no new format |
+| Lock file | `lambda-node.lock` (JSON) | Human-readable, diffable, simple to implement |
+| Global cache | `~/.lambda/cache/` | Avoid re-downloading across projects |
+| Built-in modules style | `"node:fs"` and `"fs"` both work | Maximum Node.js compat |
+| CJS detection | File extension + package.json `type` | Match Node.js 22+ behavior |
+| Native addons | ❌ Not supported | Complexity too high; covers 95% of packages without them |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| npm ecosystem is vast; many edge cases | Medium | Focus on top-100 packages; use test suites from real packages |
+| Streams are complex and ubiquitous | High | Start with Web Streams (Js15), layer Node streams on top |
+| CJS/ESM interop has subtle edge cases | High | Match Node.js 22+ behavior exactly; test with real packages |
+| Some packages probe `node_modules` paths | Medium | pnpm-style layout preserves expected structure |
+| Native addons won't work | Low | Affects ~5% of packages; document unsupported |
+| Semver range resolution is non-trivial | Medium | Port from well-tested reference implementation |
+| Performance of package manager | Low | Cache aggressively; symlinks are essentially free |
+
+## 12. Success Criteria
+
+**Phase 1 complete when:**
+- `import path from "node:path"` works with all `path.*` methods
+- `import os from "node:os"` returns correct platform info
+- `Buffer.from("hello").toString("hex")` returns `"68656c6c6f"`
+- `const { promisify } = require("util")` works
+- EventEmitter on/emit/off works correctly
+- All Tier 1 modules pass targeted test suites
+
+**Phase 2 complete when:**
+- `lambda node install` reads `package.json`, downloads from npm, creates `node_modules/`
+- `const lodash = require("lodash")` works after install
+- `lambda-node.lock` is generated and deterministic
+- Conditional exports resolve correctly
+- CJS/ESM interop handles `import cjs from "./file.cjs"` and `require("./esm.mjs")`
+
+**Phase 3 complete when:**
+- Express hello-world server runs under Lambda
+- At least 20 popular pure-JS npm packages pass their own test suites
+- `lambda node task` runs scripts from `package.json`
