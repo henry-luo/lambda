@@ -382,6 +382,21 @@ extern "C" void js_batch_reset() {
     js_reset_events_module();
     extern void js_reset_buffer_module(void);
     js_reset_buffer_module();
+    // reset Phase 4 modules
+    extern void js_crypto_reset(void);
+    js_crypto_reset();
+    extern void js_dns_reset(void);
+    js_dns_reset();
+    extern void js_zlib_reset(void);
+    js_zlib_reset();
+    extern void js_readline_reset(void);
+    js_readline_reset();
+    extern void js_stream_reset(void);
+    js_stream_reset();
+    extern void js_net_reset(void);
+    js_net_reset();
+    extern void js_tls_reset(void);
+    js_tls_reset();
 }
 
 // Get current module var count (for checkpointing)
@@ -14081,6 +14096,55 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 11 && memcmp(spec->chars, "node:buffer", 11) == 0)) {
         extern Item js_get_buffer_namespace(void);
         return js_get_buffer_namespace();
+    }
+    // node:crypto
+    if ((spec->len == 6 && memcmp(spec->chars, "crypto", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "crypto.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:crypto", 11) == 0)) {
+        extern Item js_get_crypto_namespace(void);
+        return js_get_crypto_namespace();
+    }
+    // node:dns
+    if ((spec->len == 3 && memcmp(spec->chars, "dns", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "dns.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:dns", 8) == 0)) {
+        extern Item js_get_dns_namespace(void);
+        return js_get_dns_namespace();
+    }
+    // node:zlib
+    if ((spec->len == 4 && memcmp(spec->chars, "zlib", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "zlib.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:zlib", 9) == 0)) {
+        extern Item js_get_zlib_namespace(void);
+        return js_get_zlib_namespace();
+    }
+    // node:readline
+    if ((spec->len == 8 && memcmp(spec->chars, "readline", 8) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "readline.js", 11) == 0) ||
+        (spec->len == 13 && memcmp(spec->chars, "node:readline", 13) == 0)) {
+        extern Item js_get_readline_namespace(void);
+        return js_get_readline_namespace();
+    }
+    // node:stream
+    if ((spec->len == 6 && memcmp(spec->chars, "stream", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "stream.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:stream", 11) == 0)) {
+        extern Item js_get_stream_namespace(void);
+        return js_get_stream_namespace();
+    }
+    // node:net
+    if ((spec->len == 3 && memcmp(spec->chars, "net", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "net.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:net", 8) == 0)) {
+        extern Item js_get_net_namespace(void);
+        return js_get_net_namespace();
+    }
+    // node:tls
+    if ((spec->len == 3 && memcmp(spec->chars, "tls", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "tls.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:tls", 8) == 0)) {
+        extern Item js_get_tls_namespace(void);
+        return js_get_tls_namespace();
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {

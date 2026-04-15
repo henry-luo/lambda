@@ -118,7 +118,7 @@ static bool is_esm_file(const char* file_path) {
     char* dirname = file_path_dirname(file_path);
     if (!dirname) return false;
     strncpy(dir, dirname, sizeof(dir) - 1);
-    free(dirname);
+    mem_free(dirname);
 
     while (dir[0]) {
         char pkg_path[2048];
@@ -134,11 +134,11 @@ static bool is_esm_file(const char* file_path) {
         // go up one directory
         char* parent = file_path_dirname(dir);
         if (!parent || strcmp(parent, dir) == 0) {
-            free(parent);
+            mem_free(parent);
             break;
         }
         strncpy(dir, parent, sizeof(dir) - 1);
-        free(parent);
+        mem_free(parent);
     }
     return false; // default: CJS
 }
@@ -302,11 +302,11 @@ NpmModuleResolution npm_resolve_module(const char* specifier,
         // go up one directory
         char* parent = file_path_dirname(dir);
         if (!parent || strcmp(parent, dir) == 0 || strcmp(parent, "/") == 0) {
-            free(parent);
+            mem_free(parent);
             break;
         }
         strncpy(dir, parent, sizeof(dir) - 1);
-        free(parent);
+        mem_free(parent);
     }
 
     return res; // not found

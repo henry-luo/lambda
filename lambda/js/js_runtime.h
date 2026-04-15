@@ -652,6 +652,12 @@ Item js_module_get(Item specifier);
  */
 Item js_module_namespace_create(Item exports_map);
 
+/**
+ * CJS require() — load and execute a module, return its exports.
+ * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
+ */
+Item js_require(Item specifier);
+
 // Native SHA hash functions (js_crypto.cpp)
 Item js_native_sha256(Item data, Item offset, Item length);
 Item js_native_sha384(Item data, Item offset, Item length);

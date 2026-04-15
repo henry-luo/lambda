@@ -250,31 +250,36 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
     if (is_body_element(elem)) {
         const char* onload = extract_element_attribute(elem, "onload", nullptr);
         if (onload && onload[0]) {
-            // Handle setTimeout('code', delay) in body onload — extract inner code
-            // Pattern: setTimeout('code()', delay) or setTimeout("code()", delay)
+            // Preprocess the onload handler before emitting as JS code.
+            // The MIR transpiler cannot eval() strings, so the common pattern
+            // setTimeout('code()', delay) must be transformed: we extract the
+            // string content and emit it as direct code. The function-reference
+            // form setTimeout(fn, delay) needs no transformation — the preamble's
+            // setTimeout stub calls fn() directly, and inline script function
+            // declarations are at global scope (no try/catch wrapping).
             const char* st = strstr(onload, "setTimeout(");
-            if (st && (st == onload || *(st-1) == ' ' || *(st-1) == ';')) {
+            if (st) {
                 const char* p = st + 11; // skip "setTimeout("
-                char quote = *p;
-                if (quote == '\'' || quote == '"') {
-                    p++; // skip opening quote
+                if (*p == '\'' || *p == '"') {
+                    // String form: setTimeout('code()', delay) — extract inner code
+                    char quote = *p++;
                     const char* code_start = p;
-                    // find closing quote
                     while (*p && *p != quote) p++;
                     if (*p == quote) {
-                        int code_len = (int)(p - code_start);
-                        strbuf_append_str_n(onload_buf, code_start, code_len);
+                        strbuf_append_str_n(onload_buf, code_start, (int)(p - code_start));
                         strbuf_append_str(onload_buf, "\n");
                     } else {
+                        // Malformed — emit as-is and let the transpiler handle it
                         strbuf_append_str(onload_buf, onload);
                         strbuf_append_str(onload_buf, "\n");
                     }
                 } else {
-                    // function form — pass through as-is, preamble handles it
+                    // Function reference or expression — emit as-is
                     strbuf_append_str(onload_buf, onload);
                     strbuf_append_str(onload_buf, "\n");
                 }
             } else {
+                // No setTimeout — emit the handler code directly
                 strbuf_append_str(onload_buf, onload);
                 strbuf_append_str(onload_buf, "\n");
             }
@@ -313,10 +318,13 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             }
             return;
         }
-        // extract inline script source — wrap in try/catch for error isolation
-        strbuf_append_str(script_buf, "try {\n");
+        // Inline scripts are emitted without try/catch wrapping so that
+        // function declarations remain at global scope. This allows cross-script
+        // function references (e.g. setTimeout(myFunc, 0) in onload) to resolve
+        // correctly in the MIR transpiler. Signal-level guards (SIGALRM, SIGSEGV,
+        // SIGBUS) still protect against crashes and infinite loops.
         extract_script_text(elem, script_buf);
-        strbuf_append_str(script_buf, "\n} catch(_inline_err) {}\n");
+        strbuf_append_str(script_buf, "\n");
         return;  // don't recurse into script children
     }
 

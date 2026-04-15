@@ -14,6 +14,10 @@
 #include <cstring>
 #include "../../lib/mem.h"
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
 extern Input* js_input;
 
 // =============================================================================
@@ -329,6 +333,290 @@ extern "C" Item js_cp_execSync(Item command_item) {
 }
 
 // =============================================================================
+// spawn(command, args) — async, returns ChildProcess-like object with
+// stdout/stderr EventEmitter-like on('data',cb) and on('close',cb)
+// =============================================================================
+
+typedef struct JsSpawnProcess {
+    uv_process_t process;
+    uv_pipe_t    stdout_pipe;
+    uv_pipe_t    stderr_pipe;
+    Item         js_object;    // the JS object returned to user
+    int          exit_code;
+    bool         process_exited;
+    int          handles_closed;
+} JsSpawnProcess;
+
+static void spawn_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
+    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
+    buf->len = buf->base ? suggested_size : 0;
+}
+
+static void spawn_handle_close_cb(uv_handle_t* handle) {
+    JsSpawnProcess* sp = (JsSpawnProcess*)handle->data;
+    if (!sp) return;
+    sp->handles_closed++;
+    if (sp->handles_closed >= 3) {
+        mem_free(sp);
+    }
+}
+
+// emit 'data' event on a stream object
+static void spawn_emit_data(Item stream_obj, const char* data, int len) {
+    Item on_data = js_property_get(stream_obj, make_string_item("__on_data__"));
+    if (get_type_id(on_data) == LMD_TYPE_FUNC) {
+        Item data_str = make_string_item(data, len);
+        js_call_function(on_data, ItemNull, &data_str, 1);
+    }
+}
+
+static void spawn_stdout_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+    JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
+    if (nread > 0 && sp) {
+        Item stdout_obj = js_property_get(sp->js_object, make_string_item("stdout"));
+        spawn_emit_data(stdout_obj, buf->base, (int)nread);
+    }
+    if (buf->base) mem_free(buf->base);
+    if (nread < 0) {
+        uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
+    }
+}
+
+static void spawn_stderr_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+    JsSpawnProcess* sp = (JsSpawnProcess*)stream->data;
+    if (nread > 0 && sp) {
+        Item stderr_obj = js_property_get(sp->js_object, make_string_item("stderr"));
+        spawn_emit_data(stderr_obj, buf->base, (int)nread);
+    }
+    if (buf->base) mem_free(buf->base);
+    if (nread < 0) {
+        uv_close((uv_handle_t*)stream, spawn_handle_close_cb);
+    }
+}
+
+static void spawn_exit_cb(uv_process_t* process, int64_t exit_status, int term_signal) {
+    JsSpawnProcess* sp = (JsSpawnProcess*)process->data;
+    if (!sp) return;
+    sp->exit_code = (int)exit_status;
+    sp->process_exited = true;
+
+    // emit 'close' on the js_object
+    Item on_close = js_property_get(sp->js_object, make_string_item("__on_close__"));
+    if (get_type_id(on_close) == LMD_TYPE_FUNC) {
+        Item code = (Item){.item = i2it(exit_status)};
+        js_call_function(on_close, ItemNull, &code, 1);
+        js_microtask_flush();
+    }
+
+    uv_close((uv_handle_t*)process, spawn_handle_close_cb);
+}
+
+// create a stream-like object with on('data', cb) / on('close', cb)
+static Item make_stream_object(void) {
+    Item obj = js_new_object();
+    // on(event, listener) — stores callbacks in hidden properties
+    // simplified: just stores __on_data__ and __on_close__
+    return obj;
+}
+
+// on(event, callback) for spawn objects — stores as __on_<event>__
+extern "C" Item js_spawn_on(Item self, Item event_item, Item callback) {
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
+    String* ev = it2s(event_item);
+    char key_buf[64];
+    snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
+    js_property_set(self, make_string_item(key_buf), callback);
+    return self;
+}
+
+// on() for stdout/stderr stream sub-objects
+extern "C" Item js_spawn_stream_on(Item self, Item event_item, Item callback) {
+    if (get_type_id(event_item) != LMD_TYPE_STRING) return self;
+    String* ev = it2s(event_item);
+    char key_buf[64];
+    snprintf(key_buf, sizeof(key_buf), "__on_%.*s__", (int)ev->len, ev->chars);
+    js_property_set(self, make_string_item(key_buf), callback);
+    return self;
+}
+
+extern "C" Item js_cp_spawn(Item command_item, Item args_item) {
+    char cmd_buf[4096];
+    const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
+    if (!cmd) {
+        log_error("child_process: spawn: invalid command");
+        return ItemNull;
+    }
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("child_process: spawn: event loop not initialized");
+        return ItemNull;
+    }
+
+    // build args array from JS array
+    int argc = 0;
+    char** argv = NULL;
+
+    if (get_type_id(args_item) == LMD_TYPE_ARRAY) {
+        argc = (int)js_array_length(args_item);
+    }
+
+    // argv = [cmd, ...args, NULL]
+    argv = (char**)mem_alloc(sizeof(char*) * (size_t)(argc + 2), MEM_CAT_JS_RUNTIME);
+    argv[0] = (char*)cmd;
+    for (int i = 0; i < argc; i++) {
+        Item arg = js_array_get_int(args_item, i);
+        if (get_type_id(arg) == LMD_TYPE_STRING) {
+            String* s = it2s(arg);
+            char* copy = (char*)mem_alloc(s->len + 1, MEM_CAT_JS_RUNTIME);
+            memcpy(copy, s->chars, s->len);
+            copy[s->len] = '\0';
+            argv[i + 1] = copy;
+        } else {
+            argv[i + 1] = (char*)"";
+        }
+    }
+    argv[argc + 1] = NULL;
+
+    JsSpawnProcess* sp = (JsSpawnProcess*)mem_calloc(1, sizeof(JsSpawnProcess), MEM_CAT_JS_RUNTIME);
+
+    // create JS object with stdout/stderr sub-objects
+    Item obj = js_new_object();
+    Item stdout_obj = make_stream_object();
+    Item stderr_obj = make_stream_object();
+    js_property_set(stdout_obj, make_string_item("on"),
+                    js_new_function((void*)js_spawn_stream_on, 3));
+    js_property_set(stderr_obj, make_string_item("on"),
+                    js_new_function((void*)js_spawn_stream_on, 3));
+    js_property_set(obj, make_string_item("stdout"), stdout_obj);
+    js_property_set(obj, make_string_item("stderr"), stderr_obj);
+    js_property_set(obj, make_string_item("on"),
+                    js_new_function((void*)js_spawn_on, 3));
+    js_property_set(obj, make_string_item("pid"), (Item){.item = i2it(0)});
+
+    sp->js_object = obj;
+
+    uv_pipe_init(loop, &sp->stdout_pipe, 0);
+    uv_pipe_init(loop, &sp->stderr_pipe, 0);
+    sp->stdout_pipe.data = sp;
+    sp->stderr_pipe.data = sp;
+
+    uv_stdio_container_t stdio[3];
+    stdio[0].flags = UV_IGNORE;
+    stdio[1].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+    stdio[1].data.stream = (uv_stream_t*)&sp->stdout_pipe;
+    stdio[2].flags = (uv_stdio_flags)(UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+    stdio[2].data.stream = (uv_stream_t*)&sp->stderr_pipe;
+
+    uv_process_options_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.file = cmd;
+    opts.args = argv;
+    opts.stdio = stdio;
+    opts.stdio_count = 3;
+    opts.exit_cb = spawn_exit_cb;
+
+    sp->process.data = sp;
+
+    int r = uv_spawn(loop, &sp->process, &opts);
+
+    // free arg copies
+    for (int i = 0; i < argc; i++) {
+        if (argv[i + 1] && argv[i + 1][0] != '\0') {
+            Item arg = js_array_get_int(args_item, i);
+            if (get_type_id(arg) == LMD_TYPE_STRING) {
+                String* s = it2s(arg);
+                if (s->len > 0) mem_free(argv[i + 1]);
+            }
+        }
+    }
+    mem_free(argv);
+
+    if (r != 0) {
+        log_error("child_process: spawn: failed: %s", uv_strerror(r));
+        uv_close((uv_handle_t*)&sp->stdout_pipe, spawn_handle_close_cb);
+        uv_close((uv_handle_t*)&sp->stderr_pipe, spawn_handle_close_cb);
+        sp->handles_closed++;
+        return ItemNull;
+    }
+
+    js_property_set(obj, make_string_item("pid"),
+                    (Item){.item = i2it(sp->process.pid)});
+
+    uv_read_start((uv_stream_t*)&sp->stdout_pipe, spawn_alloc_cb, spawn_stdout_read_cb);
+    uv_read_start((uv_stream_t*)&sp->stderr_pipe, spawn_alloc_cb, spawn_stderr_read_cb);
+
+    return obj;
+}
+
+// =============================================================================
+// spawnSync(command, args) — synchronous, returns {stdout, stderr, status}
+// =============================================================================
+
+extern "C" Item js_cp_spawnSync(Item command_item, Item args_item) {
+    // build full command line for popen
+    char cmd_buf[4096];
+    const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
+    if (!cmd) {
+        log_error("child_process: spawnSync: invalid command");
+        return ItemNull;
+    }
+
+    // build command string: cmd arg1 arg2 ...
+    char full_cmd[8192];
+    int pos = snprintf(full_cmd, sizeof(full_cmd), "%s", cmd);
+
+    if (get_type_id(args_item) == LMD_TYPE_ARRAY) {
+        int64_t alen = js_array_length(args_item);
+        for (int64_t i = 0; i < alen && pos < (int)sizeof(full_cmd) - 256; i++) {
+            Item arg = js_array_get_int(args_item, i);
+            if (get_type_id(arg) == LMD_TYPE_STRING) {
+                String* s = it2s(arg);
+                pos += snprintf(full_cmd + pos, sizeof(full_cmd) - (size_t)pos,
+                                " %.*s", (int)s->len, s->chars);
+            }
+        }
+    }
+
+    // redirect stderr to a temp approach — capture stdout via popen
+    FILE* fp = popen(full_cmd, "r");
+    if (!fp) {
+        log_error("child_process: spawnSync: popen failed");
+        Item result = js_new_object();
+        js_property_set(result, make_string_item("status"), (Item){.item = i2it(-1)});
+        js_property_set(result, make_string_item("stdout"), make_string_item(""));
+        js_property_set(result, make_string_item("stderr"), make_string_item(""));
+        return result;
+    }
+
+    char* out_buf = NULL;
+    size_t out_len = 0;
+    size_t out_cap = 0;
+    char chunk[4096];
+    while (fgets(chunk, sizeof(chunk), fp)) {
+        size_t clen = strlen(chunk);
+        if (out_len + clen >= out_cap) {
+            out_cap = (out_cap == 0) ? 4096 : out_cap * 2;
+            while (out_cap < out_len + clen + 1) out_cap *= 2;
+            out_buf = (char*)mem_realloc(out_buf, out_cap, MEM_CAT_JS_RUNTIME);
+        }
+        memcpy(out_buf + out_len, chunk, clen);
+        out_len += clen;
+    }
+    int status = pclose(fp);
+    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("status"), (Item){.item = i2it(exit_code)});
+    js_property_set(result, make_string_item("stdout"),
+                    out_buf ? make_string_item(out_buf, (int)out_len) : make_string_item(""));
+    js_property_set(result, make_string_item("stderr"), make_string_item(""));
+    if (out_buf) mem_free(out_buf);
+
+    return result;
+}
+
+// =============================================================================
 // child_process Module Namespace
 // =============================================================================
 
@@ -345,8 +633,12 @@ extern "C" Item js_get_child_process_namespace(void) {
 
     cp_namespace = js_new_object();
 
-    js_cp_set_method(cp_namespace, "exec",     (void*)js_cp_exec, 2);
-    js_cp_set_method(cp_namespace, "execSync", (void*)js_cp_execSync, 1);
+    js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, 2);
+    js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 1);
+    js_cp_set_method(cp_namespace, "spawn",      (void*)js_cp_spawn, 2);
+    js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 2);
+    js_cp_set_method(cp_namespace, "execFile",   (void*)js_cp_exec, 2); // alias for now
+    js_cp_set_method(cp_namespace, "execFileSync", (void*)js_cp_execSync, 1);
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");
