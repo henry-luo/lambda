@@ -7738,8 +7738,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                     current_y += row->height;
 
-                    // Add vertical border-spacing after each row (except last row in group)
-                    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && !is_last_row) {
+                    // Add vertical border-spacing after each row except the last row in the table.
+                    // CSS 2.1 §17.6.1: border-spacing applies between adjacent cell borders,
+                    // regardless of row group boundaries. The bottom edge spacing (after the
+                    // last row) is handled separately when finalizing table height.
+                    // Note: global_row_index was already incremented above.
+                    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && global_row_index < meta->row_count) {
                         current_y += table->tb->border_spacing_v;
                         log_debug("%s Added vertical spacing after row: +%.1fpx", table->source_loc(), table->tb->border_spacing_v);
                     }
