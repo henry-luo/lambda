@@ -13,6 +13,7 @@
 #include "font_face.h"
 #include "state_store.hpp"
 #include "event_sim.hpp"
+#include "browsing_session.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
@@ -199,6 +200,12 @@ static const char* get_format_name(const char* filename) {
 bool do_redraw = false;
 UiContext ui_context;
 
+// update the GLFW window title (safe to call from event handlers)
+void update_window_title(const char* title) {
+    if (!ui_context.window || !title) return;
+    glfwSetWindowTitle(ui_context.window, title);
+}
+
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height) {
     log_debug("Showing HTML document %s", doc_url);
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
@@ -249,6 +256,48 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
         return;
+    }
+
+    // Alt+Left = browser back, Alt+Right = browser forward
+    if (action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
+        BrowsingSession* session = ui_context.browsing_session;
+        if (session && ui_context.document) {
+            int css_vw = ui_context.viewport_width;
+            int css_vh = ui_context.viewport_height;
+            DomDocument* new_doc = nullptr;
+            if (key == GLFW_KEY_LEFT && session_can_go_back(session)) {
+                log_info("browse_nav: keyboard back");
+                // save scroll before leaving
+                ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
+                if (root && root->scroller && root->scroller->pane)
+                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                new_doc = session_go_back(session, &ui_context, css_vw, css_vh);
+            } else if (key == GLFW_KEY_RIGHT && session_can_go_forward(session)) {
+                log_info("browse_nav: keyboard forward");
+                ViewBlock* root = ui_context.document->view_tree ? (ViewBlock*)ui_context.document->view_tree->root : nullptr;
+                if (root && root->scroller && root->scroller->pane)
+                    session_save_scroll_position(session, root->scroller->pane->v_scroll_position);
+                new_doc = session_go_forward(session, &ui_context, css_vw, css_vh);
+            }
+            if (new_doc) {
+                // restore saved scroll position for this history entry
+                ViewBlock* root = new_doc->view_tree ? (ViewBlock*)new_doc->view_tree->root : nullptr;
+                if (root && root->scroller && root->scroller->pane) {
+                    float saved_y = session_get_scroll_position(session);
+                    root->scroller->pane->v_scroll_position = saved_y;
+                }
+                // update title
+                const char* page_title = session_current_title(session);
+                if (!page_title) page_title = session_extract_title(new_doc);
+                if (page_title) {
+                    char title_buf[512];
+                    snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
+                    update_window_title(title_buf);
+                }
+                do_redraw = 1;
+                return;
+            }
+        }
     }
 
     // Build keyboard event
@@ -446,11 +495,21 @@ void render(GLFWwindow* window) {
             log_info("view: all network resources loaded, triggering final reflow");
             reflow_html_doc(ui_context.document);
 
-            // restore original window title
+            // restore window title after load completes
             if (ui_context.document->url) {
-                const char* doc_href = url_get_href(ui_context.document->url);
+                // prefer page <title> tag over URL
+                const char* page_title = session_extract_title(ui_context.document);
                 char title[512];
-                snprintf(title, sizeof(title), "Lambda - %s", doc_href ? doc_href : "");
+                if (page_title) {
+                    snprintf(title, sizeof(title), "Lambda - %s", page_title);
+                    // update session title now that doc is fully loaded
+                    if (ui_context.browsing_session) {
+                        session_set_current_title(ui_context.browsing_session, page_title);
+                    }
+                } else {
+                    const char* doc_href = url_get_href(ui_context.document->url);
+                    snprintf(title, sizeof(title), "Lambda - %s", doc_href ? doc_href : "");
+                }
                 glfwSetWindowTitle(window, title);
             }
         } else if (!ui_context.document->fully_loaded) {
@@ -738,6 +797,12 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             }
         }
 
+        // Create browsing session for navigation history and session state
+        ui_context.browsing_session = session_create(thread_pool, file_cache);
+        if (ui_context.browsing_session) {
+            log_info("view: browsing session created");
+        }
+
         // Create RadiantState for interactive state management (caret, selection, focus, etc.)
         if (!doc->state) {
             doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
@@ -792,10 +857,20 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Set custom window title with format name
         if (!headless && doc_file) {
+            // Prefer <title> element text for HTML documents
+            const char* page_title = doc->html_root ? session_extract_title(doc) : nullptr;
             char title[512];
-            const char* format_name = get_format_name(file_to_load);
-            snprintf(title, sizeof(title), "Lambda %s Viewer - %s", format_name, file_to_load);
+            if (page_title) {
+                snprintf(title, sizeof(title), "Lambda - %s", page_title);
+            } else {
+                const char* format_name = get_format_name(file_to_load);
+                snprintf(title, sizeof(title), "Lambda %s Viewer - %s", format_name, file_to_load);
+            }
             glfwSetWindowTitle(window, title);
+            // store initial title in session if available
+            if (ui_context.browsing_session && page_title) {
+                session_set_current_title(ui_context.browsing_session, page_title);
+            }
         }
     }
 
@@ -822,6 +897,11 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         log_info("End of headless document viewer");
         // Cleanup network resources before ui_context
         if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+        // Cleanup browsing session
+        if (ui_context.browsing_session) {
+            session_destroy(ui_context.browsing_session);
+            ui_context.browsing_session = nullptr;
+        }
         if (thread_pool) thread_pool_destroy(thread_pool);
         if (file_cache) enhanced_cache_destroy(file_cache);
         network_downloader_cleanup_shared();
@@ -906,6 +986,11 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     log_info("End of document viewer");
     // Cleanup network resources before ui_context
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    // Cleanup browsing session
+    if (ui_context.browsing_session) {
+        session_destroy(ui_context.browsing_session);
+        ui_context.browsing_session = nullptr;
+    }
     if (thread_pool) thread_pool_destroy(thread_pool);
     if (file_cache) enhanced_cache_destroy(file_cache);
     network_downloader_cleanup_shared();

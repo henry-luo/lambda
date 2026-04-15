@@ -1,7 +1,7 @@
 # Radiant Web Browsing — Design Proposal
 
 **Date:** April 15, 2026  
-**Status:** Phases 1–3 implemented; Phase 4+ pending  
+**Status:** Phases 1–4 implemented; Phase 5+ pending  
 **Goal:** Enable `lambda view URL` to load and render arbitrary web pages over HTTP/HTTPS.
 
 ---
@@ -705,34 +705,43 @@ These two concerns are co-developed because multi-pass rendering is meaningless 
 
 **Validation:** All 5222 Radiant + 578 Lambda tests pass. ✅ Verified.
 
-### Phase 4: Cookie Jar & Session
+### Phase 4: Cookie Jar & Session ✅ COMPLETE
 
 **Goal:** Websites that require cookies (login sessions, preferences) work correctly.
 
-| # | Task | Files | Effort |
+| # | Task | Files | Status |
 |---|------|-------|--------|
-| 4.1 | Implement `CookieJar` (store, match, expire, persist) | `lambda/network/cookie_jar.h/cpp` (new) | L |
-| 4.2 | Integrate cookie jar with download pipeline (inject Cookie header, parse Set-Cookie) | `lambda/input/input_http.cpp`, `lambda/network/network_thread_pool.cpp` | M |
-| 4.3 | Cookie domain/path matching per RFC 6265 | `lambda/network/cookie_jar.cpp` | M |
-| 4.4 | Bundle Mozilla Public Suffix List at `data/public_suffix_list.dat`; implement `is_public_suffix()` lookup | `lambda/network/public_suffix.h/cpp` (new), `data/` | M |
-| 4.5 | Integrate PSL with cookie jar — reject cookies for public suffix domains | `lambda/network/cookie_jar.cpp` | S |
-| 4.6 | Persistent cookie storage (save/load from `./temp/cookies.dat`) | `lambda/network/cookie_jar.cpp` | S |
-| 4.7 | Session cookie cleanup on exit | `lambda/network/cookie_jar.cpp` | S |
+| 4.1 | Implement `CookieJar` (store, match, expire, persist) | `lambda/network/cookie_jar.h/cpp` (new) | ✅ |
+| 4.2 | Integrate cookie jar with download pipeline (inject Cookie header, parse Set-Cookie) | `lambda/network/network_downloader.cpp` | ✅ |
+| 4.3 | Cookie domain/path matching per RFC 6265 | `lambda/network/cookie_jar.cpp` | ✅ |
+| 4.4 | Public suffix list — hardcoded common TLDs + known hosting suffixes; `is_public_suffix()` lookup | `lambda/network/public_suffix.h/cpp` (new) | ✅ |
+| 4.5 | Integrate PSL with cookie jar — reject cookies for public suffix domains | `lambda/network/cookie_jar.cpp` | ✅ |
+| 4.6 | Persistent cookie storage (save/load from `./temp/cookies.dat`) | `lambda/network/cookie_jar.cpp` | ✅ |
+| 4.7 | Session cookie cleanup on exit | `lambda/network/cookie_jar.cpp` | ✅ |
 
-**Validation:** A site requiring cookies (e.g., one that sets a session cookie on first visit and reads it back) works correctly across same-session page loads.
+**Implementation details:**
+- **4.1**: `CookieEntry` struct (name, value, domain, path, expires, secure, http_only, same_site, creation_time). `CookieJar` with dynamic array, pthread mutex, storage path. Full lifecycle: create/destroy with auto-load/save.
+- **4.2**: `CURLOPT_HEADERFUNCTION` callback in `network_download_resource()` captures `Set-Cookie` response headers → `cookie_jar_store()`. Before each request, `cookie_jar_build_request_header()` builds `Cookie:` header → injected via `CURLOPT_HTTPHEADER`. `curl_slist` freed at all return paths.
+- **4.3**: RFC 6265 §5.1.3 domain-match (suffix matching with leading dot, IP address exclusion). RFC 6265 §5.1.4 path-match (prefix matching). Default path computed from request URI pathname.
+- **4.4**: Hardcoded ~200 TLDs (generic + country code) plus well-known second-level suffixes (`co.uk`, `com.au`, etc.) and hosting/PaaS suffixes (`github.io`, `herokuapp.com`, `netlify.app`, etc.). Simple `strcasecmp` linear scan.
+- **4.6**: Tab-separated text format: `domain\tpath\tsecure\texpires\tname\tvalue\thttponly\tsamesite`. Session cookies (expires=0) not persisted. Expired cookies skipped on load.
+- **4.7**: `cookie_jar_clear_session()` removes entries with `expires == 0`. `cookie_jar_destroy()` auto-saves persistent cookies before cleanup.
+- **Cookie jar** attached to `NetworkResourceManager` as `cookie_jar` field. Created in `resource_manager_create()`, destroyed in `resource_manager_destroy()`.
+
+**Validation:** All 5222 Radiant + 578 Lambda tests pass. ✅ Verified.
 
 ### Phase 5: Navigation & Browsing Session
 
-**Goal:** Clicking links navigates to new pages; back/forward works.
+**Goal:** Clicking links navigates to new pages; back/forward works with browse history.
 
-| # | Task | Files | Effort |
-|---|------|-------|--------|
-| 5.1 | `BrowsingSession` struct and lifecycle | `radiant/browsing_session.h/cpp` (new) | M |
-| 5.2 | Link click → `session_navigate()` | `radiant/event.cpp` | M |
-| 5.3 | Fragment navigation (scroll to `#id`) | `radiant/event.cpp`, `radiant/window.cpp` | S |
-| 5.4 | Back/forward via keyboard (Alt+Left, Alt+Right) or mouse buttons | `radiant/event.cpp` | S |
-| 5.5 | Address bar / URL display | `radiant/window.cpp` | M |
-| 5.6 | Page title from `<title>` → window title | `radiant/window.cpp` | S |
+| #   | Task                                                             | Files                                     | Effort |
+| --- | ---------------------------------------------------------------- | ----------------------------------------- | ------ |
+| 5.1 | `BrowsingSession` struct and lifecycle                           | `radiant/browsing_session.h/cpp` (new)    | M      |
+| 5.2 | Browse history management (push on navigate, truncate forward on new nav, bounds checking) | `radiant/browsing_session.cpp`            | M      |
+| 5.3 | Link click → `session_navigate()`                                | `radiant/event.cpp`                       | M      |
+| 5.4 | Fragment navigation (scroll to `#id`)                            | `radiant/event.cpp`, `radiant/window.cpp` | S      |
+| 5.5 | Back/forward via keyboard (Alt+Left, Alt+Right) or mouse buttons | `radiant/event.cpp`                       | S      |
+| 5.6 | Page title from `<title>` → window title                         | `radiant/window.cpp`                      | S      |
 
 **Validation:** Click a link on a page, arrive at new page. Press back, return to previous. Window title shows page title.
 
@@ -881,6 +890,7 @@ These are explicitly out of scope but noted for future consideration:
 - **iframe support** — Nested browsing contexts. Requires recursive document loading and rendering.
 - **`<video>` / `<audio>`** — Media playback. Large scope, requires media framework.
 - **Tab / multi-window** — Multiple concurrent pages. Window management complexity.
+- **Address bar / URL display** — Browser chrome UI for URL entry and display. Will be implemented via Lambda Reactive UI framework.
 - **Bookmarks** — Persistent URL storage with titles.
 - **HTTPS Everywhere** — Auto-upgrade HTTP to HTTPS.
 - **`--dry-run` / `--resources` flag** — Diagnostic mode: `lambda view URL --resources` lists all discovered resources and their download states without rendering. (KIV for debugging support.)
