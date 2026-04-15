@@ -64,6 +64,13 @@ static Item js_document_proxy_item = {.item = ITEM_NULL};
 
 static __thread DomDocument* _js_current_document = nullptr;
 
+// Helper: increment DOM mutation counter on current document
+static inline void js_dom_mutation_notify() {
+    if (_js_current_document) {
+        _js_current_document->js_mutation_count++;
+    }
+}
+
 /**
  * Reset JS DOM state for batch mode. Clears cached document proxy and
  * document pointer so next file starts fresh.
@@ -2245,6 +2252,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
+            js_dom_mutation_notify();
         }
         return value;
     }
@@ -2309,6 +2317,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
 
         log_debug("js_dom_set_property: set innerHTML on <%s>",
                   elem->tag_name ? elem->tag_name : "?");
+        js_dom_mutation_notify();
         return value;
     }
 
@@ -2316,6 +2325,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     const char* val_str = fn_to_cstr(value);
     if (val_str) {
         dom_element_set_attribute(elem, prop, val_str);
+        js_dom_mutation_notify();
     }
     return value;
 }
@@ -2346,6 +2356,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         if (val_str[0]) {
             dom_element_apply_inline_style(elem, val_str);
         }
+        js_dom_mutation_notify();
         log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -2357,6 +2368,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
             style_tree_remove_property(elem->specified_style, prop_id);
             elem->styles_resolved = false;
+            js_dom_mutation_notify();
         }
         log_debug("js_dom_set_style_property: removed %s (CSS: %s) on <%s>",
                   js_prop, css_prop, elem->tag_name ? elem->tag_name : "?");
@@ -2385,6 +2397,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     // apply as inline style (highest cascade priority)
     dom_element_apply_inline_style(elem, style_decl);
     elem->styles_resolved = false;  // mark for re-cascading
+    js_dom_mutation_notify();
 
     log_debug("js_dom_set_style_property: set %s='%s' (CSS: %s) on <%s>",
               js_prop, val_str, css_prop, elem->tag_name ? elem->tag_name : "?");
@@ -2579,6 +2592,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_val = fn_to_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         dom_element_set_attribute(elem, attr_name, attr_val);
+        js_dom_mutation_notify();
         return ItemNull;
     }
 
@@ -2597,6 +2611,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
         dom_element_remove_attribute(elem, attr_name);
+        js_dom_mutation_notify();
         return ItemNull;
     }
 
@@ -2700,6 +2715,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                     ((DomNode*)elem)->append_child(frag_child);
                     frag_child = next;
                 }
+                js_dom_mutation_notify();
                 return args[0];
             }
         }
@@ -2712,6 +2728,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         }
         // use DomNode::append_child which handles all node types
         ((DomNode*)elem)->append_child(child_node);
+        js_dom_mutation_notify();
         return args[0];  // return the appended child
     }
 
@@ -2724,6 +2741,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             return ItemNull;
         }
         ((DomNode*)elem)->remove_child(child_node);
+        js_dom_mutation_notify();
         return args[0];  // return the removed child
     }
 
@@ -2744,6 +2762,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                     ((DomNode*)elem)->insert_before(frag_child, ref_child);
                     frag_child = next;
                 }
+                js_dom_mutation_notify();
                 return args[0];
             }
         }
@@ -2752,6 +2771,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             new_child->parent->remove_child(new_child);
         }
         ((DomNode*)elem)->insert_before(new_child, ref_child);
+        js_dom_mutation_notify();
         return args[0];
     }
 
@@ -2990,6 +3010,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             const char* cls = fn_to_cstr(args[i]);
             if (cls) dom_element_add_class(elem, cls);
         }
+        js_dom_mutation_notify();
         return ItemNull;
     }
 
@@ -2999,6 +3020,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             const char* cls = fn_to_cstr(args[i]);
             if (cls) dom_element_remove_class(elem, cls);
         }
+        js_dom_mutation_notify();
         return ItemNull;
     }
 
@@ -3013,14 +3035,17 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             bool force = js_is_truthy(args[1]);
             if (force) {
                 dom_element_add_class(elem, cls);
+                js_dom_mutation_notify();
                 return (Item){.item = ITEM_TRUE};
             } else {
                 dom_element_remove_class(elem, cls);
+                js_dom_mutation_notify();
                 return (Item){.item = ITEM_FALSE};
             }
         }
         // no force: toggle
         bool result = dom_element_toggle_class(elem, cls);
+        js_dom_mutation_notify();
         return (Item){.item = b2it(result ? 1 : 0)};
     }
 
@@ -3050,6 +3075,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
         if (!dom_element_has_class(elem, old_cls)) return (Item){.item = ITEM_FALSE};
         dom_element_remove_class(elem, old_cls);
         dom_element_add_class(elem, new_cls);
+        js_dom_mutation_notify();
         return (Item){.item = ITEM_TRUE};
     }
 

@@ -392,12 +392,32 @@ void process_html_resource(NetworkResource* res, struct DomDocument* doc) {
 void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
     if (!res || res->state != STATE_COMPLETED || !doc) return;
 
-    log_debug("network: script resource downloaded: %s -> %s", res->url, res->local_path);
+    log_info("network: script resource downloaded: %s -> %s", res->url, res->local_path);
 
-    // Script execution will happen:
-    // 1. During initial page load via execute_document_scripts() which reads from cache
-    // 2. For late-arriving async/defer scripts, via flush_layout_updates() triggering reflow
-    // For now, just log success — the script runner will find the cached file via resource_manager_lookup
+    // Read the downloaded script content
+    if (!res->local_path) {
+        log_warn("network: script resource has no local_path: %s", res->url);
+        return;
+    }
+    size_t content_size = 0;
+    char* content = read_file_to_string(res->local_path, &content_size);
+    if (!content || content_size == 0) {
+        log_warn("network: failed to read cached script: %s", res->local_path);
+        if (content) free(content);
+        return;
+    }
+
+    // Late-arriving scripts are logged but not executed on the worker thread.
+    // Execution requires the main thread (JIT compiler, DOM access).
+    // The script content is available in the cache file for later execution
+    // via flush_layout_updates() or a future incremental script runner pass.
+    log_info("network: script cached for deferred execution: %s (%zu bytes)", res->url, content_size);
+    free(content);
+
+    // Schedule reflow so the main thread can pick up and execute this script
+    if (res->manager && doc->root) {
+        resource_manager_schedule_reflow(res->manager, doc->root);
+    }
 }
 
 // Resource failure handler
