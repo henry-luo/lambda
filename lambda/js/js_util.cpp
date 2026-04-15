@@ -118,7 +118,9 @@ extern "C" Item js_util_format(Item args_item) {
                     arg_idx++;
                     break;
                 }
-                case 'j': {
+                case 'j':
+                case 'o':
+                case 'O': {
                     Item str = js_json_stringify(arg);
                     if (get_type_id(str) == LMD_TYPE_STRING) {
                         String* s = it2s(str);
@@ -439,6 +441,14 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(types, "isBuffer",         (void*)js_util_types_isBuffer, 1);
     js_util_set_method(types, "isError",          (void*)js_util_types_isError, 1);
     js_property_set(util_namespace, make_string_item("types"), types);
+
+    // TextEncoder/TextDecoder — expose constructors on util namespace
+    extern Item js_text_encoder_new(void);
+    extern Item js_text_decoder_new(Item encoding_item);
+    Item te_ctor = js_new_function((void*)js_text_encoder_new, 0);
+    Item td_ctor = js_new_function((void*)js_text_decoder_new, 1);
+    js_property_set(util_namespace, make_string_item("TextEncoder"), te_ctor);
+    js_property_set(util_namespace, make_string_item("TextDecoder"), td_ctor);
 
     // default export
     Item default_key = make_string_item("default");

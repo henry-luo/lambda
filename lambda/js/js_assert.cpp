@@ -239,6 +239,52 @@ extern "C" Item js_assert_ifError(Item value) {
 }
 
 // =============================================================================
+// assert.match / assert.doesNotMatch
+// =============================================================================
+
+extern "C" Item js_regex_test(Item regex, Item str);
+
+extern "C" Item js_assert_match(Item string_val, Item regexp, Item message) {
+    if (get_type_id(string_val) != LMD_TYPE_STRING) {
+        return throw_assertion_error("The \"string\" argument must be of type string");
+    }
+    Item result = js_regex_test(regexp, string_val);
+    if (!it2b(result)) {
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            char buf[1024];
+            int mlen = (int)ms->len;
+            if (mlen >= (int)sizeof(buf)) mlen = (int)sizeof(buf) - 1;
+            memcpy(buf, ms->chars, mlen);
+            buf[mlen] = '\0';
+            return throw_assertion_error(buf);
+        }
+        return throw_assertion_error("The input did not match the regular expression");
+    }
+    return make_js_undefined();
+}
+
+extern "C" Item js_assert_doesNotMatch(Item string_val, Item regexp, Item message) {
+    if (get_type_id(string_val) != LMD_TYPE_STRING) {
+        return throw_assertion_error("The \"string\" argument must be of type string");
+    }
+    Item result = js_regex_test(regexp, string_val);
+    if (it2b(result)) {
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            char buf[1024];
+            int mlen = (int)ms->len;
+            if (mlen >= (int)sizeof(buf)) mlen = (int)sizeof(buf) - 1;
+            memcpy(buf, ms->chars, mlen);
+            buf[mlen] = '\0';
+            return throw_assertion_error(buf);
+        }
+        return throw_assertion_error("The input was expected to not match the regular expression");
+    }
+    return make_js_undefined();
+}
+
+// =============================================================================
 // assert Module Namespace
 // =============================================================================
 
@@ -267,6 +313,8 @@ extern "C" Item js_get_assert_namespace(void) {
     assert_set_method(assert_namespace, "throws",              (void*)js_assert_module_throws, 3);
     assert_set_method(assert_namespace, "doesNotThrow",        (void*)js_assert_module_doesNotThrow, 3);
     assert_set_method(assert_namespace, "ifError",             (void*)js_assert_ifError, 1);
+    assert_set_method(assert_namespace, "match",               (void*)js_assert_match, 3);
+    assert_set_method(assert_namespace, "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
 
     // default export
     js_property_set(assert_namespace, assert_make_string("default"), assert_namespace);

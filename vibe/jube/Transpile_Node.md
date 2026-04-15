@@ -48,23 +48,23 @@ Lambda's JS runtime already implements partial Node.js support:
 
 | Feature | Status | Implementation |
 |---------|--------|---------------|
-| `node:fs` (sync) | ✅ Partial | `js_fs.cpp` — readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, mkdirSync, rmdirSync, renameSync, readdirSync, statSync, copyFileSync, symlinkSync, chmodSync |
+| `node:fs` (sync) | ✅ Partial | `js_fs.cpp` — readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, mkdirSync, rmdirSync, renameSync, readdirSync, statSync, copyFileSync, symlinkSync, chmodSync, truncateSync |
 | `node:fs` (async) | ✅ Partial | readFile, writeFile (callback-based) |
 | `node:child_process` | ✅ Full | `js_child_process.cpp` — exec, execSync, spawn, spawnSync via libuv uv_spawn |
 | `node:crypto` | ✅ Full | `js_crypto.cpp` — SHA-256/384/512, HMAC, createHash, createHmac, randomBytes, randomUUID, randomInt, getHashes, timingSafeEqual |
 | `node:path` | ✅ Full | `js_path.cpp` — join, resolve, dirname, basename, extname, normalize, isAbsolute, relative, parse, format, sep, delimiter |
 | `node:url` | ✅ Full | `js_url_module.cpp` — URL class, parse, format, resolve, fileURLToPath, pathToFileURL |
 | `node:os` | ✅ Full | `js_os.cpp` — platform, arch, type, hostname, homedir, tmpdir, cpus, totalmem, freemem, uptime, loadavg, userInfo, EOL, endianness |
-| `node:events` | ✅ Full | `js_events.cpp` — EventEmitter: on, once, off, emit, removeAllListeners, listeners, prependListener |
-| `node:util` | ✅ Full | `js_util.cpp` — format, inspect, promisify, deprecate, callbackify, isDeepStrictEqual, types.* (18 type checkers) |
-| `node:buffer` | ✅ Full | `js_buffer.cpp` — alloc, allocUnsafe, from, concat, toString, read/write BE/LE, slice, includes, indexOf |
+| `node:events` | ✅ Full | `js_events.cpp` — EventEmitter: on, once, off, emit, removeAllListeners, listeners, rawListeners, prependListener, defaultMaxListeners |
+| `node:util` | ✅ Full | `js_util.cpp` — format (%s/%d/%i/%f/%j/%o/%O), inspect, promisify, deprecate, callbackify, isDeepStrictEqual, TextEncoder, TextDecoder, types.* (18 type checkers) |
+| `node:buffer` | ✅ Full | `js_buffer.cpp` — alloc, allocUnsafe, from, concat, toString, 14 read + 14 write BE/LE, toJSON, swap16/32/64, slice, includes, indexOf |
 | `node:querystring` | ✅ Full | `js_querystring.cpp` — parse, stringify, escape, unescape |
 | `node:string_decoder` | ✅ Full | `js_string_decoder.cpp` — StringDecoder, write, end (UTF-8 multi-byte handling) |
-| `node:assert` | ✅ Full | `js_assert.cpp` — ok, equal, strictEqual, deepStrictEqual, throws, fail, ifError |
+| `node:assert` | ✅ Full | `js_assert.cpp` — ok, equal, strictEqual, deepStrictEqual, throws, fail, ifError, match, doesNotMatch |
 | `node:timers` | ✅ Alias | Registered as importable module (wraps global timer functions) |
 | `node:console` | ✅ Alias | Registered as importable module (wraps global console) |
-| `process` global | ✅ Full | argv, env, exit, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr |
-| `Buffer` | ✅ Full | Extended Uint8Array: alloc, allocUnsafe, from, concat, endian read/write, includes, subarray, 14 read + 5 write methods |
+| `process` global | ✅ Full | argv, env, exit, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, on('exit'/'uncaughtException') |
+| `Buffer` | ✅ Full | Extended Uint8Array: alloc, allocUnsafe, from, concat, endian read/write, includes, subarray, toJSON, swap16/32/64, 14 read + 14 write methods |
 | `__dirname` / `__filename` | ✅ | Set per-module during transpilation |
 | `require()` | ✅ Full | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()` |
 | ES Modules | ✅ | import/export with module registry |
@@ -126,6 +126,7 @@ Extend `js_fs.cpp` to expose the full `lib/file.c` API surface:
 | `mkdtempSync` | `dir_temp_create` | ✅ Done |
 | `readlinkSync` | POSIX `readlink` | ✅ Done |
 | `lstatSync` | `lstat()` (no symlink follow) | ✅ Done |
+| `truncateSync` | `uv_fs_ftruncate` | ✅ Done |
 | `watch` / `watchFile` | libuv `uv_fs_event_t` | 🔲 New (Js15) |
 | `createReadStream` / `createWriteStream` | Requires `node:stream` | 🔲 Phase 2 |
 | `fs/promises` | Async wrappers via libuv `uv_fs_*` | 🔲 Phase 2 |
@@ -202,8 +203,8 @@ Extend existing `process` global with full module semantics.
 | `process.nextTick(cb)` | ✅ Done | Via `js_microtask_enqueue` |
 | `process.stdout` / `.stderr` | ✅ Done | Writable stream objects |
 | `process.stdin` | 🔲 | Readable stream (Phase 2) |
-| `process.on('exit', cb)` | 🔲 | EventEmitter pattern |
-| `process.on('uncaughtException')` | 🔲 | Requires EventEmitter |
+| `process.on('exit', cb)` | ✅ Done | Static listener array, `js_process_emit_exit()` |
+| `process.on('uncaughtException')` | ✅ Done | Static listener array |
 | `process.chdir(dir)` | ✅ Done | `chdir()` |
 | `process.umask()` | ✅ Done | `umask()` |
 | `process.uptime()` | ✅ Done | Time since process start |
@@ -225,6 +226,8 @@ New file: `lambda/js/js_events.cpp`
 - `eventNames()` ✅ Done
 - `setMaxListeners(n)` / `getMaxListeners()` ✅ Done
 - `prependListener` / `prependOnceListener` ✅ Done
+- `rawListeners(event)` ✅ Done
+- `defaultMaxListeners` (static property = 10) ✅ Done
 
 **Strategy**: Ship as a JS polyfill (`lambda/js/polyfills/events.js`) compiled into the runtime, rather than implementing in C. This matches Deno's approach.
 
@@ -234,14 +237,14 @@ Commonly imported for `promisify`, `inspect`, `types`, `TextEncoder`/`TextDecode
 
 | API | Priority | Notes |
 |-----|----------|-------|
-| `util.promisify(fn)` | High | Convert callback-style to Promise |
+| `util.promisify(fn)` | ✅ Done | Convert callback-style to Promise |
 | `util.callbackify(fn)` | ✅ Done | Inverse of promisify |
-| `util.inspect(obj, opts)` | High | Object pretty-printing |
-| `util.format(fmt, ...)` | High | printf-style string formatting |
-| `util.deprecate(fn, msg)` | Medium | Wrap with deprecation warning |
+| `util.inspect(obj, opts)` | ✅ Done | Object pretty-printing (JSON.stringify-based) |
+| `util.format(fmt, ...)` | ✅ Done | printf-style: %s, %d, %i, %f, %j, %o, %O, %% |
+| `util.deprecate(fn, msg)` | ✅ Done | Wrap with deprecation warning |
 | `util.types.isDate/isRegExp/...` | ✅ Done | Type checking functions (isBuffer, isError, isPromise, isUint8Array, isFunction, isString, isNumber, isBoolean, isNull, isUndefined, isNullOrUndefined, isObject, isPrimitive) |
-| `util.inherits(ctor, super)` | Low | Legacy, use class extends |
-| `util.TextEncoder/TextDecoder` | High | Already in Web APIs |
+| `util.inherits(ctor, super)` | ✅ Done | Legacy, use class extends |
+| `util.TextEncoder/TextDecoder` | ✅ Done | Exposed on util namespace (also available as globals) |
 
 #### `node:buffer`
 
@@ -257,10 +260,12 @@ Extend Uint8Array with Node.js Buffer semantics.
 | `buf.slice` / `buf.subarray` | ✅ Done | View into underlying memory |
 | `buf.write(str, off, len, enc)` | Medium | |
 | `buf.readUInt32BE/LE` etc. | ✅ Done | Endian-aware reads (UInt8/16/32, Int8/16/32, Float, Double) |
-| `buf.writeUInt32BE/LE` etc. | ✅ Done | Endian-aware writes (UInt8/16/32) |
-| `buf.compare` / `buf.equals` | Medium | |
-| `buf.copy(target)` | Medium | |
-| `buf.fill(val)` | Medium | |
+| `buf.writeUInt32BE/LE` etc. | ✅ Done | Endian-aware writes (UInt8/16/32, Int8/16/32, Float/Double BE/LE — 14 methods) |
+| `buf.toJSON()` | ✅ Done | Returns `{type: "Buffer", data: [...]}` |
+| `buf.swap16/32/64` | ✅ Done | Byte-order swapping |
+| `buf.compare` / `buf.equals` | ✅ Done | |
+| `buf.copy(target)` | ✅ Done | |
+| `buf.fill(val)` | ✅ Done | |
 | `buf.includes(val)` | ✅ Done | Search buffer contents |
 | `buf.lastIndexOf(val)` | ✅ Done | Reverse search |
 
@@ -358,7 +363,7 @@ Small module, can be pure JS.
 | Module | Notes | Priority |
 |--------|-------|----------|
 | `node:string_decoder` | ✅ Implemented — handles multi-byte UTF-8 across chunks | Done |
-| `node:assert` | ✅ Implemented — ok, equal, strictEqual, deepStrictEqual, throws, fail | Done |
+| `node:assert` | ✅ Implemented — ok, equal, strictEqual, deepStrictEqual, throws, fail, match, doesNotMatch | Done |
 | `node:timers` | ✅ Registered — alias to global timer functions | Done |
 | `node:console` | ✅ Registered — alias to global console | Done |
 | `node:readline` | ✅ Implemented in Phase 4 | Done |
@@ -389,8 +394,8 @@ Small module, can be pure JS.
 
 | Global | Status | Implementation |
 |--------|--------|---------------|
-| `process` | ✅ Done | Most APIs implemented |
-| `Buffer` | ✅ Done | Extended with endian read/write, includes, subarray |
+| `process` | ✅ Done | Full: argv, env, exit, cwd, platform, arch, pid, hrtime, on('exit'/'uncaughtException') |
+| `Buffer` | ✅ Done | Extended: 14 read + 14 write BE/LE, toJSON, swap16/32/64, includes, subarray |
 | `__dirname` | ✅ Done | Set per-module |
 | `__filename` | ✅ Done | Set per-module |
 | `require()` | ✅ Partial | CJS shim exists; extend resolution |
@@ -725,14 +730,14 @@ Wire existing C libraries to JS module objects. All built-in modules implemented
 |------|--------|--------|
 | `node:path` module | Small | ✅ Done — `js_path.cpp` (12 methods + 2 properties) |
 | `node:os` module | Small | ✅ Done — `js_os.cpp` (17 methods + EOL property) |
-| `node:process` extensions | Medium | ✅ Done — pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr |
-| `node:buffer` full API | Medium | ✅ Done — alloc, allocUnsafe, from, concat, 14 read + 5 write endian methods, includes, subarray |
-| `node:util` (promisify, inspect, format, types) | Medium | ✅ Done — `js_util.cpp`, 7 top-level + 18 types.* checkers |
-| `node:events` polyfill | Medium | ✅ Done — EventEmitter (15 methods including prependListener) |
-| `node:fs` remaining sync APIs | Small | ✅ Done — 18 sync + 2 async methods |
+| `node:process` extensions | Medium | ✅ Done — pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, on('exit'/'uncaughtException') |
+| `node:buffer` full API | Medium | ✅ Done — alloc, allocUnsafe, from, concat, 14 read + 14 write endian methods, toJSON, swap16/32/64, includes, subarray |
+| `node:util` (promisify, inspect, format, types) | Medium | ✅ Done — `js_util.cpp`, 7 top-level + TextEncoder/TextDecoder + 18 types.* checkers |
+| `node:events` polyfill | Medium | ✅ Done — EventEmitter (17 methods incl. prependListener, rawListeners, defaultMaxListeners) |
+| `node:fs` remaining sync APIs | Small | ✅ Done — 19 sync + 2 async methods |
 | `node:querystring` | Small | ✅ Done |
 | `node:string_decoder` | Small | ✅ Done — `js_string_decoder.cpp` |
-| `node:assert` | Small | ✅ Done — `js_assert.cpp` (12 assertion methods) |
+| `node:assert` | Small | ✅ Done — `js_assert.cpp` (13 assertion methods incl. match/doesNotMatch) |
 | `node:timers` / `node:console` | Small | ✅ Done — registered as importable aliases |
 | Module dispatcher (`node:` prefix) | Small | ✅ Done — `js_module_get()` handles 21 modules |
 

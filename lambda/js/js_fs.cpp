@@ -700,6 +700,37 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
 }
 
 // =============================================================================
+// truncateSync
+// =============================================================================
+
+extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
+    if (get_type_id(path_item) != LMD_TYPE_STRING) return ItemNull;
+    String* ps = it2s(path_item);
+    char path[PATH_MAX];
+    int plen = (int)ps->len;
+    if (plen >= (int)sizeof(path)) plen = (int)sizeof(path) - 1;
+    memcpy(path, ps->chars, plen);
+    path[plen] = '\0';
+
+    int64_t length = 0;
+    if (get_type_id(len_item) == LMD_TYPE_INT) length = it2i(len_item);
+
+    uv_fs_t req;
+    int fd = uv_fs_open(lambda_uv_loop(), &req, path, UV_FS_O_WRONLY, 0, NULL);
+    uv_fs_req_cleanup(&req);
+    if (fd < 0) return ItemNull;
+
+    int r = uv_fs_ftruncate(lambda_uv_loop(), &req, fd, length, NULL);
+    uv_fs_req_cleanup(&req);
+
+    uv_fs_close(lambda_uv_loop(), &req, fd, NULL);
+    uv_fs_req_cleanup(&req);
+
+    if (r < 0) return ItemNull;
+    return make_js_undefined();
+}
+
+// =============================================================================
 // fs Module Namespace Object
 // =============================================================================
 
@@ -742,6 +773,7 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
     js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 1);
     js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
+    js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
 
     // fs.constants
     Item constants = js_new_object();
