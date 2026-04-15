@@ -1,500 +1,727 @@
-# Proposal: Semantic Break Kinds & Corpus-Sweep Text Tests
+# Proposal: Complete FreeType Elimination from Lambda/Radiant
 
-**Status:** Implemented (Part 1 complete, Part 2 baseline enforced — 86/122 passing)  
+**Status:** Proposed  
 **Author:** Lambda Team  
 **Date:** April 2026  
-**Prerequisite:** Soft hyphen support (completed), Radiant_Font3.md
-
-### Implementation Summary
-
-**Part 1 — BreakKind enum:** Complete. 18-value `BreakKind` enum added to `layout.hpp`, boolean flags replaced with `last_space_kind` across 3 files (10 code sites). `classify_break()` function added. Zero regressions (4017/4017 baseline tests pass). Switch-dispatch refactor deferred per proposal.
-
-**Part 2 — Corpus-sweep tests:** Baseline enforced. 122 HTML tests generated (2 corpora × 61 widths), Chrome references captured. Initial results (37/122, 30%) improved to **86/122 (70.5%)** after three targeted fixes:
-
-| Fix | Description | Impact |
-|-----|-------------|--------|
-| Codepoint-based dash check | Replaced byte-level `*str == '-'` with codepoint check covering U+002D, U+2010, U+2013, U+2014 | En-dash and em-dash now treated as break opportunities |
-| Em-dash break-before (UAX #14 B2) | Added break opportunity *before* U+2014 em-dash (was break-after only) | Matches browser behavior for `word—word` patterns |
-| `?` URL query break | Added break-after for `?` (U+003F) guarded to only trigger before alphanumeric chars | Fixes over-wrapping in URL-heavy mixed-app content |
-
-Current results:
-
-| Corpus | Exact match | Failing widths | Failure category | Notes |
-|--------|-------------|----------------|------------------|-------|
-| en-gatsby-opening | 55/61 (90%) | 6 | edge-fit (sub-pixel) | All 6 are ±1 line at boundary widths |
-| mixed-app-text | 31/61 (51%) | 28 | complex-text-shaping (31 mismatches) | Thai p3: 21, Arabic p2: 8, CJK p1: 2 |
-
-86/122 passing tests are enforced via `test/layout/data/pretext/baseline.txt`. Integrated into `make test-radiant-baseline` (4103 total: 3931 layout + 47 UI + 39 page load + 86 pretext). See `test/layout/data/pretext/status.json` for per-width failure details.
+**Prerequisite:** Radiant_Design_Font_Text.md (Phase 1–5 complete)
 
 ---
 
-## Overview
+## 1. Current State
 
-Two enhancements inspired by Pretext's text layout engine:
+FreeType has been eliminated from all `radiant/` source files (Phase 1–5).
+The **only remaining FreeType usage** is in `lib/font/` — 4 files, ~54 call sites:
 
-1. **Semantic break kinds** — replace ad-hoc flags with a formal break classification enum (CSS Text 3 + UAX #14 conformant)
-2. **Corpus-sweep text tests** — adapt Pretext's fine-grained width-sweep methodology for Radiant
+| File | FT Calls | Role |
+|------|:--------:|------|
+| `font_internal.h` | — | FT headers, `FT_Face`/`FT_Library` in structs |
+| `font_context.c` | 11 | Library lifecycle, custom memory, face cleanup |
+| `font_loader.c` | ~25 | Face loading, size selection, variable font axes |
+| `font_glyph.c` | ~18 | Glyph metrics, bitmap rasterization (FT = fallback on macOS) |
 
----
+No FT types leak through the public API (`font.h`). All external accessors
+(`font_context_get_ft_library`, `font_handle_get_ft_face`) return `void*`.
 
-## Part 1: Semantic Break Kinds
+### What FreeType Does Today
 
-### Problem
+| Operation | FT APIs | Replaceable? |
+|-----------|---------|:---:|
+| Parse font from memory | `FT_New_Memory_Face` (5 sites) | ✓ |
+| Library lifecycle | `FT_New_Library`, `FT_Add_Default_Modules`, `FT_Done_Library` | ✓ |
+| Custom allocator | `FT_MemoryRec_` callbacks → Pool | Remove entirely |
+| Set size | `FT_Set_Pixel_Sizes`, `FT_Select_Size` | ✓ |
+| Variable font axes | `FT_Get_MM_Var`, `FT_Set_Var_Design_Coordinates` | ✓ |
+| Glyph metrics | `FT_Load_Glyph(LOAD_DEFAULT)` → advance, bearings | ✓ |
+| Glyph rasterization | `FT_Load_Glyph(LOAD_RENDER)` → bitmap | ✓ |
+| PostScript name | `FT_Get_Postscript_Name` | ✓ |
+| Family name | `face->family_name` | ✓ |
+| Face flags | `FT_FACE_FLAG_FIXED_SIZES`, `_COLOR`, `_MULTIPLE_MASTERS` | ✓ |
+| Face count (TTC) | `face->num_faces` | ✓ |
 
-Radiant's inline layout tracks break opportunities through a mix of implicit code branches, boolean flags, and character-class checks scattered across `layout_text.cpp`. There is no unified break classification:
+### What Already Replaces FreeType
 
-| Current mechanism | Used for |
-|---|---|
-| `is_space(*str)` byte check | Regular spaces |
-| `last_space_is_hyphen` flag | `-` vs space break |
-| `last_space_is_soft_hyphen` flag | U+00AD break |
-| Inline `codepoint == 0x200B` | ZWSP |
-| Inline `codepoint == '\t'` | Tab |
-| Inline `codepoint == '\n'` | Hard break |
-| `is_cjk_ideograph()` function | CJK break-after |
-| `is_line_break_op()` / `is_line_break_cl()` | UAX #14 OP/CL classes |
-| `is_line_break_ns()` / `is_line_break_cj()` | UAX #14 NS/CJ classes |
-| `is_line_break_ex_is_sy()` | UAX #14 EX/IS/SY classes |
+**FontTables** (custom TTF parser, `lib/font/font_tables.c`):
+- `cmap` (format 4+12) — replaces `FT_Get_Char_Index`
+- `hmtx` — glyph advance widths, replaces metrics-only `FT_Load_Glyph`
+- `kern` (format 0) — pair kerning, replaces `FT_Get_Kerning`
+- `head` — units_per_em, mac_style, replaces `FT_FACE_FLAG_*` queries
+- `hhea` — ascender/descender/line_gap
+- `OS/2` — weight, fsSelection, typo metrics, x-height, cap-height
+- `name` — family, subfamily, PostScript name (replaces `face->family_name`, `FT_Get_Postscript_Name`)
+- `fvar` — variable font axis metadata
+- `glyf`/`loca` — glyph bounding boxes
+- `post` — underline metrics
 
-This works but has downsides:
-- Adding a new break type requires touching 7+ code sites
-- No centralized place to reason about break behavior
-- White-space mode interactions are implicit (each branch checks `collapse_spaces` independently)
-- Hard to audit correctness against CSS Text 3 §5 and UAX #14
+**CoreText** (macOS, `lib/font/font_rasterize_ct.c` + `font_platform.c`):
+- `font_rasterize_ct_create()` — create CTFont from raw TTF/OTF bytes
+- `font_rasterize_ct_metrics()` — per-glyph advance + bbox (no bitmap)
+- `font_rasterize_ct_render()` — 8-bit grayscale / BGRA bitmap rasterization
+- `font_platform_get_glyph_advance()` — CT advance override (already primary for layout)
+- `font_platform_get_pair_kerning()` — GPOS kerning
+- `font_platform_create_ct_font()` — system font by name + weight
+- `get_font_metrics_platform()` — line-height metrics (Chrome-compatible)
+- `font_platform_find_codepoint_font()` — fallback font discovery
 
-### Proposed Enum
-
-Designed for CSS Text 3 §4–5 and UAX #14 conformance, not limited to Pretext's 8 kinds.
-
-```cpp
-// radiant/layout.hpp
-typedef enum BreakKind {
-    // --- Content (not a break character itself) ---
-    BRK_TEXT = 0,           // ordinary word/grapheme content
-
-    // --- Whitespace kinds (CSS Text 3 §4) ---
-    BRK_SPACE,              // collapsible space (U+0020 in white-space: normal/nowrap/pre-line)
-    BRK_PRESERVED_SPACE,    // non-collapsible space (U+0020 in pre/pre-wrap/break-spaces)
-    BRK_TAB,                // tab character (advance to next tab stop; CSS Text 3 §4.2)
-    BRK_HARD_BREAK,         // newline (\n in pre/pre-wrap/pre-line; CSS Text 3 §4.1)
-
-    // --- Non-breaking / glue (UAX #14 GL, WJ, ZWJ) ---
-    BRK_GLUE,               // visible non-breaking: NBSP U+00A0, NNBSP U+202F
-    BRK_GLUE_ZW,            // zero-width non-breaking: WJ U+2060, ZWNBSP U+FEFF
-    BRK_ZWJ,                // zero-width joiner U+200D (suppresses break, joins emoji sequences)
-
-    // --- Break opportunities (CSS Text 3 §5) ---
-    BRK_ZERO_WIDTH_BREAK,   // ZWSP U+200B (invisible, breakable)
-    BRK_SOFT_HYPHEN,        // SHY U+00AD (invisible unless broken, then visible '-')
-    BRK_HYPHEN,             // explicit hyphen U+002D, U+2010 (break after, includes width)
-
-    // --- UAX #14 line break classes (CSS Text 3 §5.2) ---
-    BRK_CJK,                // CJK ideograph (break after, unless word-break: keep-all)
-    BRK_OP,                 // opening punctuation — no break after (UAX #14 LB14)
-    BRK_CL,                 // closing punctuation — no break before (UAX #14 LB15/16)
-    BRK_NS,                 // non-starter — no break before when after CJK (UAX #14 LB20)
-    BRK_EX_IS_SY,           // EX/IS/SY — no break before (UAX #14 LB13)
-    BRK_CJ,                 // conditional Japanese starter (resolved to NS or ID per line-break mode)
-
-    // --- Ideographic space ---
-    BRK_IDEOGRAPHIC_SPACE,  // U+3000 (full-width space, hangable, break opportunity)
-} BreakKind;
-```
-
-### Design rationale
-
-**Beyond Pretext's 8 kinds.** Pretext is a JS text-measurement library that doesn't need UAX #14 line-break classes (the browser handles those). Radiant implements the full CSS text layout pipeline, so break kinds must cover:
-
-- **CSS Text 3 §4** whitespace processing: collapse, preserve, tab stops, forced breaks
-- **CSS Text 3 §5** line breaking: soft wrap opportunities, word-break, overflow-wrap
-- **UAX #14** line break algorithm: OP, CL, NS, CJ, EX/IS/SY classes suppress/allow breaks
-- **UAX #29 + UTS #51**: ZWJ joins grapheme clusters and emoji sequences
-
-**Hyphens get their own kind.** Radiant already tracks hyphens distinctly via `last_space_is_hyphen`. A dedicated `BRK_HYPHEN` kind eliminates the boolean flag and makes the break-at-hyphen path (include hyphen width in line) explicit in the enum. This also supports future `-` vs `‐` U+2010 distinction.
-
-**CJK gets its own kind.** CJK ideographs have unique break-after semantics (suppressed by `word-break: keep-all`, interacting with OP/CL/NS). A `BRK_CJK` kind makes the `is_cjk_ideograph()` check part of classification rather than a separate post-check in the text path.
-
-**Glue splits into visible and zero-width.** NBSP (U+00A0) has glyph width; WJ (U+2060) is zero-width. Both suppress breaks but differ in advance computation. Splitting `BRK_GLUE` vs `BRK_GLUE_ZW` avoids a width check inside the glue handler.
-
-**ZWJ is separate from glue.** ZWJ (U+200D) suppresses breaks like glue but also affects emoji sequence joining (UTS #51) and grapheme clustering. Its current handling (`zwj_preceded` flag + emoji width suppression) is complex enough to warrant its own kind.
-
-### Mapping: current code → break kind
-
-| Character(s) | white-space: normal | white-space: pre-wrap | Break kind |
-|---|---|---|---|
-| U+0020 space | Collapse consecutive → 1 | Preserve all, hang at EOL | `BRK_SPACE` / `BRK_PRESERVED_SPACE` |
-| U+0009 tab | Collapse to space | Render at tab-size width | `BRK_TAB` (or `BRK_SPACE` if collapsed) |
-| U+000A newline | Collapse to space | Force line break | `BRK_HARD_BREAK` (or `BRK_SPACE` if collapsed) |
-| U+00A0 NBSP | Non-breaking, visible | Non-breaking, visible | `BRK_GLUE` |
-| U+202F NNBSP | Non-breaking, visible | Non-breaking, visible | `BRK_GLUE` |
-| U+2060 WJ | Non-breaking, zero-width | Non-breaking, zero-width | `BRK_GLUE_ZW` |
-| U+FEFF ZWNBSP | Non-breaking, zero-width | Non-breaking, zero-width | `BRK_GLUE_ZW` |
-| U+200D ZWJ | Zero-width, joins sequences | Same | `BRK_ZWJ` |
-| U+200B ZWSP | Break opportunity, zero-width | Break opportunity, zero-width | `BRK_ZERO_WIDTH_BREAK` |
-| U+00AD SHY | Break opportunity, zero-width, visible `-` on break | Same | `BRK_SOFT_HYPHEN` |
-| U+002D `-` | Break after, includes width | Same | `BRK_HYPHEN` |
-| U+2010 `‐` | Break after, includes width | Same | `BRK_HYPHEN` |
-| CJK ideographs | Break after (unless keep-all) | Same | `BRK_CJK` |
-| U+3000 ideographic space | Break opportunity, full-width, hangable | Same | `BRK_IDEOGRAPHIC_SPACE` |
-| `(` `[` `{` 「 etc. | No break after | Same | `BRK_OP` |
-| `)` `]` `}` 」 、。 etc. | No break before | Same | `BRK_CL` |
-| Thai/Khmer marks, CJK iteration | No break before (after CJK) | Same | `BRK_NS` |
-| `!` `?` `,` `.` `:` `;` `/` | No break before (LB13) | Same | `BRK_EX_IS_SY` |
-| Small kana ぁ ァ, prolonged ー | NS or ID per line-break mode | Same | `BRK_CJ` |
-| All other characters | Content | Same | `BRK_TEXT` |
-
-### Where the enum is used
-
-#### A. Linebox break tracking
-
-Replace the boolean flags in `Linebox`:
-
-```cpp
-// BEFORE (layout.hpp)
-unsigned char* last_space;
-float last_space_pos;
-bool last_space_is_hyphen;
-bool last_space_is_soft_hyphen;
-
-// AFTER
-unsigned char* last_space;
-float last_space_pos;
-BreakKind last_space_kind;    // replaces both booleans + implicit "it's a regular space"
-```
-
-`reset_space()` sets `last_space_kind = BRK_TEXT` (no break recorded).
-
-#### B. Character classification
-
-Add a classifier function called early in the main layout loop. This consolidates the scattered character checks into one place:
-
-```cpp
-// radiant/layout_text.cpp
-static BreakKind classify_break(uint32_t cp, bool collapse_spaces, bool collapse_newlines) {
-    // Whitespace (CSS Text 3 §4)
-    if (cp == 0x0020) return collapse_spaces ? BRK_SPACE : BRK_PRESERVED_SPACE;
-    if (cp == '\t')   return collapse_spaces ? BRK_SPACE : BRK_TAB;
-    if (cp == '\n' || cp == '\r') return collapse_newlines ? BRK_SPACE : BRK_HARD_BREAK;
-
-    // Non-breaking glue
-    if (cp == 0x00A0 || cp == 0x202F) return BRK_GLUE;         // visible NBSP/NNBSP
-    if (cp == 0x2060 || cp == 0xFEFF) return BRK_GLUE_ZW;      // zero-width WJ/ZWNBSP
-    if (cp == 0x200D) return BRK_ZWJ;                          // ZW joiner
-
-    // Break opportunities
-    if (cp == 0x200B) return BRK_ZERO_WIDTH_BREAK;             // ZWSP
-    if (cp == 0x00AD) return BRK_SOFT_HYPHEN;                  // SHY
-    if (cp == 0x002D || cp == 0x2010) return BRK_HYPHEN;       // hyphen / hyphen-minus
-
-    // Ideographic space
-    if (cp == 0x3000) return BRK_IDEOGRAPHIC_SPACE;
-
-    // CJK ideographs (break-after unless keep-all)
-    if (is_cjk_ideograph(cp)) return BRK_CJK;
-
-    // UAX #14 line break classes
-    if (is_line_break_op(cp)) return BRK_OP;
-    if (is_line_break_cl(cp)) return BRK_CL;
-    if (is_line_break_cj(cp)) return BRK_CJ;
-    if (is_line_break_ns(cp)) return BRK_NS;
-    if (is_line_break_ex_is_sy(cp)) return BRK_EX_IS_SY;
-
-    return BRK_TEXT;
-}
-```
-
-**Note:** The existing `is_line_break_*()` functions are called during classification instead of in the main loop. This means each codepoint is classified once, and the main loop dispatches on the enum value.
-
-#### C. Main layout loop refactor
-
-The main layout loop currently has deeply nested if/else branches for each character type. With `BreakKind`, the top-level dispatch becomes a switch:
-
-```cpp
-BreakKind brk = classify_break(codepoint, collapse_spaces, collapse_newlines);
-switch (brk) {
-    case BRK_SPACE:
-        // existing collapsible space logic (LB7, trailing trim)
-        break;
-    case BRK_PRESERVED_SPACE:
-        // pre-wrap space logic (hanging, break-spaces)
-        break;
-    case BRK_TAB:
-        // tab-size × space_width advance
-        break;
-    case BRK_HARD_BREAK:
-        // forced line break
-        break;
-    case BRK_GLUE:
-        // advance by glyph width, NO break opportunity
-        break;
-    case BRK_GLUE_ZW:
-        // zero advance, NO break opportunity
-        break;
-    case BRK_ZWJ:
-        // zero advance, suppress break, set zwj_preceded flag for emoji joining
-        break;
-    case BRK_ZERO_WIDTH_BREAK:
-        // record break opportunity, zero advance
-        break;
-    case BRK_SOFT_HYPHEN:
-        // record break opportunity, zero advance, flag for visible '-' on break
-        break;
-    case BRK_HYPHEN:
-        // advance by glyph width, record break-after opportunity (include width in line)
-        break;
-    case BRK_CJK:
-        // advance by glyph width, record break-after (unless word-break: keep-all)
-        break;
-    case BRK_IDEOGRAPHIC_SPACE:
-        // advance by glyph width (hangable), record break opportunity
-        break;
-    case BRK_OP:
-        // advance by glyph width, suppress break-after (LB14)
-        break;
-    case BRK_CL:
-        // advance by glyph width, suppress break-before (LB15/16)
-        // special: allow break before when preceded by CJK (CSS Text 3 §5.2)
-        break;
-    case BRK_NS:
-        // advance by glyph width, suppress break-before when after CJK (LB20)
-        break;
-    case BRK_EX_IS_SY:
-        // advance by glyph width, suppress break-before (LB13)
-        break;
-    case BRK_CJ:
-        // resolve: if line-break: loose → treat as BRK_CJK; else treat as BRK_NS
-        break;
-    case BRK_TEXT:
-        // existing glyph layout (word-break: break-all, overflow-wrap: anywhere)
-        break;
-}
-```
-
-#### D. Break execution paths
-
-The 7 break-execution code paths remain structurally the same. The difference is that `last_space_kind` replaces the boolean flag checks:
-
-```cpp
-// BEFORE
-if (last_space_is_soft_hyphen) {
-    text_len -= 2;  // exclude SHY bytes
-    ...
-}
-
-// AFTER
-if (linebox.last_space_kind == BRK_SOFT_HYPHEN) {
-    text_len -= 2;
-    ...
-}
-```
-
-### Implementation plan
-
-| Step | Scope | Risk |
-|---|---|---|
-| 1. Add `BreakKind` enum to `layout.hpp` | Header only | None |
-| 2. Replace `last_space_is_hyphen` + `last_space_is_soft_hyphen` with `last_space_kind` | `layout.hpp`, `layout_text.cpp` | Low — mechanical flag replacement |
-| 3. Add `classify_break()` function | `layout_text.cpp` | None |
-| 4. Refactor main loop to use `classify_break()` switch dispatch | `layout_text.cpp` | Medium — largest change, must preserve all 7 break paths |
-| 5. Run baseline tests | Test | Gating — must be 100% pass |
-
-**Estimated scope:** ~300 lines changed in `layout_text.cpp`, ~30 lines in `layout.hpp`, 0 behavioral changes.
-
-### Notes
-
-1. **Phase the refactor.** Step 2 (replace booleans with enum) can ship independently and provides immediate benefit. Steps 3–4 (switch dispatch) are a larger refactor that can follow in a separate pass. This de-risks the change.
-
-2. **BRK_OP/CL/NS/EX_IS_SY in the main loop.** These UAX #14 classes currently use lookahead/lookbehind (`peek_codepoint()`) rather than the break-at-last-space pattern. Moving them into the switch makes the dispatch uniform but requires careful handling of the next-character lookahead. The switch case for `BRK_CL` needs to peek backward (was previous character CJK?), and `BRK_EX_IS_SY` needs cross-node lookahead via `view_peek_next_text_codepoint()`. These interactions should be preserved exactly.
-
-3. **`BRK_CJ` resolution.** CJ characters are resolved at classification time based on `line_break` CSS property: `line-break: loose` → `BRK_CJK`; `line-break: normal/strict` → `BRK_NS`. This means `classify_break()` needs access to the `line_break` property value, or CJ resolution happens as a post-classification step.
-
-4. **Enum stability.** The enum values should be considered internal to the layout engine. They are never serialized to JSON or exposed in the view tree. This allows future additions (e.g., `BRK_EMOJI_BASE` if emoji sequences need special handling) without compatibility concerns.
+**`font_metrics.c`** already uses **zero FT calls** — 100% FontTables.
 
 ---
 
-## Part 2: Corpus-Sweep Text Tests
+## 2. Goal
 
-### Problem
+Remove `libfreetype.a` (768KB), its transitive dependencies (HarfBuzz 1.2MB,
+zlib, bzip2, brotli portions), and all `FT_*` API calls from the codebase.
+Replace with platform-native rasterizers and the existing FontTables parser.
 
-Radiant's layout tests compare full page layout trees against Chrome references. This is effective for block/flex/grid layout but **coarse for text line-breaking** — a single full-page comparison can't distinguish a text wrapping bug from a margin rendering difference.
+### Benefits
 
-Pretext's approach is targeted: sweep one text block across 61 widths (300–900px, step 10) and compare line count / total height against the browser. This isolates text layout accuracy from everything else.
+- **~2MB smaller binary** (FreeType + HarfBuzz + transitive deps)
+- **Zero third-party font code** — full control over the pipeline
+- **Simpler build** — remove FreeType include/lib paths from all 4 platform configs
+- **Eliminate dual-path bugs** — currently every glyph operation has FT primary +
+  CT override; single path is simpler and matches browser output
+- **Faster startup** — no FT_Library initialization or module registration
 
-### What Pretext measures
+### Non-Goals
 
-| Level | Metric | Data |
-|---|---|---|
-| **Accuracy sweep** | `actual height == predicted height` | 7,680 test points: 4 fonts × 8 sizes × 8 widths × 30 short texts |
-| **Corpus sweep** | `actual line count == predicted line count` at each width | 13 corpora × 61 widths = ~800 points per corpus |
-| **Per-line diagnostics** | Exact line break positions on mismatch | Automatic diff on failure |
-
-### Adaptation strategy for Radiant
-
-Radiant is a C++ layout engine, not a JS library. We can't call `layout()` directly from a test script. Instead:
-
-#### Test flow
-
-```
-[corpus .txt files] → [generate .html test files] → [lambda.exe layout --json] → [compare against Chrome reference]
-```
-
-1. **Generator script** (`test/layout/generate_pretext_corpus.js`): For each corpus text file and each width (300–900, step 10), generate an HTML file:
-   ```html
-   <!DOCTYPE html>
-   <html><head>
-   <style>
-     @font-face { font-family: 'Liberation Sans'; src: url('../../font/LiberationSans-Regular.ttf'); }
-     * { margin: 0; padding: 0; }
-     body { font-family: 'Liberation Sans'; font-size: 16px; line-height: 1.5; }
-     .text-block { width: {WIDTH}px; }
-   </style>
-   </head><body>
-   <div class="text-block">{CORPUS_TEXT}</div>
-   </body></html>
-   ```
-
-2. **Chrome references**: Capture via existing `extract_browser_references.js` infrastructure. Each generated HTML gets a reference JSON.
-
-3. **Comparison**: Run through existing `test_radiant_layout.js` with tighter text-specific tolerances.
-
-#### Key difference from Pretext's approach
-
-| Aspect | Pretext | Radiant adaptation |
-|---|---|---|
-| Metric | Total height in px | Full layout tree (existing infra) + text rect count per text node |
-| Oracle | Live browser API call | Pre-captured Chrome reference JSON |
-| Execution | JS `layout()` call | `lambda.exe layout file.html --json` |
-| Font | System font (Helvetica, etc.) | Bundled font (`Liberation Sans`) for determinism |
-| Line-by-line diff | Custom extractor | Compare text rect sequence from view tree JSON |
-
-#### Why pre-captured references (not live Chrome)
-
-- **Determinism**: System fonts vary across machines; bundled Liberation fonts don't
-- **Speed**: No Puppeteer launch per test run; references captured once
-- **Existing infra**: Fits cleanly into the current `reference/` workflow
-- **CI-friendly**: No browser dependency in test execution
-
-#### Proposed file structure
-
-```
-test/layout/data/pretext/
-├── generate_corpus_tests.js          # generator script
-├── pretext_en_gatsby_w300.html       # generated: English, 300px
-├── pretext_en_gatsby_w310.html       # generated: English, 310px
-├── ...
-├── pretext_en_gatsby_w900.html       # generated: English, 900px
-├── pretext_mixed_app_w300.html       # generated: mixed scripts, 300px
-├── ...
-├── pretext_mixed_app_w900.html       # generated: mixed scripts, 900px
-└── README.md                         # documents methodology
-
-test/layout/reference/
-├── pretext_en_gatsby_w300.json       # Chrome reference
-├── ...
-```
-
-#### Corpus selection
-
-Reuse Pretext's corpus files from `ref/pretext/corpora/`. Start with Latin-script corpora; skip RTL and CJK for now (add later as those layout paths mature).
-
-| Corpus ID | Language | Script | Priority | Phase |
-|---|---|---|---|---|
-| `en-gatsby-opening` | English | Latin | High — baseline Latin | 1 |
-| `mixed-app-text` | Multilingual | Mixed (Latin-dominant) | High — mixed scripts | 1 |
-| `th-nithan-vetal-story-1` | Thai | Thai | Medium — no word spaces | 2 |
-| `th-nithan-vetal-story-7` | Thai | Thai | Low | 2 |
-| `hi-eidgah` | Hindi | Devanagari | Low — complex script | 3 |
-| `my-cunning-heron-teacher` | Myanmar | Myanmar | Low — complex script | 3 |
-| `my-bad-deeds-return...` | Myanmar | Myanmar | Low | 3 |
-
-*Deferred (RTL):* `ar-al-bukhala`, `ar-risalat-al-ghufran-part-1`, `he-masaot-binyamin-metudela`, `ur-chughd`  
-*Deferred (CJK):* `ja-kumo-no-ito`, `ja-rashomon`, `zh-guxiang`, `zh-zhufu`, `ko-sonagi`, `ko-unsu-joh-eun-nal`
-
-**Phase 1 (2 corpora, ~122 HTML files):** `en-gatsby-opening`, `mixed-app-text`  
-**Phase 2 (+2 corpora, ~122 more):** Thai corpora  
-**Phase 3 (+3 corpora, ~183 more):** Hindi, Myanmar
-
-#### Width sweep parameters
-
-- **Range**: 300–900px, step 10 (61 widths per corpus) — matches Pretext
-- **Font**: Liberation Sans 16px / line-height 1.5 (consistent, bundled)
-- **Viewport**: 1200×800 (existing default)
-
-#### Comparison metrics
-
-Use existing full layout tree comparison (same as baseline tests). This provides 100% web standards conformance checking — element bounds, text positions, and content all compared against Chrome.
-
-Key metrics per test file:
-- **Element match %**: All elements (html, body, div) must match positions/dimensions
-- **Text match %**: All text rects must match positions/dimensions
-- **Existing tolerance**: 5px default with proportional scaling for large values
-
-#### Failure taxonomy
-
-Adopt Pretext's taxonomy for classifying mismatches:
-
-| Category | Description | Radiant action |
-|---|---|---|
-| `corpus-dirty` | Source text has scraping artifacts | Clean corpus or reject |
-| `normalization` | White-space collapse difference | Fix preprocessing |
-| `boundary-discovery` | Wrong break opportunities | Fix UAX #14 / kinsoku tables |
-| `glue-policy` | Wrong attachment (punct stays with word) | Fix glue rules |
-| `edge-fit` | Off by <1px at line edge | Accept or tune tolerance |
-| `shaping-context` | Glyph shaping changes break | Accept (engine limitation) |
-| `font-mismatch` | Different font resolution | Fix font stack |
-| `diagnostic-sensitivity` | Test probe issue | Fix test, not engine |
-
-Track in a machine-readable `test/layout/data/pretext/status.json`:
-
-```json
-{
-  "en-gatsby-opening": {
-    "widths_tested": 61,
-    "exact_match": 58,
-    "mismatches": [
-      { "width": 430, "radiant_lines": 12, "chrome_lines": 13, "category": "edge-fit" },
-      { "width": 710, "radiant_lines": 8, "chrome_lines": 9, "category": "shaping-context" }
-    ]
-  }
-}
-```
-
-### Implementation plan
-
-| Step | Scope | Output |
-|---|---|---|
-| 1. Write generator script | `test/layout/data/pretext/generate_corpus_tests.js` | Generates HTML from corpus .txt |
-| 2. Generate Phase 1 HTML files | 2 corpora × 61 widths = 122 files | `test/layout/data/pretext/*.html` |
-| 3. Capture Chrome references | `make capture-layout suite=pretext` | `test/layout/reference/pretext_*.json` |
-| 4. Run against Radiant | `make layout suite=pretext` | Initial pass/fail scores |
-| 5. Classify failures | Manual + status.json | Failure taxonomy |
-| 6. Fix break model issues | `layout_text.cpp` | Improved text accuracy |
-| 7. Phase 2–3 corpora | Thai, then Hindi/Myanmar | Progressive multilingual coverage |
-
-### Notes
-
-1. **Baseline enforced.** 86/122 passing tests are recorded in `test/layout/data/pretext/baseline.txt` and enforced by `make test-radiant-baseline`. The test runner reads the baseline file and exits non-zero if any listed test regresses. Remaining 36 failures (6 edge-fit + 30 complex-text-shaping) are excluded from baseline until fixed. Promote additional tests as accuracy improves.
-
-2. **HTML file count.** Phase 1 is 122 files + 122 reference JSONs. Full rollout (7 corpora) is ~427 files. This fits the existing batch-mode infrastructure (batch size 100, 5 concurrent). **Keep generated files in git** for deterministic CI, but add a `make regenerate-pretext-corpus` target for updates.
-
-3. **White-space modes.** Pretext tests `normal` and `pre-wrap` modes. The corpus sweep should also cover `pre-wrap` for at least one corpus (e.g., `en-gatsby-opening`) to validate preserved-space handling. Generate a parallel set of `pretext_en_gatsby_prewrap_w*.html` files.
-
-4. **Break-kind probe texts.** Beyond corpora, add targeted probe texts (not full literary passages) for specific break kinds:
-   - Soft hyphen: `"Butter\u00ADfly"` at widths 40–100px (force/avoid break)
-   - Tab: `"Col1\tCol2\tCol3"` in `pre-wrap` at widths 100–400px
-   - NBSP: `"100\u00A0km"` — must never break
-   - ZWSP: `"long\u200Bword"` — break without visible space
-   These are ~20 extra HTML files but test break kinds that corpora may not exercise.
-
-5. **Pretext's accuracy sweep (7,680 points).** The accuracy sweep (4 fonts × 8 sizes × 8 widths × 30 short texts) tests single-paragraph height prediction. The **30 short texts** are good micro-tests. Extract them from Pretext's test data and add as a separate small suite (`test/layout/data/pretext-micro/`) with fewer width steps (e.g., 5 widths each = 150 files).
+- OpenType shaping (GSUB/GPOS ligatures). Requires HarfBuzz, not FreeType.
+- GPU text rendering or glyph atlases.
+- CFF2 variable outline support (TrueType `glyf` covers system fonts).
 
 ---
 
-## Summary
+## 3. Platform Strategy
 
-| Enhancement | Scope | Files changed | Test impact |
-|---|---|---|---|
-| Semantic break kinds | `layout.hpp`, `layout_text.cpp` | ~300 lines | Zero behavioral change; refactor only |
-| Corpus sweep tests | New test infrastructure | Generator script + 122–427 HTML/JSON files | `make layout suite=pretext`, 86/122 in baseline |
+### 3.1 macOS — CoreText (Ready Now)
 
-The two enhancements are independent and can be implemented in any order. The break kind enum is a prerequisite for *reasoning* about break correctness but not for *running* the corpus tests.
+CoreText already provides a **complete replacement pipeline**. On macOS today:
+
+- **Rendering**: CT is primary rasterizer; FT is already just a fallback
+- **Glyph metrics**: FT provides base metrics, but CT always overrides the advance
+- **Font metrics**: 100% FontTables (zero FT)
+- **Font loading**: `font_rasterize_ct_create()` creates CTFont from raw bytes
+
+**Implementation**: Promote CT from secondary to sole backend. Remove all FT
+fallback paths in `font_glyph.c`. No new code required — just deletion.
+
+### 3.2 Linux — FontTables Metrics + ThorVG Rasterization
+
+Linux has no system font rasterizer API. FreeType is currently the **only** glyph
+loader and bitmap rasterizer.
+
+**Replacement**: Two-layer approach using existing dependencies:
+
+1. **Glyph metrics (layout)** — FontTables `cmap` + `hmtx` already provide
+   advance widths. Add `glyf` outline parsing for bearing/bbox (partially exists
+   via `font_tables_get_glyph_bbox`). This covers the layout path with no new
+   dependency.
+
+2. **Glyph rasterization (rendering)** — Use **ThorVG** (already linked, v1.0-pre34)
+   as a **vector path rasterizer**. Extract TrueType glyph outlines from the `glyf`
+   table via FontTables, convert quadratic beziers to cubic
+   (`CP1 = P0 + 2/3(P1-P0)`, `CP2 = P2 + 2/3(P1-P2)`), feed into `tvg_shape_*`,
+   render to a pixel buffer via `tvg_swcanvas`. This bypasses ThorVG's text API
+   entirely — using it purely as a software rasterizer.
+
+**ThorVG advantages:**
+- Zero new dependencies — already linked for SVG rendering and wavy line decoration
+- High-quality analytic anti-aliasing (same quality as SVG path rendering)
+- COLR/CPAL color glyphs possible via layered shapes with palette colors
+- No binary size increase (already in the build)
+
+### 3.3 Windows — DirectWrite
+
+Windows has **DirectWrite**, the native text rendering API (equivalent to CoreText).
+
+**Replacement**: Implement a `font_rasterize_dw.c` module parallel to
+`font_rasterize_ct.c`:
+
+| CoreText API | DirectWrite Equivalent |
+|-------------|----------------------|
+| `CGFontCreateWithDataProvider` | `IDWriteFactory::CreateCustomFontFileReference` |
+| `CTFontCreateWithGraphicsFont` | `IDWriteFontFace::CreateFontFace` |
+| `CTFontGetAdvancesForGlyphs` | `IDWriteFontFace::GetDesignGlyphMetrics` |
+| `CTFontGetBoundingRectsForGlyphs` | `IDWriteFontFace::GetDesignGlyphMetrics` |
+| `CTFontDrawGlyphs` | `ID2D1RenderTarget::DrawGlyphRun` or `IDWriteBitmapRenderTarget::DrawGlyphRun` |
+| `CTFontGetAscent/Descent/Leading` | `IDWriteFontFace::GetMetrics` |
+| `kCTFontVariationAttribute` | `IDWriteFontFace5::GetFontAxisValues` |
+| `CTFontCreateForString` (fallback) | `IDWriteFontFallback::MapCharacters` |
+
+**Note**: DirectWrite can also be the Linux fallback if targeting minimal visual
+quality requirements, but ThorVG with direct glyph outline extraction avoids
+adding any new dependency.
+
+---
+
+## 4. Implementation Plan
+
+### Phase 6: macOS — Promote CoreText to Sole Backend
+
+**Files changed**: `font_glyph.c`, `font_loader.c`, `font_context.c`, `font_internal.h`
+
+#### 6.1 `font_loader.c` — Replace FT_New_Memory_Face with CT
+
+Current flow:
+```
+FT_New_Memory_Face(data, len) → FT_Face
+FT_Set_Pixel_Sizes(face, size)
+apply_variable_font_axes(face, opsz, wght)
+font_rasterize_ct_create(data, len, size)        // ct_raster_ref
+font_platform_create_ct_font(ps_name, family, size, weight)  // ct_font_ref
+```
+
+New flow (macOS):
+```
+font_rasterize_ct_create(data, len, size)        // ct_raster_ref (primary)
+font_platform_create_ct_font_var(family, size, weight, opsz)  // ct_font_ref with variation
+font_tables_open(data, len)                       // tables (metrics)
+```
+
+**Changes:**
+- Remove all `FT_New_Memory_Face` calls; `ct_raster_ref` and `tables` are sufficient
+- New function: `font_platform_create_ct_font_var()` — creates CTFont with
+  `kCTFontVariationAttribute` for opsz/wght axes (replaces `apply_variable_font_axes`)
+- `FontHandle.ft_face` becomes NULL on macOS; all code paths must guard on
+  `ct_raster_ref` / `tables` instead
+- `FT_Get_Postscript_Name` → `font_tables_get_name(tables)->postscript_name`
+- `face->family_name` → `font_tables_get_name(tables)->family_name`
+- `face->face_flags & FT_FACE_FLAG_FIXED_SIZES` → check for `CBDT` or `sbix` table
+  presence in FontTables (add `font_tables_has_table(tables, tag)` helper)
+- `face->face_flags & FT_FACE_FLAG_COLOR` → same CBDT/COLR/sbix table check
+- `face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS` → `font_tables_get_fvar(tables) != NULL`
+- Bitmap scale for emoji: compute from `head.units_per_em` + requested size vs
+  strike size in `CBDT`/`sbix` header
+
+#### 6.2 `font_glyph.c` — Remove FT Fallback Paths
+
+Current glyph loading (3 tiers):
+```
+1. FT_Load_Glyph          (primary)
+2. ct_raster_ref metrics   (secondary)
+3. FontTables hmtx         (tertiary)
+→ CT advance override      (always, if ct_font_ref exists)
+```
+
+New glyph loading (macOS):
+```
+1. ct_raster_ref metrics   (primary — full advance + bbox)
+2. FontTables hmtx/glyf    (fallback — advance only, if CT fails)
+→ ct_font_ref advance      (override for system fonts, as before)
+```
+
+**Changes:**
+- `font_get_glyph()`: Remove FT primary path (lines 186–205). CT `ct_raster_ref`
+  becomes the first attempt. FontTables `hmtx` becomes fallback.
+- `font_load_glyph()`: Remove `try_load_from_handle()` FT function. CT path
+  (`try_load_from_handle_ct()`) becomes the only rendering path.
+- `font_render_glyph()`: Remove FT fallback after CT render. If CT fails, glyph
+  is missing (matches browser behavior — browsers don't have an FT fallback).
+- Delete `fill_loaded_glyph_from_slot()` — only exists to read FT_GlyphSlot fields.
+- Remove `FT_LOAD_*` flag construction code.
+- Remove `FT_PIXEL_MODE_*` constants.
+
+#### 6.3 `font_context.c` — Remove FT Library Lifecycle
+
+**Changes:**
+- Remove `FT_New_Library`, `FT_Add_Default_Modules`, `FT_Library_SetLcdFilter` from
+  `font_context_create()`
+- Remove `FT_Done_Library` from `font_context_destroy()`
+- Remove `FT_Done_Face` from `font_handle_release()` (nothing to release)
+- Remove custom `FT_MemoryRec_` callbacks (`ft_pool_alloc`, `ft_pool_free`, `ft_pool_realloc`)
+- Remove `font_context_get_ft_library()`, `font_handle_get_ft_face()`, `font_handle_wrap()`
+  migration helpers
+- Remove `FT_Library ft_library` from `FontContext` struct
+- Remove `FT_MemoryRec_ ft_memory` from `FontContext` struct
+
+#### 6.4 `font_internal.h` — Remove FT Types
+
+**Changes:**
+- Remove all `#include <ft2build.h>` and `FT_*_H` includes (11 lines)
+- Remove `FT_Face ft_face` from `FontHandle` struct
+- Remove `FT_Library ft_library` and `FT_MemoryRec_ ft_memory` from `FontContext`
+- Replace `FT_Face` parameter types with `void*` or remove entirely
+
+#### 6.5 `font_fallback.c` — Remove num_faces Reference
+
+**Change**: Replace `handle->ft_face->num_faces` with FontTables-based TTC face
+count. Add `font_tables_get_face_count()` that reads the TTC header `numFonts`
+field (4 bytes at offset 8 in a TTC file).
+
+#### 6.6 `font.h` — Remove Public FT Escape Hatches
+
+**Changes:**
+- Remove `font_context_get_ft_library()` declaration
+- Remove `font_handle_get_ft_face()` declaration
+- Remove `font_handle_wrap()` declaration
+- Remove FT-related comments
+
+#### 6.7 New: `font_platform_create_ct_font_var()` — Variable Font Support
+
+```c
+// Create CTFont with variation axes (opsz, wght) applied
+void* font_platform_create_ct_font_var(const char* family_name,
+                                        float size_px, int weight, float opsz);
+```
+
+Implementation uses CoreText's `kCTFontVariationAttribute`:
+```c
+// Build variation dictionary: { 'opsz': size_px, 'wght': weight }
+CFNumberRef opsz_val = CFNumberCreate(NULL, kCFNumberFloatType, &opsz);
+CFNumberRef wght_val = CFNumberCreate(NULL, kCFNumberIntType, &weight);
+CFDictionaryRef variations = CFDictionaryCreate(NULL,
+    (const void*[]){ kCTFontOpticalSizeAttribute_tag, kCTFontWeightTrait_tag },
+    (const void*[]){ opsz_val, wght_val }, 2, ...);
+// Apply via CTFontDescriptorCreateWithAttributes + CTFontCreateWithFontDescriptor
+```
+
+#### 6.8 New: `font_tables_has_table()` — Table Presence Check
+
+```c
+// Check if a specific table exists (e.g., 'CBDT', 'COLR', 'sbix', 'fvar')
+bool font_tables_has_table(FontTables* ft, uint32_t tag);
+```
+
+Scans the table directory already parsed during `font_tables_open()`.
+
+#### 6.9 New: `font_tables_get_face_count()` — TTC Face Count
+
+```c
+// Get number of faces in a TTC collection (1 for non-TTC fonts)
+int font_tables_get_face_count(const uint8_t* data, size_t len);
+```
+
+Reads the TTC header `numFonts` field. Returns 1 for non-TTC files.
+
+**Estimated changes**: ~400 lines deleted, ~150 lines added. Net reduction ~250 lines.
+
+**Validation**: `make test-radiant-baseline`, `make test-lambda-baseline`, plus visual
+comparison of rendered pages.
+
+---
+
+### Phase 7: Linux — FontTables + ThorVG Rasterizer
+
+**New files**: `lib/font/font_glyf.c`, `lib/font/font_rasterize_tvg.cpp`
+
+Linux has no system font rasterizer API. The replacement uses two components that
+already exist in the project:
+
+1. **FontTables** — glyph metrics (`cmap` + `hmtx`) and outline extraction (`glyf`/`loca`)
+2. **ThorVG** (already linked, v1.0-pre34) — software path rasterizer via `SwCanvas`
+
+ThorVG's public text API (`tvg_text_*`) operates on strings, not individual glyphs,
+and exposes no per-glyph metrics or outline access. Instead, we **bypass the text
+API entirely** and use ThorVG purely as a **vector path rasterizer**: extract glyph
+outlines from the `glyf` table ourselves, convert to cubic bezier paths, feed them
+into `tvg_shape_*`, and rasterize via `tvg_swcanvas`.
+
+This approach is already planned in Radiant_Design_Font_Text.md §6.3.
+
+#### 7.1 `font_glyf.c` — TrueType Outline Extraction (~500 lines)
+
+New FontTables extension that parses the `glyf` table to extract glyph outlines:
+
+```c
+// Glyph outline representation
+typedef struct {
+    float x, y;
+    bool  on_curve;   // true = on-curve point, false = off-curve control point
+} GlyfPoint;
+
+typedef struct {
+    GlyfPoint* points;
+    int*       contour_ends;   // index of last point in each contour
+    int        num_points;
+    int        num_contours;
+    int16_t    x_min, y_min, x_max, y_max;  // bounding box in font units
+} GlyfOutline;
+
+// Extract outline for a glyph (handles simple + compound glyphs)
+bool font_glyf_get_outline(FontTables* tables, uint16_t glyph_id,
+                            GlyfOutline* out, Pool* pool);
+```
+
+Parsing steps:
+1. Look up glyph offset via `loca` table (short or long format, from `head.indexToLocFormat`)
+2. Read glyph header: `numberOfContours`, bounding box
+3. **Simple glyph** (`numberOfContours >= 0`): read contour endpoint array,
+   instruction length (skip), flag array (with repeat handling), x/y coordinate
+   deltas (1-byte or 2-byte per flag bits)
+4. **Compound glyph** (`numberOfContours == -1`): loop through components — each has
+   a glyph index + transform (translate, scale, or 2×2 matrix). Recursively get
+   component outlines and apply transforms.
+
+#### 7.2 `font_rasterize_tvg.cpp` — ThorVG Path Rasterizer (~400 lines)
+
+```cpp
+// Same 3-function interface as font_rasterize_ct.c
+void* font_rasterize_tvg_create(const uint8_t* data, size_t len,
+                                 float size_px, int face_index);
+bool  font_rasterize_tvg_metrics(void* tvg_ref, uint32_t codepoint,
+                                  float bitmap_scale, GlyphInfo* out);
+GlyphBitmap* font_rasterize_tvg_render(void* tvg_ref, uint32_t codepoint,
+                                        float bitmap_scale, Arena* arena,
+                                        GlyphRenderMode mode);
+```
+
+Internal state:
+```cpp
+typedef struct {
+    FontTables* tables;
+    float       size_px;
+    float       scale;         // size_px / units_per_em
+    Pool*       pool;
+} TvgFontRef;
+```
+
+**Metrics** — use existing FontTables (no ThorVG needed):
+```cpp
+bool font_rasterize_tvg_metrics(void* tvg_ref, uint32_t codepoint,
+                                 float bitmap_scale, GlyphInfo* out) {
+    TvgFontRef* ref = (TvgFontRef*)tvg_ref;
+    CmapTable* cmap = font_tables_get_cmap(ref->tables);
+    HmtxTable* hmtx = font_tables_get_hmtx(ref->tables);
+    uint16_t glyph_id = cmap_lookup(cmap, codepoint);
+    if (!glyph_id) return false;
+
+    // advance from hmtx
+    uint16_t advance = hmtx_get_advance(hmtx, glyph_id);
+    out->id = glyph_id;
+    out->advance_x = (float)advance * ref->scale / bitmap_scale;
+
+    // bbox from glyf table
+    GlyfOutline outline;
+    if (font_glyf_get_outline(ref->tables, glyph_id, &outline, ref->pool)) {
+        out->bearing_x = (float)outline.x_min * ref->scale / bitmap_scale;
+        out->bearing_y = (float)outline.y_max * ref->scale / bitmap_scale;
+        out->width = (float)(outline.x_max - outline.x_min) * ref->scale / bitmap_scale;
+        out->height = (float)(outline.y_max - outline.y_min) * ref->scale / bitmap_scale;
+    }
+    return true;
+}
+```
+
+**Rasterization** — extract outline, convert to ThorVG shape, render to buffer:
+```cpp
+GlyphBitmap* font_rasterize_tvg_render(void* tvg_ref, uint32_t codepoint,
+                                        float bitmap_scale, Arena* arena,
+                                        GlyphRenderMode mode) {
+    TvgFontRef* ref = (TvgFontRef*)tvg_ref;
+    CmapTable* cmap = font_tables_get_cmap(ref->tables);
+    uint16_t glyph_id = cmap_lookup(cmap, codepoint);
+    if (!glyph_id) return NULL;
+
+    // 1. Extract TrueType outline from glyf table
+    GlyfOutline outline;
+    if (!font_glyf_get_outline(ref->tables, glyph_id, &outline, ref->pool))
+        return NULL;
+
+    // 2. Compute pixel dimensions
+    float scale = ref->size_px * bitmap_scale
+                  / (float)font_tables_get_head(ref->tables)->units_per_em;
+    int px_w = (int)ceilf((outline.x_max - outline.x_min) * scale) + 2;
+    int px_h = (int)ceilf((outline.y_max - outline.y_min) * scale) + 2;
+    if (px_w <= 0 || px_h <= 0) return NULL;
+
+    // 3. Build ThorVG shape from outline contours
+    Tvg_Paint shape = tvg_shape_new();
+    int pt_idx = 0;
+    for (int c = 0; c < outline.num_contours; c++) {
+        int contour_end = outline.contour_ends[c];
+        bool first = true;
+        while (pt_idx <= contour_end) {
+            GlyfPoint p = outline.points[pt_idx];
+            float sx = (p.x - outline.x_min) * scale;
+            float sy = (outline.y_max - p.y) * scale;  // flip Y axis
+
+            if (first) {
+                tvg_shape_move_to(shape, sx, sy);
+                first = false;
+            } else if (p.on_curve) {
+                tvg_shape_line_to(shape, sx, sy);
+            } else {
+                // quadratic bezier → cubic: CP1 = P0 + 2/3(P1-P0)
+                // get next on-curve point (or midpoint if also off-curve)
+                // ... standard TrueType quadratic-to-cubic conversion
+                tvg_shape_cubic_to(shape, cp1x, cp1y, cp2x, cp2y, ex, ey);
+            }
+            pt_idx++;
+        }
+        tvg_shape_close(shape);
+    }
+    tvg_shape_set_fill_color(shape, 255, 255, 255, 255);
+
+    // 4. Rasterize via ThorVG software canvas
+    uint32_t* buffer = (uint32_t*)pool_calloc(ref->pool, px_w * px_h * 4);
+    Tvg_Canvas canvas = tvg_swcanvas_create(0);
+    tvg_swcanvas_set_target(canvas, buffer, px_w, px_w, px_h, TVG_COLORSPACE_ABGR8888);
+    tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, true);
+    tvg_canvas_sync(canvas);
+
+    // 5. Extract grayscale from alpha channel → 8-bit bitmap
+    GlyphBitmap* bmp = (GlyphBitmap*)arena_alloc(arena, sizeof(GlyphBitmap));
+    bmp->data = (uint8_t*)arena_alloc(arena, px_w * px_h);
+    for (int i = 0; i < px_w * px_h; i++) {
+        bmp->data[i] = (buffer[i] >> 24) & 0xFF;  // alpha channel
+    }
+    bmp->width = px_w;
+    bmp->height = px_h;
+    bmp->pitch = px_w;
+    bmp->bearing_x = (int)floorf(outline.x_min * scale);
+    bmp->bearing_y = (int)ceilf(outline.y_max * scale);
+    bmp->pixel_mode = GLYPH_PIXEL_GRAY;
+
+    tvg_canvas_destroy(canvas);
+    return bmp;
+}
+```
+
+#### 7.3 Why ThorVG Over stb_truetype
+
+| | ThorVG | stb_truetype |
+|---|---|---|
+| Already linked | **Yes** (used for SVG/wavy lines) | No (new dependency) |
+| Anti-aliasing quality | High (analytic AA, same as SVG paths) | Medium (coverage-based) |
+| Color emoji | COLR/CPAL possible via layered shapes | Not supported |
+| Code needed | ~400 lines (outline→shape conversion) | ~300 lines (simpler API) |
+| Glyph metrics | FontTables (same either way) | stb has its own parser |
+| Binary size impact | 0 (already linked) | +30KB |
+
+ThorVG is the better choice because it adds **zero new dependencies**, produces
+**higher quality anti-aliased output** (the same rasterizer used for SVG rendering),
+and can potentially handle **COLR color glyphs** via layered shapes.
+
+#### 7.4 Color Emoji on Linux
+
+Two emoji table formats to support:
+
+1. **CBDT/sbix** — pre-rendered PNG bitmaps. Parse the strike header, find the
+   glyph's PNG blob, decode with libpng (already linked). ~200 lines of table
+   parsing code. No ThorVG needed.
+2. **COLR/CPAL** — vector color glyphs (layered outlines with a color palette).
+   Each color layer is a separate glyph outline rendered with a palette color.
+   Can reuse the `font_glyf_get_outline()` + ThorVG shape pipeline, rendering each
+   layer with `tvg_shape_set_fill_color(r, g, b, a)` from the CPAL palette.
+   ~300 lines for COLR v0 (simple layers). COLR v1 (gradients, compositing) can
+   be deferred.
+
+#### 7.5 Variable Fonts on Linux
+
+ThorVG does not provide variable font interpolation through its public API.
+Options:
+
+1. **Defer** — load variable fonts at their default instance. Most system fonts on
+   Linux ship as separate static files (Regular.ttf, Bold.ttf). Variable web fonts
+   are less common. This is the pragmatic starting point.
+2. **FontTables `fvar` + `gvar` parsing** — read axis values and apply gvar deltas
+   to `glyf` control points before outline extraction. Complex (~500 lines) but
+   covers the common case (weight/opsz variations). Future enhancement.
+
+Recommended: Option 1 for initial phase, option 2 as future enhancement.
+
+#### 7.6 Font Discovery on Linux
+
+Currently uses directory scanning (`font_database.c`). No FreeType involved —
+already FT-free. No changes needed.
+
+**Estimated changes**: ~900 lines new (`font_glyf.c` ~500 + `font_rasterize_tvg.cpp`
+~400). No new dependencies. Conditional compilation via `#ifndef __APPLE__` and
+`#ifndef _WIN32`.
+
+**Validation**: Linux CI build + `make test-radiant-baseline` on Linux.
+
+---
+
+### Phase 8: Windows — DirectWrite Rasterizer
+
+**New file**: `lib/font/font_rasterize_dw.c`
+
+#### 8.1 DirectWrite Integration
+
+Create `font_rasterize_dw.c` with the same 3-function interface:
+
+```c
+void* font_rasterize_dw_create(const uint8_t* data, size_t len,
+                                float size_px, int face_index);
+bool  font_rasterize_dw_metrics(void* dw_ref, uint32_t codepoint,
+                                 float bitmap_scale, GlyphInfo* out);
+GlyphBitmap* font_rasterize_dw_render(void* dw_ref, uint32_t codepoint,
+                                       float bitmap_scale, Arena* arena,
+                                       GlyphRenderMode mode);
+```
+
+#### 8.2 Key DirectWrite APIs
+
+```c
+// Font loading from memory
+IDWriteFactory5* factory;
+DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5), &factory);
+
+// Create font face from raw data
+IDWriteFontFileStream* stream;  // custom implementation wrapping our buffer
+IDWriteFontFile* file;
+factory->CreateCustomFontFileReference(data, len, loader, &file);
+IDWriteFontFace* face;
+factory->CreateFontFace(DWRITE_FONT_FACE_TYPE_TRUETYPE, 1, &file, 0,
+                        DWRITE_FONT_SIMULATIONS_NONE, &face);
+
+// Glyph metrics
+UINT16 glyph_index;
+face->GetGlyphIndices(&codepoint, 1, &glyph_index);
+DWRITE_GLYPH_METRICS gm;
+face->GetDesignGlyphMetrics(&glyph_index, 1, &gm, FALSE);
+
+// Rasterization
+IDWriteBitmapRenderTarget* target;
+factory->CreateMonitorRenderingParams(monitor, &params);
+gdi_interop->CreateBitmapRenderTarget(NULL, w, h, &target);
+target->DrawGlyphRun(x, y, DWRITE_MEASURING_MODE_NATURAL, &run, params, RGB(0,0,0), NULL);
+
+// Variable font axes
+IDWriteFontFace5* face5;
+face->QueryInterface(__uuidof(IDWriteFontFace5), &face5);
+DWRITE_FONT_AXIS_VALUE axis_values[] = {
+    { DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, opsz },
+    { DWRITE_FONT_AXIS_TAG_WEIGHT, wght }
+};
+IDWriteFontResource* resource;
+face5->GetFontResource(&resource);
+resource->CreateFontFace(DWRITE_FONT_SIMULATIONS_NONE, axis_values, 2, &var_face);
+```
+
+#### 8.3 Color Emoji on Windows
+
+DirectWrite natively supports COLR/CPAL and SVG color glyphs via
+`ID2D1DeviceContext4::DrawColorBitmapGlyphRun`. This handles Windows emoji fonts
+(Segoe UI Emoji) without custom parsing.
+
+#### 8.4 Font Discovery on Windows
+
+Currently uses Registry scanning in `font_database.c`. No FreeType involved.
+No changes needed.
+
+**Estimated changes**: ~400 lines new. Conditional compilation via `#ifdef _WIN32`.
+
+---
+
+### Phase 9: Build System Cleanup
+
+#### 9.1 Remove FreeType from `build_lambda_config.json`
+
+- Remove `freetype` library entry from top-level `libraries` array
+- Remove `freetype` from `platforms.windows.libraries`
+- Remove `freetype` from `platforms.linux.libraries`
+- Remove FreeType include paths from `platforms.macos.includes` and `platforms.linux.includes`
+- Update `brotlidec`/`brotlicommon` descriptions (no longer "FreeType dependency" — still
+  needed for WOFF2)
+- Update `harfbuzz` description (if retained for future shaping, clarify it's no
+  longer an FreeType dependency)
+- Remove `harfbuzz` + `graphite2` from Windows if only used as FreeType transitive deps
+- Remove `zlib`/`bzip2` FreeType-related ordering comments
+
+#### 9.2 Binary Size Reduction
+
+| Library | Size (static) | Removable? |
+|---------|:---:|:---:|
+| libfreetype.a | 768KB | ✓ Remove |
+| libharfbuzz.a | 1.2MB | ✓ Remove (no shaping needed) |
+| libgraphite2.a | 120KB | ✓ Remove (HarfBuzz dep) |
+| brotlidec + brotlicommon | 180KB | ✗ Keep (WOFF2 needs brotli) |
+| zlib | — | ✗ Keep (used elsewhere) |
+| bzip2 | — | ✗ Keep (used elsewhere) |
+| **Total savings** | **~2MB** | |
+
+#### 9.3 Dependency Graph After
+
+```
+lib/font/
+├── font_context.c          — init FontTables, platform rasterizer
+├── font_loader.c           — font_tables_open() + platform rasterizer create
+├── font_glyph.c            — platform rasterizer metrics/render + FontTables fallback
+├── font_metrics.c          — FontTables only (unchanged)
+├── font_rasterize_ct.c     — macOS: CoreText (existing, promoted to primary)
+├── font_rasterize_tvg.cpp  — Linux: ThorVG path rasterizer (new)
+├── font_glyf.c             — TrueType glyf outline extraction (new, used by tvg)
+├── font_rasterize_dw.c     — Windows: DirectWrite (new)
+├── font_tables.c           — TTF/OTF binary parser (existing)
+├── font_platform.c         — platform font discovery (existing)
+├── font_fallback.c         — codepoint fallback chain (existing)
+├── font_database.c         — system font catalog (existing, FT-free)
+├── font_cache.c            — face cache (existing, FT-free)
+└── font_face.c             — face descriptors (existing, FT-free)
+```
+
+No `ft2build.h`. No `libfreetype.a`. No `FT_*` calls.
+
+---
+
+## 5. Implementation Helpers Needed
+
+### 5.1 FontTables Extensions
+
+| Function | Purpose | Used By |
+|----------|---------|---------|
+| `font_tables_has_table(ft, tag)` | Check table presence (CBDT, COLR, sbix, fvar) | Replace `FT_FACE_FLAG_*` checks |
+| `font_tables_get_face_count(data, len)` | TTC face count from header | Replace `face->num_faces` |
+| `font_tables_open_face(data, len, face_index)` | Open specific TTC face by index | Replace `FT_New_Memory_Face(..., index)` |
+
+### 5.2 Platform Rasterizer Interface
+
+All three backends (`ct`, `stb`, `dw`) share the same 3-function interface stored
+as function pointers on `FontHandle`:
+
+```c
+// In font_internal.h:
+typedef void* (*RasterizerCreateFn)(const uint8_t* data, size_t len,
+                                     float size_px, int face_index);
+typedef bool  (*RasterizerMetricsFn)(void* ref, uint32_t codepoint,
+                                     float bitmap_scale, GlyphInfo* out);
+typedef GlyphBitmap* (*RasterizerRenderFn)(void* ref, uint32_t codepoint,
+                                           float bitmap_scale, Arena* arena,
+                                           GlyphRenderMode mode);
+```
+
+Or simply use `#ifdef __APPLE__` / `#ifdef __linux__` / `#ifdef _WIN32` guards
+(simpler, matches current `font_rasterize_ct.c` pattern).
+
+---
+
+## 6. Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|:---:|:---:|------------|
+| CT-only path misses FT edge cases | Low | Medium | FT is already fallback-only on macOS; CT has been primary for 5 phases |
+| ThorVG rasterization quality gap on Linux | Low | Low | ThorVG uses same analytic AA as SVG paths; high quality output |
+| glyf outline parsing edge cases | Medium | Medium | Compound glyphs, rare TrueType flags. Incremental testing against FT baseline |
+| Variable fonts regress | Medium | Medium | Default to static instance initially; add fvar support incrementally |
+| Color emoji broken on Linux | Low | Low | Parse CBDT PNG bitmaps directly (straightforward) |
+| DirectWrite API complexity | Medium | Medium | Minimal surface needed (3 functions); well-documented API |
+| Build system breakage | Low | High | Phased: macOS first (CI validates), then Linux, then Windows |
+
+---
+
+## 7. Phasing & Priority
+
+| Phase | Platform | Effort | Priority |
+|-------|----------|:---:|:---:|
+| **6** | macOS — CT promotion | Small (mostly deletion) | **P0** — do first |
+| **7** | Linux — ThorVG rasterizer | Medium (~900 lines new) | P1 |
+| **8** | Windows — DirectWrite | Medium (new rasterizer) | P1 |
+| **9** | Build cleanup | Small | P0 (after Phase 6–8) |
+
+Phase 6 can ship independently. Phases 7 and 8 can be developed in parallel.
+Phase 9 ships after all platforms are clean.
+
+---
+
+## 8. Validation Checklist
+
+- [ ] `make build` — 0 errors, 0 FT-related warnings
+- [ ] `make test-radiant-baseline` — no regressions
+- [ ] `make test-lambda-baseline` — no regressions
+- [ ] `grep -r "ft2build\|FT_Face\|FT_Library\|freetype" lib/ lambda/ radiant/` — zero hits
+- [ ] Visual comparison: render 10 reference pages, diff against pre-change screenshots
+- [ ] Binary size: measure reduction (expect ~2MB)
+- [ ] `build_lambda_config.json` — no `freetype` entry
+- [ ] Linux CI: build + test pass with stb_truetype
+- [ ] Windows CI: build + test pass with DirectWrite
