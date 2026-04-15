@@ -2444,6 +2444,10 @@ extern "C" Item js_object_create(Item proto) {
 // includes __class_name__, __get_*, __set_*, and function-valued entries from
 // the source instance, chained to the original __proto__ for instanceof support.
 
+// Forward declarations for %TypedArray% intrinsic (defined later in file)
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
+extern "C" Item js_get_typed_array_base();
+
 extern "C" Item js_get_prototype_of(Item object) {
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
@@ -2487,6 +2491,10 @@ extern "C" Item js_get_prototype_of(Item object) {
                 (n->len == 14 && strncmp(n->chars, "AggregateError", 14) == 0);
             if (is_native_error) {
                 return js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+            }
+            // TypedArray constructors → [[Prototype]] = %TypedArray%
+            if (js_is_typed_array_ctor_name(n->chars, (int)n->len)) {
+                return js_get_typed_array_base();
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -2824,7 +2832,29 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            // ES spec: All built-in constructor .prototype are non-writable
+            JsFuncProps* efn = (JsFuncProps*)obj.function;
+            bool is_builtin_ctor = false;
+            if (efn->name) {
+                const char* en = efn->name->chars;
+                int el = (int)efn->name->len;
+                is_builtin_ctor = (el == 5 && strncmp(en, "Error", 5) == 0) ||
+                    (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
+                    (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
+                    (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
+                    (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
+                    (el == 8 && strncmp(en, "URIError", 8) == 0) ||
+                    (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+                    (el == 3 && strncmp(en, "Map", 3) == 0) ||
+                    (el == 3 && strncmp(en, "Set", 3) == 0) ||
+                    (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
+                    (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+                    (el == 7 && strncmp(en, "Promise", 7) == 0) ||
+                    (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+                    (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+                    js_is_typed_array_ctor_name(en, el);
+            }
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
             return desc;
@@ -7164,6 +7194,7 @@ struct JsCtor {
 // Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
 // Clearing the prototype field forces lazy re-creation of a fresh prototype
 // on next access, while keeping the constructor struct itself alive (pool-allocated).
+static void js_typed_array_base_reset(); // forward declaration
 extern "C" void js_reset_constructor_prototypes() {
     if (!js_ctor_cache_init) return;
     for (int i = 0; i < JS_CTOR_MAX; i++) {
@@ -7178,6 +7209,92 @@ extern "C" void js_reset_constructor_prototypes() {
     // The old globalThis holds constructors whose .prototype fields now point to stale
     // (freed or mutated) prototype objects.
     js_global_this_obj = (Item){0};
+    // Reset %TypedArray% intrinsic so it's re-created fresh
+    js_typed_array_base_reset();
+}
+
+// %TypedArray% intrinsic: shared base constructor for all TypedArray types.
+// Object.getPrototypeOf(Int8Array) === %TypedArray%
+// Object.getPrototypeOf(Int8Array.prototype) === %TypedArray%.prototype
+static Item js_typed_array_base = {0};
+static Item js_typed_array_base_proto = {0};
+
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
+    return (len == 9  && strncmp(name, "Int8Array", 9) == 0) ||
+           (len == 10 && strncmp(name, "Uint8Array", 10) == 0) ||
+           (len == 17 && strncmp(name, "Uint8ClampedArray", 17) == 0) ||
+           (len == 10 && strncmp(name, "Int16Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint16Array", 11) == 0) ||
+           (len == 10 && strncmp(name, "Int32Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint32Array", 11) == 0) ||
+           (len == 12 && strncmp(name, "Float32Array", 12) == 0) ||
+           (len == 12 && strncmp(name, "Float64Array", 12) == 0) ||
+           (len == 13 && strncmp(name, "BigInt64Array", 13) == 0) ||
+           (len == 14 && strncmp(name, "BigUint64Array", 14) == 0);
+}
+
+extern "C" Item js_get_typed_array_base_proto(); // forward declaration
+
+extern "C" Item js_get_typed_array_base() {
+    if (js_typed_array_base.item != 0) return js_typed_array_base;
+    // Create the %TypedArray% intrinsic function object
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = (void*)js_ctor_placeholder;
+    fn->param_count = 0;
+    fn->formal_length = -1;
+    fn->builtin_id = -2;
+    fn->name = heap_create_name("TypedArray", 10);
+    js_typed_array_base = (Item){.function = (Function*)fn};
+    heap_register_gc_root(&js_typed_array_base.item);
+    // Eagerly initialize %TypedArray%.prototype so it's available before any
+    // concrete TypedArray prototype chain is set up (e.g., Object.getPrototypeOf(Int8Array).prototype)
+    js_get_typed_array_base_proto();
+    return js_typed_array_base;
+}
+
+// Helper: create a named function stub (bypasses func_ptr cache).
+// For prototype method stubs that just need .name and .length properties.
+static Item js_create_func_stub(const char* name, int name_len, int param_count) {
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->builtin_id = 0;
+    fn->name = heap_create_name(name, name_len);
+    return (Item){.function = (Function*)fn};
+}
+
+// Defined in js_runtime.cpp — populates %TypedArray%.prototype with proper Array builtins
+extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor);
+
+extern "C" Item js_get_typed_array_base_proto() {
+    if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
+    js_typed_array_base_proto = js_new_object();
+    heap_register_gc_root(&js_typed_array_base_proto.item);
+    // Set __class_name__ for type identification
+    Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    Item cnv = (Item){.item = s2it(heap_create_name("TypedArray", 10))};
+    js_property_set(js_typed_array_base_proto, cnk, cnv);
+    // Set __is_proto__ marker
+    Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
+    js_property_set(js_typed_array_base_proto, ipk, (Item){.item = b2it(true)});
+    // Connect %TypedArray%.prototype to %TypedArray%
+    Item base = js_get_typed_array_base();
+    JsFunctionLayout* base_fn = (JsFunctionLayout*)base.function;
+    base_fn->prototype = js_typed_array_base_proto;
+    heap_register_gc_root(&base_fn->prototype.item);
+
+    // Populate methods on %TypedArray%.prototype and static methods on %TypedArray%
+    js_populate_typed_array_base_proto(js_typed_array_base_proto, base);
+
+    return js_typed_array_base_proto;
+}
+
+static void js_typed_array_base_reset() {
+    js_typed_array_base = (Item){0};
+    js_typed_array_base_proto = (Item){0};
 }
 
 // Forward declarations for functions in js_runtime.cpp used by constructor population
@@ -7216,9 +7333,17 @@ static void js_populate_number_ctor(Item fn_item) {
     // Fetch via js_property_get which triggers js_lookup_constructor_static
     const char* methods[] = {"isFinite", "isNaN", "isInteger", "isSafeInteger", "parseInt", "parseFloat"};
     int method_lens[] = {8, 5, 9, 13, 8, 10};
+    int method_pcs[] = {1, 1, 1, 1, 2, 1};
     for (int i = 0; i < 6; i++) {
         Item key = (Item){.item = s2it(heap_create_name(methods[i], method_lens[i]))};
-        Item method = js_property_get(fn_item, key);
+        Item method;
+        // ES spec: Number.parseInt === parseInt, Number.parseFloat === parseFloat
+        // Use the same global builtin function objects for identity equality
+        if (i >= 4) { // parseInt (i=4) and parseFloat (i=5)
+            method = js_get_global_builtin_fn(key, (Item){.item = i2it(method_pcs[i])});
+        } else {
+            method = js_property_get(fn_item, key);
+        }
         if (method.item != ItemNull.item && method.item != make_js_undefined().item) {
             js_func_init_property(fn_item, key, method);
             js_mark_non_enumerable(fn_item, key);
@@ -7294,7 +7419,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
         {"AggregateError", 14, JS_CTOR_AGGREGATE_ERROR, 2},
         {"RegExp", 6, JS_CTOR_REGEXP, 2},
-        {"Date", 4, JS_CTOR_DATE, 1},
+        {"Date", 4, JS_CTOR_DATE, 7},
         {"Promise", 7, JS_CTOR_PROMISE, 1},
         {"Map", 3, JS_CTOR_MAP, 0},
         {"Set", 3, JS_CTOR_SET, 0},
@@ -7302,15 +7427,15 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
         {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
         {"DataView", 8, JS_CTOR_DATAVIEW, 1},
-        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 1},
-        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 1},
-        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 1},
-        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 1},
-        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 1},
-        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 1},
-        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 1},
-        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 1},
-        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 1},
+        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 3},
+        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 3},
+        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 3},
+        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 3},
+        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 3},
+        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 3},
+        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
+        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
+        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
         {NULL, 0, 0, 0}
     };
 
