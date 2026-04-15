@@ -13542,6 +13542,22 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
 
+            // Re-initialize try-finally state registers after resume.
+            // These are plain MIR registers (not env-backed), so they don't
+            // survive across yield. Without re-init, stale has_return_reg
+            // values cause premature return from the finally block.
+            for (int td = 0; td < mt->try_ctx_depth; td++) {
+                JsTryContext* tc = &mt->try_ctx_stack[td];
+                if (tc->has_finally) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
+            }
+
             // The yield expression evaluates to the 'input' parameter (sent value)
             return mt->gen_input_reg;
         }
@@ -13626,6 +13642,18 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             MIR_new_mem_op(mt->ctx, MIR_T_I64,
                                 e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
                     }
+                }
+            }
+            // Re-initialize try-finally state registers after async resume
+            for (int td = 0; td < mt->try_ctx_depth; td++) {
+                JsTryContext* tc = &mt->try_ctx_stack[td];
+                if (tc->has_finally) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
                 }
             }
             // Resume value comes from gen_input register (the resolved value)
@@ -17292,6 +17320,25 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (has_finally) {
             jm_emit_label(mt, finally_label);
 
+            // In generators, push a minimal try context so that yield inside
+            // the finally body can re-initialize has_return_reg/return_val_reg
+            // on resume. The main try context was already popped before the
+            // finally block (so throws propagate outward), but the generator
+            // yield save/restore needs to know about these registers.
+            bool pushed_gen_finally_ctx = false;
+            if (mt->in_generator && mt->try_ctx_depth < 16) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = 0;
+                tc->finally_label = 0;
+                tc->end_label = 0;
+                tc->return_val_reg = return_val_reg;
+                tc->has_return_reg = has_return_reg;
+                tc->has_catch = false;
+                tc->has_finally = true;
+                tc->finally_body = NULL;
+                pushed_gen_finally_ctx = true;
+            }
+
             // Eval completion: save completion value before finally body.
             // Per spec, if finally completes normally, the completion value is
             // from the try/catch block, not the finally block.
@@ -17318,6 +17365,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
                     MIR_new_reg_op(mt->ctx, saved_cptn)));
             }
+
+            // Pop the generator finally context (pushed for yield re-init)
+            if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
             // After finally: check if we had a delayed return
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -19473,7 +19523,7 @@ static void jm_defer_mir_cleanup(MIR_context_t ctx) {
     }
 }
 
-static void jm_cleanup_deferred_mir() {
+void jm_cleanup_deferred_mir() {
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
         if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);
@@ -24534,6 +24584,16 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         g_jm_preamble_out->tp_name_pool = tp->name_pool;
         tp->ast_pool = NULL;  // prevent js_transpiler_destroy from freeing these
         tp->name_pool = NULL;
+    } else if (reusing_context) {
+        // Hot-reload batch mode: defer MIR context destruction.
+        // The heap persists across tests, so function objects on the heap
+        // may still reference code pages in this MIR context. Destroying
+        // the context now would leave dangling func_ptr pointers → SIGBUS.
+        // NOTE: We intentionally do NOT keep transpiler pools alive here
+        // to limit memory growth. If a stale function is called and its
+        // code references freed pool strings, the SIGSEGV/SIGBUS handler
+        // catches it and the batch runner recovers gracefully.
+        jm_defer_mir_cleanup(ctx);
     } else {
         MIR_finish(ctx);
     }
@@ -24547,7 +24607,11 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         runtime->nursery = js_context.nursery;
     }
 
-    jm_cleanup_deferred_mir();
+    // In hot-reload batch mode, skip deferred MIR cleanup — accumulated contexts
+    // must persist until batch end (heap objects may reference their code pages).
+    if (!reusing_context) {
+        jm_cleanup_deferred_mir();
+    }
     js_transpiler_destroy(tp);
 
     log_debug("js-mir: transpilation completed");

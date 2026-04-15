@@ -165,6 +165,7 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
 void preamble_state_destroy(JsPreambleState* state);
+void jm_cleanup_deferred_mir();
 
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).
