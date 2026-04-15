@@ -3,6 +3,7 @@
 #include "input-utils.hpp"
 #include "../mark_builder.hpp"
 #include <cstring>
+#include <cmath>
 
 #define MAX_PARSING_DEPTH 64                  // Max nesting depth
 using namespace lambda;
@@ -25,6 +26,12 @@ static String* parse_string(InputContext& ctx, const char **json) {
     tracker.advance(1);
 
     while (**json && **json != '"') {
+        unsigned char c = (unsigned char)**json;
+        // JSON does not allow unescaped control characters U+0000-U+001F
+        if (c < 0x20) {
+            ctx.addError(tracker.location(), "Unexpected control character in string");
+            return nullptr;
+        }
         if (**json == '\\') {
             (*json)++;
             tracker.advance(1);
@@ -71,8 +78,8 @@ static Item parse_number(InputContext& ctx, const char **json) {
     *json = end;
     tracker.advance(len);
 
-    // Check if it's an integer
-    if (value == (int64_t)value) {
+    // Check if it's an integer (but preserve -0 as float)
+    if (value == (int64_t)value && !(value == 0.0 && signbit(value))) {
         int64_t int_value = (int64_t)value;
         log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)",
                   value, (long long)int_value, (unsigned long long)int_value);

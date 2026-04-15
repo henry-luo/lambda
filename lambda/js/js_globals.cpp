@@ -6073,8 +6073,8 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 // Forward declaration: check if an Item is a JS Symbol (encoded as negative int)
 static bool js_is_symbol_item(Item item);
 
-static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char* gap,
-                               int depth, Item holder, Item key,
+static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
+                               const char* gap, int depth, Item holder, Item key,
                                void** visited, int visited_count);
 static void js_stringify_escape_string(StrBuf* sb, const char* s, int len);
 
@@ -6112,22 +6112,15 @@ static void js_stringify_indent(StrBuf* sb, const char* gap, int depth) {
     }
 }
 
-static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char* gap,
-                               int depth, Item holder, Item key,
+// returns true if the value was serialized, false if it's undefined/function/symbol
+// (the caller handles the "skip" vs "null" difference for arrays vs objects)
+static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
+                               const char* gap, int depth, Item holder, Item key,
                                void** visited, int visited_count) {
-    // Apply replacer function if provided
-    if (get_type_id(replacer) == LMD_TYPE_FUNC || get_type_id(replacer) == LMD_TYPE_MAP) {
-        // check if it's a callable function
-        TypeId rt = get_type_id(replacer);
-        if (rt == LMD_TYPE_FUNC) {
-            Item args[2] = {key, value};
-            value = js_call_function(replacer, holder, args, 2);
-        }
-    }
-
-    // Handle toJSON method
+    // ES spec SerializeJSONProperty steps:
+    // Step 2: toJSON first
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_MAP) {
+    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY) {
         Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
         Item toJSON_fn = js_property_access(value, toJSON_name);
         if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
@@ -6137,7 +6130,14 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         }
     }
 
-    // Unwrap Boolean/Number/String wrapper objects
+    // Step 3: Apply replacer function
+    if (get_type_id(replacer) == LMD_TYPE_FUNC) {
+        Item args[2] = {key, value};
+        value = js_call_function(replacer, holder, args, 2);
+        vtype = get_type_id(value);
+    }
+
+    // Step 4: Unwrap Boolean/Number/String wrapper objects
     if (vtype == LMD_TYPE_MAP) {
         bool cn_own = false;
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
@@ -6160,22 +6160,21 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         }
     }
 
-    // undefined, function, symbol → write "null" (in arrays, these become null)
+    // Step 5-8: undefined, function, symbol → return false (not serialized)
     if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
         || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
-        strbuf_append_str_n(sb, "null", 4);
-        return;
+        return false;
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
-        return;
+        return true;
     }
 
     // Boolean
     if (vtype == LMD_TYPE_BOOL) {
         if (it2b(value)) strbuf_append_str_n(sb, "true", 4);
         else strbuf_append_str_n(sb, "false", 5);
-        return;
+        return true;
     }
 
     // Number
@@ -6184,31 +6183,31 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         int64_t n = it2i(value);
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
         strbuf_append_str_n(sb, buf, len);
-        return;
+        return true;
     }
     if (vtype == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         if (d != d || d == (1.0/0.0) || d == (-1.0/0.0)) {
             strbuf_append_str_n(sb, "null", 4); // NaN, Infinity → null
-            return;
+            return true;
         }
         // Negative zero → "0"
         if (d == 0.0) {
             strbuf_append_str_n(sb, "0", 1);
-            return;
+            return true;
         }
         char buf[64];
         int len = snprintf(buf, sizeof(buf), "%.17g", d);
         strbuf_append_str_n(sb, buf, len);
-        return;
+        return true;
     }
 
     // String
     if (vtype == LMD_TYPE_STRING) {
         String* s = it2s(value);
-        if (!s) { strbuf_append_str_n(sb, "null", 4); return; }
+        if (!s) { strbuf_append_str_n(sb, "null", 4); return true; }
         js_stringify_escape_string(sb, s->chars, (int)s->len);
-        return;
+        return true;
     }
 
     // Circular reference detection for arrays and objects
@@ -6219,12 +6218,12 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
                 Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
                 Item msg = (Item){.item = s2it(heap_create_name("Converting circular structure to JSON"))};
                 js_throw_value(js_new_error_with_name(tn, msg));
-                return;
+                return true;
             }
         }
         if (depth >= JSON_STRINGIFY_MAX_DEPTH) {
             strbuf_append_str_n(sb, "null", 4);
-            return;
+            return true;
         }
         // Push onto visited stack
         if (visited_count < JSON_STRINGIFY_MAX_DEPTH) {
@@ -6238,50 +6237,32 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         int64_t len = js_array_length(value);
         if (len == 0) {
             strbuf_append_str_n(sb, "[]", 2);
-            return;
+            return true;
         }
         strbuf_append_char(sb, '[');
         for (int64_t i = 0; i < len; i++) {
             if (i > 0) strbuf_append_char(sb, ',');
             js_stringify_indent(sb, gap, depth + 1);
-            if (!gap || !gap[0]) {
-                // no extra space in compact mode
-            }
             Item idx_key = js_to_string((Item){.item = i2it((int)i)});
             Item elem = js_array_get(value, (Item){.item = i2it((int)i)});
-            // Check if after replacer, the value would be undefined/function
-            TypeId et = get_type_id(elem);
-            if (et == LMD_TYPE_UNDEFINED || et == LMD_TYPE_FUNC) {
-                // Still call replacer to see what it returns
-                if (get_type_id(replacer) == LMD_TYPE_FUNC) {
-                    Item args[2] = {idx_key, elem};
-                    Item replaced = js_call_function(replacer, value, args, 2);
-                    TypeId rrt = get_type_id(replaced);
-                    if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC) {
-                        strbuf_append_str_n(sb, "null", 4);
-                    } else {
-                        js_stringify_value(sb, elem, ItemNull, gap, depth + 1, value, idx_key, visited, visited_count);
-                    }
-                } else {
-                    strbuf_append_str_n(sb, "null", 4);
-                }
-            } else {
-                js_stringify_value(sb, elem, replacer, gap, depth + 1, value, idx_key, visited, visited_count);
+            // serialize element; if undefined/function/symbol, write "null" in array context
+            bool wrote = js_stringify_value(sb, elem, replacer, replacer_array, gap, depth + 1,
+                                            value, idx_key, visited, visited_count);
+            if (!wrote) {
+                strbuf_append_str_n(sb, "null", 4);
             }
         }
         js_stringify_indent(sb, gap, depth);
         strbuf_append_char(sb, ']');
-        return;
+        return true;
     }
 
     // Map (object)
     if (vtype == LMD_TYPE_MAP) {
         Item keys;
-        bool use_replacer_array = false;
-        // Check if replacer is an array (property whitelist)
-        if (get_type_id(replacer) == LMD_TYPE_ARRAY) {
-            keys = replacer;
-            use_replacer_array = true;
+        // Use replacer_array (PropertyList) if provided, otherwise own keys
+        if (get_type_id(replacer_array) == LMD_TYPE_ARRAY) {
+            keys = replacer_array;
         } else {
             keys = js_object_keys(value);
         }
@@ -6294,28 +6275,15 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
             Item k_str = js_to_string(k);
             Item v = js_property_access(value, k_str);
 
-            // v20: Apply replacer function BEFORE deciding to include key
-            Item replacer_for_recurse = use_replacer_array ? ItemNull : replacer;
-            if (get_type_id(replacer_for_recurse) == LMD_TYPE_FUNC) {
-                Item args[2] = {k_str, v};
-                v = js_call_function(replacer_for_recurse, value, args, 2);
+            // Use a temporary buffer to serialize the value
+            StrBuf* tmp = strbuf_new();
+            bool wrote = js_stringify_value(tmp, v, replacer, replacer_array, gap, depth + 1,
+                                            value, k_str, visited, visited_count);
+            if (!wrote) {
+                // undefined/function/symbol → skip this key in objects
+                strbuf_free(tmp);
+                continue;
             }
-
-            // Handle toJSON on the value
-            TypeId vt2 = get_type_id(v);
-            if (vt2 == LMD_TYPE_MAP) {
-                Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
-                Item toJSON_fn = js_property_access(v, toJSON_name);
-                if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
-                    Item tj_args[1] = {k_str};
-                    v = js_call_function(toJSON_fn, v, tj_args, 1);
-                }
-            }
-
-            // Skip undefined, functions, and symbols (they're omitted from objects)
-            TypeId vt = get_type_id(v);
-            if (vt == LMD_TYPE_UNDEFINED || vt == LMD_TYPE_FUNC || js_is_symbol_item(v)
-                || v.item == ITEM_JS_UNDEFINED) continue;
 
             if (!first) strbuf_append_char(sb, ',');
             first = false;
@@ -6325,12 +6293,12 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
             else strbuf_append_str_n(sb, "\"\"", 2);
             strbuf_append_char(sb, ':');
             if (gap && gap[0]) strbuf_append_char(sb, ' ');
-            // Don't apply replacer again in recursive call since we already did
-            js_stringify_value(sb, v, ItemNull, gap, depth + 1, value, k_str, visited, visited_count);
+            strbuf_append_str_n(sb, tmp->str, (int)tmp->length);
+            strbuf_free(tmp);
         }
         if (!first) js_stringify_indent(sb, gap, depth);
         strbuf_append_char(sb, '}');
-        return;
+        return true;
     }
 
     // Fallback: try toString
@@ -6338,6 +6306,7 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
     String* ss = it2s(sval);
     if (ss) js_stringify_escape_string(sb, ss->chars, (int)ss->len);
     else strbuf_append_str_n(sb, "null", 4);
+    return true;
 }
 
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
@@ -6384,32 +6353,72 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         }
     }
 
-    // Check if value would produce undefined (bare undefined/function/symbol at top level)
-    TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
-        || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
-        // At top level, replacer can still transform
-        if (get_type_id(replacer) == LMD_TYPE_FUNC) {
-            Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
-            Item wrapper = js_new_object();
-            js_property_set(wrapper, empty_key, value);
-            Item args[2] = {empty_key, value};
-            Item replaced = js_call_function(replacer, wrapper, args, 2);
-            TypeId rrt = get_type_id(replaced);
-            if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC
-                || js_is_symbol_item(replaced) || replaced.item == ITEM_JS_UNDEFINED)
-                return make_js_undefined();
-            value = replaced;
-        } else {
-            return make_js_undefined(); // JSON.stringify(undefined/function/symbol) returns undefined
+    // Build PropertyList from replacer array (with deduplication)
+    Item replacer_func = ItemNull;
+    Item replacer_array = ItemNull;
+
+    if (get_type_id(replacer) == LMD_TYPE_FUNC) {
+        replacer_func = replacer;
+    } else if (get_type_id(replacer) == LMD_TYPE_ARRAY) {
+        // ES spec step 4.b-f: Build PropertyList with deduplication
+        int64_t rlen = js_array_length(replacer);
+        Item prop_list = js_array_new(0);
+        for (int64_t i = 0; i < rlen; i++) {
+            Item v = js_array_get(replacer, (Item){.item = i2it((int)i)});
+            TypeId vt = get_type_id(v);
+            Item item = ItemNull;
+            if (vt == LMD_TYPE_STRING) {
+                item = v;
+            } else if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64 || vt == LMD_TYPE_FLOAT) {
+                item = js_to_string(v);
+            } else if (vt == LMD_TYPE_MAP) {
+                // Check for String or Number wrapper objects
+                bool cn_own = false;
+                Item cn = js_map_get_fast_ext(v.map, "__class_name__", 14, &cn_own);
+                if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+                    String* cn_str = it2s(cn);
+                    if ((cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) ||
+                        (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)) {
+                        item = js_to_string(v);
+                    }
+                }
+            }
+            // Skip undefined/null entries and duplicates
+            if (item.item == ItemNull.item) continue;
+            // Check for duplicate
+            bool dup = false;
+            int64_t plen = js_array_length(prop_list);
+            String* item_str = it2s(item);
+            for (int64_t j = 0; j < plen; j++) {
+                Item existing = js_array_get(prop_list, (Item){.item = i2it((int)j)});
+                String* ex_str = it2s(existing);
+                if (item_str && ex_str && item_str->len == ex_str->len &&
+                    strncmp(item_str->chars, ex_str->chars, item_str->len) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                js_array_push(prop_list, item);
+            }
         }
+        replacer_array = prop_list;
     }
 
+    // Create wrapper object per spec step 9-10
     StrBuf* sb = strbuf_new();
     Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
     Item holder = js_new_object();
+    js_property_set(holder, empty_key, value);
     void* visited_stack[JSON_STRINGIFY_MAX_DEPTH];
-    js_stringify_value(sb, value, replacer, gap, 0, holder, empty_key, visited_stack, 0);
+
+    // Call SerializeJSONProperty — it handles toJSON, replacer, unwrap, and undefined check
+    bool wrote = js_stringify_value(sb, value, replacer_func, replacer_array, gap, 0,
+                                    holder, empty_key, visited_stack, 0);
+    if (!wrote) {
+        strbuf_free(sb);
+        return make_js_undefined();
+    }
 
     String* result = heap_strcpy(sb->str, (int)sb->length);
     strbuf_free(sb);
@@ -7468,7 +7477,7 @@ extern "C" Item js_get_constructor(Item name_item) {
 
     struct { const char* name; int len; int id; int pc; } ctors[] = {
         {"Object", 6, JS_CTOR_OBJECT, 1},
-        {"Array", 5, JS_CTOR_ARRAY, 0},
+        {"Array", 5, JS_CTOR_ARRAY, 1},
         {"Function", 8, JS_CTOR_FUNCTION, 1},
         {"String", 6, JS_CTOR_STRING, 1},
         {"Number", 6, JS_CTOR_NUMBER, 1},

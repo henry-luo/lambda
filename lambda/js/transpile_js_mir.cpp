@@ -8524,7 +8524,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return jm_emit_double_to_int(mt, fd);
             }
         }
-        // Math.ceil: int→int (identity), float→int via C ceil()
+        // Math.ceil: int→int (identity), float→ceil (preserves -0)
         if (MATH_MATCH("ceil", 4)) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
@@ -8532,7 +8532,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return i;
             } else {
                 MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
-                MIR_reg_t cd = jm_call_1(mt, "ceil", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                MIR_reg_t cd = jm_call_1(mt, "js_math_ceil_d", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
                 if (target_type == LMD_TYPE_FLOAT) return cd;
                 return jm_emit_double_to_int(mt, cd);
             }
@@ -8550,7 +8550,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return jm_emit_double_to_int(mt, rd);
             }
         }
-        // Math.trunc: int→int (identity), float→int via D2I
+        // Math.trunc: int→int (identity), float→trunc (preserves -0 as double)
         if (MATH_MATCH("trunc", 5)) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
@@ -8558,9 +8558,9 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return i;
             } else {
                 MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
-                MIR_reg_t i = jm_emit_double_to_int(mt, d);
-                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
-                return i;
+                MIR_reg_t rd = jm_call_1(mt, "trunc", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, rd);
+                return rd;
             }
         }
         // Math.sign: returns i32, but we need target type

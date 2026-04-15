@@ -2250,6 +2250,8 @@ extern "C" int64_t fn_sign_f(double x) {
 // JS Math.round: rounds to +Infinity for ties (unlike C round which rounds away from zero)
 // Math.round(-0.5) -> 0, Math.round(0.5) -> 1
 extern "C" double js_math_round(double x) {
+    // ES spec: if x in [-0.5, -0], return -0
+    if (x >= -0.5 && x < 0.0) return -0.0;
     return floor(x + 0.5);
 }
 
@@ -2263,6 +2265,7 @@ extern "C" Item js_math_trunc(Item x) {
         if (d != d) return push_d(NAN);              // NaN
         if (d == 0.0 || !isfinite(d)) return push_d(d); // -0, +0, +-Inf
         double r = trunc(d);
+        if (r == 0.0 && signbit(r)) return push_d(-0.0); // preserve -0
         if (r >= -9007199254740991.0 && r <= 9007199254740991.0) {
             return (Item){.item = i2it((int64_t)r)};
         }
@@ -2301,6 +2304,13 @@ extern "C" Item js_math_floor(Item x) {
         return push_d(r);
     }
     return push_d(NAN);
+}
+
+// Double version for JIT native fast path — preserves -0
+extern "C" double js_math_ceil_d(double d) {
+    double r = ceil(d);
+    if (r == 0.0 && d < 0.0) return -0.0;
+    return r;
 }
 
 extern "C" Item js_math_ceil(Item x) {

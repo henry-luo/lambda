@@ -971,6 +971,7 @@ JitImport jit_runtime_imports[] = {
     {"js_math_sign", FPTR(js_math_sign)},
     {"js_math_floor", FPTR(js_math_floor)},
     {"js_math_ceil", FPTR(js_math_ceil)},
+    {"js_math_ceil_d", FPTR(js_math_ceil_d)},
     {"js_math_round_item", FPTR(js_math_round_item)},
     {"js_math_pow", FPTR(js_math_pow)},
     {"js_math_pow_d", FPTR(js_math_pow_d)},
