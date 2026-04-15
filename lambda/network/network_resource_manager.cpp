@@ -126,8 +126,14 @@ static void download_task_fn(void* task_data) {
                     }
                     break;
                 case RESOURCE_FONT:
-                    // Font requires FontFaceRule, not implemented yet
-                    log_debug("network: font resource processing not yet implemented");
+                    // Font loading handled by font system on demand
+                    // Schedule reflow so text gets remeasured with new font
+                    if (res->manager->document) {
+                        DomDocument* doc = (DomDocument*)res->manager->document;
+                        if (doc->root) {
+                            resource_manager_schedule_reflow(res->manager, doc->root);
+                        }
+                    }
                     break;
                 case RESOURCE_SVG:
                     if (res->owner_element) {
@@ -135,7 +141,9 @@ static void download_task_fn(void* task_data) {
                     }
                     break;
                 case RESOURCE_SCRIPT:
-                    log_debug("network: script resource processing not yet implemented");
+                    if (res->manager->document) {
+                        process_script_resource(res, res->manager->document);
+                    }
                     break;
             }
         }

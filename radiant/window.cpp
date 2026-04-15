@@ -17,6 +17,7 @@
 #include "../lambda/network/network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
+#include "../lambda/network/network_downloader.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -437,6 +438,28 @@ void render(GLFWwindow* window) {
     // This handles resource completions and triggers reflows/repaints for loaded resources
     if (ui_context.document && ui_context.document->resource_manager) {
         resource_manager_flush_layout_updates(ui_context.document->resource_manager);
+
+        // Detect fully loaded state and trigger final stabilization reflow
+        if (!ui_context.document->fully_loaded &&
+            resource_manager_is_fully_loaded(ui_context.document->resource_manager)) {
+            ui_context.document->fully_loaded = true;
+            log_info("view: all network resources loaded, triggering final reflow");
+            reflow_html_doc(ui_context.document);
+
+            // restore original window title
+            if (ui_context.document->url) {
+                const char* doc_href = url_get_href(ui_context.document->url);
+                char title[512];
+                snprintf(title, sizeof(title), "Lambda - %s", doc_href ? doc_href : "");
+                glfwSetWindowTitle(window, title);
+            }
+        } else if (!ui_context.document->fully_loaded) {
+            // show loading progress in window title
+            float progress = resource_manager_get_load_progress(ui_context.document->resource_manager);
+            char title[512];
+            snprintf(title, sizeof(title), "Loading... %.0f%%", progress * 100.0f);
+            glfwSetWindowTitle(window, title);
+        }
     }
 
     // reflow the document if window size has changed
@@ -706,6 +729,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // This enables async resource loading (CSS, images, fonts) during rendering
         if (doc->html_root && file_to_load &&
             (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
+            network_downloader_init_shared();
             thread_pool = thread_pool_create(4);
             file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
             if (thread_pool) {
@@ -723,6 +747,33 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // Process @font-face rules before layout
         process_document_font_faces(&ui_context, doc);
 
+        // Discover and queue network resources BEFORE layout
+        // This starts async downloads for CSS, images, fonts early
+        if (doc->resource_manager) {
+            radiant_discover_document_resources(doc);
+            log_info("view: network resource discovery complete");
+
+            // Wait for render-blocking CSS (up to 5 seconds)
+            // CSS in <head> must be loaded before first meaningful layout
+            double wait_start = glfwGetTime();
+            const double CSS_TIMEOUT = 5.0;
+            while (!resource_manager_is_fully_loaded(doc->resource_manager)) {
+                double elapsed = glfwGetTime() - wait_start;
+                if (elapsed >= CSS_TIMEOUT) {
+                    log_warn("view: CSS load timeout after %.1fs, proceeding with layout", elapsed);
+                    break;
+                }
+                // Process any completed resources (CSS parsed → stylesheets added)
+                resource_manager_flush_layout_updates(doc->resource_manager);
+                // Brief sleep to avoid busy-waiting
+                glfwWaitEventsTimeout(0.05);  // 50ms poll
+            }
+            double wait_time = glfwGetTime() - wait_start;
+            if (wait_time > 0.01) {
+                log_info("view: waited %.2fs for network resources before layout", wait_time);
+            }
+        }
+
         // Layout document (for HTML-based documents)
         // PDF documents have pre-built view trees and skip this
         if (doc->root) {
@@ -734,13 +785,6 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // Render document
         if (doc && doc->view_tree) {
             render_html_doc(&ui_context, doc->view_tree, NULL);
-        }
-
-        // Discover and queue network resources after initial layout
-        // Resources (images, external CSS, fonts) will load async and trigger reflow via flush
-        if (doc->resource_manager) {
-            radiant_discover_document_resources(doc);
-            log_info("view: network resource discovery complete");
         }
         log_notice("view: render complete");
 
@@ -780,6 +824,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
         if (thread_pool) thread_pool_destroy(thread_pool);
         if (file_cache) enhanced_cache_destroy(file_cache);
+        network_downloader_cleanup_shared();
         ui_context_cleanup(&ui_context);
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
@@ -863,6 +908,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
     if (thread_pool) thread_pool_destroy(thread_pool);
     if (file_cache) enhanced_cache_destroy(file_cache);
+    network_downloader_cleanup_shared();
     ui_context_cleanup(&ui_context);
     log_cleanup();
 

@@ -1347,9 +1347,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
                 if (specified_width >= 0 && replaced_width > 0 && replaced_width != specified_width) {
-                    // Only override if image was actually loaded (replaced_width > 0).
-                    // Don't apply to broken images (replaced_width < 0).
+                    // Override loaded image dimensions with specified value
                     log_debug("  -> replaced IMG width overridden by specified: %.0f (was %.0f)", specified_width, replaced_width);
+                    replaced_width = specified_width;
+                } else if (specified_width >= 0 && replaced_width < 0) {
+                    // image not loaded yet — use specified width as placeholder
+                    log_debug("  -> replaced IMG placeholder width: %.0f (image pending)", specified_width);
                     replaced_width = specified_width;
                 }
             }
@@ -1358,8 +1361,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Browsers ignore HTML width/height attributes for broken images
             // and render a small broken image icon with alt text instead.
             if (replaced_width < 0) {
-                replaced_width = 16;
-                log_debug("  -> replaced IMG fallback width: 16 (broken image)");
+                replaced_width = 0;
+                log_debug("  -> replaced IMG fallback width: 0 (no image or attributes)");
             }
         }
         else if (replaced_tag == HTM_TAG_IFRAME) {
@@ -3617,7 +3620,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 int h = atoi(attr_h);
                 if (h > 0) return (float)h;
             }
-            return 16.0f;  // broken image icon size (Chrome uses 16x16)
+            // also check blk->given_height from resolved CSS/HTML attributes
+            if (view->blk && view->blk->given_height >= 0) {
+                return view->blk->given_height;
+            }
+            return 0.0f;  // no image loaded, no dimensions specified
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150

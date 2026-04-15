@@ -141,6 +141,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     size_t downloaded_size = 0;
 
     if (is_http) {
+        // When network resource manager is active, images are loaded asynchronously.
+        // Return NULL so layout uses placeholder sizing and reflows when image arrives.
+        if (uicon->document->resource_manager) {
+            log_debug("[image] Skipping sync download (resource manager active): %s", url_get_href(abs_url));
+            url_destroy(abs_url);
+            return NULL;
+        }
         // Download the image from HTTP URL
         const char* url_str = url_get_href(abs_url);
         log_debug("[image] Downloading image from URL: %s", url_str);

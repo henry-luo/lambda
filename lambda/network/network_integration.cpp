@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include "../../lib/mem.h"
+#include "../input/css/css_font_face.hpp"
 #include <time.h>
 
 // Helper: resolve a potentially relative URL against the document's base URL.
@@ -89,35 +90,59 @@ static void discover_link_callback(DomElement* link, void* user_data) {
 
     // Get rel attribute
     const char* rel = dom_element_get_attribute(link, "rel");
-    if (!rel || strcmp(rel, "stylesheet") != 0) {
-        return; // Not a stylesheet link
-    }
+    if (!rel) return;
 
     // Get href attribute
     const char* href = dom_element_get_attribute(link, "href");
-    if (!href) {
-        log_debug("network: <link rel=stylesheet> without href attribute");
-        return;
+    if (!href) return;
+
+    if (strcmp(rel, "stylesheet") == 0) {
+        log_debug("network: discovered stylesheet: %s", href);
+
+        // Resolve relative URL against document base
+        char* abs_url = resolve_url(href, doc);
+
+        // Queue for download with HIGH priority (CSS blocks rendering)
+        NetworkResource* res = resource_manager_load(doc->resource_manager,
+                                                     abs_url,
+                                                     RESOURCE_CSS,
+                                                     PRIORITY_HIGH,
+                                                     link);
+
+        // Set completion callback
+        if (res) {
+            res->on_complete = (void (*)(NetworkResource*, void*))process_css_resource;
+            res->user_data = (void*)doc;
+        }
+        mem_free(abs_url);
     }
+    else if (strcmp(rel, "preload") == 0) {
+        // <link rel="preload" href="..." as="...">
+        const char* as_type = dom_element_get_attribute(link, "as");
+        if (!as_type) return;
 
-    log_debug("network: discovered stylesheet: %s", href);
+        char* abs_url = resolve_url(href, doc);
+        ResourceType rtype = RESOURCE_IMAGE;  // default
+        ResourcePriority prio = PRIORITY_NORMAL;
 
-    // Resolve relative URL against document base
-    char* abs_url = resolve_url(href, doc);
+        if (strcmp(as_type, "style") == 0) {
+            rtype = RESOURCE_CSS;
+            prio = PRIORITY_HIGH;
+        } else if (strcmp(as_type, "font") == 0) {
+            rtype = RESOURCE_FONT;
+            prio = PRIORITY_HIGH;
+        } else if (strcmp(as_type, "image") == 0) {
+            rtype = RESOURCE_IMAGE;
+            prio = PRIORITY_NORMAL;
+        } else if (strcmp(as_type, "script") == 0) {
+            rtype = RESOURCE_SCRIPT;
+            prio = PRIORITY_NORMAL;
+        }
 
-    // Queue for download with HIGH priority (CSS blocks rendering)
-    NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 abs_url,
-                                                 RESOURCE_CSS,
-                                                 PRIORITY_HIGH,
-                                                 link);
-
-    // Set completion callback
-    if (res) {
-        res->on_complete = (void (*)(NetworkResource*, void*))process_css_resource;
-        res->user_data = (void*)doc;
+        log_debug("network: discovered preload: %s (as=%s)", href, as_type);
+        resource_manager_load(doc->resource_manager, abs_url, rtype, prio, link);
+        mem_free(abs_url);
     }
-    mem_free(abs_url);
 }
 
 // Callback for <img> discovery
@@ -191,6 +216,25 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     mem_free(abs_url);
 }
 
+// Callback for <script src="..."> discovery
+static void discover_script_callback(DomElement* script, void* user_data) {
+    DomDocument* doc = (DomDocument*)user_data;
+
+    const char* src = dom_element_get_attribute(script, "src");
+    if (!src) return;  // inline script, no download needed
+
+    // Determine priority: defer/async scripts are lower priority
+    const char* defer_attr = dom_element_get_attribute(script, "defer");
+    const char* async_attr = dom_element_get_attribute(script, "async");
+    ResourcePriority priority = (defer_attr || async_attr) ? PRIORITY_NORMAL : PRIORITY_HIGH;
+
+    char* abs_url = resolve_url(src, doc);
+    log_debug("network: discovered <script src>: %s (priority=%d)", abs_url, priority);
+
+    resource_manager_load(doc->resource_manager, abs_url, RESOURCE_SCRIPT, priority, script);
+    mem_free(abs_url);
+}
+
 // Discover and queue all network resources in a document
 void radiant_discover_document_resources(DomDocument* doc) {
     if (!doc || !doc->resource_manager) {
@@ -214,9 +258,52 @@ void radiant_discover_document_resources(DomDocument* doc) {
     // Find all <svg><use>
     find_elements_by_selector(doc->root, "use", discover_use_callback, doc);
 
-    // TODO: Discover @font-face url() in stylesheets
-    // This requires iterating through doc->stylesheets array and parsing @font-face rules
-    // For now, font loading will be handled separately during font resolution
+    // Find all <script src="...">
+    find_elements_by_selector(doc->root, "script", discover_script_callback, doc);
+
+    // Find all <picture><source srcset="..."> and <img srcset="...">
+    // Note: srcset parsing is simplified — only uses first URL, ignores descriptors
+    // Full srcset handling would need viewport/DPR-aware selection
+
+    // Discover @font-face url() in stylesheets
+    if (doc->stylesheets && doc->stylesheet_count > 0) {
+        for (int s = 0; s < doc->stylesheet_count; s++) {
+            if (!doc->stylesheets[s]) continue;
+            int face_count = 0;
+            CssFontFaceDescriptor** faces = css_extract_font_faces(
+                doc->stylesheets[s], NULL, doc->pool, &face_count);
+            for (int f = 0; f < face_count; f++) {
+                if (!faces[f]) continue;
+                // Try each src URL in order — queue the first HTTP URL found
+                for (int u = 0; u < faces[f]->src_count; u++) {
+                    const char* font_url = faces[f]->src_urls[u].url;
+                    if (!font_url) continue;
+                    char* abs_url = resolve_url(font_url, doc);
+                    if (abs_url && url_is_absolute_url(abs_url) &&
+                        (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
+                        log_debug("network: discovered @font-face url: %s (family: %s)",
+                                  abs_url, faces[f]->family_name ? faces[f]->family_name : "?");
+                        resource_manager_load(doc->resource_manager,
+                                              abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
+                        mem_free(abs_url);
+                        break;  // only queue first viable URL per @font-face
+                    }
+                    mem_free(abs_url);
+                }
+                // Also try the fallback src_url field
+                if (faces[f]->src_url && faces[f]->src_count == 0) {
+                    char* abs_url = resolve_url(faces[f]->src_url, doc);
+                    if (abs_url && url_is_absolute_url(abs_url) &&
+                        (strncmp(abs_url, "http://", 7) == 0 || strncmp(abs_url, "https://", 8) == 0)) {
+                        log_debug("network: discovered @font-face src_url: %s", abs_url);
+                        resource_manager_load(doc->resource_manager,
+                                              abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
+                    }
+                    mem_free(abs_url);
+                }
+            }
+        }
+    }
 
     log_debug("network: resource discovery complete");
 }

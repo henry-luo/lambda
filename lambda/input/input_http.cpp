@@ -115,6 +115,9 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
     }
 
+    // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+
     // Perform the request
     log_debug("HTTP: Downloading %s\n", url);
     res = curl_easy_perform(curl);
@@ -363,6 +366,9 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, response);
+
+    // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 
     // Method configuration
     if (config && config->method) {
