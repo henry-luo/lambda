@@ -13,6 +13,7 @@
 
 #include "font_tables.h"
 #include "../mempool.h"
+#include "../utf.h"
 #include "../log.h"
 
 #include <string.h>
@@ -821,23 +822,24 @@ FvarTable* font_tables_get_fvar(FontTables* tables) {
 // decode a UTF-16 BE string to a pool-allocated ASCII/UTF-8 string
 static char* decode_utf16be(const uint8_t* data, uint16_t byte_len, Pool* pool) {
     uint16_t char_count = byte_len / 2;
-    // allocate worst case: each UTF-16 char → up to 3 UTF-8 bytes
-    char* buf = (char*)pool_alloc(pool, (size_t)char_count * 3 + 1);
+    // allocate worst case: each UTF-16 char → up to 4 UTF-8 bytes
+    char* buf = (char*)pool_alloc(pool, (size_t)char_count * 4 + 1);
     if (!buf) return NULL;
 
     size_t out = 0;
     for (uint16_t i = 0; i < char_count; i++) {
         uint16_t ch = rd16(data + i * 2);
-        if (ch < 0x80) {
-            buf[out++] = (char)ch;
-        } else if (ch < 0x800) {
-            buf[out++] = (char)(0xC0 | (ch >> 6));
-            buf[out++] = (char)(0x80 | (ch & 0x3F));
-        } else {
-            buf[out++] = (char)(0xE0 | (ch >> 12));
-            buf[out++] = (char)(0x80 | ((ch >> 6) & 0x3F));
-            buf[out++] = (char)(0x80 | (ch & 0x3F));
+        // handle surrogate pairs
+        if (ch >= 0xD800 && ch <= 0xDBFF && i + 1 < char_count) {
+            uint16_t lo = rd16(data + (i + 1) * 2);
+            uint32_t cp = utf16_decode_pair(ch, lo);
+            if (cp > 0) {
+                out += utf8_encode(cp, buf + out);
+                i++; // skip low surrogate
+                continue;
+            }
         }
+        out += utf8_encode((uint32_t)ch, buf + out);
     }
     buf[out] = '\0';
     return buf;

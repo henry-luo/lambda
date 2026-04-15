@@ -221,13 +221,11 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
 // Harness files that mutate global built-in state.  Tests including ANY of
 // these MUST run individually, never inside a shared batch process, because
 // the mutations leak into subsequent tests within the same batch.
-// propertyHelper.js is listed here because its isConfigurable() helper
-// calls `delete obj[name]` to verify configurability — this permanently
-// removes built-in prototype methods in a shared batch process.  ~1500
-// baseline tests include it; running them individually (chunk_size=1) adds
-// only ~1.5s wallclock with 12 parallel workers.
+// NOTE: propertyHelper.js was previously listed here because its
+// isConfigurable() helper called `delete obj[name]` without restoring.
+// We patched isConfigurable() to restore after testing, so it's now safe
+// to batch.
 static const std::set<std::string> NON_BATCH_INCLUDES = {
-    "propertyHelper.js",
 };
 
 // =============================================================================
@@ -521,6 +519,8 @@ static void discover_tests_recursive(const std::string& dir, const std::string& 
         if (fd.attrib & _A_SUBDIR) {
             discover_tests_recursive(full, category, subcategory, out);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".js") {
+            // skip _FIXTURE.js helper modules — not standalone tests
+            if (name.size() > 11 && name.substr(name.size() - 11) == "_FIXTURE.js") continue;
             Test262Param p;
             p.test_path = full;
             p.category = category;
@@ -554,6 +554,8 @@ static void discover_tests_recursive(const std::string& dir, const std::string& 
         if (S_ISDIR(st.st_mode)) {
             discover_tests_recursive(full, category, subcategory, out);
         } else if (name.size() > 3 && name.substr(name.size() - 3) == ".js") {
+            // skip _FIXTURE.js helper modules — not standalone tests
+            if (name.size() > 11 && name.substr(name.size() - 11) == "_FIXTURE.js") continue;
             Test262Param p;
             p.test_path = full;
             p.category = category;
@@ -1805,14 +1807,14 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // skip timeout tests — they are already above, don't re-emit as CRASH_
             written.insert(timeout_names.begin(), timeout_names.end());
 
-            // Retain previously-quarantined crashers.
-            // CRASH entries are kept even if they pass individually in Phase 2a,
-            // because they may only crash when running in batch context (shared
-            // heap state causes SIGSEGV/SIGBUS). Removing and re-adding them each
-            // run causes quarantine oscillation — they crash in batch, get quarantined,
-            // pass individually, get un-quarantined, crash again in batch, etc.
+            // Re-evaluate previously-quarantined crashers.
+            // CRASH entries that still crash (exit > 128) stay quarantined.
+            // CRASH entries that pass individually (exit <= 128) are RELEASED from
+            // quarantine — they return to batch execution next run. If they crash
+            // in batch again, they'll be re-quarantined as BATCH_KILL.
             // MISSING entries are removed if they pass individually (they were likely
             // collateral from a batch kill, not inherently crashing).
+            size_t crash_released = 0;
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
@@ -1827,15 +1829,16 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
-                    // Was a CRASH entry — keep quarantined even though it passed individually.
-                    // The original crash tag is preserved so it can be re-quarantined next run.
-                    fprintf(crasher_log, "%s\t%s\t%s\n",
-                            known_crasher_tags[p.test_name].c_str(),
-                            p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    crash_exit++;
+                    // Was a CRASH entry but now passes individually — release from quarantine.
+                    // It will return to batch execution next run. If it causes a batch crash,
+                    // the BATCH_KILL detection will re-quarantine it.
+                    crash_released++;
                 }
                 // else: MISSING/SLOW test passed individually → removed from quarantine
+            }
+            if (crash_released > 0) {
+                fprintf(stderr, "[test262] Released %zu formerly-crashing tests from quarantine (now pass individually)\n",
+                        crash_released);
             }
 
             // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)

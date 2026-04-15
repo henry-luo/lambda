@@ -309,6 +309,17 @@ build_mir_for_mac() {
         return 1
     }
 
+    # Apply MIR alloca-branch fix patch
+    PATCH_FILE="$SCRIPT_DIR/patches/mir-alloca-branch-fix.patch"
+    if [ -f "$PATCH_FILE" ]; then
+        echo "Applying MIR patches..."
+        git apply "$PATCH_FILE" 2>/dev/null || {
+            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
+                echo "  (patch already applied or skipped)"
+            }
+        }
+    fi
+
     echo "Building MIR..."
     if make -j$(sysctl -n hw.ncpu); then
         echo "✅ MIR built successfully in mac-deps/mir"

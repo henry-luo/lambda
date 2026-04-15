@@ -2038,6 +2038,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     auto t_scripts = high_resolution_clock::now();
 
+    // Log JS DOM mutations — cascade will pick these up since it runs after scripts
+    if (dom_doc->js_mutation_count > 0) {
+        log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
+                 dom_doc->js_mutation_count);
+    }
+
     // Step 6: Apply CSS cascade (external + <style> elements)
     SelectorMatcher* matcher = selector_matcher_create(pool);
 
@@ -2129,7 +2135,13 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         return NULL;
     }
 
-    // Detect file type by extension
+    // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
+    if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
+        log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
+        return load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    }
+
+    // Detect file type by extension (local files only)
     const char* ext = strrchr(doc_url, '.');
     DomDocument* doc = nullptr;
 

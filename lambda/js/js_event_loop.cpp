@@ -198,10 +198,16 @@ extern "C" void js_clearInterval(Item timer_id) {
 // =============================================================================
 
 extern "C" void js_event_loop_init(void) {
-    // reset microtask queue
+    // reset microtask queue — zero ring buffer to prevent GC scanning stale Items
+    memset(microtask_ring, 0, sizeof(microtask_ring));
     microtask_head = 0;
     microtask_tail = 0;
     microtask_count = 0;
+    // reset timers — clear stale callback pointers
+    for (int i = 0; i < timer_handle_count; i++) {
+        timer_handles[i] = NULL;
+    }
+    timer_handle_count = 0;
     next_timer_id = 1;
 
     // register microtask ring buffer as GC root (static memory invisible to stack scanning)

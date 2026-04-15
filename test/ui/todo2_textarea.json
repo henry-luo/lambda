@@ -3,7 +3,9 @@
   "html": "test/lambda/ui/todo2.ls",
   "viewport": {"width": 900, "height": 700},
   "events": [
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "min_count": 3, "comment": "Initial items visible"},
+    {"type": "click", "target": {"selector": ".file-name", "index": 1}, "comment": "Switch to work file (has items with notes)"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "min_count": 3, "comment": "Work items visible"},
     {"type": "click", "target": {"selector": ".todo-text", "index": 0}, "comment": "Click first item text to edit"},
     {"type": "wait", "ms": 200},
     {"type": "assert_count", "target": {"selector": ".inline-edit"}, "count": 1, "comment": "Title input appears"},

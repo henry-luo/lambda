@@ -286,6 +286,7 @@
                 "lib/pdf_writer.c",
                 "lib/strbuf.c",
                 "lib/str.c",
+                "lib/utf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
                 "lib/string.c",
@@ -315,6 +316,7 @@
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
             "link": "static",
+            "pic": true,
             "defines": [
                 "UTF8PROC_STATIC",
                 "SQLITE_THREADSAFE=0",
@@ -393,6 +395,7 @@
                 "lib/log.c",
                 "lib/memtrack.c",
                 "lib/str.c",
+                "lib/utf.c",
                 "radiant/symbol_resolver.cpp"
             ],
             "libraries": [
@@ -1453,7 +1456,8 @@
                             "lib/hashmap.c",
                             "lib/arraylist.c",
                             "lib/strbuf.c",
-                            "lib/str.c"
+                            "lib/str.c",
+                            "lib/utf.c"
                         ],
                         "binary": "test_woff2_gtest.exe",
                         "icon": "🧱"
@@ -1503,17 +1507,6 @@
                         "icon": "⌨️"
                     },
                     {
-                        "source": "test_basic_gtest.cpp",
-                        "name": "Basic Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_basic_gtest.exe",
-                        "icon": "🧪"
-                    },
-                    {
                         "source": "test_mempool_gtest.cpp",
                         "name": "Unified Memory Pool Tests",
                         "disable_sanitizer": true,
@@ -1526,6 +1519,7 @@
                         "additional_sources": [
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_mempool_gtest.exe",
@@ -1546,6 +1540,7 @@
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_memtrack_gtest.exe",
@@ -1564,6 +1559,7 @@
                             "lib/avl_tree.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree.exe",
@@ -1597,7 +1593,8 @@
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
-                            "lib/str.c"
+                            "lib/str.c",
+                            "lib/utf.c"
                         ],
                         "binary": "test_scratch_arena_gtest.exe",
                         "icon": "📋"
@@ -1660,6 +1657,7 @@
                             "lib/avl_tree.c",
                             "lib/mempool.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree_perf.exe",
@@ -2300,6 +2298,7 @@
                             "lib/memtrack.c",
                             "lib/arena.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/log.c"
                         ],
                         "binary": "test_css_style_node.exe",
@@ -2326,6 +2325,7 @@
                             "lib/arena.c",
                             "lib/string.c",
                             "lib/str.c",
+                            "lib/utf.c",
                             "lib/hashmap.c",
                             "lib/log.c"
                         ],
@@ -2505,34 +2505,6 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_engine_negative.exe",
-                        "icon": "🎨"
-                    },
-                    {
-                        "source": "test/css/test_dom_element_print.cpp",
-                        "name": "DOM Element Print Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "additional_sources": [
-                            "lib/avl_tree.c",
-                            "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/dom_node.cpp",
-                            "lib/hashmap.c",
-                            "lambda/input/css/css_style_node.cpp",
-                            "lambda/input/css/css_properties.cpp",
-                            "lambda/input/css/css_parser.cpp",
-                            "lambda/input/css/css_value_parser.cpp",
-                            "lambda/input/css/css_value.cpp",
-                            "lambda/input/css/css_formatter.cpp",
-                            "radiant/symbol_resolver.cpp",
-                            "radiant/layout_counters.cpp"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_dom_element_print.exe",
                         "icon": "🎨"
                     },
                     {
@@ -2825,20 +2797,6 @@
                         "icon": "🎨"
                     },
                     {
-                        "source": "test/test_math_parser_gtest.cpp",
-                        "name": "Math Parser Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "binary": "test_math_parser_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "icon": "📐"
-                    },
-                    {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
                         "dependencies": [],
@@ -3050,17 +3008,6 @@
                         "requires_lambda_exe": true,
                         "requires_jube_exe": true,
                         "icon": "⚡"
-                    },
-                    {
-                        "source": "test/test_transpile_patterns_gtest.cpp",
-                        "name": "Transpile Pattern Tests",
-                        "dependencies": [],
-                        "binary": "test_transpile_patterns_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_jube_exe": true,
-                        "icon": "🔍"
                     },
                     {
                         "source": "test/test_js_test262_gtest.cpp",

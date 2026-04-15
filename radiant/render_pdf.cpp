@@ -5,6 +5,7 @@
 #include "font_face.h"
 
 #include "../lib/font/font.h"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
@@ -181,22 +182,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
             for (int tti = 0; tti < tt_count; tti++) {
             uint32_t transformed = tt_out[tti];
             if (transformed == 0) continue;
-
-            if (transformed < 0x80) {
-                *dst++ = (char)transformed;
-            } else if (transformed < 0x800) {
-                *dst++ = (char)(0xC0 | (transformed >> 6));
-                *dst++ = (char)(0x80 | (transformed & 0x3F));
-            } else if (transformed < 0x10000) {
-                *dst++ = (char)(0xE0 | (transformed >> 12));
-                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
-                *dst++ = (char)(0x80 | (transformed & 0x3F));
-            } else {
-                *dst++ = (char)(0xF0 | (transformed >> 18));
-                *dst++ = (char)(0x80 | ((transformed >> 12) & 0x3F));
-                *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
-                *dst++ = (char)(0x80 | (transformed & 0x3F));
-            }
+            dst += utf8_encode(transformed, dst);
             } // end for tti
             src += bytes;
         }

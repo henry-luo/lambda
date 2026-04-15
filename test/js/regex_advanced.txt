@@ -1,0 +1,10 @@
+t1:true,hello,i
+t2:true,false
+t3:user@example.com,user,example,com
+t4:2024,01
+t5:hi world hi
+t6:abc[123]def[456]
+t7:one|two|three|four
+t8:6,-1
+t9:true,true,true
+t10:true,true,false,false

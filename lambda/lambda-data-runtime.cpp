@@ -675,12 +675,6 @@ Map* map_fill(Map* map, ...) {
 Item _map_read_field(ShapeEntry* field, void* map_data) {
     TypeId type_id = field->type->type_id;
     void* field_ptr = (char*)map_data + field->byte_offset;
-    // DEBUG: trace reads of "number" field  
-    if (field->name && field->name->length == 6 && strncmp(field->name->str, "number", 6) == 0) {
-        int64_t raw_val = *(int64_t*)field_ptr;
-        log_debug("TRACE _map_read_field: name=number type=%d raw_val=%lld field=%p entry=%p",
-                  (int)type_id, (long long)raw_val, field_ptr, (void*)field);
-    }
     switch (type_id) {
     case LMD_TYPE_NULL: {
         void* ptr = *(void**)field_ptr;

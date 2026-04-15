@@ -223,6 +223,12 @@ void font_context_destroy(FontContext* ctx) {
     // clear @font-face descriptors (handles are released via face_cache cleanup)
     font_face_clear(ctx);
 
+    // release cached emoji handle before face cache teardown
+    if (ctx->cached_emoji_handle) {
+        font_handle_release(ctx->cached_emoji_handle);
+        ctx->cached_emoji_handle = NULL;
+    }
+
     // free face cache (calls face_cache_free which releases handles)
     if (ctx->face_cache) {
         hashmap_free(ctx->face_cache);
@@ -461,6 +467,16 @@ FontHandle* font_handle_retain(FontHandle* handle) {
         handle->ref_count++;
     }
     return handle;
+}
+
+bool font_handle_get_style(FontHandle* handle, const char** out_family,
+                           float* out_size_px, FontWeight* out_weight, FontSlant* out_slant) {
+    if (!handle) return false;
+    if (out_family)  *out_family  = handle->family_name;
+    if (out_size_px) *out_size_px = handle->size_px;
+    if (out_weight)  *out_weight  = handle->weight;
+    if (out_slant)   *out_slant   = handle->slant;
+    return true;
 }
 
 void font_handle_release(FontHandle* handle) {

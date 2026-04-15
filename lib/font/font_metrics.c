@@ -259,6 +259,9 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
 
     handle->metrics_ready = true;
 
+    // Font5 §4.2: enable ASCII advance fast path now that the handle is fully loaded
+    handle->ascii_advance_ready = true;
+
     const char* fname = handle->family_name ? handle->family_name : "?";
     log_info("font_metrics: %s @%.0fpx — asc=%.1f desc=%.1f lh=%.1f xh=%.1f ch=%.1f sp=%.1f em=%.0f kern=%d",
              fname, handle->physical_size_px,
@@ -505,12 +508,21 @@ float font_get_cell_height(FontHandle* handle) {
 float font_get_rendering_ascender(FontHandle* handle) {
     if (!handle) return 0;
 
+    // return cached value if available
+    if (handle->cached_rendering_ascender_ready)
+        return handle->cached_rendering_ascender;
+
     const char* family = handle->family_name ? handle->family_name : NULL;
     float ascent, descent, lh;
+    float result;
     if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
-        return ascent;
+        result = ascent;
+    } else {
+        const FontMetrics* m = font_get_metrics(handle);
+        result = m ? m->hhea_ascender : 0;
     }
 
-    const FontMetrics* m = font_get_metrics(handle);
-    return m ? m->hhea_ascender : 0;
+    handle->cached_rendering_ascender = result;
+    handle->cached_rendering_ascender_ready = true;
+    return result;
 }

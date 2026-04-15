@@ -110,6 +110,9 @@ struct DomDocument {
     // Phase 16: Incremental layout mode — skip pool recreate, skip clean subtrees
     bool incremental_layout;
 
+    // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
+    int js_mutation_count;
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -125,7 +128,8 @@ struct DomDocument {
                     cached_css_engine(nullptr),
                     element_dom_map(nullptr),
                     skip_style_reset(false),
-                    incremental_layout(false) {}
+                    incremental_layout(false),
+                    js_mutation_count(0) {}
 };
 
 typedef struct {

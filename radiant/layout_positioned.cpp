@@ -78,7 +78,6 @@ static void offset_children_recursive(ViewElement* elem, float offset_x, float o
  * Relative positioning moves the element from its normal position without affecting other elements
  */
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
-    log_debug("Applying relative positioning to element");
     // calculate offset from top/right/bottom/left properties
     float offset_x = 0, offset_y = 0;
 
@@ -203,9 +202,6 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
             offset_y = -block->position->bottom;
         }
     }
-    log_debug("Calculated relative offset: x=%.1f, y=%.1f (parent direction=%s, cb=%.0fx%.0f)",
-             offset_x, offset_y, parent_direction == TD_RTL ? "RTL" : "LTR", cb_width, cb_height);
-
     // apply offset to visual position (doesn't affect layout of other elements)
     block->x += offset_x;  block->y += offset_y;
     log_debug("Applied relative positioning: offset (%.1f, %.1f), final position (%.0f, %.0f)",
@@ -684,7 +680,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // This must happen before computing x position, because right-positioned elements
     // use the element's own width to determine x (x = cb_width - right - margin - width).
     // If we clamp after position, right/bottom-positioned elements get wrong offsets.
+    float pre_clamp_cw = content_width;
     content_width = adjust_min_max_width(block, content_width);
+    if (content_width != pre_clamp_cw) {
+        fprintf(stderr, "[TRACE ABS] %s adjust_min_max clamped: %.1f -> %.1f\n", block->source_loc(), pre_clamp_cw, content_width);
+    }
 
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
     // When left, right, and width are all NOT auto, the equation is over-constrained.
@@ -977,12 +977,22 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
 }
 
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
-    log_debug("layout_abs_block");  log_enter();
+    log_enter();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", elmt->node_name(), block->x, block->y, pa_block->advance_y);
+
+    // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
+    // layout_abs_block bypasses layout_flow_node so its depth guard doesn't apply here
+    lycon->depth++;
+    if (lycon->depth >= MAX_LAYOUT_DEPTH) {
+        log_error("layout_abs_block: depth %d exceeded, skipping %s", MAX_LAYOUT_DEPTH, elmt->source_loc());
+        lycon->depth--;
+        log_leave();
+        return;
+    }
 
     // find containing block
     ViewBlock* cb = find_containing_block(block, block->position->position);
-    if (!cb) { log_error("Missing containing block");  return; }
+    if (!cb) { log_error("Missing containing block");  lycon->depth--;  log_leave();  return; }
     log_debug("found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d",
         cb, cb->width, cb->height, cb->content_width, cb->content_height);
     // link to containing block's float context
@@ -1479,7 +1489,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
         block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
         lycon->block.given_height, block->position->has_top, block->position->has_bottom);
-
     // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
     bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
     bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
@@ -1734,6 +1743,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
     log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
         block->x, block->y, block->width,  block->height);
+    lycon->depth--;
     log_leave();
 }
 
@@ -2115,14 +2125,12 @@ void adjust_line_for_floats(LayoutContext* lycon) {
     // Find BFC using BlockContext API
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (!bfc || !bfc->establishing_element) {
-        log_debug("adjust_line_for_floats: early exit - no BFC or establishing_element");
         return;
     }
 
     // Get the current view being laid out
     View* current_view = lycon->view;
     if (!current_view) {
-        log_debug("adjust_line_for_floats: early exit - no current_view");
         return;
     }
 
@@ -2148,7 +2156,6 @@ void adjust_line_for_floats(LayoutContext* lycon) {
     }
 
     if (!found_container) {
-        log_debug("adjust_line_for_floats: early exit - view not inside BFC");
         return;
     }
 
@@ -2168,7 +2175,6 @@ void adjust_line_for_floats(LayoutContext* lycon) {
 
     // If there's no float intrusion at this Y position, skip adjustment
     if (!space.has_left_float && !space.has_right_float) {
-        log_debug("No float intrusion at this Y position, skipping adjustment");
         return;
     }
 

@@ -1030,7 +1030,7 @@ DisplayValue resolve_display_value(void* child) {
         }
 
         // Fall back to default display values based on tag ID
-        if (tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
+        if (tag_id == HTM_TAG_HTML || tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
             tag_id == HTM_TAG_H2 || tag_id == HTM_TAG_H3 ||
             tag_id == HTM_TAG_H4 || tag_id == HTM_TAG_H5 ||
             tag_id == HTM_TAG_H6 || tag_id == HTM_TAG_P ||
@@ -1143,8 +1143,10 @@ DisplayValue resolve_display_value(void* child) {
                 display.inner = CSS_VALUE_FLOW;
             }
         }
-        // TODO: Check for CSS display property in child->style (DomElement)
-        // For now, using tag-based defaults is sufficient
+        // CSS 2.1 §9.7: Apply blockification to tag-based defaults too.
+        // Floated or absolutely positioned elements become block-level
+        // regardless of how their display value was determined.
+        return needs_blockify ? blockify_display(display) : display;
     }
     return display;
 }
@@ -1549,6 +1551,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (keyword == CSS_VALUE_AUTO) {
             log_info("length value: auto");
             result = 0.0f;  // auto represented as 0, caller should check keyword separately
+        } else if (keyword == CSS_VALUE_THIN) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thin' → 1px
+            result = 1.0f;
+        } else if (keyword == CSS_VALUE_MEDIUM) {
+            // CSS 2.1 §8.5.1: border-width keyword 'medium' → 3px
+            result = 3.0f;
+        } else if (keyword == CSS_VALUE_THICK) {
+            // CSS 2.1 §8.5.1: border-width keyword 'thick' → 5px
+            result = 5.0f;
         } else {
             const CssEnumInfo* info = css_enum_info(keyword);
             log_debug("length keyword: %s (treating as 0)", info ? info->name : "unknown");
@@ -2476,7 +2487,22 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // 1. First pass: Resolve font properties (font, font-size, font-family, etc.)
     //    This ensures font metrics are available for em/ex unit calculations
     // 2. Second pass: Resolve all other properties
-    int font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+
+    // Font5 §4.4: skip first-pass AVL traversal if no font properties exist.
+    // Most elements (especially in markdown) inherit all font properties from
+    // their parent and have zero font-related CSS declarations.
+    bool has_any_font_prop = (avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_WEIGHT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_STYLE) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_VARIANT) != nullptr ||
+                              avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
+
+    int font_processed = 0;
+    if (has_any_font_prop) {
+        font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+    }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
     // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
@@ -2486,7 +2512,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // size was established (keyword, em, px, %, etc.).
     // Only apply when font-family was set via CSS (not by the HTM handler for <code>/<pre>/etc.,
     // which already applies the quirk in resolve_htm_style.cpp).
-    {
+    if (has_any_font_prop) {
         ViewSpan* span = (ViewSpan*)lycon->view;
         if (span && span->font && span->font->family) {
             bool has_css_font_family = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
@@ -2511,7 +2537,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
     // Set up font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
-    if (font_processed > 0) {
+    if (has_any_font_prop) {
         ViewSpan* span = (ViewSpan*)lycon->view;
         // Check if font or font-family was explicitly set on this element
         bool has_font = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
@@ -2630,6 +2656,16 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 if (span->font && span->font->font_size > 0) {
                     log_debug("[FONT INHERIT] Skipping inheritance - font-size already set via shorthand: %.1f",
                              span->font->font_size);
+                    continue;
+                }
+            }
+
+            // Special case: font shorthand sets line-height directly on span->blk
+            // without creating a CssDeclaration, so also check if line_height is set
+            if (prop_id == CSS_PROPERTY_LINE_HEIGHT) {
+                ViewSpan* span = (ViewSpan*)lycon->view;
+                if (span->blk && span->blk->line_height) {
+                    log_debug("[FONT INHERIT] Skipping inheritance - line-height already set via shorthand");
                     continue;
                 }
             }
@@ -2944,6 +2980,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+
+    // CSS 2.1 §10.3.1, §10.6.2: 'width' and 'height' do not apply to
+    // non-replaced inline elements. However, the computed values are still
+    // preserved on blk->given_width/given_height so that children can
+    // inherit them (CSS 2.1 §6.2.1). The actual enforcement happens in
+    // intrinsic_sizing.cpp (measure_element_intrinsic_widths skips the
+    // explicit width shortcut) and in layout (inline elements don't use
+    // given_width for their own sizing).
 
     // HTML UA stylesheet: <table> elements default to box-sizing: border-box.
     // CSS Tables 3 §5: The table grid box uses border-box sizing by default.

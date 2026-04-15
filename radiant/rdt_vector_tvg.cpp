@@ -18,6 +18,7 @@ struct RdtVectorImpl {
     int width;
     int height;
     int stride;
+    float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
 };
 
 // Path stores ThorVG path commands for deferred replay
@@ -89,6 +90,14 @@ static void tvg_push_draw_remove(RdtVectorImpl* impl, Tvg_Paint shape) {
     // reset target to prevent ThorVG from clearing previously-drawn content
     tvg_swcanvas_set_target(impl->canvas, impl->pixels, impl->stride,
                             impl->width, impl->height, TVG_COLORSPACE_ABGR8888);
+    // for tiled rendering: wrap the shape in a scene translated by -tile_offset_y
+    // so page-absolute coordinates map to tile-relative coordinates
+    if (impl->tile_offset_y != 0.0f) {
+        Tvg_Paint scene = tvg_scene_new();
+        tvg_scene_push(scene, shape);
+        tvg_paint_translate(scene, 0.0f, -impl->tile_offset_y);
+        shape = scene;
+    }
     tvg_canvas_push(impl->canvas, shape);
     tvg_canvas_draw(impl->canvas, false);
     tvg_canvas_sync(impl->canvas);
@@ -151,6 +160,11 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
     impl->height = h;
     impl->stride = stride;
     tvg_swcanvas_set_target(impl->canvas, pixels, stride, w, h, TVG_COLORSPACE_ABGR8888);
+}
+
+void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_y = offset_y;
 }
 
 // ============================================================================
@@ -443,6 +457,16 @@ void rdt_pop_clip(RdtVector* vec) {
     ClipEntry* entry = &s_clip_stack[s_clip_depth];
     rdt_path_free(entry->path);
     entry->path = nullptr;
+}
+
+int rdt_clip_save_depth() {
+    int saved = s_clip_depth;
+    s_clip_depth = 0;
+    return saved;
+}
+
+void rdt_clip_restore_depth(int saved_depth) {
+    s_clip_depth = saved_depth;
 }
 
 // Apply active clip masks to a shape (called before tvg_push_draw_remove)

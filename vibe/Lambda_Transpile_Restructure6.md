@@ -608,15 +608,17 @@ The experiment is a **negative result**. None of the three success criteria were
 
 ### 8f. Bugs fixed during implementation
 
-All 677/677 baseline tests pass with the direct-string-pointer implementation. The following bugs were discovered and fixed:
+All 677/677 baseline tests pass with the direct-string-pointer implementation. The following bugs were discovered and fixed. **All 7 are branch-specific artifacts of the direct-pointer scheme and do not exist on master — none need to be ported.**
 
-1. `init_ascii_char_table()` — missing `type_id = LMD_TYPE_STRING` for interned single-char strings
-2. `stringbuf_to_string()` — missing `type_id = STRING_TYPE_ID` for strings built from StringBuf
-3. `fn_eq_depth()` — equality comparison failed when both sides have `_type_id == 0` (e.g., String vs Array)
-4. `ConstItem::string()` — dereferenced ITEM_NULL as a pointer (crash in DOM building)
-5. Various `_type_id ==` checks replaced with `get_type_id()` calls
-6. `emit_load_const_boxed` BINARY case — still used old tag-based boxing
-7. `deep_copy_internal` BINARY case — lost `type_id` after calling `createString()`
+On master, String/Symbol/Binary carry their `TypeId` in the high byte of the `Item` register (tagged pointer). The struct has no `type_id` field, and `_type_id` is always non-zero for these types, so the tagged-pointer code paths handle all cases correctly. Each bug below only manifests when the tag is removed and the struct must self-identify via an embedded `type_id` field:
+
+1. `init_ascii_char_table()` — missing `type_id = LMD_TYPE_STRING` for interned single-char strings. Master: no `type_id` field in `String` struct; type comes from Item tag.
+2. `stringbuf_to_string()` — missing `type_id = STRING_TYPE_ID` for strings built from StringBuf. Master: same reason.
+3. `fn_eq_depth()` — equality comparison failed when both sides have `_type_id == 0` (e.g., String vs Array). Master: String has `_type_id = LMD_TYPE_STRING` (non-zero), so the `a._type_id != b._type_id` mismatch branch correctly catches String-vs-Array.
+4. `ConstItem::string()` — dereferenced ITEM_NULL as a pointer (crash in DOM building). Master: checks `_type_id == LMD_TYPE_STRING` first; ITEM_NULL has `_type_id = LMD_TYPE_NULL`, so it safely returns `nullptr`.
+5. Various `_type_id ==` checks replaced with `get_type_id()` calls. Master: `_type_id` is correct for String/Symbol/Binary (set in high byte), so direct `_type_id` checks work.
+6. `emit_load_const_boxed` BINARY case — still used old tag-based boxing. Master: tag-based boxing IS the correct behavior.
+7. `deep_copy_internal` BINARY case — lost `type_id` after calling `createString()`. Master: `x2it()` adds the BINARY tag to the Item; the struct needs no `type_id`.
 
 ---
 

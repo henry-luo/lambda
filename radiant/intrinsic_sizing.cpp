@@ -10,6 +10,7 @@
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
 #include "../lib/font/font.h"
+#include "../lib/utf.h"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 // str.h included via view.hpp
@@ -72,30 +73,12 @@ CssEnum get_white_space_value(DomNode* node);
 // Text Measurement (Core Implementation)
 // ============================================================================
 
-/**
- * Check if a codepoint is an emoji that participates in ZWJ composition.
- * Only emoji characters form composed glyphs when joined by ZWJ.
- */
 static inline bool is_emoji_for_zwj(uint32_t cp) {
-    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks
-           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
-           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical
-           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
-           cp == 0x200D || cp == 0x2764;
+    return utf_is_emoji_for_zwj(cp);
 }
 
-/**
- * Check if a codepoint can serve as the base (left side) of a ZWJ emoji
- * composition sequence. (Unicode UTS #51, emoji-zwj-sequences.txt)
- */
 static inline bool is_zwj_composition_base(uint32_t cp) {
-    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
-           cp == 0x1F9D1 ||                       // Person (gender-neutral)
-           cp == 0x1F441 ||                       // Eye
-           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
-           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
-           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
-           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+    return utf_is_zwj_composition_base(cp);
 }
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
@@ -1116,7 +1099,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // min-content of the element's content, NOT the specified CSS width.
     // CSS Tables §4.1: Table content-box inline size is never smaller than its minimum
     // content inline size, so tables skip the explicit width shortcut and measure content.
-    if (element->specified_style && !content_only && !is_table_display) {
+    // CSS 2.1 §10.3.1: 'width' does not apply to non-replaced inline elements.
+    // Use resolve_display_value() to get the computed display with blockification
+    // (CSS 2.1 §9.7: floated/abspos elements are blockified and DO get width).
+    bool is_inline_non_replaced = false;
+    {
+        DisplayValue resolved_display = resolve_display_value((void*)element);
+        if (resolved_display.outer == CSS_VALUE_INLINE && resolved_display.inner == CSS_VALUE_FLOW) {
+            is_inline_non_replaced = true;
+        }
+    }
+    if (element->specified_style && !content_only && !is_table_display && !is_inline_non_replaced) {
         CssDeclaration* width_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_WIDTH);
         if (width_decl && width_decl->value &&
@@ -1354,9 +1347,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
                 if (specified_width >= 0 && replaced_width > 0 && replaced_width != specified_width) {
-                    // Only override if image was actually loaded (replaced_width > 0).
-                    // Don't apply to broken images (replaced_width < 0).
+                    // Override loaded image dimensions with specified value
                     log_debug("  -> replaced IMG width overridden by specified: %.0f (was %.0f)", specified_width, replaced_width);
+                    replaced_width = specified_width;
+                } else if (specified_width >= 0 && replaced_width < 0) {
+                    // image not loaded yet — use specified width as placeholder
+                    log_debug("  -> replaced IMG placeholder width: %.0f (image pending)", specified_width);
                     replaced_width = specified_width;
                 }
             }
@@ -1365,8 +1361,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Browsers ignore HTML width/height attributes for broken images
             // and render a small broken image icon with alt text instead.
             if (replaced_width < 0) {
-                replaced_width = 16;
-                log_debug("  -> replaced IMG fallback width: 16 (broken image)");
+                replaced_width = 0;
+                log_debug("  -> replaced IMG fallback width: 0 (no image or attributes)");
             }
         }
         else if (replaced_tag == HTM_TAG_IFRAME) {
@@ -3235,6 +3231,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_for_minmax = (ViewBlock*)element;
     bool view_is_border_box = view_for_minmax->blk &&
                               view_for_minmax->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    // Fallback: check CSS if blk hasn't been set up yet
+    if (!view_is_border_box && element->specified_style) {
+        CssDeclaration* bs_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_BOX_SIZING);
+        if (bs_decl && bs_decl->value &&
+            bs_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            bs_decl->value->data.keyword == CSS_VALUE_BORDER_BOX) {
+            view_is_border_box = true;
+        }
+    }
 
     // Apply min-width: floor the intrinsic sizes to ensure they're at least min-width
     float given_min_width = -1;
@@ -3614,7 +3620,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 int h = atoi(attr_h);
                 if (h > 0) return (float)h;
             }
-            return 16.0f;  // broken image icon size (Chrome uses 16x16)
+            // also check blk->given_height from resolved CSS/HTML attributes
+            if (view->blk && view->blk->given_height >= 0) {
+                return view->blk->given_height;
+            }
+            return 0.0f;  // no image loaded, no dimensions specified
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150
@@ -3992,6 +4002,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
+    // Track previous margin-bottom for block-flow margin collapse (used in else branch below,
+    // declared here so the last-child-margin fix after padding/border resolution can access them)
+    float prev_margin_bottom = 0;
+    bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
+
     // For multi-column grids, calculate height based on rows
     if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
@@ -4110,10 +4125,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
 
-        // Track previous margin-bottom for block-flow margin collapse
-        float prev_margin_bottom = 0;
-        bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
-
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
             if (child->is_element()) {
@@ -4123,7 +4134,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     continue;
                 }
             }
-            float child_height = calculate_max_content_height(lycon, child, content_w);
+            // CSS 2.1 §10.3.3: The available width for a child element's content
+            // is the parent's content width minus the child's own padding and border.
+            // Pass the child's content-box width so its descendants wrap correctly.
+            float child_content_w = content_w;
+            if (child->is_element()) {
+                ViewElement* child_ve = (ViewElement*)child->as_element();
+                if (child_ve->bound) {
+                    float cp = child_ve->bound->padding.left + child_ve->bound->padding.right;
+                    float cb = 0;
+                    if (child_ve->bound->border)
+                        cb = child_ve->bound->border->width.left + child_ve->bound->border->width.right;
+                    if (cp + cb > 0 && child_content_w - cp - cb > 0) {
+                        child_content_w -= cp + cb;
+                    }
+                }
+            }
+            float child_height = calculate_max_content_height(lycon, child, child_content_w);
 
             // Resolve child's vertical margins for height estimation
             if (child->is_element() && content_w > 0) {
@@ -4246,6 +4273,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (view->bound && view->bound->border) {
         border_top = view->bound->border->width.top;
         border_bottom = view->bound->border->width.bottom;
+    }
+
+    // CSS 2.1 §8.3.1: The last child's margin-bottom does not collapse through the
+    // parent when the parent has padding-bottom or border-bottom. In that case, the
+    // last child's margin contributes to the parent's content height.
+    if (is_block_flow && prev_margin_bottom > 0 && (pad_bottom > 0 || border_bottom > 0)) {
+        height += prev_margin_bottom;
     }
 
     height += pad_top + pad_bottom + border_top + border_bottom;

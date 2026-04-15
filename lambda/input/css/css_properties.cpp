@@ -478,6 +478,8 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
     // Property-specific validation
     switch (id) {
         case CSS_PROPERTY_FONT_SIZE: {
+            // Font-size accepts a single value only
+            if (value->type == CSS_VALUE_TYPE_LIST) return false;
             // Font-size must be non-negative
             // Per CSS spec: Negative values are not allowed
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -504,6 +506,8 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_MIN_HEIGHT:
         case CSS_PROPERTY_MAX_WIDTH:
         case CSS_PROPERTY_MAX_HEIGHT: {
+            // These properties accept a single value only
+            if (value->type == CSS_VALUE_TYPE_LIST) return false;
             // Width and height must be non-negative (per CSS spec)
             // Reject CUSTOM values (e.g., dimension with unknown unit like "300x")
             if (value->type == CSS_VALUE_TYPE_CUSTOM) {
@@ -526,10 +530,22 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         }
 
         case CSS_PROPERTY_BORDER_WIDTH:
+            // border-width shorthand accepts 1-4 values (LIST ok), but not percentages
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (int i = 0; i < value->data.list.count; i++) {
+                    CssValue* v = value->data.list.values[i];
+                    if (v && v->type == CSS_VALUE_TYPE_PERCENTAGE) return false;
+                }
+            }
+            break;
+
         case CSS_PROPERTY_BORDER_TOP_WIDTH:
         case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
         case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
+            // Longhand border-width properties accept a single value only
+            if (value->type == CSS_VALUE_TYPE_LIST) return false;
             // CSS 2.1 §8.5.1: border-width accepts only <length> and thin|medium|thick.
             // Percentage values are invalid and must be rejected.
             if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {

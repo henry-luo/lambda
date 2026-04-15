@@ -389,7 +389,7 @@ FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float h
     return space;
 }
 
-float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y) {
+float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height) {
     if (ctx->left_float_count == 0 && ctx->right_float_count == 0) {
         return min_y;
     }
@@ -398,7 +398,7 @@ float block_context_find_y_for_width(BlockContext* ctx, float required_width, fl
     int max_iterations = 100;
 
     while (max_iterations-- > 0) {
-        FloatAvailableSpace space = block_context_space_at_y(ctx, y, 1.0f);
+        FloatAvailableSpace space = block_context_space_at_y(ctx, y, element_height);
         float available_width = space.right - space.left;
         if (available_width >= required_width) {
             return y;

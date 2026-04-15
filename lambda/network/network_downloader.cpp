@@ -9,6 +9,55 @@
 #include <string.h>
 #include "../../lib/mem.h"
 #include <time.h>
+#include <pthread.h>
+
+// Shared connection pool for connection reuse across threads
+static CURLSH* shared_handle = NULL;
+static pthread_mutex_t share_lock_conn = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t share_lock_dns  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t share_lock_ssl  = PTHREAD_MUTEX_INITIALIZER;
+
+static void share_lock_cb(CURL* handle, curl_lock_data data,
+                          curl_lock_access access, void* userptr) {
+    (void)handle; (void)access; (void)userptr;
+    switch (data) {
+        case CURL_LOCK_DATA_CONNECT: pthread_mutex_lock(&share_lock_conn); break;
+        case CURL_LOCK_DATA_DNS:     pthread_mutex_lock(&share_lock_dns);  break;
+        case CURL_LOCK_DATA_SSL_SESSION: pthread_mutex_lock(&share_lock_ssl); break;
+        default: break;
+    }
+}
+
+static void share_unlock_cb(CURL* handle, curl_lock_data data, void* userptr) {
+    (void)handle; (void)userptr;
+    switch (data) {
+        case CURL_LOCK_DATA_CONNECT: pthread_mutex_unlock(&share_lock_conn); break;
+        case CURL_LOCK_DATA_DNS:     pthread_mutex_unlock(&share_lock_dns);  break;
+        case CURL_LOCK_DATA_SSL_SESSION: pthread_mutex_unlock(&share_lock_ssl); break;
+        default: break;
+    }
+}
+
+void network_downloader_init_shared(void) {
+    if (shared_handle) return;
+    shared_handle = curl_share_init();
+    if (shared_handle) {
+        curl_share_setopt(shared_handle, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+        curl_share_setopt(shared_handle, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+        curl_share_setopt(shared_handle, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+        curl_share_setopt(shared_handle, CURLSHOPT_LOCKFUNC, share_lock_cb);
+        curl_share_setopt(shared_handle, CURLSHOPT_UNLOCKFUNC, share_unlock_cb);
+        log_debug("network: shared connection pool initialized");
+    }
+}
+
+void network_downloader_cleanup_shared(void) {
+    if (shared_handle) {
+        curl_share_cleanup(shared_handle);
+        shared_handle = NULL;
+        log_debug("network: shared connection pool cleaned up");
+    }
+}
 
 // Response data structure
 typedef struct {
@@ -109,6 +158,18 @@ bool network_download_resource(NetworkResource* res) {
     
     // Compression support
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+    
+    // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    
+    // per-host connection limit: 6 for HTTP/1.1 (matches browser behavior),
+    // HTTP/2 multiplexes over 1 connection automatically
+    curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, 6L);
+    
+    // Share connection pool, DNS cache, and SSL sessions across threads
+    if (shared_handle) {
+        curl_easy_setopt(curl, CURLOPT_SHARE, shared_handle);
+    }
     
     // Perform the download
     log_debug("network: downloading %s (timeout: %dms)", res->url, timeout_ms);

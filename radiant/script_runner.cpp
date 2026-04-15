@@ -40,6 +40,24 @@
 static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
 static struct sigaction js_exec_old_segv, js_exec_old_bus;
+static volatile sig_atomic_t js_exec_timed_out = 0;
+
+// Per-script timeout: SIGALRM handler for 5s execution limit
+static struct sigaction js_exec_old_alrm;
+#define JS_EXEC_TIMEOUT_SECONDS 5
+
+static void js_exec_timeout_handler(int sig) {
+    if (js_exec_guarded) {
+        js_exec_timed_out = 1;
+        const char* msg = "execute_document_scripts: JS execution timed out (5s limit)\n";
+        write(STDERR_FILENO, msg, strlen(msg));
+        js_exec_guarded = 0;
+        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
+        sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
+        siglongjmp(js_exec_jmpbuf, 2);
+    }
+}
 
 static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
     if (js_exec_guarded) {
@@ -295,9 +313,10 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             }
             return;
         }
-        // extract inline script source
+        // extract inline script source — wrap in try/catch for error isolation
+        strbuf_append_str(script_buf, "try {\n");
         extract_script_text(elem, script_buf);
-        strbuf_append_str(script_buf, "\n");
+        strbuf_append_str(script_buf, "\n} catch(_inline_err) {}\n");
         return;  // don't recurse into script children
     }
 
@@ -355,17 +374,68 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // Wrap script code with window object support:
     // 1. Prepend: var window = {};  (provides window.onload, window.setTimeout etc.)
     // 2. Append: extract library globals (jQuery/$) from window, then call window.onload
-    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 1024);
-    // Preamble: provide browser globals
+    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 2048);
+    // Preamble: provide browser globals and stub unsupported APIs
     strbuf_append_str(wrapped_buf,
         "var window = {};\n"
-        "var navigator = {userAgent: ''};\n"
+        "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
         "function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }\n"
-        "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); }\n"
+        "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); return 0; }\n"
+        "function clearTimeout(id) {}\n"
+        "function clearInterval(id) {}\n"
+        "function requestAnimationFrame(fn) { if (typeof fn === 'function') fn(0); return 0; }\n"
+        "function cancelAnimationFrame(id) {}\n"
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
+        "window.clearTimeout = clearTimeout;\n"
+        "window.clearInterval = clearInterval;\n"
+        "window.requestAnimationFrame = requestAnimationFrame;\n"
+        "window.cancelAnimationFrame = cancelAnimationFrame;\n"
+        // Stub storage APIs
+        "var localStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
+        "var sessionStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
+        "window.localStorage = localStorage;\n"
+        "window.sessionStorage = sessionStorage;\n"
+        // Stub observer/constructor APIs (return no-op objects)
+        "function MutationObserver(cb) { this.observe = function(){}; this.disconnect = function(){}; this.takeRecords = function(){ return []; }; }\n"
+        "function IntersectionObserver(cb, opts) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
+        "function ResizeObserver(cb) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
+        "window.MutationObserver = MutationObserver;\n"
+        "window.IntersectionObserver = IntersectionObserver;\n"
+        "window.ResizeObserver = ResizeObserver;\n"
+        // Stub console, performance, history, screen, location
+        "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
+        "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntriesByName: function(){ return []; }, timing: {}};\n"
+        "var history = {pushState: function(){}, replaceState: function(){}, back: function(){}, forward: function(){}, go: function(){}, length: 1};\n"
+        "var screen = {width: 1920, height: 1080, availWidth: 1920, availHeight: 1080, colorDepth: 24, pixelDepth: 24};\n"
+        "var location = {href: '', protocol: 'https:', hostname: '', pathname: '/', search: '', hash: '', host: '', origin: '', reload: function(){}, assign: function(){}, replace: function(){}};\n"
+        "window.console = console;\n"
+        "window.performance = performance;\n"
+        "window.history = history;\n"
+        "window.screen = screen;\n"
+        "window.location = location;\n"
+        // Stub constructors that should not crash
+        "function XMLHttpRequest() { this.open = function(){}; this.send = function(){}; this.setRequestHeader = function(){}; this.addEventListener = function(){}; this.status = 0; this.readyState = 0; this.response = ''; this.responseText = ''; }\n"
+        "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
+        "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
+        "window.XMLHttpRequest = XMLHttpRequest;\n"
+        "window.WebSocket = WebSocket;\n"
+        "window.Worker = Worker;\n"
+        // Stub event listener on window
+        "window.addEventListener = function(type, fn, opts) {};\n"
+        "window.removeEventListener = function(type, fn, opts) {};\n"
+        "window.dispatchEvent = function(ev) { return true; };\n"
+        "window.getComputedStyle = function(el, pseudo) { return {}; };\n"
+        "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
+        "window.scrollTo = function(){};\n"
+        "window.scrollBy = function(){};\n"
+        "window.innerWidth = 1024;\n"
+        "window.innerHeight = 768;\n"
+        "window.outerWidth = 1024;\n"
+        "window.outerHeight = 768;\n"
+        "window.devicePixelRatio = 1;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
     // Postamble: call window.onload if set by scripts
@@ -388,20 +458,35 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 
     // execute the combined JS source via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
+    // and per-script timeout via SIGALRM
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = js_exec_crash_handler;
     sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, &js_exec_old_segv);
     sigaction(SIGBUS, &sa, &js_exec_old_bus);
+
+    // install SIGALRM-based timeout
+    struct sigaction alrm_sa;
+    memset(&alrm_sa, 0, sizeof(alrm_sa));
+    alrm_sa.sa_handler = js_exec_timeout_handler;
+    sigaction(SIGALRM, &alrm_sa, &js_exec_old_alrm);
+    js_exec_timed_out = 0;
     js_exec_guarded = 1;
+    alarm(JS_EXEC_TIMEOUT_SECONDS);
 
     Item result;
-    if (sigsetjmp(js_exec_jmpbuf, 1) == 0) {
+    int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
+    if (jmp_val == 0) {
         result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
         js_exec_guarded = 0;
+        alarm(0);  // cancel pending alarm
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
+        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
+    } else if (jmp_val == 2) {
+        log_error("execute_document_scripts: JS execution timed out after %ds", JS_EXEC_TIMEOUT_SECONDS);
+        result = ItemError;
     } else {
         log_error("execute_document_scripts: recovered from crash in JS JIT code");
         result = ItemError;

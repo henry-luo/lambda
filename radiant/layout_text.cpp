@@ -5,6 +5,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/avl_tree.h"
 #include "../lib/font/font.h"
+#include "../lib/utf.h"
 
 #include "../lib/log.h"
 #include <chrono>
@@ -405,25 +406,42 @@ static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
     return CSS_VALUE_NORMAL;
 }
 
+/**
+ * Resolve the lang attribute by walking up the DOM tree.
+ * Returns the first non-null lang (or xml:lang) attribute found on an ancestor,
+ * or nullptr if none is set. The lang attribute is inherited per HTML spec.
+ */
+static const char* resolve_lang(DomNode* node) {
+    while (node) {
+        if (node->is_element()) {
+            const char* lang = node->get_attribute("lang");
+            if (lang && *lang) return lang;
+            lang = node->get_attribute("xml:lang");
+            if (lang && *lang) return lang;
+        }
+        node = node->parent;
+    }
+    return nullptr;
+}
+
+/**
+ * Check if a lang attribute value indicates Japanese.
+ * Matches "ja", "ja-JP", "ja-*" (case-insensitive prefix match).
+ */
+static inline bool is_lang_japanese(const char* lang) {
+    if (!lang) return false;
+    if ((lang[0] == 'j' || lang[0] == 'J') && (lang[1] == 'a' || lang[1] == 'A')) {
+        return lang[2] == '\0' || lang[2] == '-';
+    }
+    return false;
+}
+
 // ============================================================================
 // CSS white-space Property Helpers
 // ============================================================================
 
-/**
- * Check if a codepoint is a CJK character (Han/Kana/Hangul).
- * Used for CJK-specific font metrics tracking (line-height blending).
- */
 static inline bool is_cjk_character(uint32_t codepoint) {
-    return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
-           (codepoint >= 0x3400 && codepoint <= 0x4DBF) ||  // CJK Extension A
-           (codepoint >= 0x20000 && codepoint <= 0x2A6DF) || // CJK Extension B
-           (codepoint >= 0x2A700 && codepoint <= 0x2B73F) || // CJK Extension C
-           (codepoint >= 0x2B740 && codepoint <= 0x2B81F) || // CJK Extension D
-           (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
-           (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
-           (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
-           (codepoint >= 0xAC00 && codepoint <= 0xD7AF) ||  // Hangul Syllables
-           (codepoint >= 0xFF65 && codepoint <= 0xFF9F);    // Halfwidth Katakana
+    return utf_is_cjk(codepoint);
 }
 
 /**
@@ -812,12 +830,7 @@ static uint32_t peek_next_inline_codepoint(DomNode* node) {
  * Reference: Unicode Technical Standard #51 (Emoji), UAX #29 (Grapheme Clusters)
  */
 static inline bool is_emoji_for_zwj(uint32_t cp) {
-    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks (Emoticons, Symbols, Transport, etc.)
-           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
-           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical (hourglass, keyboard, etc.)
-           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
-           cp == 0x200D ||                        // ZWJ itself
-           cp == 0x2764;                          // Heavy heart (used in heart ZWJ sequences)
+    return utf_is_emoji_for_zwj(cp);
 }
 
 /**
@@ -828,13 +841,7 @@ static inline bool is_emoji_for_zwj(uint32_t cp) {
  * Reference: Unicode UTS #51, emoji-zwj-sequences.txt
  */
 static inline bool is_zwj_composition_base(uint32_t cp) {
-    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
-           cp == 0x1F9D1 ||                       // Person (gender-neutral)
-           cp == 0x1F441 ||                       // Eye
-           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
-           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
-           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
-           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+    return utf_is_zwj_composition_base(cp);
 }
 
 /**
@@ -897,11 +904,7 @@ static inline bool is_east_asian_fw(uint32_t cp) {
  * when either side is Hangul.
  */
 static inline bool is_hangul(uint32_t cp) {
-    return (cp >= 0x1100 && cp <= 0x11FF) ||   // Hangul Jamo
-           (cp >= 0x3130 && cp <= 0x318F) ||   // Hangul Compatibility Jamo
-           (cp >= 0xA960 && cp <= 0xA97F) ||   // Hangul Jamo Extended-A
-           (cp >= 0xAC00 && cp <= 0xD7AF) ||   // Hangul Syllables
-           (cp >= 0xD7B0 && cp <= 0xD7FF);     // Hangul Jamo Extended-B
+    return utf_is_hangul(cp);
 }
 
 /**
@@ -1073,7 +1076,7 @@ static inline bool should_break_line(LayoutContext* lycon, float current_x, floa
  *
  * Uses the new unified BlockContext API instead of the old BFC system.
  */
-void update_line_for_bfc_floats(LayoutContext* lycon) {
+void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
     // Find the BFC root for this layout context
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
 
@@ -1100,13 +1103,17 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
 
     float current_y_local = lycon->block.advance_y;
     float current_y_bfc = current_y_local + offset_y;
-    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
+    // CSS 2.1 §9.5.1: For inline-blocks, query using the element's full height
+    // so floats whose top is below the line start but within the element's height
+    // are properly accounted for.
+    float effective_height = query_height > 0 ? query_height :
+        (lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f);
 
     log_debug("  DEBUG: line adjustment, y_local=%.1f, offset_y=%.1f, y_bfc=%.1f",
         current_y_local, offset_y, current_y_bfc);
 
     // Query available space at this Y using BlockContext API (in BFC coordinates)
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, line_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, effective_height);
 
     // Convert from BFC coordinates to local coordinates
     float local_space_left = space.left - offset_x;
@@ -2050,6 +2057,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops
 
+    // CSS Text 3 §6.2: Resolve lang for CJ class behavior.
+    // In line-break: normal, CJ → NS for Japanese, CJ → ID for Chinese/Korean.
+    // In strict, CJ → NS always. In loose, CJ → ID always.
+    const char* lang = resolve_lang(text_node);
+    bool cj_is_non_starter = (line_break_val == CSS_VALUE_STRICT)
+        || (line_break_val != CSS_VALUE_LOOSE && is_lang_japanese(lang));
+
     // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
     // transformation. When a collapsible segment break occurs between two East Asian
     // Wide characters (neither Hangul), the break is removed instead of becoming a space.
@@ -2830,7 +2844,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 //   Rule 1: If adjacent to ZWSP (U+200B), remove the segment break.
                 //   Rule 2: If both the character before and after are East Asian Width
                 //           Fullwidth/Wide (not Hangul), remove the segment break.
-                //           NOTE: Rule 2 is deferred — browser references do not implement it.
                 // Otherwise the segment break becomes a space (already added as wd).
                 if (has_segment_break && collapse_newlines) {
                     bool remove_break = false;
@@ -2838,19 +2851,26 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     bool prev_is_zwsp = (last_processed_cp == 0x200B);
                     // check character after: peek at next non-whitespace
                     bool next_is_zwsp = false;
-                    if (*str) {
-                        if (str[0] == 0xE2 && str[1] == 0x80 && str[2] == 0x8B) {
-                            next_is_zwsp = true;
-                        }
+                    uint32_t next_cp = *str ? peek_codepoint(str) : 0;
+                    if (next_cp == 0x200B) {
+                        next_is_zwsp = true;
                     }
                     // Rule 1: adjacent to ZWSP
                     if (prev_is_zwsp || next_is_zwsp) {
                         remove_break = true;
                     }
+                    // Rule 2: East Asian Wide ↔ East Asian Wide (not Hangul)
+                    // CSS Text 3 §4.1.2: segment breaks between two East Asian F/W
+                    // characters (neither Hangul) are removed instead of becoming spaces.
+                    if (!remove_break && last_processed_cp && next_cp
+                        && is_east_asian_fw(last_processed_cp) && !is_hangul(last_processed_cp)
+                        && is_east_asian_fw(next_cp) && !is_hangul(next_cp)) {
+                        remove_break = true;
+                    }
                     if (remove_break) {
                         rect->width -= wd;  // undo the space width
                         log_debug("segment break removed between U+%04X and U+%04X (CSS Text 3 §4.1.2)",
-                                  last_processed_cp, next_is_zwsp ? 0x200BU : 0U);
+                                  last_processed_cp, next_cp);
                         continue;  // skip break opportunity recording
                     }
                 }
@@ -3011,8 +3031,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     if (is_line_break_cl(next_cp)) {
                         allow_break = false;
                     }
-                    // NS class prevents break; CJ chars also prevent unless loose mode
-                    else if (is_line_break_ns(next_cp) || (!is_loose && is_line_break_cj(next_cp))) {
+                    // NS class prevents break; CJ chars also prevent when resolved to NS
+                    // CSS Text 3 §6.2: CJ → NS for Japanese (normal/strict), CJ → ID for
+                    // Chinese/Korean (normal). Strict always → NS, loose always → ID.
+                    else if (is_line_break_ns(next_cp) || (cj_is_non_starter && is_line_break_cj(next_cp))) {
                         allow_break = false;
                     }
                     // EX/IS/SY prevents break, but loose mode allows break before fullwidth ！？

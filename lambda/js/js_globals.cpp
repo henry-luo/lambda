@@ -29,6 +29,9 @@ extern Item parse_json_to_item_strict(Input* input, const char* json_string, boo
 // v24: strict mode flag from js_runtime.cpp
 extern bool js_strict_mode;
 
+// forward declarations
+static bool js_is_symbol_item(Item item);
+
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -1082,6 +1085,13 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
 }
 
 extern "C" Item js_number_method(Item num, Item method_name, Item* args, int argc) {
+    // Symbols are encoded as negative ints — route to generic property dispatch
+    if (js_is_symbol_item(num)) {
+        Item fn = js_property_get(num, method_name);
+        if (get_type_id(fn) == LMD_TYPE_FUNC)
+            return js_call_function(fn, num, args, argc);
+        return ItemNull;
+    }
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
     if (!method) return ItemNull;
@@ -1354,6 +1364,30 @@ static int encode_charcode_utf8(char* buf, int code) {
     }
 }
 
+// encode a full Unicode codepoint (up to U+10FFFF) to UTF-8
+static int encode_charcode_full_utf8(char* buf, int code) {
+    if (code < 0 || code > 0x10FFFF) return 0;
+    if (code < 0x80) {
+        buf[0] = (char)code;
+        return 1;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+        return 2;
+    } else if (code < 0x10000) {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+        return 3;
+    } else {
+        buf[0] = (char)(0xF0 | (code >> 18));
+        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (code & 0x3F));
+        return 4;
+    }
+}
+
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
 // Takes a Lambda Array or TypedArray of code points and returns a concatenated string
 extern "C" Item js_string_fromCharCode_array(Item arr_item) {
@@ -1364,7 +1398,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
         int len = ta->length;
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-        char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
+        char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
         int pos = 0;
         for (int i = 0; i < len; i++) {
             int code = 0;
@@ -1377,6 +1411,28 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             case JS_TYPED_INT32:   code = ((int32_t*)ta->data)[i]; break;
             case JS_TYPED_FLOAT32: code = (int)((float*)ta->data)[i]; break;
             case JS_TYPED_FLOAT64: code = (int)((double*)ta->data)[i]; break;
+            }
+            code &= 0xFFFF;
+            // combine adjacent surrogate pairs into a single supplementary codepoint
+            if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
+                int lo = 0;
+                switch (ta->element_type) {
+                case JS_TYPED_UINT8:   lo = ((uint8_t*)ta->data)[i+1]; break;
+                case JS_TYPED_INT8:    lo = ((int8_t*)ta->data)[i+1]; break;
+                case JS_TYPED_UINT16:  lo = ((uint16_t*)ta->data)[i+1]; break;
+                case JS_TYPED_INT16:   lo = ((int16_t*)ta->data)[i+1]; break;
+                case JS_TYPED_UINT32:  lo = (int)((uint32_t*)ta->data)[i+1]; break;
+                case JS_TYPED_INT32:   lo = ((int32_t*)ta->data)[i+1]; break;
+                case JS_TYPED_FLOAT32: lo = (int)((float*)ta->data)[i+1]; break;
+                case JS_TYPED_FLOAT64: lo = (int)((double*)ta->data)[i+1]; break;
+                }
+                lo &= 0xFFFF;
+                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                    int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+                    pos += encode_charcode_full_utf8(buf + pos, cp);
+                    i++; // skip the low surrogate
+                    continue;
+                }
             }
             pos += encode_charcode_utf8(buf + pos, code);
         }
@@ -1392,7 +1448,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)mem_alloc(len * 3 + 1, MEM_CAT_JS_RUNTIME);
+    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
@@ -1401,6 +1457,21 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             code = (int)it2i(arr->items[i]);
         } else if (itype == LMD_TYPE_FLOAT) {
             code = (int)it2d(arr->items[i]);
+        }
+        code &= 0xFFFF;
+        // combine adjacent surrogate pairs into a single supplementary codepoint
+        if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
+            int lo = 0;
+            TypeId lo_type = get_type_id(arr->items[i + 1]);
+            if (lo_type == LMD_TYPE_INT) lo = (int)it2i(arr->items[i + 1]);
+            else if (lo_type == LMD_TYPE_FLOAT) lo = (int)it2d(arr->items[i + 1]);
+            lo &= 0xFFFF;
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                int cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+                pos += encode_charcode_full_utf8(buf + pos, cp);
+                i++; // skip the low surrogate
+                continue;
+            }
         }
         pos += encode_charcode_utf8(buf + pos, code);
     }
@@ -4214,16 +4285,38 @@ extern "C" void js_assert_not_same_value(Item actual, Item unexpected, Item mess
 // Native compareArray / assert.compareArray for test262 (debug builds only)
 // =============================================================================
 
+// check if item is an array or typed array (array-like for comparison)
+static bool is_array_like(Item v) {
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_ARRAY) return true;
+    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
+    return false;
+}
+
+// get length of array or typed array (for compareArray)
+static int64_t array_like_length(Item v) {
+    extern int64_t js_array_length(Item array);
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_ARRAY) return js_array_length(v);
+    // for typed arrays, use property access for "length"
+    if (t == LMD_TYPE_MAP) {
+        extern Item js_property_access(Item object, Item key);
+        Item len_key = (Item){.item = s2it(heap_create_name("length"))};
+        Item len_val = js_property_access(v, len_key);
+        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
+    }
+    return 0;
+}
+
 // compareArray(a, b): element-wise SameValue comparison, returns bool Item
 extern "C" Item js_compare_array(Item a, Item b) {
-    extern int64_t js_array_length(Item array);
     extern Item js_array_get_int(Item array, int64_t index);
 
-    if (get_type_id(a) != LMD_TYPE_ARRAY || get_type_id(b) != LMD_TYPE_ARRAY)
+    if (!is_array_like(a) || !is_array_like(b))
         return (Item){.item = b2it(false)};
 
-    int64_t len_a = js_array_length(a);
-    int64_t len_b = js_array_length(b);
+    int64_t len_a = array_like_length(a);
+    int64_t len_b = array_like_length(b);
     if (len_a != len_b) return (Item){.item = b2it(false)};
 
     for (int64_t i = 0; i < len_a; i++) {
@@ -4236,14 +4329,13 @@ extern "C" Item js_compare_array(Item a, Item b) {
 
 // helper: format array as "[elem1, elem2, ...]" for error messages
 static Item assert_format_array(Item arr) {
-    extern int64_t js_array_length(Item array);
     extern Item js_array_get_int(Item array, int64_t index);
     extern Item js_to_string_val(Item value);
 
-    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+    if (!is_array_like(arr)) {
         return (Item){.item = s2it(heap_create_name("(not an array)"))};
     }
-    int64_t len = js_array_length(arr);
+    int64_t len = array_like_length(arr);
     // pre-pass: compute total length
     int total = 2; // "[]"
     char* strs[256];
@@ -6995,7 +7087,8 @@ extern "C" Item js_symbol_for(Item key) {
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
-    if (!js_is_symbol_item(sym)) return ItemNull;
+    if (!js_is_symbol_item(sym))
+        return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
     js_symbol_init_registry();
     uint64_t id = js_symbol_item_id(sym);
 
@@ -7008,7 +7101,7 @@ extern "C" Item js_symbol_key_for(Item sym) {
             return (Item){.item = s2it(heap_create_name(e->key, strlen(e->key)))};
         }
     }
-    return ItemNull;  // not in global registry
+    return make_js_undefined();  // not in global registry → undefined per spec
 }
 
 extern "C" Item js_symbol_to_string(Item sym) {
@@ -7109,9 +7202,16 @@ extern "C" Item js_symbol_get_description(Item sym) {
 // Return a well-known symbol by its property name on the Symbol constructor.
 // e.g. Symbol.iterator → fixed ID=1, Symbol.toPrimitive → fixed ID=2, etc.
 // Unlike js_symbol_create(), this always returns the SAME item for a given name.
+extern "C" Item js_symbol_builtin_method(int which);
+
 extern "C" Item js_symbol_well_known(Item name) {
     String* s = it2s(name);
     if (s) {
+        // Symbol static methods — return builtin functions, not well-known symbols
+        if (s->len == 3 && strncmp(s->chars, "for", 3) == 0)
+            return js_symbol_builtin_method(0);
+        if (s->len == 6 && strncmp(s->chars, "keyFor", 6) == 0)
+            return js_symbol_builtin_method(1);
         if (s->len == 8 && strncmp(s->chars, "iterator", 8) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_ITERATOR);
         if (s->len == 11 && strncmp(s->chars, "toPrimitive", 11) == 0)

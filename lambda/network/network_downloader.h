@@ -28,6 +28,18 @@ bool network_download_resource(NetworkResource* res);
  */
 bool is_http_error_retryable(long http_code);
 
+/**
+ * Initialize the shared connection pool for HTTP/2 multiplexing.
+ * Must be called once before any downloads. Thread-safe.
+ */
+void network_downloader_init_shared(void);
+
+/**
+ * Destroy the shared connection pool.
+ * Must be called after all downloads are complete.
+ */
+void network_downloader_cleanup_shared(void);
+
 #ifdef __cplusplus
 }
 #endif

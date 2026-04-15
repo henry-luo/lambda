@@ -31,7 +31,7 @@ extern __thread EvalContext* context;
 extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, int64_t index);
 
 // forward declaration of static error string (defined later in this file)
-extern String STR_ERROR;
+extern String& STR_ERROR;
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
@@ -1719,10 +1719,15 @@ Bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.len = 4, .is_ascii = 1, .chars = "null"};
-String STR_TRUE = {.len = 4, .is_ascii = 1, .chars = "true"};
-String STR_FALSE = {.len = 5, .is_ascii = 1, .chars = "false"};
-String STR_ERROR = {.len = 7, .is_ascii = 1, .chars = "<error>"};
+// use struct overlays for static String with flexible array member
+static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_null  = {4, 1, "null"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[5]; } _str_true  = {4, 1, "true"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[6]; } _str_false = {5, 1, "false"};
+static struct { uint32_t len; uint8_t is_ascii; char chars[8]; } _str_error = {7, 1, "<error>"};
+String& STR_NULL  = reinterpret_cast<String&>(_str_null);
+String& STR_TRUE  = reinterpret_cast<String&>(_str_true);
+String& STR_FALSE = reinterpret_cast<String&>(_str_false);
+String& STR_ERROR = reinterpret_cast<String&>(_str_error);
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
@@ -4874,6 +4879,14 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_et->content_length = old_et->content_length;
         new_et->ns = old_et->ns;
         new_et->type_index = tl->length;
+
+        // Populate hash table for O(1) property lookup
+        ShapeEntry* he = first;
+        while (he) {
+            typemap_hash_insert((TypeMap*)new_et, he);
+            he = he->next;
+        }
+
         arraylist_append(tl, new_et);
         *type_slot = new_et;
     } else {
@@ -4884,6 +4897,29 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->length = field_count;
         new_mt->byte_size = new_byte_size;
         new_mt->type_index = tl->length;
+
+        // Populate hash table for O(1) property lookup
+        ShapeEntry* he = first;
+        while (he) {
+            typemap_hash_insert(new_mt, he);
+            he = he->next;
+        }
+
+        // Rebuild slot_entries if old TypeMap had them (for shaped JS objects)
+        if (old_map_type->slot_entries && old_map_type->slot_count > 0 &&
+            field_count == old_map_type->slot_count) {
+            ShapeEntry** entries = (ShapeEntry**)pool_calloc(context->pool,
+                field_count * sizeof(ShapeEntry*));
+            if (entries) {
+                ShapeEntry* se = first;
+                for (int i = 0; i < field_count && se; i++, se = se->next) {
+                    entries[i] = se;
+                }
+                new_mt->slot_entries = entries;
+                new_mt->slot_count = field_count;
+            }
+        }
+
         arraylist_append(tl, new_mt);
         *type_slot = new_mt;
     }
@@ -4992,12 +5028,6 @@ void fn_map_set(Item map_item, Item key, Item value) {
             TypeId field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
-            // DEBUG: trace "number" field writes
-            if (strlen(key_cstr) == 6 && strncmp(key_cstr, "number", 6) == 0) {
-                log_debug("TRACE fn_map_set: name=number value_type=%d field_type=%d val=0x%llx entry=%p",
-                          (int)value_type, (int)field_type, (unsigned long long)value.item, (void*)entry);
-            }
-
             if (field_type == value_type) {
                 // same type — fast path: in-place update
                 map_field_decrement_ref(field_ptr, field_type);
@@ -5036,15 +5066,24 @@ void fn_map_set(Item map_item, Item key, Item value) {
             // NULL↔MAP, NULL↔ARRAY, MAP↔ELEMENT, etc. all store pointers,
             // and _map_read_field handles null pointers for all container types.
             // No shape rebuild needed — just update the value in-place.
+            // UNDEFINED and BOOL are included because:
+            //   - For UNDEFINED: _map_read_field ignores the stored value entirely
+            //     (returns a constant), so an 8-byte slot with zeros is fine.
+            //   - For BOOL: stored as 1 byte but in shaped (JS constructor) objects
+            //     the slot is always 8 bytes. Avoiding rebuild preserves slot alignment.
+            //   - Key invariant: shaped objects have all 8-byte slots. Rebuild would
+            //     break JIT-compiled code that uses hardcoded byte_offset = slot*8.
             {
                 bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
                     field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
-                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE);
+                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE ||
+                    field_type == LMD_TYPE_UNDEFINED || field_type == LMD_TYPE_BOOL);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
                     value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
-                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE);
+                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE ||
+                    value_type == LMD_TYPE_UNDEFINED || value_type == LMD_TYPE_BOOL);
                 if (old_is_ptr && new_is_ptr) {
                     map_field_decrement_ref(field_ptr, field_type);
                     map_field_store(field_ptr, value, value_type);

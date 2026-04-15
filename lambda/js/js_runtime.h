@@ -524,7 +524,7 @@ Item js_symbol_well_known(Item name);
  * The func_ptr is the MIR-compiled generator body (state machine form).
  * env/env_size represent captured closure variables.
  */
-Item js_generator_create(void* func_ptr, Item* env, int env_size);
+Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
 
 /**
  * Advance the generator: execute next state, return {value, done} result.

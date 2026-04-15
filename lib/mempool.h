@@ -99,6 +99,11 @@ char* pool_strdup(Pool* pool, const char* str);
  */
 void mempool_cleanup(void);
 
+/**
+ * Get pool identifier (debug helper)
+ */
+unsigned int pool_get_id(Pool* pool);
+
 #ifdef __cplusplus
 }
 #endif

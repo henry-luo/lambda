@@ -148,6 +148,19 @@ TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
+# MIR JIT library (platform-specific paths match build_lambda_config.json)
+ifeq ($(OS),Darwin)
+    MIR_LIB = mac-deps/mir/libmir.a
+    MIR_BUILD_DIR = mac-deps/mir
+else ifeq ($(IS_MSYS2),yes)
+    MIR_LIB = win-native-deps/lib/libmir.a
+    MIR_BUILD_DIR = build_temp/mir
+else
+    MIR_LIB = /usr/local/lib/libmir.a
+    MIR_BUILD_DIR = build_temp/mir
+endif
+MIR_PATCH = patches/mir-alloca-branch-fix.patch
+
 # JavaScript scanner dependencies
 JS_SCANNER_C = lambda/tree-sitter-javascript/src/scanner.c
 
@@ -203,7 +216,7 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="$(CURDIR)/node_modules/.bin/tree-sitter" V=1 VERBOSE=1
 
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
@@ -305,6 +318,36 @@ $(RE2_LIB):
 		cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
+
+# Build MIR JIT library (clone, patch, compile)
+$(MIR_LIB):
+	@echo "Building MIR library..."
+	@if [ ! -d "$(MIR_BUILD_DIR)" ]; then \
+		echo "Cloning MIR repository..."; \
+		mkdir -p $(dir $(MIR_BUILD_DIR)); \
+		git clone https://github.com/vnmakarov/mir.git $(MIR_BUILD_DIR); \
+	fi
+	@if [ -f "$(MIR_PATCH)" ]; then \
+		echo "Applying MIR patches..."; \
+		cd $(MIR_BUILD_DIR) && git apply "$(CURDIR)/$(MIR_PATCH)" 2>/dev/null || \
+		echo "  (MIR patch already applied or skipped)"; \
+	fi
+ifeq ($(IS_MSYS2),yes)
+	@cd $(MIR_BUILD_DIR) && CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \
+		CFLAGS="-O2 -DNDEBUG -fPIC" make libmir.a
+	@mkdir -p win-native-deps/lib && cp $(MIR_BUILD_DIR)/libmir.a win-native-deps/lib/
+else
+	@$(MAKE) -C $(MIR_BUILD_DIR) -j$(JOBS)
+endif
+ifeq ($(OS),Linux)
+	@echo "Installing MIR to system location (requires sudo)..."
+	@sudo mkdir -p /usr/local/lib /usr/local/include
+	@sudo cp $(MIR_BUILD_DIR)/libmir.a /usr/local/lib/
+	@sudo cp $(MIR_BUILD_DIR)/mir.h /usr/local/include/ 2>/dev/null || true
+endif
+	@echo "✅ MIR built: $(MIR_LIB)"
+
+build-mir: $(MIR_LIB)
 
 # Toolchain Validation Functions
 define toolchain_verify
@@ -408,7 +451,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart \
+	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    test-ui-automation test-reactive-ui test-redex-baseline
 
 # Help target - shows available commands
@@ -423,6 +466,7 @@ help:
 	@echo "  build-release - Build optimized release version using Premake"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  build-mir     - Build MIR JIT library (clone, patch, compile)"
 	@echo "  build-jube    - Build polyglot runtime (Lambda + JS/TS + Python + Bash + Ruby + Radiant)"
 	@echo "  release-jube  - Build optimized polyglot release version"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -456,7 +500,7 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline + layout page suite regression check"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
@@ -538,7 +582,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -681,12 +725,7 @@ build-jube-test: build-jube build-test
 # Run jube-specific tests only (Python, Bash, Ruby)
 test-jube: build-jube-test
 	@echo "Running jube-specific test suites (Python, Bash, Ruby)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=jube --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=jube --parallel
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -824,45 +863,25 @@ test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running lambda (core) test suites (excluding jube)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --exclude-target=jube --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --exclude-target=jube --parallel
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running ALL test suites (baseline + extended)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --parallel
 
 test-all-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running BASELINE test suites only..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --category=baseline --parallel
 
 test-lambda-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=lambda --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=lambda --category=baseline --parallel
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -876,12 +895,7 @@ test-c2mir: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		LAMBDA_USE_C2MIR=1 ./test/test_run.sh --target=lambda --category=baseline --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@LAMBDA_USE_C2MIR=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
 # test262 baseline: run only tests in baseline, must pass 100%
 test262-baseline: build-test
@@ -1055,13 +1069,15 @@ test-radiant-baseline: build-test
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
-		echo "📦 Page Snapshot Regression:"; \
+		echo "📦 Layout Page Suite Regression:"; \
 		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page 2>&1) || true; \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
 		echo "$$snap_output" | tail -5; \
-		if echo "$$snap_output" | grep -q "REGRESSION"; then \
+		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		snapshot_passed=$${snapshot_passed:-0}; \
+		if echo "$$snap_output" | grep -q "REGRESSION\|regression detected"; then \
 			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions"; then \
+		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
 			snapshot_status="✅ PASS"; \
 		else \
 			snapshot_status="✅ PASS"; \
@@ -1082,7 +1098,7 @@ test-radiant-baseline: build-test
 	fi; \
 	\
 	echo ""; \
-	echo "📦 Page Load (Headless) Tests:"; \
+	echo "📦 View Page and Markdown (Headless) Tests:"; \
 	if [ -f "test/test_page_load_gtest.exe" ]; then \
 		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
 		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
@@ -1119,8 +1135,8 @@ test-radiant-baseline: build-test
 	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
 	else pretext_status="✅ PASS"; fi; \
 	\
-	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
-	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
+	total_passed=$$((layout_passed + wpt_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + wpt_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
 	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1130,13 +1146,13 @@ test-radiant-baseline: build-test
 	echo "=============================================================="; \
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
-	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped)"; \
-	echo "   ├── Page Snapshot       $$snapshot_status"; \
-	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
-	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
-	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed)"; \
-	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped)"; \
+	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped) (test_radiant_layout.js -c baseline)"; \
+	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped) (test_radiant_layout.js -c wpt-css-text)"; \
+	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
+	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
+	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
+	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped) (test_radiant_layout.js -c pretext)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
@@ -1159,7 +1175,7 @@ test-layout-baseline: build-test
 		echo "Running page suite snapshot regression check..."; \
 		echo "=============================================================="; \
 		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/save_suite_snapshot.js --check page; \
+			| node test/layout/layout_suite_snapshot.js --check page; \
 	fi
 
 test-ui-automation: build-test
@@ -1173,7 +1189,7 @@ test-ui-automation: build-test
 	fi
 
 test-page-load: build-test
-	@echo "Running Page Load (Headless) test suite..."
+	@echo "Running View Page and Markdown (Headless) test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_page_load_gtest.exe" ]; then \
 		./test/test_page_load_gtest.exe; \
@@ -1211,7 +1227,7 @@ layout-snapshot:
 	fi; \
 	echo "Saving snapshot for suite: $$SUITE_VAR"; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --save $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --save $$SUITE_VAR
 
 layout-snapshot-check:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1220,7 +1236,7 @@ layout-snapshot-check:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --check $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --check $$SUITE_VAR
 
 layout-snapshot-diff:
 	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
@@ -1229,7 +1245,7 @@ layout-snapshot-diff:
 		exit 1; \
 	fi; \
 	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
-		| node test/layout/save_suite_snapshot.js --diff $$SUITE_VAR
+		| node test/layout/layout_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
 test-math: build
@@ -1302,50 +1318,23 @@ test-extended: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running EXTENDED test suites only..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --category=extended --parallel; \
-	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --category=extended --parallel
 
 test-library: build
 	@echo "Running library test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=library --raw; \
-	else \
-		echo "Error: No test script found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=library --raw
 
 test-input: build
 	@echo "Running input processing test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=input --raw; \
-	else \
-		echo "Error: No test script found"; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=input --raw
 
 test-validator: build
 	@echo "Running validator test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=validator --raw; \
-	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=validator --raw
 
 test-lambda: build
 	@echo "Running lambda test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=lambda --raw; \
-	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
-		exit 1; \
-	fi
+	@node test/test_run.js --target=lambda --raw
 
 # CSS Resolution Verification Target
 # Compares Lambda CSS resolved properties against browser reference data
@@ -1451,7 +1440,7 @@ test-coverage:
 	@if command -v gcov >/dev/null 2>&1 && command -v lcov >/dev/null 2>&1; then \
 		echo "Compiling with coverage flags..."; \
 		gcc --coverage -fprofile-arcs -ftest-coverage -o lambda_coverage.exe $(shell find lambda -name "*.c") -I./include -I./lambda; \
-		./test/test_run.sh; \
+		node test/test_run.js; \
 		gcov $(shell find lambda -name "*.c"); \
 		lcov --capture --directory . --output-file coverage.info; \
 		genhtml coverage.info --output-directory coverage-report; \

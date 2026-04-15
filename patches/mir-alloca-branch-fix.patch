@@ -1,0 +1,14 @@
+diff --git a/mir.c b/mir.c
+index 5ba1261b..6f01d139 100644
+--- a/mir.c
++++ b/mir.c
+@@ -3878,7 +3878,8 @@ static MIR_insn_t func_alloca_features (MIR_context_t ctx, MIR_func_t func, int
+   if (non_top_alloca_p != NULL) *non_top_alloca_p = FALSE;
+   for (insn = DLIST_HEAD (MIR_insn_t, func->insns); insn != NULL;
+        insn = DLIST_NEXT (MIR_insn_t, insn)) {
+-    if (insn->code == MIR_LABEL && set_top_alloca_p) set_top_alloca_p = FALSE;
++    if ((insn->code == MIR_LABEL || MIR_any_branch_code_p (insn->code)) && set_top_alloca_p)
++      set_top_alloca_p = FALSE;
+     if (insn->code != MIR_ALLOCA) {
+       if (top_alloca == NULL || *top_alloca_used_p) continue;
+       alloca_reg = top_alloca->ops[0].u.reg;

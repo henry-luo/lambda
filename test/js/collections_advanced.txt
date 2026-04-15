@@ -1,0 +1,11 @@
+t1:hello,42,true
+t2:false,true
+t3:true,true,false
+t4:false,true
+t5:c,a,b
+t6:number,string,bool,3
+t7:4
+t7b:1,2,3,4
+t8:true,false,true,2
+t9:10,20,30,3
+t10:h,e,l,o,4

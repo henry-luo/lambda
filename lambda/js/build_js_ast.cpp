@@ -4,6 +4,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <string.h>
 #include <stdio.h>
@@ -234,21 +235,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                     char hex[7] = {0};
                                     memcpy(hex, src + hex_start, hex_len);
                                     uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
-                                    if (cp < 0x80) {
-                                        temp_str[out++] = (char)cp;
-                                    } else if (cp < 0x800) {
-                                        temp_str[out++] = (char)(0xC0 | (cp >> 6));
-                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                    } else if (cp <= 0xFFFF) {
-                                        temp_str[out++] = (char)(0xE0 | (cp >> 12));
-                                        temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                    } else if (cp <= 0x10FFFF) {
-                                        temp_str[out++] = (char)(0xF0 | (cp >> 18));
-                                        temp_str[out++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-                                        temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                    }
+                                    out += utf8_encode(cp, temp_str + out);
                                     i = hex_end; // skip past closing }
                                 } else {
                                     temp_str[out++] = src[i]; // keep as-is
@@ -256,16 +243,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                             } else if (i + 5 < content_len) {
                                 char hex[5] = {src[i+2], src[i+3], src[i+4], src[i+5], 0};
                                 uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
-                                if (cp < 0x80) {
-                                    temp_str[out++] = (char)cp;
-                                } else if (cp < 0x800) {
-                                    temp_str[out++] = (char)(0xC0 | (cp >> 6));
-                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                } else {
-                                    temp_str[out++] = (char)(0xE0 | (cp >> 12));
-                                    temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                }
+                                out += utf8_encode(cp, temp_str + out);
                                 i += 5; // skip \uXXXX
                             } else {
                                 temp_str[out++] = src[i]; // keep as-is
@@ -275,13 +253,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                             if (i + 3 < content_len) {
                                 char hex[3] = {src[i+2], src[i+3], 0};
                                 uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
-                                if (cp < 0x80) {
-                                    temp_str[out++] = (char)cp;
-                                } else {
-                                    // 0x80-0xFF: 2-byte UTF-8
-                                    temp_str[out++] = (char)(0xC0 | (cp >> 6));
-                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
-                                }
+                                out += utf8_encode(cp, temp_str + out);
                                 i += 3;
                             } else {
                                 temp_str[out++] = src[i];
@@ -391,21 +363,7 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
                     }
                 }
                 // encode as UTF-8
-                if (cp < 0x80) {
-                    decoded_buf[oi++] = (char)cp;
-                } else if (cp < 0x800) {
-                    decoded_buf[oi++] = (char)(0xC0 | (cp >> 6));
-                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
-                } else if (cp < 0x10000) {
-                    decoded_buf[oi++] = (char)(0xE0 | (cp >> 12));
-                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
-                } else {
-                    decoded_buf[oi++] = (char)(0xF0 | (cp >> 18));
-                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
-                }
+                oi += utf8_encode(cp, decoded_buf + oi);
             } else {
                 decoded_buf[oi++] = temp_str[i++];
             }
@@ -818,7 +776,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                                 } else {
                                     for (int j = 0; j < 4 && ii < (int)accessor_name.length; j++, ii++) { char c = accessor_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
                                 }
-                                if (cp < 0x80) { dec_acc[oi++] = (char)cp; } else if (cp < 0x800) { dec_acc[oi++] = (char)(0xC0|(cp>>6)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec_acc[oi++] = (char)(0xE0|(cp>>12)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else { dec_acc[oi++] = (char)(0xF0|(cp>>18)); dec_acc[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); }
+                                if (cp < 0x80) { dec_acc[oi++] = (char)cp; } else { oi += utf8_encode(cp, dec_acc + oi); }
                             } else { dec_acc[oi++] = accessor_name.str[ii++]; }
                         }
                         dec_acc[oi] = '\0';
@@ -857,7 +815,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                                 } else {
                                     for (int j = 0; j < 4 && ii < (int)method_name.length; j++, ii++) { char c = method_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
                                 }
-                                if (cp < 0x80) { dec[oi++] = (char)cp; } else if (cp < 0x800) { dec[oi++] = (char)(0xC0|(cp>>6)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec[oi++] = (char)(0xE0|(cp>>12)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else { dec[oi++] = (char)(0xF0|(cp>>18)); dec[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); }
+                                if (cp < 0x80) { dec[oi++] = (char)cp; } else { oi += utf8_encode(cp, dec + oi); }
                             } else { dec[oi++] = method_name.str[ii++]; }
                         }
                         dec[oi] = '\0';
@@ -1832,8 +1790,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             }
         }
 
-        // skip comments inside expressions
+        // skip comments and empty statements inside expressions
         if (strcmp(node_type, "comment") == 0) return NULL;
+        if (strcmp(node_type, "empty_statement") == 0) return NULL;
 
         log_error("Unsupported JavaScript expression type: %s (symbol: %d, content: %.*s)",
                   node_type, symbol, (int)source.length, source.str);
@@ -2281,21 +2240,8 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                     // \uXXXX — 4-hex-digit Unicode escape, encode as UTF-8
                     char hex[5] = {source.str[2], source.str[3], source.str[4], source.str[5], 0};
                     uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
-                    if (code <= 0x7F) {
-                        if (quasi_len < (int)sizeof(quasi_buf) - 1)
-                            quasi_buf[quasi_len++] = (char)code;
-                    } else if (code <= 0x7FF) {
-                        if (quasi_len < (int)sizeof(quasi_buf) - 2) {
-                            quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
-                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                        }
-                    } else {
-                        if (quasi_len < (int)sizeof(quasi_buf) - 3) {
-                            quasi_buf[quasi_len++] = (char)(0xE0 | (code >> 12));
-                            quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
-                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                        }
-                    }
+                    if (quasi_len < (int)sizeof(quasi_buf) - 4)
+                        quasi_len += (int)utf8_encode(code, quasi_buf + quasi_len);
                 } else if (esc == 'u' && source.length >= 4 && source.str[2] == '{') {
                     // \u{XXXXX} — Unicode code point escape
                     int hex_end = 3;
@@ -2305,42 +2251,15 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                     if (hex_len > 0 && hex_len < 16) {
                         memcpy(hex, source.str + 3, hex_len);
                         uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
-                        if (code <= 0x7F) {
-                            if (quasi_len < (int)sizeof(quasi_buf) - 1)
-                                quasi_buf[quasi_len++] = (char)code;
-                        } else if (code <= 0x7FF) {
-                            if (quasi_len < (int)sizeof(quasi_buf) - 2) {
-                                quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
-                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                            }
-                        } else if (code <= 0xFFFF) {
-                            if (quasi_len < (int)sizeof(quasi_buf) - 3) {
-                                quasi_buf[quasi_len++] = (char)(0xE0 | (code >> 12));
-                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
-                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                            }
-                        } else if (code <= 0x10FFFF) {
-                            if (quasi_len < (int)sizeof(quasi_buf) - 4) {
-                                quasi_buf[quasi_len++] = (char)(0xF0 | (code >> 18));
-                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 12) & 0x3F));
-                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
-                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                            }
-                        }
+                        if (quasi_len < (int)sizeof(quasi_buf) - 4)
+                            quasi_len += (int)utf8_encode(code, quasi_buf + quasi_len);
                     }
                 } else if (esc == 'x' && source.length >= 4) {
                     // \xXX — 2-hex-digit escape
                     char hex[3] = {source.str[2], source.str[3], 0};
                     uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
-                    if (code <= 0x7F) {
-                        if (quasi_len < (int)sizeof(quasi_buf) - 1)
-                            quasi_buf[quasi_len++] = (char)code;
-                    } else {
-                        if (quasi_len < (int)sizeof(quasi_buf) - 2) {
-                            quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
-                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
-                        }
-                    }
+                    if (quasi_len < (int)sizeof(quasi_buf) - 4)
+                        quasi_len += (int)utf8_encode(code, quasi_buf + quasi_len);
                 } else {
                     char decoded = js_decode_escape_char(esc);
                     if (quasi_len < (int)sizeof(quasi_buf) - 1) {

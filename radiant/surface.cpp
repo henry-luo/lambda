@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
+#include "clip_shape.h"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
@@ -140,6 +141,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     size_t downloaded_size = 0;
 
     if (is_http) {
+        // When network resource manager is active, images are loaded asynchronously.
+        // Return NULL so layout uses placeholder sizing and reflows when image arrives.
+        if (uicon->document->resource_manager) {
+            log_debug("[image] Skipping sync download (resource manager active): %s", url_get_href(abs_url));
+            url_destroy(abs_url);
+            return NULL;
+        }
         // Download the image from HTTP URL
         const char* url_str = url_get_href(abs_url);
         log_debug("[image] Downloading image from URL: %s", url_str);
@@ -216,20 +224,50 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (downloaded_data) mem_free(downloaded_data);
     }
     else {
-        int width, height, channels;
-        unsigned char *data;
+        int width, height;
         if (is_http && downloaded_data) {
-            data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
-            mem_free(downloaded_data);
+            // HTTP images: read dimensions from memory header, keep data for lazy decode
+            if (image_get_dimensions_from_memory(downloaded_data, downloaded_size, &width, &height)) {
+                surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+                surface->width = width;
+                surface->height = height;
+                surface->source_data = downloaded_data;
+                surface->source_data_len = downloaded_size;
+                // pixels stays NULL — decoded on demand
+                log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
+            } else {
+                // Fallback: full decode if header read fails
+                int channels;
+                unsigned char *data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
+                mem_free(downloaded_data);
+                if (!data) {
+                    log_debug("failed to load image: %s", file_path);
+                    return NULL;
+                }
+                surface = image_surface_create_from(width, height, data);
+                if (!surface) { image_free(data); return NULL; }
+            }
         } else {
-            data = image_load(file_path, &width, &height, &channels, 4);
+            // Local files: read dimensions from file header only
+            if (image_get_dimensions(file_path, &width, &height)) {
+                surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+                surface->width = width;
+                surface->height = height;
+                surface->source_path = mem_strdup(file_path, MEM_CAT_IMAGE);
+                // pixels stays NULL — decoded on demand
+                log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path);
+            } else {
+                // Fallback: full decode if header read fails
+                int channels;
+                unsigned char *data = image_load(file_path, &width, &height, &channels, 4);
+                if (!data) {
+                    log_debug("failed to load image: %s", file_path);
+                    return NULL;
+                }
+                surface = image_surface_create_from(width, height, data);
+                if (!surface) { image_free(data); return NULL; }
+            }
         }
-        if (!data) {
-            log_debug("failed to load image: %s", file_path);
-            return NULL;
-        }
-        surface = image_surface_create_from(width, height, data);
-        if (!surface) { image_free(data);  return NULL; }
         if (slen > 5 && strcmp(file_path + slen - 5, ".jpeg") == 0) {
             surface->format = IMAGE_FORMAT_JPEG;
         }
@@ -333,7 +371,8 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     // else src_a == 0: fully transparent, don't draw anything
 }
 
-void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip) {
+void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
+                       ClipShape** clip_shapes, int clip_depth) {
     Rect r;
     if (!surface || !surface->pixels) return;
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
@@ -345,9 +384,36 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     int top = (int)std::max(clip->top, rect->y);
     int bottom = (int)std::min(clip->bottom, rect->y + rect->height);
     if (left >= right || top >= bottom) return; // rect outside clip
+
+    int y_off = surface->tile_offset_y;  // subtract to get tile-relative row index
+    // Fast path: no clip shapes active
+    if (clip_depth <= 0) {
+        for (int i = top; i < bottom; i++) {
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
+            _fill_row(row_pixels, left, right - left, color);
+        }
+        return;
+    }
+
+    // Check if rect is entirely inside all clip shapes
+    if (clip_shapes_rect_inside(clip_shapes, clip_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1))) {
+        for (int i = top; i < bottom; i++) {
+            uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
+            _fill_row(row_pixels, left, right - left, color);
+        }
+        return;
+    }
+
+    // Per-row scanline clipping
     for (int i = top; i < bottom; i++) {
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch;
-        _fill_row(row_pixels, left, right - left, color);
+        float py = (float)i + 0.5f;
+        int rl = left, rr = right;
+        clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &rl, &rr);
+        if (rl >= rr) continue;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (i - y_off) * surface->pitch;
+        _fill_row(row_pixels, rl, rr - rl, color);
     }
 }
 
@@ -439,7 +505,8 @@ static uint32_t area_average(ImageSurface* src, float x0, float y0, float x1, fl
 }
 
 // Enhanced blit function with support for different scaling modes
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode) {
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
+                         ClipShape** clip_shapes, int clip_depth) {
     Rect rect;
     if (!src || !dst || !dst_rect || !clip) return;
     if (!src->pixels) {
@@ -467,9 +534,22 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
     int bottom = (int)std::min(clip->bottom, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return; // dst_rect outside the dst surface
 
+    // Check if clip shape clipping is needed
+    bool need_shape_clip = (clip_depth > 0) &&
+        !clip_shapes_rect_inside(clip_shapes, clip_depth,
+            (float)left + 0.5f, (float)top + 0.5f,
+            (float)(right - left - 1), (float)(bottom - top - 1));
+
+    int y_off = dst->tile_offset_y;  // subtract to get tile-relative row index
     for (int i = top; i < bottom; i++) {
-        uint8_t* row_pixels = (uint8_t*)dst->pixels + i * dst->pitch;
-        for (int j = left; j < right; j++) {
+        int row_left = left, row_right = right;
+        if (need_shape_clip) {
+            float py = (float)i + 0.5f;
+            clip_shapes_scanline_bounds(clip_shapes, clip_depth, py, left, right, &row_left, &row_right);
+            if (row_left >= row_right) continue;
+        }
+        uint8_t* row_pixels = (uint8_t*)dst->pixels + (i - y_off) * dst->pitch;
+        for (int j = row_left; j < row_right; j++) {
             float src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
             float src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
 
@@ -537,6 +617,41 @@ void image_surface_destroy(ImageSurface* img_surface) {
         if (img_surface->pic) {
             rdt_picture_free(img_surface->pic);
         }
+        if (img_surface->source_path) mem_free(img_surface->source_path);
+        if (img_surface->source_data) mem_free(img_surface->source_data);
         mem_free(img_surface);
+    }
+}
+
+void image_surface_ensure_decoded(ImageSurface* img) {
+    if (!img || img->pixels) return;  // already decoded or null
+
+    if (img->source_path) {
+        // decode from local file
+        int width, height, channels;
+        unsigned char* data = image_load(img->source_path, &width, &height, &channels, 4);
+        if (data) {
+            img->pixels = data;
+            img->pitch = width * 4;
+            log_debug("[image] Decoded local image on demand: %dx%d from %s", width, height, img->source_path);
+        } else {
+            log_error("[image] Failed to decode local image: %s", img->source_path);
+        }
+        mem_free(img->source_path);
+        img->source_path = NULL;
+    } else if (img->source_data) {
+        // decode from memory buffer
+        int width, height, channels;
+        unsigned char* data = image_load_from_memory(img->source_data, img->source_data_len, &width, &height, &channels);
+        if (data) {
+            img->pixels = data;
+            img->pitch = width * 4;
+            log_debug("[image] Decoded HTTP image on demand: %dx%d", width, height);
+        } else {
+            log_error("[image] Failed to decode HTTP image from memory");
+        }
+        mem_free(img->source_data);
+        img->source_data = NULL;
+        img->source_data_len = 0;
     }
 }

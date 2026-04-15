@@ -92,6 +92,13 @@ void dir_entry_free(DirEntry* entry) {
     mem_free(entry);
 }
 
+// compare DirEntry by name for sorting
+static int dir_entry_compare_name(ArrayListValue a, ArrayListValue b) {
+    DirEntry* ea = (DirEntry*)a;
+    DirEntry* eb = (DirEntry*)b;
+    return strcmp(ea->name, eb->name);
+}
+
 // ---------------------------------------------------------------------------
 // dir_list — list immediate children of a directory
 // ---------------------------------------------------------------------------
@@ -130,6 +137,8 @@ ArrayList* dir_list(const char* dir_path) {
     } while (FindNextFileA(hFind, &fd));
 
     FindClose(hFind);
+    // sort entries alphabetically for deterministic order
+    arraylist_sort(list, dir_entry_compare_name);
     return list;
 }
 
@@ -181,6 +190,8 @@ ArrayList* dir_list(const char* dir_path) {
     }
 
     closedir(dir);
+    // sort entries alphabetically for deterministic order
+    arraylist_sort(list, dir_entry_compare_name);
     return list;
 }
 

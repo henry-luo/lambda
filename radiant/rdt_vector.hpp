@@ -68,6 +68,10 @@ void rdt_vector_destroy(RdtVector* vec);
 // re-bind to a (possibly different) pixel buffer of the same size
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride);
 
+// set a Y-pixel offset for tiled rendering (0 = normal full-page mode)
+// all subsequent draw calls are translated upward by offset_y physical pixels
+void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y);
+
 // ---------------------------------------------------------------------------
 // Path construction
 // ---------------------------------------------------------------------------
@@ -131,6 +135,12 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 // clips nest (push multiple, pop in reverse).
 void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transform);
 void rdt_pop_clip(RdtVector* vec);
+
+// Save and restore clip stack depth for isolated rendering contexts.
+// rdt_clip_save_depth returns the current depth and resets to 0.
+// rdt_clip_restore_depth restores a previously saved depth.
+int rdt_clip_save_depth();
+void rdt_clip_restore_depth(int saved_depth);
 
 // ---------------------------------------------------------------------------
 // Image drawing (replaces tvg_picture_load_raw + push + draw)

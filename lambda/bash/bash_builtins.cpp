@@ -14,6 +14,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
 #include "../../lib/mem.h"
@@ -54,30 +55,6 @@ extern "C" void bash_getopts_pop_state(void) {
 // ============================================================================
 // Shared escape sequence processor (used by echo -e, printf %b, $'...')
 // ============================================================================
-
-// encode a Unicode codepoint as UTF-8 into buf, return number of bytes written
-static int utf8_encode(uint32_t cp, char* buf) {
-    if (cp < 0x80) {
-        buf[0] = (char)cp;
-        return 1;
-    } else if (cp < 0x800) {
-        buf[0] = (char)(0xC0 | (cp >> 6));
-        buf[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    } else if (cp < 0x10000) {
-        buf[0] = (char)(0xE0 | (cp >> 12));
-        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    } else if (cp < 0x110000) {
-        buf[0] = (char)(0xF0 | (cp >> 18));
-        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (cp & 0x3F));
-        return 4;
-    }
-    return 0;
-}
 
 // process escape sequences in a string, appending to out
 // supports: \a \b \e \f \n \r \t \v \\ \' \" \0NNN \xHH \uHHHH \UHHHHHHHH \c (stop)

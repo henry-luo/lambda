@@ -355,7 +355,8 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         rdt_path_free(p);
     } else {
         ImageSurface* surface = rdcon->ui_context->surface;
-        fill_surface_rect(surface, &rect, color.c, &rdcon->block.clip);
+        fill_surface_rect(surface, &rect, color.c, &rdcon->block.clip,
+            rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 }
 
@@ -1289,8 +1290,9 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
 /**
  * Render a single tile of a background image using the raster blit path.
  */
-static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip) {
-    blit_surface_scaled(img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR);
+static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
+                         ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
+    blit_surface_scaled(img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR, clip_shapes, clip_depth);
 }
 
 /**
@@ -1419,6 +1421,10 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
 
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
+    if (!is_svg) {
+        // ensure raster image pixels are decoded (lazy loading)
+        image_surface_ensure_decoded(img);
+    }
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
             Rect tile_rect;
@@ -1444,7 +1450,8 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
             if (is_svg) {
                 render_bg_tile_tvg(rdcon, img, &tile_rect);
             } else {
-                blit_bg_tile(img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip);
+                blit_bg_tile(img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
+                             rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         }
     }

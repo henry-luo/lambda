@@ -11,6 +11,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
+#include "../../lib/utf.h"
 #include <string.h>
 #include "../../lib/mem.h"
 #include <ctype.h>
@@ -1253,33 +1254,6 @@ bool pdf_font_needs_decoding(PDFFontEntry* entry) {
 }
 
 /**
- * Encode a Unicode code point to UTF-8
- * Returns the number of bytes written
- */
-static int encode_utf8(uint32_t codepoint, char* buf) {
-    if (codepoint < 0x80) {
-        buf[0] = (char)codepoint;
-        return 1;
-    } else if (codepoint < 0x800) {
-        buf[0] = (char)(0xC0 | (codepoint >> 6));
-        buf[1] = (char)(0x80 | (codepoint & 0x3F));
-        return 2;
-    } else if (codepoint < 0x10000) {
-        buf[0] = (char)(0xE0 | (codepoint >> 12));
-        buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (codepoint & 0x3F));
-        return 3;
-    } else if (codepoint < 0x110000) {
-        buf[0] = (char)(0xF0 | (codepoint >> 18));
-        buf[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (codepoint & 0x3F));
-        return 4;
-    }
-    return 0;
-}
-
-/**
  * Decode PDF text using ToUnicode CMap
  * Converts character codes to Unicode string
  *
@@ -1344,29 +1318,29 @@ int pdf_font_decode_text(PDFFontEntry* entry, const char* input_text, int input_
         // This is important for search/comparison functionality
         switch (unicode) {
             case 0xFB00:  // ff ligature
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('f', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
                 break;
             case 0xFB01:  // fi ligature
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('i', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('i', output_buf + out_pos);
                 break;
             case 0xFB02:  // fl ligature
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('l', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('l', output_buf + out_pos);
                 break;
             case 0xFB03:  // ffi ligature
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('i', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('i', output_buf + out_pos);
                 break;
             case 0xFB04:  // ffl ligature
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('f', output_buf + out_pos);
-                out_pos += encode_utf8('l', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('f', output_buf + out_pos);
+                out_pos += utf8_encode('l', output_buf + out_pos);
                 break;
             default:
-                out_pos += encode_utf8(unicode, output_buf + out_pos);
+                out_pos += utf8_encode(unicode, output_buf + out_pos);
                 break;
         }
     }

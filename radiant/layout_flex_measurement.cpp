@@ -284,7 +284,8 @@ uint32_t get_measurement_cache_generation() {
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
-                               float content_width, float content_height) {
+                               float content_width, float content_height,
+                               float context_width) {
     if (cache_count >= 1000) {
         log_error("Measurement cache overflow");
         return;
@@ -295,6 +296,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     measurement_cache[cache_count].measured_height = height;
     measurement_cache[cache_count].content_width = content_width;
     measurement_cache[cache_count].content_height = content_height;
+    measurement_cache[cache_count].context_width = context_width;
     measurement_cache[cache_count].generation = cache_generation;
     cache_count++;
 
@@ -337,12 +339,9 @@ void invalidate_measurement_cache_for_node(DomNode* node) {
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (!child) return;
 
-    log_debug("Measuring flex child content for %s", child->node_name());
-
     // Check if already measured
     MeasurementCacheEntry* cached = get_from_measurement_cache(child);
     if (cached) {
-        log_debug("Using cached measurement for %s", child->node_name());
         return;
     }
 
@@ -1068,9 +1067,10 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                   child->node_name(), measured_width, measured_height);
     }
 
-    // Store measurement results
+    // Store measurement results (include the container width used during measurement)
     store_in_measurement_cache(child, measured_width, measured_height,
-                              content_width, content_height);
+                              content_width, content_height,
+                              saved_context.block.content_width);
 
     // Restore original context, but preserve depth and node_count guards
     int current_depth = lycon->depth;
@@ -1192,25 +1192,19 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 // Lightweight View creation for flex items with measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     if (!node) return;
-    log_debug("=== TRACE: layout_flow_node_for_flex ENTRY for %s (node=%p)", node->node_name(), node);
     // Skip text nodes - flex layout only processes element nodes
     if (!node->is_element()) {
-        log_debug("TRACE: Skipping text node in flex container: %s", node->node_name());
         return;
     }
 
-    log_debug("TRACE: About to call init_flex_item_view for %s", node->node_name());
     // Create lightweight View for flex item element only (no child processing)
     init_flex_item_view(lycon, node);
-    log_debug("TRACE: Completed init_flex_item_view for %s", node->node_name());
 
     // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
-    log_debug("DEBUG: cached = %p", cached);
 
     if (cached && node->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* view = (ViewBlock*)node;
-        log_debug("DEBUG: view = %p, node = %p", view, node);
         if (view == node) {
             log_debug("Applying cached measurements to flex item: %.1fx%.1f",
                 cached->measured_width, cached->measured_height);
@@ -1236,10 +1230,8 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
             }
             log_debug("Applied measurements: view size now %.1fx%.1f (is_grid=%d)", view->width, view->height, node_is_grid);
         } else {
-            log_debug("DEBUG: Node mismatch - cached for different node");
         }
     } else {
-        log_debug("DEBUG: Failed measurement application - cached=%p, node=%p", cached, node);
     }
 }
 
@@ -1265,7 +1257,6 @@ void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* 
 void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
-    log_debug("*** TRACE: init_flex_item_view ENTRY for %s (node=%p)", node->node_name(), node);
     // Get display properties for the element
     DisplayValue display = resolve_display_value(node);
 
@@ -1295,7 +1286,6 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     }
 
     block->display = display;
-    log_debug("*** SET DISPLAY: node=%p (%s), display={%d,%d}", node, node->node_name(), display.outer, display.inner);
 
     // Set up basic CSS properties (minimal setup for flex items)
     dom_node_resolve_style(node, lycon);
@@ -1825,6 +1815,21 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     if (available_width <= 0) available_width = 10000.0f;
                 }
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
+                // calculate_max_content_height returns border-box values (includes the
+                // element's own padding+border). Convert back to content-box so all
+                // stored intrinsic sizes are content-box — resolve_flex_item_constraints
+                // adds padding+border when converting to border-box for comparison.
+                // (Same conversion as done for width above.)
+                if (item->bound) {
+                    float vp = item->bound->padding.top + item->bound->padding.bottom;
+                    float vb = 0;
+                    if (item->bound->border)
+                        vb = item->bound->border->width.top + item->bound->border->width.bottom;
+                    min_height -= (vp + vb);
+                    max_height -= (vp + vb);
+                    if (min_height < 0) min_height = 0;
+                    if (max_height < 0) max_height = 0;
+                }
                 log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f avail_w=%.1f (is_grid=%d)", min_height, available_width, item_is_grid_container);
             }
 
@@ -2099,6 +2104,87 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             } else if (dom_css_height > 0) {
                                 child_height = dom_css_height;
                             }
+                        } else if (is_row_flex_container && lycon && flex_layout &&
+                                   !is_main_axis_horizontal(flex_layout) &&
+                                   flex_layout->cross_axis_size > 0) {
+                            // Row flex items in a column parent: compute height at
+                            // the item's estimated width share, not the grandparent's
+                            // full cross-axis size (which would prevent text wrapping).
+                            float row_width = flex_layout->cross_axis_size;
+                            if (item->bound) {
+                                row_width -= item->bound->margin.left + item->bound->margin.right;
+                                row_width -= item->bound->padding.left + item->bound->padding.right;
+                                if (item->bound->border)
+                                    row_width -= item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                            // Estimate each child's share of the row (assumes flex:1 equal split)
+                            float gap = 0;
+                            if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
+                                ViewBlock* bv = (ViewBlock*)item;
+                                if (bv->embed && bv->embed->flex)
+                                    gap = bv->embed->flex->column_gap;
+                            }
+                            int n_flex_children = 0;
+                            for (DomNode* sc = item->first_child; sc; sc = sc->next_sibling)
+                                if (sc->is_element()) n_flex_children++;
+                            float child_share = row_width;
+                            if (n_flex_children > 1)
+                                child_share = (row_width - gap * (n_flex_children - 1)) / n_flex_children;
+                            // Subtract child's own padding+border to get content width
+                            float child_content_w = child_share;
+                            if (child_view->bound) {
+                                child_content_w -= child_view->bound->padding.left + child_view->bound->padding.right;
+                                if (child_view->bound->border)
+                                    child_content_w -= child_view->bound->border->width.left + child_view->bound->border->width.right;
+                            } else if (child_view->specified_style) {
+                                // Fallback: resolve padding/border from CSS when bound not yet computed
+                                float cp = 0, cb = 0;
+                                CssDeclaration* pad_decl = style_tree_get_declaration(
+                                    child_view->specified_style, CSS_PROPERTY_PADDING);
+                                if (pad_decl && pad_decl->value && pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    float p = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
+                                    cp = p * 2; // left + right
+                                } else {
+                                    CssDeclaration* pl = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_PADDING_LEFT);
+                                    CssDeclaration* pr = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+                                    if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH)
+                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
+                                    if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH)
+                                        cp += resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
+                                }
+                                CssDeclaration* bw_decl = style_tree_get_declaration(
+                                    child_view->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+                                if (bw_decl && bw_decl->value && bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                    float b = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
+                                    cb = b * 2;
+                                } else {
+                                    // Check border shorthand (e.g., "border: 1px solid #color")
+                                    CssDeclaration* b_sh = style_tree_get_declaration(
+                                        child_view->specified_style, CSS_PROPERTY_BORDER);
+                                    if (b_sh && b_sh->value) {
+                                        float bw = 0;
+                                        if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                                            for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
+                                                CssValue* bv = b_sh->value->data.list.values[bi];
+                                                if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
+                                                    bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
+                                                    break;
+                                                }
+                                            }
+                                        } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                            bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
+                                        }
+                                        cb = bw * 2;
+                                    }
+                                }
+                                child_content_w -= cp + cb;
+                            }
+                            if (child_content_w < 0) child_content_w = 0;
+                            child_height = calculate_max_content_height(lycon, c, child_content_w);
+                            log_debug("Row flex child height at estimated share: share=%.1f, content_w=%.1f, h=%.1f",
+                                      child_share, child_content_w, child_height);
                         } else if (child_view->fi) {
                             // Child has fi - use cached intrinsic or calculate recursively
                             if (!child_view->fi->has_intrinsic_height) {

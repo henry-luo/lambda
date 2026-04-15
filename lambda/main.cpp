@@ -129,7 +129,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 extern int view_doc_in_window(const char* doc_file);
-extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless);
+extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
+                                           const char** font_dirs = nullptr, int font_dir_count = 0);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -1081,6 +1082,9 @@ int main(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "--mir-interp") == 0) {
                     g_mir_interp_mode = 1;
+                } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
+                    int level = atoi(argv[i] + 12);
+                    if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
                 } else if (argv[i][0] != '-') {
                     if (!js_file) js_file = argv[i];
                 }
@@ -2080,12 +2084,20 @@ int main(int argc, char *argv[]) {
         const char* filename = NULL;
         const char* event_file = NULL;
         bool headless = false;
+        const char* font_dirs[16];
+        int font_dir_count = 0;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
             } else if (strcmp(argv[i], "--headless") == 0) {
                 headless = true;
+            } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
+                if (font_dir_count < 16) {
+                    font_dirs[font_dir_count++] = argv[++i];
+                } else {
+                    i++; // skip argument
+                }
             } else if (argv[i][0] != '-' && filename == NULL) {
                 filename = argv[i];
             }
@@ -2275,7 +2287,7 @@ int main(int argc, char *argv[]) {
 
             // View the temp SVG file
             log_info("Opening graph SVG in viewer: %s", temp_svg);
-            exit_code = view_doc_in_window_with_events(temp_svg, event_file, headless);
+            exit_code = view_doc_in_window_with_events(temp_svg, event_file, headless, font_dirs, font_dir_count);
 
             // Clean up temp file after viewing
             file_delete(temp_svg);
@@ -2301,7 +2313,7 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
-            exit_code = view_doc_in_window_with_events(filename, event_file, headless);
+            exit_code = view_doc_in_window_with_events(filename, event_file, headless, font_dirs, font_dir_count);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
@@ -2703,7 +2715,7 @@ int main(int argc, char *argv[]) {
         // signal handler tries to run on the same overflowed stack and triggers
         // a double fault. With sigaltstack, the handler runs on a separate
         // allocation and can safely siglongjmp back to the recovery point.
-        static char alt_stack_mem[SIGSTKSZ + 65536];  // generous alt stack
+        static char alt_stack_mem[131072];  // 128KB generous alt stack
         stack_t alt_stack;
         alt_stack.ss_sp = alt_stack_mem;
         alt_stack.ss_size = sizeof(alt_stack_mem);
