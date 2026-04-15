@@ -910,7 +910,6 @@ These are explicitly out of scope but noted for future consideration:
 
 - **Full JavaScript compliance** — async/await, Promises, ES modules, full event loop. Would close the gap for SPA frameworks (React, Vue, Angular).
 - **Form submission** — POST requests with form encoding. Moderate effort, useful for login flows.
-- **iframe support** — Nested browsing contexts. Requires recursive document loading and rendering.
 - **`<video>` / `<audio>`** — Media playback. Large scope, requires media framework.
 - **Tab / multi-window** — Multiple concurrent pages. Window management complexity.
 - **Address bar / URL display** — Browser chrome UI for URL entry and display. Will be implemented via Lambda Reactive UI framework.
