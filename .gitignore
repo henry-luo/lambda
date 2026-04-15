@@ -24,6 +24,7 @@ premake5.*.lua
 *.app
 *.bin|
 *.pyc
+*.dvi
 
 # Build directories
 build/
