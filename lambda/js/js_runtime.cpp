@@ -71,6 +71,7 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
+extern "C" Item js_get_current_this(void) { return js_current_this; }
 // TRACE: track last called function name for debugging
 static const char* _trace_last_fn = "(none)";
 static int _trace_last_fn_len = 6;
@@ -3050,6 +3051,18 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (ta_proto.item != ITEM_NULL) {
                         Item result = js_property_get(ta_proto, key);
                         if (result.item != ITEM_NULL) return result;
+                    }
+                    // fallback: check buffer prototype for Uint8Array (Buffer) instances
+                    {
+                        JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                        if (ta && ta->element_type == JS_TYPED_UINT8) {
+                            extern Item js_get_buffer_prototype(void);
+                            Item buf_proto = js_get_buffer_prototype();
+                            if (buf_proto.item != ITEM_NULL) {
+                                Item result = js_property_get(buf_proto, key);
+                                if (result.item != ITEM_NULL) return result;
+                            }
+                        }
                     }
                     return (Item){.item = ITEM_NULL};
                 }
@@ -8832,6 +8845,20 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_typed_array(obj)) {
         String* method = it2s(method_name);
         if (method) {
+            // Buffer (Uint8Array) instance methods: dispatch through buffer prototype first
+            {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                if (ta && ta->element_type == JS_TYPED_UINT8) {
+                    extern Item js_get_buffer_prototype(void);
+                    Item buf_proto = js_get_buffer_prototype();
+                    if (buf_proto.item != ITEM_NULL) {
+                        Item fn = js_property_get(buf_proto, method_name);
+                        if (fn.item != ITEM_NULL && get_type_id(fn) == LMD_TYPE_FUNC) {
+                            return js_call_function(fn, obj, args, argc);
+                        }
+                    }
+                }
+            }
             if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
                 Item value = argc > 0 ? args[0] : ItemNull;
                 int start = argc > 1 ? (int)it2i(args[1]) : 0;
@@ -9473,6 +9500,21 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     Item ts_fn = js_prototype_lookup(obj, ts_key);
                     if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                         return js_call_function(ts_fn, obj, args, argc);
+                    }
+                }
+                // Buffer prototype: Uint8Array (Buffer) instances use buffer toString
+                if (js_is_typed_array(obj)) {
+                    JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                    if (ta && ta->element_type == JS_TYPED_UINT8) {
+                        extern Item js_get_buffer_prototype(void);
+                        Item buf_proto = js_get_buffer_prototype();
+                        if (buf_proto.item != ITEM_NULL) {
+                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+                            Item ts_fn = js_property_get(buf_proto, ts_key);
+                            if (ts_fn.item != ITEM_NULL && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                                return js_call_function(ts_fn, obj, args, argc);
+                            }
+                        }
                     }
                 }
                 // v20: Error.prototype.toString — "name: message" format
