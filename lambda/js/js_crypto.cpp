@@ -1,16 +1,28 @@
 /**
- * Native SHA-256/384/512 implementations for Lambda JS engine.
+ * Native SHA-256/384/512, HMAC, randomBytes, randomUUID, createHash for Lambda JS engine.
  * 
  * These replace the JavaScript Word64-based SHA implementations which are
  * extremely slow due to per-operation method call overhead through JS dispatch.
  * The native versions compute SHA directly on raw buffers and return Uint8Array.
+ *
+ * Phase 4 additions: HMAC (native), randomBytes (OS entropy), randomUUID (v4),
+ * createHash (streaming hash API), crypto module namespace.
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
+#include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include "../../lib/mem.h"
+
+#ifdef _WIN32
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 // ============================================================================
 // SHA-256 constants
@@ -309,4 +321,476 @@ extern "C" Item js_native_sha512(Item data_item, Item offset_item, Item length_i
         memcpy(rta->data, hash, 64);
     }
     return result;
+}
+
+// ============================================================================
+// OS-level random bytes
+// ============================================================================
+
+static bool crypto_random_bytes(uint8_t* buf, size_t len) {
+#ifdef _WIN32
+    return BCryptGenRandom(NULL, buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) return false;
+    size_t total = 0;
+    while (total < len) {
+        ssize_t r = read(fd, buf + total, len - total);
+        if (r <= 0) { close(fd); return false; }
+        total += (size_t)r;
+    }
+    close(fd);
+    return true;
+#endif
+}
+
+// ============================================================================
+// randomBytes(size) → Uint8Array
+// ============================================================================
+
+static Item make_string_item_crypto(const char* str) {
+    if (!str) return ItemNull;
+    String* s = heap_create_name(str, strlen(str));
+    return (Item){.item = s2it(s)};
+}
+
+extern "C" Item js_crypto_randomBytes(Item size_item) {
+    int size = (int)it2i(size_item);
+    if (size <= 0 || size > 65536) {
+        log_error("crypto: randomBytes: invalid size %d", size);
+        return ItemNull;
+    }
+    Item result = js_typed_array_new(JS_TYPED_UINT8, size);
+    JsTypedArray* ta = (JsTypedArray*)result.map->data;
+    if (!ta || !ta->data) return ItemNull;
+    if (!crypto_random_bytes((uint8_t*)ta->data, (size_t)size)) {
+        log_error("crypto: randomBytes: entropy source failed");
+        return ItemNull;
+    }
+    return result;
+}
+
+// ============================================================================
+// randomUUID() → string "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
+// ============================================================================
+
+extern "C" Item js_crypto_randomUUID(void) {
+    uint8_t bytes[16];
+    if (!crypto_random_bytes(bytes, 16)) {
+        log_error("crypto: randomUUID: entropy source failed");
+        return ItemNull;
+    }
+    // set version 4 and variant 1
+    bytes[6] = (bytes[6] & 0x0F) | 0x40;
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
+    static const char hex[] = "0123456789abcdef";
+    char uuid[37];
+    int p = 0;
+    for (int i = 0; i < 16; i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) uuid[p++] = '-';
+        uuid[p++] = hex[bytes[i] >> 4];
+        uuid[p++] = hex[bytes[i] & 0x0F];
+    }
+    uuid[p] = '\0';
+    return make_string_item_crypto(uuid);
+}
+
+// ============================================================================
+// randomInt(min, max) → integer in [min, max)
+// ============================================================================
+
+extern "C" Item js_crypto_randomInt(Item min_item, Item max_item) {
+    int64_t min_val = it2i(min_item);
+    int64_t max_val = it2i(max_item);
+    if (max_val <= min_val) return (Item){.item = i2it(min_val)};
+    uint32_t rnd;
+    crypto_random_bytes((uint8_t*)&rnd, sizeof(rnd));
+    int64_t range = max_val - min_val;
+    return (Item){.item = i2it(min_val + (int64_t)(rnd % (uint32_t)range))};
+}
+
+// ============================================================================
+// HMAC — hash-based message authentication code (native implementation)
+// ============================================================================
+
+static void hmac_compute(const uint8_t* key, int key_len,
+                         const uint8_t* data, int data_len,
+                         const char* alg, uint8_t* out, int* out_len) {
+    int block_size;
+    int hash_len;
+    void (*hash_fn)(const uint8_t*, int, int, uint8_t*) = NULL;
+    void (*hash_fn512)(const uint8_t*, int, int, bool, uint8_t*) = NULL;
+    bool is384 = false;
+
+    if (strcmp(alg, "sha256") == 0) {
+        block_size = 64; hash_len = 32;
+        hash_fn = sha256_compute;
+    } else if (strcmp(alg, "sha384") == 0) {
+        block_size = 128; hash_len = 48;
+        hash_fn512 = sha512_compute; is384 = true;
+    } else if (strcmp(alg, "sha512") == 0) {
+        block_size = 128; hash_len = 64;
+        hash_fn512 = sha512_compute; is384 = false;
+    } else {
+        *out_len = 0;
+        return;
+    }
+
+    // derive K'
+    uint8_t k_prime[128];
+    memset(k_prime, 0, (size_t)block_size);
+    if (key_len > block_size) {
+        if (hash_fn) hash_fn(key, 0, key_len, k_prime);
+        else hash_fn512(key, 0, key_len, is384, k_prime);
+    } else {
+        memcpy(k_prime, key, (size_t)key_len);
+    }
+
+    // inner hash
+    int inner_len = block_size + data_len;
+    uint8_t* inner = (uint8_t*)mem_alloc((size_t)inner_len, MEM_CAT_JS_RUNTIME);
+    for (int i = 0; i < block_size; i++) inner[i] = k_prime[i] ^ 0x36;
+    if (data_len > 0) memcpy(inner + block_size, data, (size_t)data_len);
+
+    uint8_t inner_hash[64];
+    if (hash_fn) hash_fn(inner, 0, inner_len, inner_hash);
+    else hash_fn512(inner, 0, inner_len, is384, inner_hash);
+    mem_free(inner);
+
+    // outer hash
+    int outer_len = block_size + hash_len;
+    uint8_t* outer = (uint8_t*)mem_alloc((size_t)outer_len, MEM_CAT_JS_RUNTIME);
+    for (int i = 0; i < block_size; i++) outer[i] = k_prime[i] ^ 0x5c;
+    memcpy(outer + block_size, inner_hash, (size_t)hash_len);
+
+    if (hash_fn) hash_fn(outer, 0, outer_len, out);
+    else hash_fn512(outer, 0, outer_len, is384, out);
+    mem_free(outer);
+    *out_len = hash_len;
+}
+
+// ============================================================================
+// Encoding helpers
+// ============================================================================
+
+static const char hex_chars[] = "0123456789abcdef";
+
+static Item bytes_to_hex_string(const uint8_t* bytes, int len) {
+    char* hex = (char*)mem_alloc((size_t)(len * 2 + 1), MEM_CAT_JS_RUNTIME);
+    for (int i = 0; i < len; i++) {
+        hex[i*2] = hex_chars[bytes[i] >> 4];
+        hex[i*2+1] = hex_chars[bytes[i] & 0x0F];
+    }
+    hex[len*2] = '\0';
+    Item result = make_string_item_crypto(hex);
+    mem_free(hex);
+    return result;
+}
+
+static Item bytes_to_base64_string(const uint8_t* bytes, int len) {
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int out_len = ((len + 2) / 3) * 4;
+    char* out = (char*)mem_alloc((size_t)(out_len + 1), MEM_CAT_JS_RUNTIME);
+    int j = 0;
+    for (int i = 0; i < len; i += 3) {
+        uint32_t n = ((uint32_t)bytes[i]) << 16;
+        if (i + 1 < len) n |= ((uint32_t)bytes[i+1]) << 8;
+        if (i + 2 < len) n |= bytes[i+2];
+        out[j++] = b64[(n >> 18) & 0x3F];
+        out[j++] = b64[(n >> 12) & 0x3F];
+        out[j++] = (i + 1 < len) ? b64[(n >> 6) & 0x3F] : '=';
+        out[j++] = (i + 2 < len) ? b64[n & 0x3F] : '=';
+    }
+    out[j] = '\0';
+    Item result = make_string_item_crypto(out);
+    mem_free(out);
+    return result;
+}
+
+// ============================================================================
+// createHmac(algorithm, key) → object with update(data)/digest(encoding)
+// ============================================================================
+
+struct HmacCtx {
+    char alg[16];
+    uint8_t* key;
+    int key_len;
+    uint8_t* data;
+    int data_len;
+    int data_cap;
+};
+
+extern "C" Item js_hmac_update(Item self, Item data_item) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__hmac_ctx__"));
+    if (ctx_item.item == 0) return self;
+    HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx) return self;
+
+    if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        int need = ctx->data_len + (int)s->len;
+        if (need > ctx->data_cap) {
+            int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+            while (cap < need) cap *= 2;
+            ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+            ctx->data_cap = cap;
+        }
+        memcpy(ctx->data + ctx->data_len, s->chars, s->len);
+        ctx->data_len += (int)s->len;
+    } else if (js_is_typed_array(data_item)) {
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(data_item, &buf, &len)) {
+            int need = ctx->data_len + len;
+            if (need > ctx->data_cap) {
+                int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+                while (cap < need) cap *= 2;
+                ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+                ctx->data_cap = cap;
+            }
+            memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+            ctx->data_len += len;
+        }
+    }
+    return self;
+}
+
+extern "C" Item js_hmac_digest(Item self, Item encoding_item) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__hmac_ctx__"));
+    if (ctx_item.item == 0) return ItemNull;
+    HmacCtx* ctx = (HmacCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx) return ItemNull;
+
+    uint8_t hash[64];
+    int hash_len = 0;
+    hmac_compute(ctx->key, ctx->key_len, ctx->data, ctx->data_len, ctx->alg, hash, &hash_len);
+
+    if (ctx->key) mem_free(ctx->key);
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+    js_property_set(self, make_string_item_crypto("__hmac_ctx__"), ItemNull);
+
+    if (hash_len == 0) return ItemNull;
+
+    const char* enc = NULL;
+    char enc_buf[32];
+    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
+        String* s = it2s(encoding_item);
+        int len = (int)s->len < 31 ? (int)s->len : 31;
+        memcpy(enc_buf, s->chars, (size_t)len);
+        enc_buf[len] = '\0';
+        enc = enc_buf;
+    }
+
+    if (enc && strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
+    if (enc && strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
+    JsTypedArray* ta = (JsTypedArray*)result.map->data;
+    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
+    return result;
+}
+
+extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
+    String* alg = it2s(alg_item);
+
+    HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
+    int alen = (int)alg->len < 15 ? (int)alg->len : 15;
+    memcpy(ctx->alg, alg->chars, (size_t)alen);
+    ctx->alg[alen] = '\0';
+
+    if (get_type_id(key_item) == LMD_TYPE_STRING) {
+        String* ks = it2s(key_item);
+        ctx->key = (uint8_t*)mem_alloc(ks->len, MEM_CAT_JS_RUNTIME);
+        memcpy(ctx->key, ks->chars, ks->len);
+        ctx->key_len = (int)ks->len;
+    } else if (js_is_typed_array(key_item)) {
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(key_item, &buf, &len)) {
+            ctx->key = (uint8_t*)mem_alloc((size_t)len, MEM_CAT_JS_RUNTIME);
+            memcpy(ctx->key, buf, (size_t)len);
+            ctx->key_len = len;
+        }
+    }
+
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item_crypto("__hmac_ctx__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
+    js_property_set(obj, make_string_item_crypto("update"),
+                    js_new_function((void*)js_hmac_update, 2));
+    js_property_set(obj, make_string_item_crypto("digest"),
+                    js_new_function((void*)js_hmac_digest, 2));
+    return obj;
+}
+
+// ============================================================================
+// createHash(algorithm) → object with update(data)/digest(encoding)
+// ============================================================================
+
+struct HashCtx {
+    char alg[16];
+    uint8_t* data;
+    int data_len;
+    int data_cap;
+};
+
+extern "C" Item js_hash_update(Item self, Item data_item) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
+    if (ctx_item.item == 0) return self;
+    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx) return self;
+
+    if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        int need = ctx->data_len + (int)s->len;
+        if (need > ctx->data_cap) {
+            int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+            while (cap < need) cap *= 2;
+            ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+            ctx->data_cap = cap;
+        }
+        memcpy(ctx->data + ctx->data_len, s->chars, s->len);
+        ctx->data_len += (int)s->len;
+    } else if (js_is_typed_array(data_item)) {
+        const uint8_t* buf; int len;
+        if (get_uint8_buffer(data_item, &buf, &len)) {
+            int need = ctx->data_len + len;
+            if (need > ctx->data_cap) {
+                int cap = ctx->data_cap == 0 ? 1024 : ctx->data_cap;
+                while (cap < need) cap *= 2;
+                ctx->data = (uint8_t*)mem_realloc(ctx->data, (size_t)cap, MEM_CAT_JS_RUNTIME);
+                ctx->data_cap = cap;
+            }
+            memcpy(ctx->data + ctx->data_len, buf, (size_t)len);
+            ctx->data_len += len;
+        }
+    }
+    return self;
+}
+
+extern "C" Item js_hash_digest(Item self, Item encoding_item) {
+    Item ctx_item = js_property_get(self, make_string_item_crypto("__hash_ctx__"));
+    if (ctx_item.item == 0) return ItemNull;
+    HashCtx* ctx = (HashCtx*)(uintptr_t)it2i(ctx_item);
+    if (!ctx) return ItemNull;
+
+    uint8_t hash[64];
+    int hash_len = 0;
+
+    if (strcmp(ctx->alg, "sha256") == 0) {
+        sha256_compute(ctx->data ? ctx->data : (const uint8_t*)"", 0, ctx->data_len, hash);
+        hash_len = 32;
+    } else if (strcmp(ctx->alg, "sha384") == 0) {
+        sha512_compute(ctx->data ? ctx->data : (const uint8_t*)"", 0, ctx->data_len, true, hash);
+        hash_len = 48;
+    } else if (strcmp(ctx->alg, "sha512") == 0) {
+        sha512_compute(ctx->data ? ctx->data : (const uint8_t*)"", 0, ctx->data_len, false, hash);
+        hash_len = 64;
+    }
+
+    if (ctx->data) mem_free(ctx->data);
+    mem_free(ctx);
+    js_property_set(self, make_string_item_crypto("__hash_ctx__"), ItemNull);
+
+    if (hash_len == 0) return ItemNull;
+
+    const char* enc = NULL;
+    char enc_buf[32];
+    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
+        String* s = it2s(encoding_item);
+        int len = (int)s->len < 31 ? (int)s->len : 31;
+        memcpy(enc_buf, s->chars, (size_t)len);
+        enc_buf[len] = '\0';
+        enc = enc_buf;
+    }
+
+    if (enc && strcmp(enc, "hex") == 0) return bytes_to_hex_string(hash, hash_len);
+    if (enc && strcmp(enc, "base64") == 0) return bytes_to_base64_string(hash, hash_len);
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, hash_len);
+    JsTypedArray* ta = (JsTypedArray*)result.map->data;
+    if (ta && ta->data) memcpy(ta->data, hash, (size_t)hash_len);
+    return result;
+}
+
+extern "C" Item js_crypto_createHash(Item alg_item) {
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
+    String* alg = it2s(alg_item);
+
+    HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);
+    int alen = (int)alg->len < 15 ? (int)alg->len : 15;
+    memcpy(ctx->alg, alg->chars, (size_t)alen);
+    ctx->alg[alen] = '\0';
+
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item_crypto("__hash_ctx__"),
+                    (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
+    js_property_set(obj, make_string_item_crypto("update"),
+                    js_new_function((void*)js_hash_update, 2));
+    js_property_set(obj, make_string_item_crypto("digest"),
+                    js_new_function((void*)js_hash_digest, 2));
+    return obj;
+}
+
+// ============================================================================
+// getHashes() → array of supported algorithm names
+// ============================================================================
+
+extern "C" Item js_crypto_getHashes(void) {
+    Item arr = js_array_new(3);
+    js_array_push(arr, make_string_item_crypto("sha256"));
+    js_array_push(arr, make_string_item_crypto("sha384"));
+    js_array_push(arr, make_string_item_crypto("sha512"));
+    return arr;
+}
+
+// ============================================================================
+// timingSafeEqual(a, b) → boolean
+// ============================================================================
+
+extern "C" Item js_crypto_timingSafeEqual(Item a_item, Item b_item) {
+    const uint8_t *a_buf, *b_buf;
+    int a_len, b_len;
+    if (!get_uint8_buffer(a_item, &a_buf, &a_len) || !get_uint8_buffer(b_item, &b_buf, &b_len))
+        return (Item){.item = b2it(false)};
+    if (a_len != b_len) return (Item){.item = b2it(false)};
+    volatile uint8_t diff = 0;
+    for (int i = 0; i < a_len; i++) diff |= a_buf[i] ^ b_buf[i];
+    return (Item){.item = b2it(diff == 0)};
+}
+
+// ============================================================================
+// crypto Module Namespace
+// ============================================================================
+
+static Item crypto_namespace = {0};
+
+static void crypto_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    Item key = make_string_item_crypto(name);
+    Item fn = js_new_function(func_ptr, param_count);
+    js_property_set(ns, key, fn);
+}
+
+extern "C" Item js_get_crypto_namespace(void) {
+    if (crypto_namespace.item != 0) return crypto_namespace;
+
+    crypto_namespace = js_new_object();
+
+    crypto_set_method(crypto_namespace, "createHash",       (void*)js_crypto_createHash, 1);
+    crypto_set_method(crypto_namespace, "createHmac",       (void*)js_crypto_createHmac, 2);
+    crypto_set_method(crypto_namespace, "randomBytes",      (void*)js_crypto_randomBytes, 1);
+    crypto_set_method(crypto_namespace, "randomUUID",       (void*)js_crypto_randomUUID, 0);
+    crypto_set_method(crypto_namespace, "randomInt",        (void*)js_crypto_randomInt, 2);
+    crypto_set_method(crypto_namespace, "getHashes",        (void*)js_crypto_getHashes, 0);
+    crypto_set_method(crypto_namespace, "timingSafeEqual",  (void*)js_crypto_timingSafeEqual, 2);
+
+    Item default_key = make_string_item_crypto("default");
+    js_property_set(crypto_namespace, default_key, crypto_namespace);
+
+    return crypto_namespace;
+}
+
+extern "C" void js_crypto_reset(void) {
+    crypto_namespace = (Item){0};
 }

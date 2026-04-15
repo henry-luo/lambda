@@ -10,6 +10,7 @@
 #include "../lib/file.h"    // For file_exists, file_delete, file_getcwd
 #include "../lib/shell.h"   // For shell_getenv
 #include "npm/npm_installer.h"  // For npm install/uninstall
+#include "npm/npm_package_json.h"  // For npm_package_json_parse
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
@@ -1054,6 +1055,8 @@ int main(int argc, char *argv[]) {
             printf("  install -D <pkg>        Install as dev dependency\n");
             printf("  uninstall <pkg>         Remove a dependency\n");
             printf("  info <pkg>              Show package info\n");
+            printf("  task <script>           Run a script from package.json\n");
+            printf("  exec <pkg> [args...]    Run a package binary (like npx)\n");
             printf("\nOptions:\n");
             printf("  --production            Skip devDependencies\n");
             printf("  --dry-run               Print what would be installed\n");
@@ -1063,6 +1066,8 @@ int main(int argc, char *argv[]) {
             printf("  %s node install lodash       # Add lodash\n", argv[0]);
             printf("  %s node install -D jest      # Add jest as dev dep\n", argv[0]);
             printf("  %s node uninstall lodash     # Remove lodash\n", argv[0]);
+            printf("  %s node task test            # Run 'test' script\n", argv[0]);
+            printf("  %s node exec cowsay hello    # Run cowsay binary\n", argv[0]);
             log_finish();
             return 0;
         }
@@ -1108,26 +1113,190 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Error: %s\n", result->error);
             }
             npm_install_result_free(result);
-            free(cwd);
+            mem_free(cwd);
             log_finish();
             return exit_code;
 
         } else if (strcmp(subcmd, "uninstall") == 0) {
             if (argc < 4) {
                 fprintf(stderr, "Usage: %s node uninstall <package>\n", argv[0]);
-                free(cwd);
+                mem_free(cwd);
                 log_finish();
                 return 1;
             }
             int ret = npm_uninstall(cwd, argv[3]);
-            free(cwd);
+            mem_free(cwd);
             log_finish();
             return ret;
+
+        } else if (strcmp(subcmd, "task") == 0) {
+            // Run a script from package.json
+            if (argc < 4) {
+                // List available scripts
+                char pkg_path[PATH_MAX];
+                snprintf(pkg_path, sizeof(pkg_path), "%s/package.json", cwd);
+                NpmPackageJson* pkg = npm_package_json_parse(pkg_path);
+                if (!pkg || !pkg->valid) {
+                    fprintf(stderr, "No package.json found in current directory\n");
+                    if (pkg) npm_package_json_free(pkg);
+                    mem_free(cwd);
+                    log_finish();
+                    return 1;
+                }
+                if (pkg->script_count == 0) {
+                    printf("No scripts defined in package.json\n");
+                } else {
+                    printf("Available scripts:\n");
+                    for (int i = 0; i < pkg->script_count; i++) {
+                        printf("  %-20s %s\n", pkg->scripts[i].name, pkg->scripts[i].range);
+                    }
+                }
+                npm_package_json_free(pkg);
+                mem_free(cwd);
+                log_finish();
+                return 0;
+            }
+
+            const char* script_name = argv[3];
+            char pkg_path[PATH_MAX];
+            snprintf(pkg_path, sizeof(pkg_path), "%s/package.json", cwd);
+            NpmPackageJson* pkg = npm_package_json_parse(pkg_path);
+            if (!pkg || !pkg->valid) {
+                fprintf(stderr, "No package.json found in current directory\n");
+                if (pkg) npm_package_json_free(pkg);
+                mem_free(cwd);
+                log_finish();
+                return 1;
+            }
+
+            // Find the script
+            const char* script_cmd = NULL;
+            for (int i = 0; i < pkg->script_count; i++) {
+                if (strcmp(pkg->scripts[i].name, script_name) == 0) {
+                    script_cmd = pkg->scripts[i].range;
+                    break;
+                }
+            }
+            if (!script_cmd) {
+                fprintf(stderr, "Script '%s' not found in package.json\n", script_name);
+                fprintf(stderr, "Available scripts:");
+                for (int i = 0; i < pkg->script_count; i++) {
+                    fprintf(stderr, " %s", pkg->scripts[i].name);
+                }
+                fprintf(stderr, "\n");
+                npm_package_json_free(pkg);
+                mem_free(cwd);
+                log_finish();
+                return 1;
+            }
+
+            // Prepend node_modules/.bin to PATH for script execution
+            char bin_path[PATH_MAX];
+            snprintf(bin_path, sizeof(bin_path), "%s/node_modules/.bin", cwd);
+            const char* existing_path = getenv("PATH");
+            char new_path[PATH_MAX * 2];
+            snprintf(new_path, sizeof(new_path), "%s:%s", bin_path, existing_path ? existing_path : "");
+
+            ShellEnvEntry env_entries[] = {
+                { "PATH", new_path },
+                { NULL, NULL }
+            };
+            ShellOptions shell_opts = {};
+            shell_opts.cwd = cwd;
+            shell_opts.env = env_entries;
+
+            // Append any extra args from CLI
+            if (argc > 4) {
+                // rebuild command with extra args
+                char full_cmd[4096];
+                int pos = snprintf(full_cmd, sizeof(full_cmd), "%s", script_cmd);
+                for (int i = 4; i < argc && pos < (int)sizeof(full_cmd) - 2; i++) {
+                    pos += snprintf(full_cmd + pos, sizeof(full_cmd) - pos, " %s", argv[i]);
+                }
+                printf("> %s\n\n", full_cmd);
+                ShellResult result = shell_exec_line(full_cmd, &shell_opts);
+                if (result.stdout_buf) { fwrite(result.stdout_buf, 1, result.stdout_len, stdout); }
+                if (result.stderr_buf) { fwrite(result.stderr_buf, 1, result.stderr_len, stderr); }
+                int exit_code = result.exit_code;
+                shell_result_free(&result);
+                npm_package_json_free(pkg);
+                mem_free(cwd);
+                log_finish();
+                return exit_code;
+            } else {
+                printf("> %s\n\n", script_cmd);
+                ShellResult result = shell_exec_line(script_cmd, &shell_opts);
+                if (result.stdout_buf) { fwrite(result.stdout_buf, 1, result.stdout_len, stdout); }
+                if (result.stderr_buf) { fwrite(result.stderr_buf, 1, result.stderr_len, stderr); }
+                int exit_code = result.exit_code;
+                shell_result_free(&result);
+                npm_package_json_free(pkg);
+                mem_free(cwd);
+                log_finish();
+                return exit_code;
+            }
+
+        } else if (strcmp(subcmd, "exec") == 0) {
+            // Run a package binary (like npx)
+            if (argc < 4) {
+                fprintf(stderr, "Usage: %s node exec <package> [args...]\n", argv[0]);
+                mem_free(cwd);
+                log_finish();
+                return 1;
+            }
+
+            const char* pkg_name = argv[3];
+
+            // Check node_modules/.bin/<pkg_name> first
+            char bin_path[PATH_MAX];
+            snprintf(bin_path, sizeof(bin_path), "%s/node_modules/.bin/%s", cwd, pkg_name);
+
+            if (!file_exists(bin_path)) {
+                // Try installing the package first
+                printf("Package '%s' not found locally, installing...\n", pkg_name);
+                NpmInstallOptions install_opts = {};
+                NpmInstallResult* install_result = npm_install_package(cwd, pkg_name, NULL, false, &install_opts);
+                if (!install_result->success) {
+                    fprintf(stderr, "Failed to install '%s'", pkg_name);
+                    if (install_result->error) fprintf(stderr, ": %s", install_result->error);
+                    fprintf(stderr, "\n");
+                    npm_install_result_free(install_result);
+                    mem_free(cwd);
+                    log_finish();
+                    return 1;
+                }
+                npm_install_result_free(install_result);
+            }
+
+            if (!file_exists(bin_path)) {
+                fprintf(stderr, "No executable '%s' found in node_modules/.bin\n", pkg_name);
+                mem_free(cwd);
+                log_finish();
+                return 1;
+            }
+
+            // Build command line with remaining args
+            char cmd[4096];
+            int pos = snprintf(cmd, sizeof(cmd), "%s", bin_path);
+            for (int i = 4; i < argc && pos < (int)sizeof(cmd) - 2; i++) {
+                pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", argv[i]);
+            }
+
+            ShellOptions shell_opts = {};
+            shell_opts.cwd = cwd;
+            ShellResult result = shell_exec_line(cmd, &shell_opts);
+            if (result.stdout_buf) { fwrite(result.stdout_buf, 1, result.stdout_len, stdout); }
+            if (result.stderr_buf) { fwrite(result.stderr_buf, 1, result.stderr_len, stderr); }
+            int exit_code = result.exit_code;
+            shell_result_free(&result);
+            mem_free(cwd);
+            log_finish();
+            return exit_code;
 
         } else {
             fprintf(stderr, "Unknown node command: %s\n", subcmd);
             fprintf(stderr, "Run '%s node --help' for usage.\n", argv[0]);
-            free(cwd);
+            mem_free(cwd);
             log_finish();
             return 1;
         }

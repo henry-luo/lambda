@@ -1495,6 +1495,9 @@ JitImport jit_runtime_imports[] = {
     {"js_setInterval", FPTR(js_setInterval)},
     {"js_clearTimeout", FPTR(js_clearTimeout)},
     {"js_clearInterval", FPTR(js_clearInterval)},
+    {"js_setImmediate", FPTR(js_setImmediate)},
+    {"js_clearImmediate", FPTR(js_clearImmediate)},
+    {"js_structuredClone", FPTR(js_structuredClone)},
     {"js_event_loop_init", FPTR(js_event_loop_init)},
     {"js_event_loop_drain", FPTR(js_event_loop_drain)},
     {"js_microtask_enqueue", FPTR(js_microtask_enqueue)},
@@ -1502,6 +1505,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
+    // CJS require() support
+    {"js_require", FPTR(js_require)},
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers

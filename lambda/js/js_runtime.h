@@ -616,6 +616,9 @@ Item js_setTimeout(Item callback, Item delay);         // returns timer id
 Item js_setInterval(Item callback, Item delay);        // returns timer id
 void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
+Item js_setImmediate(Item callback);                   // schedule for next tick
+void js_clearImmediate(Item id);
+Item js_structuredClone(Item value);                   // deep clone
 
 /**
  * Drain the event loop: process all microtasks, then fire due timers.
@@ -651,6 +654,12 @@ Item js_module_get(Item specifier);
  * Create a module namespace object from an export map.
  */
 Item js_module_namespace_create(Item exports_map);
+
+/**
+ * CJS require() — load and execute a module, return its exports.
+ * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
+ */
+Item js_require(Item specifier);
 
 // Native SHA hash functions (js_crypto.cpp)
 Item js_native_sha256(Item data, Item offset, Item length);

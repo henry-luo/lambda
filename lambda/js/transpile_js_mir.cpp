@@ -23,6 +23,7 @@
 #include "../../lib/file.h"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
+#include "../npm/npm_resolve_module.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>
@@ -8832,6 +8833,32 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_emit_null(mt);
     }
 
+    // require(specifier) — CJS module loading
+    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* callee_id = (JsIdentifierNode*)call->callee;
+        if (callee_id->name && callee_id->name->len == 7 &&
+            memcmp(callee_id->name->chars, "require", 7) == 0 && arg_count == 1) {
+            JsAstNode* arg = call->arguments;
+            if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
+                JsLiteralNode* lit = (JsLiteralNode*)arg;
+                if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                    // resolve the module path at transpile time
+                    char resolved[512];
+                    jm_resolve_module_path(mt->filename ? mt->filename : ".",
+                        lit->value.string_value->chars, (int)lit->value.string_value->len,
+                        resolved, sizeof(resolved));
+                    MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
+                    return jm_call_1(mt, "js_require", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+                }
+            }
+            // dynamic require(expr) — resolve at runtime
+            MIR_reg_t spec = jm_transpile_box_item(mt, call->arguments);
+            return jm_call_1(mt, "js_require", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+        }
+    }
+
     // super(args) — call parent constructor with current 'this'
     if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
@@ -10884,6 +10911,25 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_clearInterval",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
+            }
+            // setImmediate(callback) — schedule callback for next tick
+            if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
+                MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_setImmediate", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cb));
+            }
+            // clearImmediate(id) — cancel setImmediate
+            if (nl == 14 && strncmp(n, "clearImmediate", 14) == 0) {
+                MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                jm_call_void_1(mt, "js_clearImmediate",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
+                return jm_emit_null(mt);
+            }
+            // structuredClone(value) — deep clone
+            if (nl == 15 && strncmp(n, "structuredClone", 15) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_structuredClone", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             // v15: fetch(url [, options])
             if (nl == 5 && strncmp(n, "fetch", 5) == 0) {
@@ -19562,16 +19608,68 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
     } else if (spec_len >= 3 && specifier[0] == '.' && specifier[1] == '.' && specifier[2] == '/') {
         // Parent: ../utils.js
         snprintf(out, out_size, "%.*s%.*s", dir_len, base_file, spec_len, specifier);
+    } else if (spec_len >= 1 && specifier[0] == '/') {
+        // Absolute path
+        snprintf(out, out_size, "%.*s", spec_len, specifier);
     } else {
-        // Absolute or bare — use as-is
+        // Bare specifier — try npm_resolve_module for node_modules lookup
+        char spec_buf[512];
+        snprintf(spec_buf, sizeof(spec_buf), "%.*s", spec_len, specifier);
+
+        // skip node: builtins (handled by js_module_get)
+        bool has_node_prefix = (spec_len >= 5 && strncmp(specifier, "node:", 5) == 0);
+
+        // skip known built-in module names (prefer engine built-ins over npm polyfills)
+        static const char* builtin_names[] = {
+            "fs", "child_process", "path", "os", "url", "util",
+            "process", "querystring", "events", "buffer",
+            "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
+            "string_decoder", "assert", "timers", "console", NULL
+        };
+        bool is_builtin = has_node_prefix;
+        if (!is_builtin) {
+            for (int i = 0; builtin_names[i]; i++) {
+                if (strcmp(spec_buf, builtin_names[i]) == 0) {
+                    is_builtin = true;
+                    break;
+                }
+            }
+        }
+
+        if (!is_builtin) {
+            // get the directory of the importing file
+            char from_dir[512];
+            if (dir_len > 0) {
+                snprintf(from_dir, sizeof(from_dir), "%.*s", dir_len - 1, base_file); // strip trailing /
+            } else {
+                from_dir[0] = '.'; from_dir[1] = '\0';
+            }
+
+            const char* conditions[] = { "lambda", "node", "import", "default" };
+            NpmModuleResolution res = npm_resolve_module(spec_buf, from_dir, conditions, 4);
+            if (res.found && res.resolved_path) {
+                snprintf(out, out_size, "%s", res.resolved_path);
+                npm_module_resolution_free(&res);
+                return; // already fully resolved with extension
+            }
+            npm_module_resolution_free(&res);
+        }
+
+        // fallback: use as-is (will be checked as builtin by js_module_get)
         snprintf(out, out_size, "%.*s", spec_len, specifier);
     }
 
-    // If doesn't end in .js, append .js (skip for node: protocol specifiers)
+    // If doesn't end in a known JS extension, try adding .js
+    // Recognized extensions: .js, .mjs, .cjs, .json, .ls
     int len = (int)strlen(out);
     bool has_node_prefix = (len >= 5 && strncmp(out, "node:", 5) == 0);
-    if (!has_node_prefix && (len < 3 || strcmp(out + len - 3, ".js") != 0)) {
-        if (len + 3 < out_size) {
+    if (!has_node_prefix) {
+        bool has_ext = (len >= 3 && strcmp(out + len - 3, ".js") == 0) ||
+                       (len >= 4 && strcmp(out + len - 4, ".mjs") == 0) ||
+                       (len >= 4 && strcmp(out + len - 4, ".cjs") == 0) ||
+                       (len >= 5 && strcmp(out + len - 5, ".json") == 0) ||
+                       (len >= 3 && strcmp(out + len - 3, ".ls") == 0);
+        if (!has_ext && len + 3 < out_size) {
             strcat(out, ".js");
         }
     }
@@ -24711,5 +24809,113 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
 
     Item ns = transpile_js_module_to_mir(runtime, source, js_path);
     mem_free(source);
+    return ns;
+}
+
+// ============================================================================
+// CJS require() — runtime function called from JIT code
+// ============================================================================
+
+static bool js_is_cjs_file(const char* path) {
+    size_t len = strlen(path);
+    if (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) return true;
+    if (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) return false;
+    // For .js files loaded via require(), treat as CJS (Node.js behavior)
+    return true;
+}
+
+static char* js_wrap_cjs_source(const char* source, const char* filename) {
+    // Extract __dirname from filename
+    const char* last_slash = strrchr(filename, '/');
+    int dir_len = last_slash ? (int)(last_slash - filename) : 1;
+    const char* dir_str = last_slash ? filename : ".";
+
+    // Wrap:  var __cjs_module__ = {exports: {}};
+    //        var exports = __cjs_module__.exports;
+    //        var module = __cjs_module__;
+    //        var __filename = "..."; var __dirname = "...";
+    //        <original source>
+    //        export default __cjs_module__.exports;
+    const char* prefix_fmt =
+        "var __cjs_module__ = {exports: {}};\n"
+        "var exports = __cjs_module__.exports;\n"
+        "var module = __cjs_module__;\n"
+        "var __filename = \"%s\";\n"
+        "var __dirname = \"%.*s\";\n";
+    const char* suffix = "\nexport default __cjs_module__.exports;\n";
+
+    size_t src_len = strlen(source);
+    size_t prefix_size = strlen(prefix_fmt) + strlen(filename) + dir_len + 64;
+    size_t total = prefix_size + src_len + strlen(suffix) + 1;
+
+    char* wrapped = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+    int offset = snprintf(wrapped, total, prefix_fmt, filename, dir_len, dir_str);
+    memcpy(wrapped + offset, source, src_len);
+    offset += (int)src_len;
+    strcpy(wrapped + offset, suffix);
+    return wrapped;
+}
+
+extern "C" Item js_require(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) {
+        log_error("require: specifier is not a string");
+        return ItemNull;
+    }
+    String* spec = it2s(specifier);
+    if (!spec || spec->len == 0) return ItemNull;
+
+    // Check if already loaded in module cache
+    Item existing = js_module_get(specifier);
+    if (get_type_id(existing) != LMD_TYPE_NULL) {
+        // For CJS modules, the cached value is the namespace.
+        // Extract the default export (which is module.exports)
+        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
+        Item def_val = js_property_get(existing, def_key);
+        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        return existing;
+    }
+
+    char path_buf[512];
+    snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
+
+    // Read the source file
+    char* source = read_text_file(path_buf);
+    if (!source) {
+        log_error("require: cannot read module '%s'", path_buf);
+        return ItemNull;
+    }
+
+    Runtime* runtime = js_source_runtime;
+    if (!runtime) {
+        log_error("require: no runtime available");
+        mem_free(source);
+        return ItemNull;
+    }
+
+    Item ns;
+    if (js_is_cjs_file(path_buf)) {
+        // Wrap CJS source with module/exports globals
+        char* wrapped = js_wrap_cjs_source(source, path_buf);
+        mem_free(source);
+        ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        mem_free(wrapped);
+    } else {
+        // ESM — transpile as-is
+        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        mem_free(source);
+    }
+
+    if (get_type_id(ns) == LMD_TYPE_NULL) {
+        log_error("require: failed to compile module '%s'", path_buf);
+        return ItemNull;
+    }
+
+    // For CJS, extract the default export (module.exports)
+    if (js_is_cjs_file(path_buf)) {
+        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
+        Item def_val = js_property_get(ns, def_key);
+        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+    }
+
     return ns;
 }

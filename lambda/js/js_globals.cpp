@@ -24,9 +24,13 @@
 #include <time.h>
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
+#include <psapi.h>
 #define getpid _getpid
 #else
 #include <unistd.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #endif
 
 // forward declaration for JSON parser
@@ -41,6 +45,8 @@ static bool js_is_symbol_item(Item item);
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/task_info.h>
 #endif
 
 static inline Item make_js_undefined() {
@@ -869,6 +875,113 @@ static Item build_process_stderr(void) {
     return stderr_obj;
 }
 
+// process.nextTick(callback, ...args) — queue callback before microtasks
+extern "C" Item js_process_nextTick(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // schedule as microtask (matches Node.js semantics closely enough)
+    extern void js_microtask_enqueue(Item func);
+    js_microtask_enqueue(callback);
+    return make_js_undefined();
+}
+
+// process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
+extern "C" Item js_process_memoryUsage(void) {
+    Item result = js_new_object();
+    // approximate memory info
+#ifdef __APPLE__
+    struct task_basic_info info;
+    mach_msg_type_number_t size = TASK_BASIC_INFO_COUNT;
+    kern_return_t kr = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&info, &size);
+    int64_t rss = (kr == KERN_SUCCESS) ? (int64_t)info.resident_size : 0;
+#elif defined(__linux__)
+    int64_t rss = 0;
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        long pages = 0;
+        if (fscanf(f, "%*ld %ld", &pages) == 1)
+            rss = (int64_t)pages * sysconf(_SC_PAGESIZE);
+        fclose(f);
+    }
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    int64_t rss = 0;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        rss = (int64_t)pmc.WorkingSetSize;
+#else
+    int64_t rss = 0;
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("rss", 3))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapTotal", 9))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapUsed", 8))},
+                    (Item){.item = i2it(rss / 2)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("external", 8))},
+                    (Item){.item = i2it(0)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("arrayBuffers", 12))},
+                    (Item){.item = i2it(0)});
+    return result;
+}
+
+// process.cpuUsage() — returns {user, system} in microseconds
+extern "C" Item js_process_cpuUsage(void) {
+    Item result = js_new_object();
+#ifndef _WIN32
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    int64_t user_us = (int64_t)usage.ru_utime.tv_sec * 1000000 + (int64_t)usage.ru_utime.tv_usec;
+    int64_t sys_us = (int64_t)usage.ru_stime.tv_sec * 1000000 + (int64_t)usage.ru_stime.tv_usec;
+#else
+    int64_t user_us = 0, sys_us = 0;
+    FILETIME create, exit_t, kernel, user_ft;
+    if (GetProcessTimes(GetCurrentProcess(), &create, &exit_t, &kernel, &user_ft)) {
+        ULARGE_INTEGER u, k;
+        u.LowPart = user_ft.dwLowDateTime; u.HighPart = user_ft.dwHighDateTime;
+        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
+        user_us = (int64_t)(u.QuadPart / 10); // 100ns → us
+        sys_us = (int64_t)(k.QuadPart / 10);
+    }
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("user", 4))},
+                    (Item){.item = i2it(user_us)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("system", 6))},
+                    (Item){.item = i2it(sys_us)});
+    return result;
+}
+
+// process.umask([mask]) — get/set file mode creation mask
+extern "C" Item js_process_umask(Item mask_item) {
+#ifndef _WIN32
+    TypeId tid = get_type_id(mask_item);
+    if (tid == LMD_TYPE_INT) {
+        mode_t old = umask((mode_t)it2i(mask_item));
+        return (Item){.item = i2it((int64_t)old)};
+    }
+    // get current and restore
+    mode_t current = umask(0);
+    umask(current);
+    return (Item){.item = i2it((int64_t)current)};
+#else
+    return (Item){.item = i2it(0)};
+#endif
+}
+
+// build process.versions object
+static Item build_process_versions(void) {
+    Item versions = js_new_object();
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("node", 4))},
+                    (Item){.item = s2it(heap_create_name("20.0.0", 6))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("lambda", 6))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("v8", 2))},
+                    (Item){.item = s2it(heap_create_name("0.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("uv", 2))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
+                    (Item){.item = s2it(heap_create_name("115", 3))});
+    return versions;
+}
+
 static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
     Item fn = js_new_function(func_ptr, param_count);
@@ -928,6 +1041,19 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
         js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
         js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
+        js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, 1);
+        js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
+        js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
+        js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
+
+        // versions object
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("versions", 8))}, build_process_versions());
+
+        // title
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("title", 5))},
+            (Item){.item = s2it(heap_create_name("lambda", 6))});
 
         // hrtime object with bigint() method
         Item hrtime_obj = js_new_object();
@@ -946,6 +1072,93 @@ extern "C" Item js_get_process_object_value(void) {
             (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
     }
     return js_process_object;
+}
+
+// =============================================================================
+// setImmediate / clearImmediate
+// =============================================================================
+
+// setImmediate(callback) — schedule callback as a microtask (next tick)
+extern "C" Item js_setImmediate(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // use setTimeout with 0 delay for setImmediate semantics
+    extern Item js_setTimeout(Item cb, Item delay);
+    return js_setTimeout(callback, (Item){.item = i2it(0)});
+}
+
+// clearImmediate(id) — cancel a setImmediate
+extern "C" void js_clearImmediate(Item id) {
+    extern void js_clearTimeout(Item id);
+    js_clearTimeout(id);
+}
+
+// =============================================================================
+// structuredClone(value) — deep clone
+// =============================================================================
+
+static Item structured_clone_impl(Item value, int depth) {
+    if (depth > 100) return value; // prevent infinite recursion
+    TypeId tid = get_type_id(value);
+
+    // primitives: return as-is
+    if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+        tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
+        tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_STRING) {
+        return value;
+    }
+
+    // arrays: deep clone each element
+    if (tid == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(value);
+        Item result = js_array_new((int)len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = js_array_get_int(value, i);
+            js_array_push(result, structured_clone_impl(elem, depth + 1));
+        }
+        return result;
+    }
+
+    // typed array: copy buffer
+    extern bool js_is_typed_array(Item item);
+    if (js_is_typed_array(value)) {
+        Map* m = value.map;
+        JsTypedArray* ta = (JsTypedArray*)m->data;
+        if (ta && ta->data && ta->byte_length > 0) {
+            extern Item js_typed_array_new(int element_type, int length);
+            Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
+            Map* cm = clone.map;
+            JsTypedArray* cta = (JsTypedArray*)cm->data;
+            if (cta && cta->data) {
+                memcpy(cta->data, ta->data, ta->byte_length);
+            }
+            return clone;
+        }
+        return value;
+    }
+
+    // maps/objects: clone properties
+    if (tid == LMD_TYPE_MAP) {
+        Item result = js_new_object();
+        Item keys = js_object_keys(value);
+        int64_t len = js_array_length(keys);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(keys, i);
+            Item val = js_property_get(value, key);
+            js_property_set(result, key, structured_clone_impl(val, depth + 1));
+        }
+        return result;
+    }
+
+    // functions can't be cloned
+    if (tid == LMD_TYPE_FUNC) {
+        return value;
+    }
+
+    return value;
+}
+
+extern "C" Item js_structuredClone(Item value) {
+    return structured_clone_impl(value, 0);
 }
 
 // =============================================================================
@@ -2231,6 +2444,10 @@ extern "C" Item js_object_create(Item proto) {
 // includes __class_name__, __get_*, __set_*, and function-valued entries from
 // the source instance, chained to the original __proto__ for instanceof support.
 
+// Forward declarations for %TypedArray% intrinsic (defined later in file)
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
+extern "C" Item js_get_typed_array_base();
+
 extern "C" Item js_get_prototype_of(Item object) {
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
@@ -2274,6 +2491,10 @@ extern "C" Item js_get_prototype_of(Item object) {
                 (n->len == 14 && strncmp(n->chars, "AggregateError", 14) == 0);
             if (is_native_error) {
                 return js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+            }
+            // TypedArray constructors → [[Prototype]] = %TypedArray%
+            if (js_is_typed_array_ctor_name(n->chars, (int)n->len)) {
+                return js_get_typed_array_base();
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -2611,7 +2832,29 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            // ES spec: All built-in constructor .prototype are non-writable
+            JsFuncProps* efn = (JsFuncProps*)obj.function;
+            bool is_builtin_ctor = false;
+            if (efn->name) {
+                const char* en = efn->name->chars;
+                int el = (int)efn->name->len;
+                is_builtin_ctor = (el == 5 && strncmp(en, "Error", 5) == 0) ||
+                    (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
+                    (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
+                    (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
+                    (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
+                    (el == 8 && strncmp(en, "URIError", 8) == 0) ||
+                    (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+                    (el == 3 && strncmp(en, "Map", 3) == 0) ||
+                    (el == 3 && strncmp(en, "Set", 3) == 0) ||
+                    (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
+                    (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+                    (el == 7 && strncmp(en, "Promise", 7) == 0) ||
+                    (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+                    (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+                    js_is_typed_array_ctor_name(en, el);
+            }
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
             return desc;
@@ -6951,6 +7194,7 @@ struct JsCtor {
 // Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
 // Clearing the prototype field forces lazy re-creation of a fresh prototype
 // on next access, while keeping the constructor struct itself alive (pool-allocated).
+static void js_typed_array_base_reset(); // forward declaration
 extern "C" void js_reset_constructor_prototypes() {
     if (!js_ctor_cache_init) return;
     for (int i = 0; i < JS_CTOR_MAX; i++) {
@@ -6965,6 +7209,92 @@ extern "C" void js_reset_constructor_prototypes() {
     // The old globalThis holds constructors whose .prototype fields now point to stale
     // (freed or mutated) prototype objects.
     js_global_this_obj = (Item){0};
+    // Reset %TypedArray% intrinsic so it's re-created fresh
+    js_typed_array_base_reset();
+}
+
+// %TypedArray% intrinsic: shared base constructor for all TypedArray types.
+// Object.getPrototypeOf(Int8Array) === %TypedArray%
+// Object.getPrototypeOf(Int8Array.prototype) === %TypedArray%.prototype
+static Item js_typed_array_base = {0};
+static Item js_typed_array_base_proto = {0};
+
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
+    return (len == 9  && strncmp(name, "Int8Array", 9) == 0) ||
+           (len == 10 && strncmp(name, "Uint8Array", 10) == 0) ||
+           (len == 17 && strncmp(name, "Uint8ClampedArray", 17) == 0) ||
+           (len == 10 && strncmp(name, "Int16Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint16Array", 11) == 0) ||
+           (len == 10 && strncmp(name, "Int32Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint32Array", 11) == 0) ||
+           (len == 12 && strncmp(name, "Float32Array", 12) == 0) ||
+           (len == 12 && strncmp(name, "Float64Array", 12) == 0) ||
+           (len == 13 && strncmp(name, "BigInt64Array", 13) == 0) ||
+           (len == 14 && strncmp(name, "BigUint64Array", 14) == 0);
+}
+
+extern "C" Item js_get_typed_array_base_proto(); // forward declaration
+
+extern "C" Item js_get_typed_array_base() {
+    if (js_typed_array_base.item != 0) return js_typed_array_base;
+    // Create the %TypedArray% intrinsic function object
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = (void*)js_ctor_placeholder;
+    fn->param_count = 0;
+    fn->formal_length = -1;
+    fn->builtin_id = -2;
+    fn->name = heap_create_name("TypedArray", 10);
+    js_typed_array_base = (Item){.function = (Function*)fn};
+    heap_register_gc_root(&js_typed_array_base.item);
+    // Eagerly initialize %TypedArray%.prototype so it's available before any
+    // concrete TypedArray prototype chain is set up (e.g., Object.getPrototypeOf(Int8Array).prototype)
+    js_get_typed_array_base_proto();
+    return js_typed_array_base;
+}
+
+// Helper: create a named function stub (bypasses func_ptr cache).
+// For prototype method stubs that just need .name and .length properties.
+static Item js_create_func_stub(const char* name, int name_len, int param_count) {
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->builtin_id = 0;
+    fn->name = heap_create_name(name, name_len);
+    return (Item){.function = (Function*)fn};
+}
+
+// Defined in js_runtime.cpp — populates %TypedArray%.prototype with proper Array builtins
+extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor);
+
+extern "C" Item js_get_typed_array_base_proto() {
+    if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
+    js_typed_array_base_proto = js_new_object();
+    heap_register_gc_root(&js_typed_array_base_proto.item);
+    // Set __class_name__ for type identification
+    Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    Item cnv = (Item){.item = s2it(heap_create_name("TypedArray", 10))};
+    js_property_set(js_typed_array_base_proto, cnk, cnv);
+    // Set __is_proto__ marker
+    Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
+    js_property_set(js_typed_array_base_proto, ipk, (Item){.item = b2it(true)});
+    // Connect %TypedArray%.prototype to %TypedArray%
+    Item base = js_get_typed_array_base();
+    JsFunctionLayout* base_fn = (JsFunctionLayout*)base.function;
+    base_fn->prototype = js_typed_array_base_proto;
+    heap_register_gc_root(&base_fn->prototype.item);
+
+    // Populate methods on %TypedArray%.prototype and static methods on %TypedArray%
+    js_populate_typed_array_base_proto(js_typed_array_base_proto, base);
+
+    return js_typed_array_base_proto;
+}
+
+static void js_typed_array_base_reset() {
+    js_typed_array_base = (Item){0};
+    js_typed_array_base_proto = (Item){0};
 }
 
 // Forward declarations for functions in js_runtime.cpp used by constructor population
@@ -7003,9 +7333,17 @@ static void js_populate_number_ctor(Item fn_item) {
     // Fetch via js_property_get which triggers js_lookup_constructor_static
     const char* methods[] = {"isFinite", "isNaN", "isInteger", "isSafeInteger", "parseInt", "parseFloat"};
     int method_lens[] = {8, 5, 9, 13, 8, 10};
+    int method_pcs[] = {1, 1, 1, 1, 2, 1};
     for (int i = 0; i < 6; i++) {
         Item key = (Item){.item = s2it(heap_create_name(methods[i], method_lens[i]))};
-        Item method = js_property_get(fn_item, key);
+        Item method;
+        // ES spec: Number.parseInt === parseInt, Number.parseFloat === parseFloat
+        // Use the same global builtin function objects for identity equality
+        if (i >= 4) { // parseInt (i=4) and parseFloat (i=5)
+            method = js_get_global_builtin_fn(key, (Item){.item = i2it(method_pcs[i])});
+        } else {
+            method = js_property_get(fn_item, key);
+        }
         if (method.item != ItemNull.item && method.item != make_js_undefined().item) {
             js_func_init_property(fn_item, key, method);
             js_mark_non_enumerable(fn_item, key);
@@ -7081,7 +7419,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
         {"AggregateError", 14, JS_CTOR_AGGREGATE_ERROR, 2},
         {"RegExp", 6, JS_CTOR_REGEXP, 2},
-        {"Date", 4, JS_CTOR_DATE, 1},
+        {"Date", 4, JS_CTOR_DATE, 7},
         {"Promise", 7, JS_CTOR_PROMISE, 1},
         {"Map", 3, JS_CTOR_MAP, 0},
         {"Set", 3, JS_CTOR_SET, 0},
@@ -7089,15 +7427,15 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
         {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
         {"DataView", 8, JS_CTOR_DATAVIEW, 1},
-        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 1},
-        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 1},
-        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 1},
-        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 1},
-        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 1},
-        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 1},
-        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 1},
-        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 1},
-        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 1},
+        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 3},
+        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 3},
+        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 3},
+        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 3},
+        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 3},
+        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 3},
+        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
+        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
+        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
         {NULL, 0, 0, 0}
     };
 

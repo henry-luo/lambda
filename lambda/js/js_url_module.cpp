@@ -254,6 +254,82 @@ extern "C" Item js_url_resolve(Item from_item, Item to_item) {
     return result;
 }
 
+// ─── fileURLToPath(url) — convert file:// URL to local file path ────────────
+extern "C" Item js_url_fileURLToPath(Item url_item) {
+    if (get_type_id(url_item) != LMD_TYPE_STRING) return ItemNull;
+    String* s = it2s(url_item);
+    char buf[4096];
+    int len = (int)s->len;
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    memcpy(buf, s->chars, len);
+    buf[len] = '\0';
+
+    // strip "file://" prefix
+    const char* path = buf;
+    if (strncmp(path, "file://", 7) == 0) {
+        path += 7;
+        // handle "file:///path" -> "/path"
+        // on macOS/Linux: file:///Users/foo -> /Users/foo
+        // on Windows: file:///C:/foo -> C:/foo
+#ifdef _WIN32
+        if (path[0] == '/' && path[2] == ':') path++; // skip leading /
+#endif
+    }
+
+    // URL-decode %XX sequences
+    char decoded[4096];
+    int di = 0;
+    for (int i = 0; path[i] && di < (int)sizeof(decoded) - 1; i++) {
+        if (path[i] == '%' && path[i+1] && path[i+2]) {
+            auto hex_digit = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+                if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+                return 0;
+            };
+            decoded[di++] = (char)((hex_digit(path[i+1]) << 4) | hex_digit(path[i+2]));
+            i += 2;
+        } else {
+            decoded[di++] = path[i];
+        }
+    }
+    decoded[di] = '\0';
+
+    return make_string_item(decoded, di);
+}
+
+// ─── pathToFileURL(path) — convert local path to file:// URL ────────────────
+extern "C" Item js_url_pathToFileURL(Item path_item) {
+    if (get_type_id(path_item) != LMD_TYPE_STRING) return ItemNull;
+    String* s = it2s(path_item);
+    char buf[4096];
+    int len = (int)s->len;
+    if (len >= (int)sizeof(buf) - 8) len = (int)sizeof(buf) - 9;
+
+    // build file:// URL — simple path encoding
+    int pos = 0;
+    memcpy(buf, "file://", 7);
+    pos = 7;
+
+#ifdef _WIN32
+    // windows: file:///C:/foo
+    buf[pos++] = '/';
+#endif
+
+    // encode path: replace spaces with %20, leave / alone
+    for (int i = 0; i < len && pos < (int)sizeof(buf) - 4; i++) {
+        char c = s->chars[i];
+        if (c == ' ') {
+            buf[pos++] = '%'; buf[pos++] = '2'; buf[pos++] = '0';
+        } else {
+            buf[pos++] = c;
+        }
+    }
+    buf[pos] = '\0';
+
+    return make_string_item(buf, pos);
+}
+
 // =============================================================================
 // url Module Namespace Object
 // =============================================================================
@@ -278,6 +354,10 @@ extern "C" Item js_get_url_namespace(void) {
     js_url_set_method(url_module_namespace, "parse", (void*)js_url_parse_legacy, 1);
     js_url_set_method(url_module_namespace, "format", (void*)js_url_format, 1);
     js_url_set_method(url_module_namespace, "resolve", (void*)js_url_resolve, 2);
+
+    // file URL conversion
+    js_url_set_method(url_module_namespace, "fileURLToPath", (void*)js_url_fileURLToPath, 1);
+    js_url_set_method(url_module_namespace, "pathToFileURL", (void*)js_url_pathToFileURL, 1);
 
     // default export
     Item default_key = make_string_item("default");
