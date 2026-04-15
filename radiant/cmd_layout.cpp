@@ -1072,6 +1072,65 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 }
 
 /**
+ * Recursively collect <style> inline CSS from DomElement* tree (post-JS mutations).
+ * Unlike collect_inline_styles_to_list() which walks Element* (pre-JS), this walks
+ * the DomElement tree which reflects JS DOM mutations (createElement, appendChild,
+ * textContent writes, disabled attribute changes).
+ *
+ * Handles:
+ * - Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
+ * - <style disabled> elements — skipped (e.g. table-anonymous-objects-015)
+ * - Media query filtering
+ */
+void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
+                                     CssStylesheet*** stylesheets, int* count, int depth = 0) {
+    if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
+
+    // Check if this is a <style> element
+    if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+        // Check disabled attribute — skip disabled stylesheets
+        if (dom_element_has_attribute(elem, "disabled")) {
+            log_debug("[CSS] Skipping <style> element with disabled attribute");
+        } else {
+            // Check media attribute
+            const char* media = dom_element_get_attribute(elem, "media");
+            if (media && !css_evaluate_media_query(engine, media)) {
+                log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
+            } else {
+                // Extract text content from DomText children
+                DomNode* child = elem->first_child;
+                while (child) {
+                    if (child->node_type == DOM_NODE_TEXT) {
+                        DomText* text_node = (DomText*)child;
+                        if (text_node->text && text_node->length > 0) {
+                            CssStylesheet* stylesheet = css_parse_stylesheet(engine, text_node->text, "<inline-style>");
+                            if (stylesheet && stylesheet->rule_count > 0) {
+                                log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
+                                *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                                              (*count + 1) * sizeof(CssStylesheet*));
+                                (*stylesheets)[*count] = stylesheet;
+                                (*count)++;
+                            }
+                        }
+                    }
+                    child = child->next_sibling;
+                }
+            }
+        }
+    }
+
+    // Recursively process children
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->node_type == DOM_NODE_ELEMENT) {
+            collect_inline_styles_from_dom((DomElement*)child, engine, pool, stylesheets, count, depth + 1);
+        }
+        child = child->next_sibling;
+    }
+}
+
+/**
  * Recursively collect <style> inline CSS from HTML
  * Parses and adds to engine's stylesheet list
  */
@@ -2218,7 +2277,39 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     if (dom_doc->js_mutation_count > 0) {
         log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
                  dom_doc->js_mutation_count);
+
+        // Re-collect inline stylesheets from the DomElement* tree to pick up:
+        // 1. Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
+        // 2. <style disabled> elements that should be skipped (e.g. table-anonymous-objects-015)
+        // This replaces the pre-script collection which walked the Element* tree.
+        int rescan_count = 0;
+        CssStylesheet** rescan_sheets = nullptr;
+        collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_sheets, &rescan_count);
+        if (rescan_count != inline_stylesheet_count) {
+            log_info("[CSS] Re-scan found %d inline stylesheets (was %d before JS)",
+                     rescan_count, inline_stylesheet_count);
+        }
+        inline_stylesheets = rescan_sheets;
+        inline_stylesheet_count = rescan_count;
+
+        // Update DomDocument stylesheet cache for getComputedStyle
+        int new_total = rescan_count + (external_stylesheet ? 1 : 0);
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+        dom_doc->stylesheet_capacity = new_total;
+        if (external_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+        }
+        for (int i = 0; i < rescan_count; i++) {
+            if (rescan_sheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = rescan_sheets[i];
+            }
+        }
     }
+
+    // Step 2e: Collect and compile inline event handlers (onclick, onmouseover, etc.)
+    // Must happen after execute_document_scripts so function definitions are available.
+    collect_and_compile_event_handlers(dom_doc);
 
     // Step 6: Apply CSS cascade (external + <style> elements)
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -5100,6 +5191,10 @@ static bool layout_single_file(
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
 
     if (doc) {
+        // Clean up retained JS state (MIR context, event registry, runtime heap)
+        // before destroying the document that owns the pointers.
+        script_runner_cleanup_js_state(doc);
+
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);
             mem_free(doc->view_tree);

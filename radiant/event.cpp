@@ -16,6 +16,9 @@
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
+#include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
+#include "../lib/hashmap.h"           // hashmap for event handler registry lookup
+#include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
 
 // thread-local eval context used by heap allocation functions
@@ -23,11 +26,22 @@ extern __thread EvalContext* context;
 extern __thread Context* input_context;
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+void view_pool_destroy(ViewTree* tree);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
 void update_window_title(const char* title);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
+
+// Forward declarations for HTML event handler post-rebuild
+struct CssEngine;
+void apply_stylesheet_to_dom_tree_fast(DomElement* root, struct CssStylesheet* stylesheet,
+                                        struct SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
+void apply_inline_styles_to_tree(DomElement* root, Element* html_root, Pool* pool, int depth = 0);
+void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
+                                     struct CssStylesheet*** stylesheets, int* count, int depth = 0);
+struct SelectorMatcher* selector_matcher_create(Pool* pool);
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, void* render_ctx);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -767,6 +781,176 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     return false;
 }
 
+// ============================================================================
+// HTML Inline Event Handler Dispatch (onclick, onmouseover, etc.)
+// ============================================================================
+
+#include "event_handler_registry.h"
+
+/**
+ * Find a compiled event handler for a DomElement and event type.
+ * Returns the handler entry, or nullptr if not found.
+ */
+static JsEventHandler* find_html_event_handler(JsEventRegistry* registry,
+                                                 DomElement* element,
+                                                 const char* event_type) {
+    if (!registry || !registry->element_map || !element) return nullptr;
+
+    JsEventHandler key = {};
+    key.element = element;
+    JsEventHandler* chain = (JsEventHandler*)hashmap_get(registry->element_map, &key);
+    if (!chain) return nullptr;
+
+    // walk linked list to find matching event_type
+    for (JsEventHandler* h = chain; h; h = h->next) {
+        if (h->element == element && strcmp(h->event_type, event_type) == 0) {
+            return h;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * Post-handler rebuild: after JS handler mutates DOM, re-cascade CSS and relayout.
+ */
+static void post_html_handler_rebuild(EventContext* evcon,
+                                       std::chrono::high_resolution_clock::time_point t_start,
+                                       std::chrono::high_resolution_clock::time_point t_handler) {
+    using namespace std::chrono;
+    DomDocument* doc = evcon->ui_context->document;
+    int mutations = doc->js_mutation_count;
+
+    if (mutations == 0) {
+        log_info("[TIMING] html event handler: %.2fms (no DOM changes)",
+                 duration<double, std::milli>(t_handler - t_start).count());
+        return;
+    }
+
+    auto t0 = high_resolution_clock::now();
+
+    // Re-cascade CSS on the full tree (handles className changes, style writes, etc.)
+    // Re-collect inline stylesheets in case JS added/removed/disabled <style> elements
+    Pool* pool = doc->pool;
+    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+
+    // Apply all cached stylesheets
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (doc->stylesheets[i]) {
+            apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i], matcher, pool, css_engine);
+        }
+    }
+
+    // Re-apply inline style="" attributes
+    apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
+
+    auto t1 = high_resolution_clock::now();
+
+    // Force full relayout by clearing view tree
+    if (doc->view_tree) {
+        view_pool_destroy(doc->view_tree);
+        mem_free(doc->view_tree);
+        doc->view_tree = nullptr;
+    }
+    layout_html_doc(evcon->ui_context, doc, false);
+
+    auto t2 = high_resolution_clock::now();
+
+    // Request repaint
+    evcon->need_repaint = true;
+    to_repaint();
+
+    auto t3 = high_resolution_clock::now();
+
+    log_info("[TIMING] html handler rebuild: cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
+             "total=%.2fms (mutations=%d)",
+             duration<double, std::milli>(t1 - t0).count(),
+             duration<double, std::milli>(t2 - t1).count(),
+             duration<double, std::milli>(t3 - t2).count(),
+             duration<double, std::milli>(t3 - t_start).count(),
+             mutations);
+
+    // Reset mutation count for next event
+    doc->js_mutation_count = 0;
+}
+
+/**
+ * Dispatch an inline HTML event handler (onclick, onmouseover, etc.).
+ * Walks up from target through DOM ancestors, checking for registered handlers.
+ * Restores JS execution context and invokes the compiled handler function.
+ *
+ * @return true if a handler was found and invoked
+ */
+static bool dispatch_html_event_handler(EventContext* evcon, View* target, const char* event_type) {
+    DomDocument* doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+    if (!doc || !doc->js_event_registry || !doc->js_mir_ctx) {
+        return false;
+    }
+
+    JsEventRegistry* registry = (JsEventRegistry*)doc->js_event_registry;
+
+    // walk up from target DomElement, checking each for a handler (event bubbling)
+    DomNode* node = (DomNode*)target;
+    int depth = 0;
+    while (node && depth < 100) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            JsEventHandler* handler = find_html_event_handler(registry, elem, event_type);
+
+            if (handler && handler->compiled_func) {
+                log_debug("dispatch_html_event_handler: invoking '%s' on <%s> at depth=%d",
+                          event_type, elem->tag_name ? elem->tag_name : "?", depth);
+
+                using namespace std::chrono;
+                auto t_start = high_resolution_clock::now();
+
+                // Restore EvalContext from retained JS runtime state
+                EvalContext handler_ctx;
+                memset(&handler_ctx, 0, sizeof(handler_ctx));
+                Heap* heap = (Heap*)doc->js_runtime_heap;
+                if (heap) {
+                    handler_ctx.heap = heap;
+                    handler_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
+                    handler_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
+                    handler_ctx.pool = heap->pool;
+                }
+
+                EvalContext* saved_ctx = context;
+                Context* saved_input_ctx = input_context;
+                context = &handler_ctx;
+                input_context = nullptr;
+
+                // Restore JS DOM bridge context
+                js_dom_set_document(doc);
+
+                // Reset mutation counter before handler
+                doc->js_mutation_count = 0;
+
+                // Invoke: function __evt_handler_N() { ... }
+                // JS handler functions return Item but we ignore the return value
+                typedef Item (*js_handler_fn)(void);
+                js_handler_fn fn = (js_handler_fn)handler->compiled_func;
+                fn();
+
+                auto t_handler = high_resolution_clock::now();
+
+                // Restore context
+                context = saved_ctx;
+                input_context = saved_input_ctx;
+
+                // Post-handler: detect DOM changes and rebuild
+                post_html_handler_rebuild(evcon, t_start, t_handler);
+
+                return true;
+            }
+        }
+        node = node->parent;
+        depth++;
+    }
+
+    return false;
+}
+
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
@@ -861,6 +1045,9 @@ void update_hover_state(EventContext* evcon, View* new_target) {
             node = (View*)node->parent;
         }
         log_debug("update_hover_state: set hover on %p", new_target);
+
+        // Dispatch HTML onmouseover handler if registered
+        dispatch_html_event_handler(evcon, new_target, "mouseover");
     }
 
     state->hover_target = new_target;
@@ -1619,6 +1806,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
+            dispatch_html_event_handler(evcon, prev_focus, "blur");
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
@@ -1628,6 +1816,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 
         // Set :focus on new element
         sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
+
+        // Dispatch HTML onfocus handler if registered
+        dispatch_html_event_handler(evcon, new_focus, "focus");
 
         // Set :focus-visible only for keyboard navigation
         if (from_keyboard) {
@@ -1645,6 +1836,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
+            dispatch_html_event_handler(evcon, prev_focus, "blur");
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
@@ -2449,6 +2641,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
+            // Dispatch HTML onmousedown handler
+            dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
+
             // Update focus if target is focusable (mouse-triggered focus)
             if (is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
@@ -2856,6 +3051,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         evcon.need_repaint = true;
                     }
                 }
+
+                // Dispatch HTML inline event handlers (onclick="...")
+                if (evcon.target) {
+                    if (dispatch_html_event_handler(&evcon, evcon.target, "click")) {
+                        evcon.need_repaint = true;
+                    }
+                }
             }
 
             // End selection mode
@@ -3104,6 +3306,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             // Re-fetch focused element (dispatch may have rebuilt the DOM)
             focused = focus_get(state);
+        }
+
+        // Dispatch HTML onkeydown handler (any key)
+        if (focused) {
+            if (dispatch_html_event_handler(&evcon, focused, "keydown")) {
+                evcon.need_repaint = true;
+                focused = focus_get(state);
+            }
         }
 
         // Handle arrow keys and caret adjustment for text input form controls
