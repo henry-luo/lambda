@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Click: display toggle (show/hide)</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #panel { padding: 20px; background: #e0e0ff; border: 1px solid #99f; margin: 10px 0; }
+  .hidden { display: none; }
+  #indicator { margin-top: 5px; }
+</style>
+<script>
+  function togglePanel() {
+    var panel = document.getElementById('panel');
+    if (panel.className === 'hidden') {
+      panel.className = 'visible';
+      document.getElementById('indicator').textContent = 'Panel is visible';
+    } else {
+      panel.className = 'hidden';
+      document.getElementById('indicator').textContent = 'Panel is hidden';
+    }
+  }
+</script>
+</head>
+<body>
+  <button id="btn-toggle" onclick="togglePanel()">Toggle Panel</button>
+  <div id="panel" class="visible">This panel can be toggled visible/hidden.</div>
+  <div id="indicator">Panel is visible</div>
+</body>
+</html>

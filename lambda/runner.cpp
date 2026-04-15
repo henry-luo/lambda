@@ -1413,15 +1413,19 @@ void runtime_reset_heap(Runtime* runtime) {
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
 
+        // Release name_pool BEFORE heap_destroy: the NamePool struct is
+        // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
+        // all pool memory.  We must free the hashmap inside while accessible.
+        if (runtime->name_pool) {
+            name_pool_release(runtime->name_pool);
+            runtime->name_pool = NULL;
+        }
+
         heap_destroy();
         if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
         runtime->heap = NULL;
         runtime->nursery = NULL;
         context = NULL;
-    }
-    if (runtime->name_pool) {
-        name_pool_release(runtime->name_pool);
-        runtime->name_pool = NULL;
     }
 }
 
@@ -1444,18 +1448,21 @@ void runtime_cleanup(Runtime* runtime) {
 
         print_heap_entries();
         check_memory_leak();
+
+        // Release name_pool BEFORE heap_destroy: the NamePool struct is
+        // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
+        // all pool memory.  We must free the hashmap inside while accessible.
+        if (runtime->name_pool) {
+            name_pool_release(runtime->name_pool);
+            runtime->name_pool = NULL;
+        }
+
         heap_destroy();
         if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
         runtime->heap = NULL;
         runtime->nursery = NULL;
         context = NULL;
     }
-    if (runtime->name_pool) {
-        name_pool_release(runtime->name_pool);
-        runtime->name_pool = NULL;
-    }
-
-    if (runtime->parser) ts_parser_delete(runtime->parser);
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];

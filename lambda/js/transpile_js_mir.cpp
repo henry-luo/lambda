@@ -19578,6 +19578,13 @@ void jm_cleanup_deferred_mir() {
     module_mir_context_count = 0;
 }
 
+void* jm_get_last_deferred_mir_ctx() {
+    if (module_mir_context_count > 0) {
+        return module_mir_contexts[module_mir_context_count - 1];
+    }
+    return NULL;
+}
+
 // Finish and remove the most recently deferred MIR context.
 // Used by eval() to eagerly free MIR contexts for one-shot compiled code
 // that is called once and then discarded.
@@ -24700,9 +24707,12 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // each heap allocates ~12MB (data zone + tenured zone + bump block), so
     // leaking one per document causes massive RSS growth in batch mode.
     // caller must call runtime_reset_heap() after inspecting the result.
-    if (!reusing_context && !g_jm_preamble_out) {
+    // In preamble mode, also stash the heap so the caller can retain it
+    // for interactive event handler compilation (needs heap for reusing_context).
+    if (!reusing_context) {
         runtime->heap = js_context.heap;
         runtime->nursery = js_context.nursery;
+        runtime->name_pool = js_context.name_pool;
     }
 
     // In hot-reload batch mode, skip deferred MIR cleanup — accumulated contexts

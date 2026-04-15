@@ -1,0 +1,32 @@
+{
+  "name": "JS onclick: textContent mutation and counter",
+  "html": "test/ui/js_click_textcontent.html",
+  "description": "Tests onclick handlers that mutate textContent. Verifies counter incrementing across multiple clicks, message setting, and clearing.",
+  "events": [
+    {"type": "log", "message": "=== js_click_textcontent: textContent mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial counter is 0"},
+    {"type": "assert_text", "target": {"selector": "#counter-display"}, "equals": "0"},
+
+    {"type": "log", "message": "Step 2: Click increment three times"},
+    {"type": "click", "target": {"selector": "#btn-inc"}},
+    {"type": "assert_text", "target": {"selector": "#counter-display"}, "equals": "1", "assert_timeout": 500},
+
+    {"type": "click", "target": {"selector": "#btn-inc"}},
+    {"type": "assert_text", "target": {"selector": "#counter-display"}, "equals": "2", "assert_timeout": 500},
+
+    {"type": "click", "target": {"selector": "#btn-inc"}},
+    {"type": "assert_text", "target": {"selector": "#counter-display"}, "equals": "3", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 3: Set message"},
+    {"type": "click", "target": {"selector": "#btn-msg"}},
+    {"type": "assert_text", "target": {"selector": "#message"}, "equals": "Button was clicked!", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 4: Clear message"},
+    {"type": "click", "target": {"selector": "#btn-clear"}},
+    {"type": "assert_text", "target": {"selector": "#message"}, "equals": "", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== js_click_textcontent complete ==="}
+  ]
+}

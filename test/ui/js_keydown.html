@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Keydown: keyboard handler</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #key-area { width: 300px; height: 60px; background: #eee; padding: 10px; border: 2px solid #999; }
+  #key-area.active { border-color: green; background: #dfd; }
+  #key-display { margin-top: 10px; font-size: 24px; font-family: monospace; min-height: 30px; }
+</style>
+<script>
+  function onKeyPress() {
+    document.getElementById('key-area').className = 'active';
+    document.getElementById('key-display').textContent = 'Key pressed!';
+    document.getElementById('key-display').className = 'pressed';
+  }
+</script>
+</head>
+<body>
+  <div id="key-area" class="" tabindex="0" onkeydown="onKeyPress()">Click here then press a key</div>
+  <div id="key-display">No key pressed</div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Mouseover: hover handler</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #hover-target { width: 150px; height: 80px; background: blue; color: white; padding: 10px; }
+  #hover-target.hovered { background: orange; }
+  #indicator { margin-top: 10px; padding: 5px; }
+  #indicator.active { background: yellow; }
+</style>
+<script>
+  function onHoverIn() {
+    document.getElementById('hover-target').className = 'hovered';
+    document.getElementById('indicator').className = 'active';
+    document.getElementById('indicator').textContent = 'Hovered!';
+  }
+</script>
+</head>
+<body>
+  <div id="hover-target" class="" onmouseover="onHoverIn()">Hover over me</div>
+  <div id="indicator">Not hovered</div>
+</body>
+</html>

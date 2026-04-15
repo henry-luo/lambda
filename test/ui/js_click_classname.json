@@ -1,0 +1,30 @@
+{
+  "name": "JS onclick: className toggle on button click",
+  "html": "test/ui/js_click_classname.html",
+  "description": "Tests onclick handler that toggles className. Verifies class attribute changes on click, and that multiple clicks toggle back and forth.",
+  "events": [
+    {"type": "log", "message": "=== js_click_classname: className toggle ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state — #box has class 'inactive'"},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "inactive"},
+
+    {"type": "log", "message": "Step 2: Click toggle button — #box should get class 'active'"},
+    {"type": "click", "target": {"selector": "#toggle-btn"}},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "active", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 3: Click toggle button again — #box should be 'inactive'"},
+    {"type": "click", "target": {"selector": "#toggle-btn"}},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "inactive", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 4: Click toggle a third time — #box should be active again"},
+    {"type": "click", "target": {"selector": "#toggle-btn"}},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "active", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 5: Click status button — #status should update based on #box state"},
+    {"type": "click", "target": {"selector": "#status-btn"}},
+    {"type": "assert_attribute", "target": {"selector": "#status"}, "attribute": "class", "equals": "on", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== js_click_classname complete ==="}
+  ]
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Click: DOM structure mutation</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #container { border: 1px solid black; padding: 10px; min-height: 20px; }
+  .item { padding: 5px; margin: 2px; background: #eee; }
+</style>
+<script>
+  var itemCount = 0;
+  function addItem() {
+    itemCount++;
+    var item = document.createElement('div');
+    item.className = 'item';
+    item.id = 'item-' + itemCount;
+    item.textContent = 'Item ' + itemCount;
+    document.getElementById('container').appendChild(item);
+  }
+  function removeFirst() {
+    var container = document.getElementById('container');
+    var first = container.firstChild;
+    if (first) {
+      container.removeChild(first);
+    }
+  }
+  function removeLast() {
+    var container = document.getElementById('container');
+    var last = container.lastChild;
+    if (last) {
+      container.removeChild(last);
+    }
+  }
+</script>
+</head>
+<body>
+  <button id="btn-add" onclick="addItem()">Add Item</button>
+  <button id="btn-remove-first" onclick="removeFirst()">Remove First</button>
+  <button id="btn-remove-last" onclick="removeLast()">Remove Last</button>
+  <div id="container"></div>
+</body>
+</html>

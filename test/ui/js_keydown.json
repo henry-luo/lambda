@@ -1,0 +1,27 @@
+{
+  "name": "JS onkeydown: keyboard handler on focusable element",
+  "html": "test/ui/js_keydown.html",
+  "description": "Tests onkeydown handler that updates className and textContent on key press. Verifies keydown dispatch to focused element.",
+  "events": [
+    {"type": "log", "message": "=== js_keydown: keyboard handler ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#key-display"}, "equals": "No key pressed"},
+
+    {"type": "log", "message": "Step 2: Click #key-area to focus it"},
+    {"type": "click", "target": {"selector": "#key-area"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Press a key — onkeydown should fire"},
+    {"type": "key_press", "key": "a"},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 4: Verify keydown handler fired"},
+    {"type": "assert_attribute", "target": {"selector": "#key-area"}, "attribute": "class", "equals": "active", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#key-display"}, "equals": "Key pressed!"},
+    {"type": "assert_attribute", "target": {"selector": "#key-display"}, "attribute": "class", "equals": "pressed"},
+
+    {"type": "log", "message": "=== js_keydown complete ==="}
+  ]
+}

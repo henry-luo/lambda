@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Click: text content mutation</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #message { padding: 10px; margin: 10px 0; min-height: 20px; background: #f0f0f0; }
+  #counter-display { font-size: 24px; font-weight: bold; }
+</style>
+<script>
+  var count = 0;
+  function increment() {
+    count++;
+    document.getElementById('counter-display').textContent = String(count);
+  }
+  function setMessage() {
+    document.getElementById('message').textContent = 'Button was clicked!';
+  }
+  function clearMessage() {
+    document.getElementById('message').textContent = '';
+  }
+</script>
+</head>
+<body>
+  <button id="btn-inc" onclick="increment()">Increment</button>
+  <button id="btn-msg" onclick="setMessage()">Set Message</button>
+  <button id="btn-clear" onclick="clearMessage()">Clear</button>
+  <div id="counter-display">0</div>
+  <div id="message"></div>
+</body>
+</html>

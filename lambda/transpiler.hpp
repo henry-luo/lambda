@@ -129,6 +129,7 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
+void* find_func_prefix(MIR_context_t ctx, const char *prefix);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
 void register_dynamic_import(const char *name, void *addr);
