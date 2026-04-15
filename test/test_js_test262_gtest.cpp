@@ -28,6 +28,20 @@
 // The test262 runner MUST produce ZERO crashes and ZERO lost tests in every CI
 // run.  Any crash is a MAJOR regression that must be fixed immediately.
 //
+// Stable checkpoint (commit 86235a964, 2026-04-15):
+//   Baseline passing:  21,824
+//   Nonbatch entries:  0
+//   Batch-lost:        0
+//   Crash-exits:       0
+//   Regressions:       0   (verified stable across 2 consecutive runs)
+//
+// --update-baseline gate: to update the baseline, ALL of the following must hold:
+//   1. Nonbatch entries   == 0   (all tests batch-safe)
+//   2. Batch-lost         == 0   (no infrastructure failures)
+//   3. Crash-exits        == 0   (no crashes)
+//   4. Fully passing      >= STABLE_BASELINE_MIN  (net improvement required)
+//   5. Regressions        == 0   (no test may regress)
+//
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into three groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
@@ -858,6 +872,15 @@ static double g_prep_secs = 0;  // Phase 1 (prepare) runtime
 static double g_exec_secs = 0;  // Phase 2 (execute) runtime
 static double g_total_secs = 0; // total runtime
 
+// Stable checkpoint baseline (commit 86235a964, 2026-04-15).
+// --update-baseline requires fully passing >= this value.
+static const int STABLE_BASELINE_MIN = 21824;
+
+// Phase-level counters set during execution, read by --update-baseline gate.
+static size_t g_phase_nonbatch_count = 0;   // nonbatch entries loaded from file
+static size_t g_phase_crash_exit = 0;       // crash-exit tests (exit > 128)
+static size_t g_phase_batch_lost = 0;       // tests lost in batch, recovered individually
+
 // Batch assignment tracking: which batch each test was in during Phase 2.
 // Used by Phase 4 to diagnose which co-batched tests cause false failures.
 static std::unordered_map<std::string, size_t> g_batch_assignment;  // test_name → batch_index
@@ -947,6 +970,7 @@ static void load_nonbatch_list(const char* path) {
         if (len > 0) g_nonbatch_tests.insert(std::string(buf));
     }
     fclose(f);
+    g_phase_nonbatch_count = g_nonbatch_tests.size();
     if (!g_nonbatch_tests.empty())
         fprintf(stderr, "[test262] Loaded %zu non-batch tests from %s\n",
                 g_nonbatch_tests.size(), path);
@@ -1944,6 +1968,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → temp/_t262_crashers.txt\n",
                         still_lost, crash_exit, slow_count, batch_kill_count);
             }
+            // Expose crash-exit count for --update-baseline gate
+            g_phase_crash_exit = crash_exit + still_lost;
         }
     }
 
@@ -2106,6 +2132,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         fprintf(stderr, "[test262] Phase 3 partial passes: %zu quarantined-crasher + %zu batch-lost + %zu slow (>= 3s)\n",
                 pp_crasher, pp_batch_lost, pp_slow);
     }
+    // Expose batch-lost count for --update-baseline gate
+    g_phase_batch_lost = pp_batch_lost;
 
     auto total_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(total_time - start_time).count();
@@ -2306,12 +2334,36 @@ public:
             }
         }
 
-        // Update baseline if requested — only fully passed tests
+        // Update baseline if requested — gated by stability criteria
         if (g_update_baseline) {
-            write_baseline_file(BASELINE_FILE, current_passing,
-                                g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
-                   BASELINE_FILE, current_passing.size());
+            bool gate_ok = true;
+            if (g_phase_nonbatch_count > 0) {
+                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
+                gate_ok = false;
+            }
+            if ((size_t)batch_lost > 0 || g_phase_batch_lost > 0) {
+                printf("\n❌  Baseline NOT updated: %d batch-lost (must be 0)\n", batch_lost);
+                gate_ok = false;
+            }
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+                gate_ok = false;
+            }
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+                gate_ok = false;
+            }
+            if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
+                printf("\n❌  Baseline NOT updated: %zu fully passing < %d (stable minimum)\n",
+                       current_passing.size(), STABLE_BASELINE_MIN);
+                gate_ok = false;
+            }
+            if (gate_ok) {
+                write_baseline_file(BASELINE_FILE, current_passing,
+                                    g_total_tests, skipped, g_total_batched, failed);
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                       BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
+            }
         }
     }
 };
@@ -2728,12 +2780,36 @@ int main(int argc, char** argv) {
                 printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
             }
         }
-        // Update baseline if requested (batch-only path) — only fully passed tests
+        // Update baseline if requested (batch-only path) — gated by stability criteria
         if (g_update_baseline) {
-            write_baseline_file(BASELINE_FILE, current_passing,
-                                g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
-                   BASELINE_FILE, current_passing.size());
+            bool gate_ok = true;
+            if (g_phase_nonbatch_count > 0) {
+                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
+                gate_ok = false;
+            }
+            if (g_phase_batch_lost > 0) {
+                printf("\n❌  Baseline NOT updated: %zu batch-lost (must be 0)\n", g_phase_batch_lost);
+                gate_ok = false;
+            }
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+                gate_ok = false;
+            }
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+                gate_ok = false;
+            }
+            if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
+                printf("\n❌  Baseline NOT updated: %zu fully passing < %d (stable minimum)\n",
+                       current_passing.size(), STABLE_BASELINE_MIN);
+                gate_ok = false;
+            }
+            if (gate_ok) {
+                write_baseline_file(BASELINE_FILE, current_passing,
+                                    g_total_tests, skipped, g_total_batched, failed);
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                       BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
+            }
         }
         return regressions.empty() ? 0 : 1;
     }
