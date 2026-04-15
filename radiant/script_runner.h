@@ -41,6 +41,26 @@ struct Url;
  */
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
 
+/**
+ * Collect and compile inline event handler attributes (onclick, onmouseover, etc.)
+ * from the DomElement* tree. Uses the retained MIR context from execute_document_scripts()
+ * so that handler code can reference functions defined in <script> blocks.
+ *
+ * Must be called AFTER execute_document_scripts() and only if dom_doc->js_mir_ctx is set.
+ *
+ * @param dom_doc  DomDocument with retained JS compilation state
+ */
+void collect_and_compile_event_handlers(DomDocument* dom_doc);
+
+/**
+ * Clean up retained JS compilation state on a DomDocument.
+ * Destroys the MIR context, runtime pools, and event handler registry.
+ * Called during document teardown.
+ *
+ * @param dom_doc  DomDocument to clean up
+ */
+void script_runner_cleanup_js_state(DomDocument* dom_doc);
+
 #ifdef __cplusplus
 }
 #endif

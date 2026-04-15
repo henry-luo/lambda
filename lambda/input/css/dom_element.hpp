@@ -113,6 +113,15 @@ struct DomDocument {
     // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
     int js_mutation_count;
 
+    // Retained JS compilation state for interactive event handler dispatch
+    void* js_mir_ctx;               // MIR_context_t — keeps compiled JS code pages alive
+    void* js_preamble_state;        // JsPreambleState* — full state for cleanup
+    void* js_runtime_heap;          // Heap* — retained GC heap for JS objects
+    void* js_runtime_nursery;       // gc_nursery_t* — retained nursery allocator
+    void* js_runtime_name_pool;     // NamePool* — retained string interning pool
+    void* js_runtime_pool;          // Pool* — retained mmap pool for JS code
+    void* js_event_registry;        // JsEventRegistry* — compiled event handler registry
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -129,7 +138,11 @@ struct DomDocument {
                     element_dom_map(nullptr),
                     skip_style_reset(false),
                     incremental_layout(false),
-                    js_mutation_count(0) {}
+                    js_mutation_count(0),
+                    js_mir_ctx(nullptr), js_preamble_state(nullptr),
+                    js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
+                    js_runtime_name_pool(nullptr), js_runtime_pool(nullptr),
+                    js_event_registry(nullptr) {}
 };
 
 typedef struct {
