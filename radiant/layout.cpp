@@ -2124,6 +2124,19 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     // to convert CSS pixels to physical surface pixels for HiDPI displays.
     lycon->width = uicon->viewport_width > 0 ? uicon->viewport_width : 1200;
     lycon->height = uicon->viewport_height > 0 ? uicon->viewport_height : 800;
+
+    // Apply <meta name="viewport"> width if present
+    // Explicit pixel widths (e.g., width=320) override the window/default viewport
+    // width=device-width (stored as 0) means "use device width" — no override needed
+    if (doc->viewport_width > 0) {
+        lycon->width = (float)doc->viewport_width;
+        log_info("layout_init: viewport meta override width=%d", doc->viewport_width);
+    }
+    if (doc->viewport_height > 0) {
+        lycon->height = (float)doc->viewport_height;
+        log_info("layout_init: viewport meta override height=%d", doc->viewport_height);
+    }
+
     log_debug("layout_init: uicon=%p, viewport=%.1fx%.1f (CSS logical pixels), pixel_ratio=%.2f",
               uicon, lycon->width, lycon->height, uicon->pixel_ratio);
 

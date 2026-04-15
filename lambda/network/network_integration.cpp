@@ -334,6 +334,9 @@ void radiant_cleanup_network_support(DomDocument* doc) {
 
     log_debug("network: cleaning up network support");
 
+    // cancel all in-flight downloads before destroying the manager
+    resource_manager_cancel_all(doc->resource_manager);
+
     resource_manager_destroy(doc->resource_manager);
     doc->resource_manager = nullptr;
     doc->fully_loaded = true;

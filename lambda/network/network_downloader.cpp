@@ -67,9 +67,20 @@ typedef struct {
     size_t size;
 } HttpResponse;
 
+// Maximum single resource size (100 MB) — prevents unbounded memory growth
+#define NETWORK_MAX_RESOURCE_SIZE (100 * 1024 * 1024)
+
 // Callback for curl to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
+    
+    // enforce maximum resource size
+    if (response->size + total_size > NETWORK_MAX_RESOURCE_SIZE) {
+        log_error("network: resource exceeds maximum size (%d MB), aborting download",
+                  NETWORK_MAX_RESOURCE_SIZE / (1024 * 1024));
+        return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
+    }
+    
     char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_NETWORK);
     
     if (!new_data) {
@@ -235,10 +246,42 @@ bool network_download_resource(NetworkResource* res) {
     // Check for curl errors
     if (curl_res != CURLE_OK) {
         const char* error_str = curl_easy_strerror(curl_res);
-        log_error("network: download failed for %s: %s", res->url, error_str);
+        
+        // Provide specific error messages for common failure modes
+        char error_msg[256];
+        switch (curl_res) {
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_SSL_CERTPROBLEM:
+            case CURLE_SSL_CIPHER:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+                snprintf(error_msg, sizeof(error_msg), "SSL certificate error: %s", error_str);
+                log_error("network: SSL/TLS certificate error for %s: %s", res->url, error_str);
+                break;
+            case CURLE_TOO_MANY_REDIRECTS:
+                snprintf(error_msg, sizeof(error_msg), "Redirect loop (max 5 redirects exceeded)");
+                log_error("network: redirect loop detected for %s", res->url);
+                break;
+            case CURLE_OPERATION_TIMEDOUT:
+                snprintf(error_msg, sizeof(error_msg), "Request timed out");
+                log_error("network: request timed out for %s", res->url);
+                break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+                snprintf(error_msg, sizeof(error_msg), "Could not resolve host");
+                log_error("network: could not resolve host for %s", res->url);
+                break;
+            case CURLE_COULDNT_CONNECT:
+                snprintf(error_msg, sizeof(error_msg), "Connection refused");
+                log_error("network: connection refused for %s", res->url);
+                break;
+            default:
+                snprintf(error_msg, sizeof(error_msg), "%s", error_str);
+                log_error("network: download failed for %s: %s", res->url, error_str);
+                break;
+        }
         
         if (res->error_message) mem_free(res->error_message);
-        res->error_message = mem_strdup(error_str, MEM_CAT_NETWORK);
+        res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
         mem_free(response.data);
         if (custom_headers) curl_slist_free_all(custom_headers);

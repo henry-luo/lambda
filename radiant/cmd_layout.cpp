@@ -1784,6 +1784,163 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
 }
 
 /**
+ * Detect charset from HTML content by scanning for <meta charset="..."> or
+ * <meta http-equiv="Content-Type" content="...; charset=..."> within the first 1024 bytes.
+ * Returns the charset name (e.g., "iso-8859-1") or nullptr if UTF-8 or not specified.
+ */
+static const char* detect_html_charset(const char* html, size_t len) {
+    if (!html || len == 0) return nullptr;
+
+    // only scan the first 1024 bytes (charset must appear early per HTML spec)
+    size_t scan_len = len < 1024 ? len : 1024;
+    char buf[1025];
+    memcpy(buf, html, scan_len);
+    buf[scan_len] = '\0';
+
+    // look for <meta charset="...">
+    const char* p = buf;
+    while ((p = strstr(p, "charset")) != nullptr) {
+        p += 7; // skip "charset"
+        // skip optional whitespace and '='
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '=') continue;
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        // skip optional quote
+        char quote = 0;
+        if (*p == '"' || *p == '\'') { quote = *p; p++; }
+
+        // extract charset value
+        const char* start = p;
+        while (*p && *p != '"' && *p != '\'' && *p != ';' && *p != '>' && *p != ' ') p++;
+        size_t vlen = p - start;
+        if (vlen == 0 || vlen > 30) continue;
+
+        // copy to static buffer (lowercase)
+        static char charset_buf[32];
+        for (size_t i = 0; i < vlen; i++) {
+            charset_buf[i] = (start[i] >= 'A' && start[i] <= 'Z') ? start[i] + 32 : start[i];
+        }
+        charset_buf[vlen] = '\0';
+
+        // skip if already UTF-8
+        if (strcmp(charset_buf, "utf-8") == 0 || strcmp(charset_buf, "utf8") == 0) {
+            return nullptr;
+        }
+
+        log_info("[charset] Detected non-UTF-8 charset: %s", charset_buf);
+        return charset_buf;
+    }
+
+    return nullptr;
+}
+
+/**
+ * Convert HTML content from ISO-8859-1 or Windows-1252 to UTF-8.
+ * These two encodings cover the vast majority of non-UTF-8 web pages.
+ * Each byte 0x80-0xFF maps to a 2-byte or 3-byte UTF-8 sequence.
+ * Returns a newly allocated UTF-8 string or nullptr on failure.
+ * Caller must free the returned string with mem_free().
+ */
+static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
+    if (!content) return nullptr;
+
+    // Windows-1252 to Unicode mapping for 0x80-0x9F (differs from Latin-1)
+    // Latin-1 maps these as C1 control characters; Win-1252 maps them to useful glyphs
+    static const uint16_t win1252_map[32] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+    };
+
+    // worst case: each byte becomes 3 UTF-8 bytes
+    size_t out_size = content_len * 3 + 1;
+    char* out_buf = (char*)mem_alloc(out_size, MEM_CAT_LAYOUT);
+    if (!out_buf) return nullptr;
+
+    char* out = out_buf;
+    for (size_t i = 0; i < content_len; i++) {
+        unsigned char c = (unsigned char)content[i];
+        if (c < 0x80) {
+            *out++ = (char)c;
+        } else {
+            uint16_t cp;
+            if (c >= 0x80 && c <= 0x9F) {
+                cp = win1252_map[c - 0x80];
+            } else {
+                cp = c;  // Latin-1: codepoint == byte value for 0xA0-0xFF
+            }
+            // encode as UTF-8
+            if (cp < 0x80) {
+                *out++ = (char)cp;
+            } else if (cp < 0x800) {
+                *out++ = (char)(0xC0 | (cp >> 6));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            } else {
+                *out++ = (char)(0xE0 | (cp >> 12));
+                *out++ = (char)(0x80 | ((cp >> 6) & 0x3F));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    }
+    *out = '\0';
+    size_t converted_len = out - out_buf;
+    log_info("[charset] Converted %zu bytes Latin-1/Win-1252 to %zu bytes UTF-8", content_len, converted_len);
+    return out_buf;
+}
+
+/**
+ * Convert HTML content from a non-UTF-8 charset to UTF-8.
+ * Currently supports ISO-8859-1 and Windows-1252 (covers ~95% of non-UTF-8 pages).
+ * Returns a newly allocated UTF-8 string or nullptr if charset is unsupported.
+ * Caller must free the returned string with mem_free().
+ */
+static char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset) {
+    if (!content || !from_charset) return nullptr;
+
+    // ISO-8859-1 and Windows-1252 use the same converter
+    if (strcmp(from_charset, "iso-8859-1") == 0 ||
+        strcmp(from_charset, "latin1") == 0 ||
+        strcmp(from_charset, "latin-1") == 0 ||
+        strcmp(from_charset, "windows-1252") == 0 ||
+        strcmp(from_charset, "cp1252") == 0) {
+        return convert_latin1_to_utf8(content, content_len);
+    }
+
+    log_warn("[charset] Unsupported charset '%s', proceeding with raw content", from_charset);
+    return nullptr;
+}
+
+/**
+ * Generate an HTML error page for network/loading errors.
+ * Returns a heap-allocated HTML string that the caller must free with mem_free().
+ * @param url The URL that failed to load
+ * @param error_title Short error title (e.g., "Network Error", "404 Not Found")
+ * @param error_detail Detailed error message
+ */
+static char* generate_error_page_html(const char* url, const char* error_title, const char* error_detail) {
+    char buf[4096];
+    snprintf(buf, sizeof(buf),
+        "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+        "<title>%s</title>"
+        "<style>"
+        "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; "
+        "max-width: 600px; margin: 80px auto; padding: 20px; color: #333; }"
+        "h1 { color: #c00; font-size: 24px; }"
+        "p { line-height: 1.6; }"
+        ".url { word-break: break-all; color: #666; font-size: 14px; "
+        "background: #f5f5f5; padding: 8px 12px; border-radius: 4px; }"
+        "</style></head><body>"
+        "<h1>%s</h1>"
+        "<p>%s</p>"
+        "<p class=\"url\">%s</p>"
+        "</body></html>",
+        error_title, error_title, error_detail, url ? url : "");
+    return mem_strdup(buf, MEM_CAT_LAYOUT);
+}
+
+/**
  * Load HTML document with Lambda CSS system
  * Parses HTML, applies CSS cascade, builds DOM tree, returns DomDocument for layout
  *
@@ -1822,7 +1979,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         html_content = download_http_content(url_str, &content_size, nullptr);
         if (!html_content) {
             log_error("Failed to download HTML from URL: %s", url_str);
-            return nullptr;
+            // generate error page instead of returning nullptr
+            html_content = generate_error_page_html(url_str,
+                "Page Could Not Be Loaded",
+                "The requested page could not be loaded. The server may be unreachable, "
+                "the URL may be incorrect, or there may be a network connectivity issue.");
+            if (!html_content) return nullptr;
         }
         html_content_owned = true;
     } else {
@@ -1833,6 +1995,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             return nullptr;
         }
         html_content_owned = true;
+    }
+
+    // Detect non-UTF-8 charset and convert if needed
+    if (html_content && html_content_owned) {
+        size_t html_len = strlen(html_content);
+        const char* charset = detect_html_charset(html_content, html_len);
+        if (charset) {
+            char* utf8_content = convert_charset_to_utf8(html_content, html_len, charset);
+            if (utf8_content) {
+                mem_free(html_content);
+                html_content = utf8_content;
+            }
+            // if conversion fails, proceed with original content (best effort)
+        }
     }
 
     auto t_read = high_resolution_clock::now();
