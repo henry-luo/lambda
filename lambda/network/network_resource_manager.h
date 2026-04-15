@@ -129,6 +129,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
 
 void resource_manager_cancel(NetworkResourceManager* mgr, NetworkResource* res);
 void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct DomElement* elmt);
+void resource_manager_cancel_all(NetworkResourceManager* mgr);
 
 // Status queries
 bool resource_manager_is_fully_loaded(const NetworkResourceManager* mgr);

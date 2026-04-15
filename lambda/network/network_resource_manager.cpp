@@ -305,6 +305,13 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     
     pthread_mutex_lock(&mgr->mutex);
     
+    // enforce maximum resources per page (500) to prevent runaway loading
+    if (mgr->total_resources >= 500) {
+        log_warn("network: max resources per page (500) reached, rejecting: %s", url);
+        pthread_mutex_unlock(&mgr->mutex);
+        return NULL;
+    }
+    
     // check for existing resource (deduplication)
     ResourceEntry key = { .url = (char*)url, .res = NULL };
     const ResourceEntry* existing = (const ResourceEntry*)hashmap_get(
@@ -659,6 +666,35 @@ void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct Dom
     
     if (cancelled > 0) {
         log_debug("network: cancelled %d resources for element", cancelled);
+    }
+    
+    pthread_mutex_unlock(&mgr->mutex);
+}
+
+// cancel all in-flight downloads (called on navigation to abort old page's resources)
+void resource_manager_cancel_all(NetworkResourceManager* mgr) {
+    if (!mgr) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    
+    int cancelled = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter((struct hashmap*)mgr->resources, &iter, &item)) {
+        ResourceEntry* entry = (ResourceEntry*)item;
+        if (entry->res) {
+            if (entry->res->state == STATE_PENDING || entry->res->state == STATE_DOWNLOADING) {
+                entry->res->state = STATE_FAILED;
+                if (entry->res->error_message) mem_free(entry->res->error_message);
+                entry->res->error_message = mem_strdup("Navigation cancelled", MEM_CAT_NETWORK);
+                mgr->failed_resources++;
+                cancelled++;
+            }
+        }
+    }
+    
+    if (cancelled > 0) {
+        log_info("network: cancelled %d in-flight resources due to navigation", cancelled);
     }
     
     pthread_mutex_unlock(&mgr->mutex);

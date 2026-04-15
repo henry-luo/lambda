@@ -513,11 +513,32 @@ void render(GLFWwindow* window) {
                 glfwSetWindowTitle(window, title);
             }
         } else if (!ui_context.document->fully_loaded) {
-            // show loading progress in window title
-            float progress = resource_manager_get_load_progress(ui_context.document->resource_manager);
-            char title[512];
-            snprintf(title, sizeof(title), "Loading... %.0f%%", progress * 100.0f);
-            glfwSetWindowTitle(window, title);
+            // Check for page load timeout — show partial content instead of waiting forever
+            if (resource_manager_check_page_timeout(ui_context.document->resource_manager)) {
+                ui_context.document->fully_loaded = true;
+                int pending = resource_manager_get_pending_count(ui_context.document->resource_manager);
+                log_warn("view: page load timeout, showing partial content (%d resources still pending)", pending);
+                reflow_html_doc(ui_context.document);
+
+                // update title to indicate partial load
+                if (ui_context.document->url) {
+                    const char* page_title = session_extract_title(ui_context.document);
+                    char title[512];
+                    if (page_title) {
+                        snprintf(title, sizeof(title), "Lambda - %s (partial)", page_title);
+                    } else {
+                        const char* doc_href = url_get_href(ui_context.document->url);
+                        snprintf(title, sizeof(title), "Lambda - %s (partial)", doc_href ? doc_href : "");
+                    }
+                    glfwSetWindowTitle(window, title);
+                }
+            } else {
+                // show loading progress in window title
+                float progress = resource_manager_get_load_progress(ui_context.document->resource_manager);
+                char title[512];
+                snprintf(title, sizeof(title), "Loading... %.0f%%", progress * 100.0f);
+                glfwSetWindowTitle(window, title);
+            }
         }
     }
 
