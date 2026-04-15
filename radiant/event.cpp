@@ -811,6 +811,51 @@ static JsEventHandler* find_html_event_handler(JsEventRegistry* registry,
 }
 
 /**
+ * Clear view-pool-allocated pointers from DOM tree nodes.
+ * Must be called after view_pool_destroy() and before relayout to prevent
+ * dangling pointer access (TextRect, FontProp, BoundaryProp, etc. are
+ * allocated from the view tree's pool which has just been destroyed).
+ */
+static void clear_dom_view_pool_pointers(DomNode* node) {
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = (DomElement*)node;
+            elem->font = nullptr;
+            elem->bound = nullptr;
+            elem->in_line = nullptr;
+            elem->blk = nullptr;
+            elem->scroller = nullptr;
+            elem->embed = nullptr;
+            elem->position = nullptr;
+            elem->transform = nullptr;
+            elem->filter = nullptr;
+            elem->multicol = nullptr;
+            elem->pseudo = nullptr;
+            elem->vpath = nullptr;
+            elem->layout_cache = nullptr;
+            elem->view_type = RDT_VIEW_NONE;
+            elem->content_width = 0;
+            elem->content_height = 0;
+            elem->has_cached_intrinsic_widths = false;
+            elem->styles_resolved = false;
+            elem->float_prelaid = false;
+            // Clear union (fi/gi/tb/td/form all share this slot)
+            elem->fi = nullptr;
+            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+            if (elem->first_child) {
+                clear_dom_view_pool_pointers(elem->first_child);
+            }
+        } else if (node->node_type == DOM_NODE_TEXT) {
+            DomText* text = (DomText*)node;
+            text->rect = nullptr;
+            text->font = nullptr;
+            text->view_type = RDT_VIEW_NONE;
+        }
+        node = node->next_sibling;
+    }
+}
+
+/**
  * Post-handler rebuild: after JS handler mutates DOM, re-cascade CSS and relayout.
  */
 static void post_html_handler_rebuild(EventContext* evcon,
@@ -852,6 +897,44 @@ static void post_html_handler_rebuild(EventContext* evcon,
         mem_free(doc->view_tree);
         doc->view_tree = nullptr;
     }
+
+    // Clear stale view pointers in RadiantState — old views are now freed
+    RadiantState* state = (RadiantState*)doc->state;
+    if (state) {
+        state->hover_target = nullptr;
+        state->active_target = nullptr;
+        state->drag_target = nullptr;
+        state->is_dragging = false;
+        state->open_dropdown = nullptr;
+        if (state->caret) state->caret->view = nullptr;
+        if (state->selection) {
+            state->selection->view = nullptr;
+            state->selection->anchor_view = nullptr;
+            state->selection->focus_view = nullptr;
+            state->selection->is_selecting = false;
+        }
+        if (state->focus) {
+            state->focus->current = nullptr;
+            state->focus->previous = nullptr;
+        }
+        if (state->cursor) state->cursor->view = nullptr;
+        if (state->drag_drop) {
+            state->drag_drop->source_view = nullptr;
+            state->drag_drop->drop_target = nullptr;
+            state->drag_drop->active = false;
+            state->drag_drop->pending = false;
+        }
+        // Clear per-view state entries — they reference old view pointers as keys
+        if (state->state_map) {
+            hashmap_clear(state->state_map, false);
+        }
+    }
+
+    // Clear dangling view-pool pointers from DOM tree nodes before relayout
+    if (doc->root) {
+        clear_dom_view_pool_pointers((DomNode*)doc->root);
+    }
+
     layout_html_doc(evcon->ui_context, doc, false);
 
     auto t2 = high_resolution_clock::now();
