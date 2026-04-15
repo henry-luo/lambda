@@ -2558,7 +2558,16 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
 
     // Convert name to string for comparison
-    Item name_str_item = js_to_string(name);
+    // v41: Symbol keys must be converted to __sym_N internal format, not human-readable string
+    Item name_str_item;
+    if (get_type_id(name) == LMD_TYPE_INT && it2i(name) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(name) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        name_str_item = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    } else {
+        name_str_item = js_to_string(name);
+    }
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
 
@@ -5228,7 +5237,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v18: handle function objects — prototype, name, length, and custom properties
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        Item k = js_to_string(key);
+        Item k;
+        // v41: Symbol keys → __sym_N format
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else {
+            k = js_to_string(key);
+        }
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
@@ -6226,6 +6244,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // Convert Symbol keys to __sym_N string format so marker checks work
+    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
