@@ -1,0 +1,30 @@
+key:value
+42
+3
+3.140000
+%%
+[1,2,3]
+a b c
+inspect type: string
+inspect has name: true
+isPromise: true
+isPromise false: false
+isError: true
+isError false: false
+isFunction: true
+isFunction false: false
+isString: true
+isString false: false
+isNumber: true
+isNumber false: false
+isBoolean: true
+isNull: true
+isUndefined: true
+isObject: true
+isPrimitive str: true
+isPrimitive obj: false
+TextEncoder len: 5
+TextDecoder: hello
+deprecate type: function
+deprecate call: 42
+inherits: hi

@@ -1,0 +1,6 @@
+decoder created: true
+write hello: hello
+write world:  world
+end result: 
+write ABC: ABC
+end DEF: DEF

@@ -1,0 +1,18 @@
+randomBytes length: 16
+randomBytes is buffer: true
+randomBytes unique: true
+randomUUID length: 36
+randomUUID has dashes: true
+randomUUID unique: true
+randomInt in range: true
+randomInt small range: true
+getHashes is array: true
+getHashes has sha256: true
+getHashes has sha512: true
+timingSafeEqual same: true
+timingSafeEqual diff: false
+sha256 length: 64
+sha512 length: 128
+hash chain: true
+hmac length: 64
+hmac deterministic: true

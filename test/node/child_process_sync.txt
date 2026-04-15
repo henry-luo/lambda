@@ -1,0 +1,7 @@
+execSync: hello
+execSync pipe: 2
+spawnSync stdout: spawn test
+spawnSync status: 0
+spawnSync ls has files: true
+execFileSync: hello
+spawnSync false status: 1
