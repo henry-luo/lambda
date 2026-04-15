@@ -397,6 +397,10 @@ extern "C" void js_batch_reset() {
     js_net_reset();
     extern void js_tls_reset(void);
     js_tls_reset();
+    extern void js_http_reset(void);
+    js_http_reset();
+    extern void js_https_reset(void);
+    js_https_reset();
     extern void js_string_decoder_reset(void);
     js_string_decoder_reset();
     extern void js_assert_reset(void);
@@ -14149,6 +14153,20 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 8 && memcmp(spec->chars, "node:tls", 8) == 0)) {
         extern Item js_get_tls_namespace(void);
         return js_get_tls_namespace();
+    }
+    // node:http
+    if ((spec->len == 4 && memcmp(spec->chars, "http", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "http.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:http", 9) == 0)) {
+        extern Item js_get_http_namespace(void);
+        return js_get_http_namespace();
+    }
+    // node:https
+    if ((spec->len == 5 && memcmp(spec->chars, "https", 5) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "https.js", 8) == 0) ||
+        (spec->len == 10 && memcmp(spec->chars, "node:https", 10) == 0)) {
+        extern Item js_get_https_namespace(void);
+        return js_get_https_namespace();
     }
     // node:string_decoder
     if ((spec->len == 14 && memcmp(spec->chars, "string_decoder", 14) == 0) ||

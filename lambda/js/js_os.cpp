@@ -28,10 +28,23 @@
 #include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
+#include <mach/processor_info.h>
 #endif
 
 #ifdef __linux__
 #include <sys/sysinfo.h>
+#endif
+
+#if !defined(_WIN32)
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#ifdef __APPLE__
+#include <net/if_dl.h>
+#endif
+#ifdef __linux__
+#include <linux/if_packet.h>
+#endif
 #endif
 
 // Helper: make JS undefined value
@@ -188,16 +201,75 @@ extern "C" Item js_os_freemem(void) {
 // os.cpus() — returns array of CPU info objects
 extern "C" Item js_os_cpus(void) {
     int num_cpus = 1;
+    const char* cpu_model = "Unknown";
+    int64_t cpu_speed = 0; // MHz
+
 #ifdef __APPLE__
     size_t size = sizeof(num_cpus);
     sysctlbyname("hw.logicalcpu", &num_cpus, &size, NULL, 0);
+
+    static char brand[256] = {0};
+    if (brand[0] == 0) {
+        size = sizeof(brand);
+        sysctlbyname("machdep.cpu.brand_string", brand, &size, NULL, 0);
+    }
+    if (brand[0] != 0) cpu_model = brand;
+
+    // CPU frequency in Hz → MHz
+    int64_t freq = 0;
+    size = sizeof(freq);
+    if (sysctlbyname("hw.cpufrequency", &freq, &size, NULL, 0) == 0 && freq > 0) {
+        cpu_speed = freq / 1000000; // Hz → MHz
+    } else {
+        // Apple Silicon: no hw.cpufrequency, estimate from perf cores
+        cpu_speed = 3200; // reasonable default for M-series
+    }
+
+    // get per-CPU times from host_processor_info
+    natural_t cpu_count = 0;
+    processor_info_array_t cpu_info = NULL;
+    mach_msg_type_number_t info_count = 0;
+    host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+                        &cpu_count, &cpu_info, &info_count);
+
+    Item arr = js_array_new(0);
+    for (int i = 0; i < num_cpus; i++) {
+        Item cpu = js_new_object();
+        js_property_set(cpu, make_string_item("model"), make_string_item(cpu_model));
+        js_property_set(cpu, make_string_item("speed"), (Item){.item = i2it(cpu_speed)});
+        Item times = js_new_object();
+        if (cpu_info && i < (int)cpu_count) {
+            processor_cpu_load_info_data_t* load =
+                (processor_cpu_load_info_data_t*)cpu_info + i;
+            int64_t user_t = (int64_t)load->cpu_ticks[CPU_STATE_USER] * 10;
+            int64_t nice_t = (int64_t)load->cpu_ticks[CPU_STATE_NICE] * 10;
+            int64_t sys_t  = (int64_t)load->cpu_ticks[CPU_STATE_SYSTEM] * 10;
+            int64_t idle_t = (int64_t)load->cpu_ticks[CPU_STATE_IDLE] * 10;
+            js_property_set(times, make_string_item("user"), (Item){.item = i2it(user_t)});
+            js_property_set(times, make_string_item("nice"), (Item){.item = i2it(nice_t)});
+            js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(sys_t)});
+            js_property_set(times, make_string_item("idle"), (Item){.item = i2it(idle_t)});
+            js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+        } else {
+            js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
+            js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+        }
+        js_property_set(cpu, make_string_item("times"), times);
+        js_array_push(arr, cpu);
+    }
+    if (cpu_info) {
+        vm_deallocate(mach_task_self(), (vm_address_t)cpu_info,
+                      info_count * sizeof(natural_t));
+    }
+    return arr;
+
 #elif defined(_WIN32)
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     num_cpus = si.dwNumberOfProcessors;
-#else
-    num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
-#endif
 
     Item arr = js_array_new(0);
     for (int i = 0; i < num_cpus; i++) {
@@ -207,13 +279,80 @@ extern "C" Item js_os_cpus(void) {
         Item times = js_new_object();
         js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
         js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("sys"), (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
         js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
-        js_property_set(times, make_string_item("irq"), (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
         js_property_set(cpu, make_string_item("times"), times);
         js_array_push(arr, cpu);
     }
     return arr;
+
+#else
+    // Linux
+    num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (num_cpus < 1) num_cpus = 1;
+
+    // read CPU model from /proc/cpuinfo
+    static char model_buf[256] = {0};
+    if (model_buf[0] == 0) {
+        FILE* f = fopen("/proc/cpuinfo", "r");
+        if (f) {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "model name", 10) == 0) {
+                    char* colon = strchr(line, ':');
+                    if (colon) {
+                        colon++;
+                        while (*colon == ' ') colon++;
+                        char* nl = strchr(colon, '\n');
+                        if (nl) *nl = '\0';
+                        int mlen = (int)strlen(colon);
+                        if (mlen >= (int)sizeof(model_buf)) mlen = (int)sizeof(model_buf) - 1;
+                        memcpy(model_buf, colon, mlen);
+                        model_buf[mlen] = '\0';
+                    }
+                    break;
+                }
+            }
+            fclose(f);
+        }
+    }
+    if (model_buf[0] != 0) cpu_model = model_buf;
+
+    // read cpu MHz
+    {
+        FILE* f = fopen("/proc/cpuinfo", "r");
+        if (f) {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "cpu MHz", 7) == 0) {
+                    char* colon = strchr(line, ':');
+                    if (colon) {
+                        cpu_speed = (int64_t)atof(colon + 1);
+                    }
+                    break;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    Item arr = js_array_new(0);
+    for (int i = 0; i < num_cpus; i++) {
+        Item cpu = js_new_object();
+        js_property_set(cpu, make_string_item("model"), make_string_item(cpu_model));
+        js_property_set(cpu, make_string_item("speed"), (Item){.item = i2it(cpu_speed)});
+        Item times = js_new_object();
+        js_property_set(times, make_string_item("user"), (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("nice"), (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("sys"),  (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("idle"), (Item){.item = i2it(0)});
+        js_property_set(times, make_string_item("irq"),  (Item){.item = i2it(0)});
+        js_property_set(cpu, make_string_item("times"), times);
+        js_array_push(arr, cpu);
+    }
+    return arr;
+#endif
 }
 
 // os.uptime()
@@ -289,9 +428,107 @@ extern "C" Item js_os_version(void) {
 #endif
 }
 
-// os.networkInterfaces() — stub returning empty object
+// os.networkInterfaces() — returns object keyed by interface name
 extern "C" Item js_os_networkInterfaces(void) {
-    return js_new_object();
+    Item result = js_new_object();
+#if !defined(_WIN32)
+    struct ifaddrs* ifap = NULL;
+    if (getifaddrs(&ifap) != 0) return result;
+
+    for (struct ifaddrs* ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr) continue;
+        int family = ifa->ifa_addr->sa_family;
+        if (family != AF_INET && family != AF_INET6) continue;
+
+        char addr[INET6_ADDRSTRLEN] = {0};
+        char netmask[INET6_ADDRSTRLEN] = {0};
+        const char* fam_str = (family == AF_INET) ? "IPv4" : "IPv6";
+        int cidr = 0;
+
+        if (family == AF_INET) {
+            struct sockaddr_in* sa = (struct sockaddr_in*)ifa->ifa_addr;
+            inet_ntop(AF_INET, &sa->sin_addr, addr, sizeof(addr));
+            if (ifa->ifa_netmask) {
+                struct sockaddr_in* nm = (struct sockaddr_in*)ifa->ifa_netmask;
+                inet_ntop(AF_INET, &nm->sin_addr, netmask, sizeof(netmask));
+                uint32_t mask = ntohl(nm->sin_addr.s_addr);
+                while (mask & 0x80000000) { cidr++; mask <<= 1; }
+            }
+        } else {
+            struct sockaddr_in6* sa6 = (struct sockaddr_in6*)ifa->ifa_addr;
+            inet_ntop(AF_INET6, &sa6->sin6_addr, addr, sizeof(addr));
+            if (ifa->ifa_netmask) {
+                struct sockaddr_in6* nm6 = (struct sockaddr_in6*)ifa->ifa_netmask;
+                inet_ntop(AF_INET6, &nm6->sin6_addr, netmask, sizeof(netmask));
+                for (int b = 0; b < 16; b++) {
+                    uint8_t byte = nm6->sin6_addr.s6_addr[b];
+                    while (byte & 0x80) { cidr++; byte <<= 1; }
+                    if (byte == 0 && nm6->sin6_addr.s6_addr[b] != 0xff) break;
+                }
+            }
+        }
+
+        // get MAC address
+        char mac[18] = "00:00:00:00:00:00";
+#ifdef __APPLE__
+        // on macOS, iterate again for AF_LINK
+        for (struct ifaddrs* lifa = ifap; lifa; lifa = lifa->ifa_next) {
+            if (strcmp(lifa->ifa_name, ifa->ifa_name) == 0 &&
+                lifa->ifa_addr && lifa->ifa_addr->sa_family == AF_LINK) {
+                struct sockaddr_dl* sdl = (struct sockaddr_dl*)lifa->ifa_addr;
+                if (sdl->sdl_alen == 6) {
+                    unsigned char* m = (unsigned char*)LLADDR(sdl);
+                    snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+                             m[0], m[1], m[2], m[3], m[4], m[5]);
+                }
+                break;
+            }
+        }
+#elif defined(__linux__)
+        for (struct ifaddrs* lifa = ifap; lifa; lifa = lifa->ifa_next) {
+            if (strcmp(lifa->ifa_name, ifa->ifa_name) == 0 &&
+                lifa->ifa_addr && lifa->ifa_addr->sa_family == AF_PACKET) {
+                struct sockaddr_ll* sll = (struct sockaddr_ll*)lifa->ifa_addr;
+                if (sll->sll_halen == 6) {
+                    unsigned char* m = sll->sll_addr;
+                    snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+                             m[0], m[1], m[2], m[3], m[4], m[5]);
+                }
+                break;
+            }
+        }
+#endif
+
+        bool internal = (ifa->ifa_flags & IFF_LOOPBACK) != 0;
+
+        // build the entry object
+        Item entry = js_new_object();
+        js_property_set(entry, make_string_item("address"), make_string_item(addr));
+        js_property_set(entry, make_string_item("netmask"), make_string_item(netmask));
+        js_property_set(entry, make_string_item("family"), make_string_item(fam_str));
+        js_property_set(entry, make_string_item("mac"), make_string_item(mac));
+        js_property_set(entry, make_string_item("internal"), (Item){.item = b2it(internal)});
+        js_property_set(entry, make_string_item("cidr"),
+            make_string_item(addr)); // will build full cidr below
+
+        // build cidr string: "addr/prefix"
+        char cidr_str[INET6_ADDRSTRLEN + 8];
+        snprintf(cidr_str, sizeof(cidr_str), "%s/%d", addr, cidr);
+        js_property_set(entry, make_string_item("cidr"), make_string_item(cidr_str));
+
+        // get or create array for this interface name
+        Item iface_key = make_string_item(ifa->ifa_name);
+        Item iface_arr = js_property_get(result, iface_key);
+        if (iface_arr.item == 0 || get_type_id(iface_arr) == LMD_TYPE_UNDEFINED) {
+            iface_arr = js_array_new(0);
+            js_property_set(result, iface_key, iface_arr);
+        }
+        js_array_push(iface_arr, entry);
+    }
+
+    freeifaddrs(ifap);
+#endif
+    return result;
 }
 
 // os.userInfo() — returns user information

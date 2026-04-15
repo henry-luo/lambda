@@ -141,12 +141,36 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
     if (emitter.item == 0) return (Item){.item = b2it(false)};
     Item map = get_events_map(emitter);
     Item arr = js_property_get(map, event_name);
-    if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
+
+    bool has_listeners = (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED &&
+                          js_array_length(arr) > 0);
+
+    // Node.js error event behavior: throw if no listeners for 'error'
+    if (!has_listeners) {
+        if (get_type_id(event_name) == LMD_TYPE_STRING) {
+            String* en = it2s(event_name);
+            if (en->len == 5 && memcmp(en->chars, "error", 5) == 0) {
+                // throw the error argument, or a generic error
+                extern void js_throw_value(Item error);
+                extern Item js_new_error_with_name(Item type_name, Item message);
+                Item err_arg = ItemNull;
+                if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
+                    int64_t argc = js_array_length(args_rest);
+                    if (argc > 0) err_arg = js_array_get_int(args_rest, 0);
+                }
+                if (err_arg.item == 0 || get_type_id(err_arg) == LMD_TYPE_UNDEFINED) {
+                    Item type_n = make_string_item("Error");
+                    Item msg = make_string_item("Unhandled 'error' event");
+                    err_arg = js_new_error_with_name(type_n, msg);
+                }
+                js_throw_value(err_arg);
+                return (Item){.item = b2it(false)};
+            }
+        }
         return (Item){.item = b2it(false)};
     }
 
     int64_t len = js_array_length(arr);
-    if (len == 0) return (Item){.item = b2it(false)};
 
     // collect args from rest parameter array
     int64_t argc = 0;

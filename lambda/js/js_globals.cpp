@@ -109,6 +109,37 @@ extern "C" Item js_process_stdout_write(Item str_item) {
     return (Item){.item = ITEM_TRUE};
 }
 
+// process.stderr.write(string) — writes to stderr (fd 2)
+extern "C" Item js_process_stderr_write(Item str_item) {
+    TypeId type = get_type_id(str_item);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(str_item);
+        if (s && s->len > 0) {
+            fwrite(s->chars, 1, s->len, stderr);
+            fflush(stderr);
+        }
+    } else {
+        Item str = js_to_string(str_item);
+        String* s = it2s(str);
+        if (s && s->len > 0) {
+            fwrite(s->chars, 1, s->len, stderr);
+            fflush(stderr);
+        }
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+// process.stdin.read() — read a line from stdin
+extern "C" Item js_process_stdin_read(void) {
+    char buf[4096];
+    if (fgets(buf, sizeof(buf), stdin) == NULL) {
+        return ItemNull;
+    }
+    int len = (int)strlen(buf);
+    String* s = heap_create_name(buf, (size_t)len);
+    return (Item){.item = s2it(s)};
+}
+
 extern "C" Item js_process_hrtime_bigint(void) {
     // Return nanosecond-precision monotonic time as a double
     // double has ~53 bits of mantissa, good for ~104 days of nanosecond precision
@@ -816,13 +847,27 @@ extern "C" Item js_process_chdir(Item dir_item) {
 }
 
 // process.exit([code])
+static int js_process_exit_code_value = 0;
+
 extern "C" Item js_process_exit(Item code_item) {
-    int code = 0;
+    int code = js_process_exit_code_value; // default to exitCode
     TypeId type = get_type_id(code_item);
     if (type == LMD_TYPE_INT) code = (int)it2i(code_item);
     else if (type == LMD_TYPE_FLOAT) code = (int)it2d(code_item);
     exit(code);
     return make_js_undefined(); // unreachable
+}
+
+// process.exitCode getter/setter
+extern "C" Item js_process_get_exitCode(void) {
+    return (Item){.item = i2it(js_process_exit_code_value)};
+}
+
+extern "C" Item js_process_set_exitCode(Item code_item) {
+    TypeId type = get_type_id(code_item);
+    if (type == LMD_TYPE_INT) js_process_exit_code_value = (int)it2i(code_item);
+    else if (type == LMD_TYPE_FLOAT) js_process_exit_code_value = (int)it2d(code_item);
+    return make_js_undefined();
 }
 
 // process.uptime()
@@ -863,16 +908,34 @@ static Item build_process_stdout(void) {
     Item stdout_obj = js_new_object();
     Item write_fn = js_new_function((void*)js_process_stdout_write, 1);
     js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(1)});
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(1))});
     return stdout_obj;
 }
 
 // build process.stderr object with write() method
 static Item build_process_stderr(void) {
     Item stderr_obj = js_new_object();
-    // reuse stdout_write for now (both write to fd)
-    Item write_fn = js_new_function((void*)js_process_stdout_write, 1);
+    Item write_fn = js_new_function((void*)js_process_stderr_write, 1);
     js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(2)});
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(2))});
     return stderr_obj;
+}
+
+// build process.stdin object with read() method and basic Readable-like interface
+static Item build_process_stdin(void) {
+    Item stdin_obj = js_new_object();
+    Item read_fn = js_new_function((void*)js_process_stdin_read, 0);
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("read", 4))}, read_fn);
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(0)});
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(0))});
+    // setEncoding — stub that just records encoding
+    // resume/pause — stubs for stream interface
+    return stdin_obj;
 }
 
 // process.nextTick(callback, ...args) — queue callback before microtasks
@@ -1104,11 +1167,18 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("env", 3))}, build_process_env());
 
-        // stdout, stderr
+        // stdout, stderr, stdin
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("stdout", 6))}, build_process_stdout());
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stdin", 5))}, build_process_stdin());
+
+        // exitCode — default 0
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("exitCode", 8))},
+            (Item){.item = i2it(0)});
     }
     return js_process_object;
 }

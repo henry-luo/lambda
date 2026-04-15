@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_event_loop.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -44,6 +45,16 @@ static Item make_string_item(const char* str, int len) {
 static Item make_string_item(const char* str) {
     if (!str) return ItemNull;
     return make_string_item(str, (int)strlen(str));
+}
+
+// Helper: get raw data pointer and length from a Buffer (typed array) Item
+static uint8_t* buffer_data(Item buf, int* out_len) {
+    if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
+    Map* m = buf.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta || !ta->data) { *out_len = 0; return NULL; }
+    *out_len = ta->byte_length;
+    return (uint8_t*)ta->data;
 }
 
 // =============================================================================
@@ -731,6 +742,159 @@ extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
 }
 
 // =============================================================================
+// File Descriptor Operations: openSync, closeSync, readSync, writeSync, fstatSync
+// =============================================================================
+
+extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item) {
+    char path[PATH_MAX];
+    const char* p = item_to_cstr(path_item, path, sizeof(path));
+    if (!p) return ItemNull;
+
+    int flags = UV_FS_O_RDONLY;
+    if (get_type_id(flags_item) == LMD_TYPE_STRING) {
+        String* fs = it2s(flags_item);
+        if (fs->len == 1 && fs->chars[0] == 'r') flags = UV_FS_O_RDONLY;
+        else if (fs->len == 2 && fs->chars[0] == 'r' && fs->chars[1] == '+') flags = UV_FS_O_RDWR;
+        else if (fs->len == 1 && fs->chars[0] == 'w') flags = UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC;
+        else if (fs->len == 2 && fs->chars[0] == 'w' && fs->chars[1] == '+') flags = UV_FS_O_RDWR | UV_FS_O_CREAT | UV_FS_O_TRUNC;
+        else if (fs->len == 1 && fs->chars[0] == 'a') flags = UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND;
+        else if (fs->len == 2 && fs->chars[0] == 'a' && fs->chars[1] == '+') flags = UV_FS_O_RDWR | UV_FS_O_CREAT | UV_FS_O_APPEND;
+        else if (fs->len == 2 && fs->chars[0] == 'a' && fs->chars[1] == 'x') flags = UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_APPEND | UV_FS_O_EXCL;
+        else if (fs->len == 2 && fs->chars[0] == 'w' && fs->chars[1] == 'x') flags = UV_FS_O_WRONLY | UV_FS_O_CREAT | UV_FS_O_TRUNC | UV_FS_O_EXCL;
+    } else if (get_type_id(flags_item) == LMD_TYPE_INT) {
+        flags = (int)it2i(flags_item);
+    }
+
+    int mode = 0666;
+    if (get_type_id(mode_item) == LMD_TYPE_INT) mode = (int)it2i(mode_item);
+
+    uv_fs_t req;
+    int fd = uv_fs_open(lambda_uv_loop(), &req, p, flags, mode, NULL);
+    uv_fs_req_cleanup(&req);
+    if (fd < 0) return ItemNull;
+    return (Item){.item = i2it((int64_t)fd)};
+}
+
+extern "C" Item js_fs_closeSync(Item fd_item) {
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return ItemNull;
+    int fd = (int)it2i(fd_item);
+    uv_fs_t req;
+    uv_fs_close(lambda_uv_loop(), &req, fd, NULL);
+    uv_fs_req_cleanup(&req);
+    return make_js_undefined();
+}
+
+extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item, Item length_item, Item position_item) {
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
+    int fd = (int)it2i(fd_item);
+
+    int blen = 0;
+    uint8_t* data = buffer_data(buffer_item, &blen);
+    if (!data) return (Item){.item = i2it(0)};
+
+    int offset = 0, length = blen;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
+    if (get_type_id(length_item) == LMD_TYPE_INT) length = (int)it2i(length_item);
+    if (offset + length > blen) length = blen - offset;
+    if (length <= 0) return (Item){.item = i2it(0)};
+
+    int64_t position = -1;
+    if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
+
+    uv_buf_t buf = uv_buf_init((char*)(data + offset), length);
+    uv_fs_t req;
+    int nread = uv_fs_read(lambda_uv_loop(), &req, fd, &buf, 1, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nread < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nread)};
+}
+
+extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, Item length_item, Item position_item) {
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return (Item){.item = i2it(0)};
+    int fd = (int)it2i(fd_item);
+
+    // data can be a string or a Buffer
+    const char* write_buf = NULL;
+    int write_len = 0;
+
+    if (get_type_id(data_item) == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        write_buf = s->chars;
+        write_len = (int)s->len;
+    } else {
+        int blen = 0;
+        uint8_t* bdata = buffer_data(data_item, &blen);
+        if (bdata) {
+            write_buf = (const char*)bdata;
+            write_len = blen;
+        }
+    }
+    if (!write_buf) return (Item){.item = i2it(0)};
+
+    int offset = 0, length = write_len;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
+    if (get_type_id(length_item) == LMD_TYPE_INT) length = (int)it2i(length_item);
+    if (offset + length > write_len) length = write_len - offset;
+    if (length <= 0) return (Item){.item = i2it(0)};
+
+    int64_t position = -1;
+    if (get_type_id(position_item) == LMD_TYPE_INT) position = it2i(position_item);
+
+    uv_buf_t buf = uv_buf_init((char*)(write_buf + offset), length);
+    uv_fs_t req;
+    int nwritten = uv_fs_write(lambda_uv_loop(), &req, fd, &buf, 1, position, NULL);
+    uv_fs_req_cleanup(&req);
+    if (nwritten < 0) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)nwritten)};
+}
+
+extern "C" Item js_fs_fstatSync(Item fd_item) {
+    if (get_type_id(fd_item) != LMD_TYPE_INT) return ItemNull;
+    int fd = (int)it2i(fd_item);
+    uv_fs_t req;
+    int r = uv_fs_fstat(lambda_uv_loop(), &req, fd, NULL);
+    if (r < 0) { uv_fs_req_cleanup(&req); return ItemNull; }
+
+    uv_stat_t* st = &req.statbuf;
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("size"), (Item){.item = i2it((int64_t)st->st_size)});
+    js_property_set(result, make_string_item("mode"), (Item){.item = i2it((int64_t)st->st_mode)});
+    js_property_set(result, make_string_item("uid"),  (Item){.item = i2it((int64_t)st->st_uid)});
+    js_property_set(result, make_string_item("gid"),  (Item){.item = i2it((int64_t)st->st_gid)});
+    js_property_set(result, make_string_item("nlink"),(Item){.item = i2it((int64_t)st->st_nlink)});
+    js_property_set(result, make_string_item("dev"),  (Item){.item = i2it((int64_t)st->st_dev)});
+    js_property_set(result, make_string_item("ino"),  (Item){.item = i2it((int64_t)st->st_ino)});
+
+    // time fields in milliseconds
+    double mt = (double)st->st_mtim.tv_sec * 1000.0 + (double)st->st_mtim.tv_nsec / 1e6;
+    double at = (double)st->st_atim.tv_sec * 1000.0 + (double)st->st_atim.tv_nsec / 1e6;
+    double ct = (double)st->st_ctim.tv_sec * 1000.0 + (double)st->st_ctim.tv_nsec / 1e6;
+    double bt = (double)st->st_birthtim.tv_sec * 1000.0 + (double)st->st_birthtim.tv_nsec / 1e6;
+
+    double* mtp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *mtp = mt;
+    js_property_set(result, make_string_item("mtimeMs"), (Item){.item = d2it(mtp)});
+    double* atp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *atp = at;
+    js_property_set(result, make_string_item("atimeMs"), (Item){.item = d2it(atp)});
+    double* ctp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *ctp = ct;
+    js_property_set(result, make_string_item("ctimeMs"), (Item){.item = d2it(ctp)});
+    double* btp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *btp = bt;
+    js_property_set(result, make_string_item("birthtimeMs"), (Item){.item = d2it(btp)});
+
+    // isFile() / isDirectory() method checks
+    bool is_file = S_ISREG(st->st_mode);
+    bool is_dir = S_ISDIR(st->st_mode);
+    js_property_set(result, make_string_item("isFile"), (Item){.item = b2it(is_file)});
+    js_property_set(result, make_string_item("isDirectory"), (Item){.item = b2it(is_dir)});
+
+    uv_fs_req_cleanup(&req);
+    return result;
+}
+
+// =============================================================================
 // fs Module Namespace Object
 // =============================================================================
 
@@ -775,12 +939,26 @@ extern "C" Item js_get_fs_namespace(void) {
     js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
     js_fs_set_method(fs_namespace, "truncateSync",    (void*)js_fs_truncateSync, 2);
 
+    // file descriptor operations
+    js_fs_set_method(fs_namespace, "openSync",        (void*)js_fs_openSync, 3);
+    js_fs_set_method(fs_namespace, "closeSync",       (void*)js_fs_closeSync, 1);
+    js_fs_set_method(fs_namespace, "readSync",        (void*)js_fs_readSync, 5);
+    js_fs_set_method(fs_namespace, "writeSync",       (void*)js_fs_writeSync, 5);
+    js_fs_set_method(fs_namespace, "fstatSync",       (void*)js_fs_fstatSync, 1);
+
     // fs.constants
     Item constants = js_new_object();
     js_property_set(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
     js_property_set(constants, make_string_item("R_OK"), (Item){.item = i2it(4)});
     js_property_set(constants, make_string_item("W_OK"), (Item){.item = i2it(2)});
     js_property_set(constants, make_string_item("X_OK"), (Item){.item = i2it(1)});
+    js_property_set(constants, make_string_item("O_RDONLY"),   (Item){.item = i2it(UV_FS_O_RDONLY)});
+    js_property_set(constants, make_string_item("O_WRONLY"),   (Item){.item = i2it(UV_FS_O_WRONLY)});
+    js_property_set(constants, make_string_item("O_RDWR"),     (Item){.item = i2it(UV_FS_O_RDWR)});
+    js_property_set(constants, make_string_item("O_CREAT"),    (Item){.item = i2it(UV_FS_O_CREAT)});
+    js_property_set(constants, make_string_item("O_TRUNC"),    (Item){.item = i2it(UV_FS_O_TRUNC)});
+    js_property_set(constants, make_string_item("O_APPEND"),   (Item){.item = i2it(UV_FS_O_APPEND)});
+    js_property_set(constants, make_string_item("O_EXCL"),     (Item){.item = i2it(UV_FS_O_EXCL)});
     js_property_set(fs_namespace, make_string_item("constants"), constants);
 
     // set "default" export to the namespace itself (for `import fs from 'fs'`)
