@@ -4,6 +4,8 @@
 #include "network_resource_manager.h"
 #include "network_downloader.h"
 #include "resource_loaders.h"
+#include "../input/css/dom_element.hpp"
+#include "../../radiant/state_store.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
@@ -462,7 +464,7 @@ void resource_manager_schedule_repaint(NetworkResourceManager* mgr, struct DomEl
     pthread_mutex_unlock(&mgr->mutex);
 }
 
-// flush pending layout updates
+// flush pending layout updates (called on main thread from render loop)
 void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
     if (!mgr) return;
     
@@ -482,31 +484,30 @@ void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
     log_debug("network: flushing layout updates (reflows: %d, repaints: %d)",
               reflow_count, repaint_count);
     
-    // process reflows first (they may trigger repaints)
-    // TODO: call actual layout engine here
-    // for (int i = 0; i < reflows->length; i++) {
-    //     DomElement* elem = (DomElement*)reflows->data[i];
-    //     layout_element(elem);
-    // }
+    // If any reflows are pending, do a full document reflow
+    // (CSS changes typically affect the whole document)
+    bool needs_reflow = reflow_count > 0;
+    bool needs_repaint = repaint_count > 0;
     
-    // clear reflow list
-    if (reflows) {
-        arraylist_clear(reflows);
-    }
-    
-    // process repaints
-    // TODO: call actual paint engine here
-    // for (int i = 0; i < repaints->length; i++) {
-    //     DomElement* elem = (DomElement*)repaints->data[i];
-    //     repaint_element(elem);
-    // }
-    
-    // clear repaint list
-    if (repaints) {
-        arraylist_clear(repaints);
-    }
+    // clear lists before releasing lock (elements processed below)
+    if (reflows) arraylist_clear(reflows);
+    if (repaints) arraylist_clear(repaints);
     
     pthread_mutex_unlock(&mgr->mutex);
+    
+    // trigger reflow/repaint via document state (main thread safe)
+    DomDocument* doc = mgr->document;
+    if (doc && doc->state) {
+        RadiantState* state = (RadiantState*)doc->state;
+        if (needs_reflow) {
+            state->needs_reflow = true;
+            state->is_dirty = true;
+            log_debug("network: triggered document reflow from resource completion");
+        } else if (needs_repaint) {
+            state->is_dirty = true;
+            log_debug("network: triggered document repaint from resource completion");
+        }
+    }
 }
 
 // check if all resources loaded

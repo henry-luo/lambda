@@ -5,7 +5,30 @@
 #include "resource_loaders.h"
 #include "../input/css/dom_element.hpp"
 #include "../../lib/log.h"
+#include "../../lib/url.h"
+#include "../../lib/mem.h"
 #include <time.h>
+
+// Helper: resolve a potentially relative URL against the document's base URL.
+// Returns a heap-allocated absolute URL string (caller must free with mem_free).
+// If resolution fails, returns a copy of the input.
+static char* resolve_url(const char* href, DomDocument* doc) {
+    if (!href) return nullptr;
+    if (url_is_absolute_url(href)) {
+        return mem_strdup(href, MEM_CAT_NETWORK);
+    }
+    if (!doc || !doc->url) {
+        return mem_strdup(href, MEM_CAT_NETWORK);
+    }
+    Url* resolved = url_resolve_relative(href, doc->url);
+    if (resolved && resolved->href) {
+        char* result = mem_strdup(resolved->href->chars, MEM_CAT_NETWORK);
+        url_destroy(resolved);
+        return result;
+    }
+    if (resolved) url_destroy(resolved);
+    return mem_strdup(href, MEM_CAT_NETWORK);
+}
 
 // Initialize network support for a document
 int radiant_init_network_support(DomDocument* doc,
@@ -79,9 +102,12 @@ static void discover_link_callback(DomElement* link, void* user_data) {
 
     log_debug("network: discovered stylesheet: %s", href);
 
+    // Resolve relative URL against document base
+    char* abs_url = resolve_url(href, doc);
+
     // Queue for download with HIGH priority (CSS blocks rendering)
     NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 href,
+                                                 abs_url,
                                                  RESOURCE_CSS,
                                                  PRIORITY_HIGH,
                                                  link);
@@ -91,6 +117,7 @@ static void discover_link_callback(DomElement* link, void* user_data) {
         res->on_complete = (void (*)(NetworkResource*, void*))process_css_resource;
         res->user_data = (void*)doc;
     }
+    mem_free(abs_url);
 }
 
 // Callback for <img> discovery
@@ -106,9 +133,12 @@ static void discover_img_callback(DomElement* img, void* user_data) {
 
     log_debug("network: discovered image: %s", src);
 
+    // Resolve relative URL against document base
+    char* abs_url = resolve_url(src, doc);
+
     // Queue for download with NORMAL priority
     NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 src,
+                                                 abs_url,
                                                  RESOURCE_IMAGE,
                                                  PRIORITY_NORMAL,
                                                  img);
@@ -118,6 +148,7 @@ static void discover_img_callback(DomElement* img, void* user_data) {
         res->on_complete = (void (*)(NetworkResource*, void*))process_image_resource;
         res->user_data = (void*)img;
     }
+    mem_free(abs_url);
 }
 
 // Callback for <svg><use> discovery
@@ -142,9 +173,12 @@ static void discover_use_callback(DomElement* use, void* user_data) {
 
     log_debug("network: discovered external SVG reference: %s", href);
 
+    // Resolve relative URL against document base
+    char* abs_url = resolve_url(href, doc);
+
     // Queue for download with NORMAL priority
     NetworkResource* res = resource_manager_load(doc->resource_manager,
-                                                 href,
+                                                 abs_url,
                                                  RESOURCE_SVG,
                                                  PRIORITY_NORMAL,
                                                  use);
@@ -154,6 +188,7 @@ static void discover_use_callback(DomElement* use, void* user_data) {
         res->on_complete = (void (*)(NetworkResource*, void*))process_svg_resource;
         res->user_data = (void*)use;
     }
+    mem_free(abs_url);
 }
 
 // Discover and queue all network resources in a document
