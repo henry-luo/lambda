@@ -10203,7 +10203,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         Item search_val = js_to_string((argc >= 1) ? args[0] : make_js_undefined());
         if (argc < 2) return (Item){.item = i2it(fn_index_of(str, search_val))};
         // indexOf with start position
-        int start_pos = (int)js_get_number(args[1]);
+        double dpos = js_get_number(args[1]);
+        int start_pos = isnan(dpos) ? 0 : (int)dpos;
         String* s = it2s(str);
         String* sub = it2s(search_val);
         if (!s || !sub) return (Item){.item = i2it(-1)};
