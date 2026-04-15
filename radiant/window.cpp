@@ -14,6 +14,9 @@
 #include "state_store.hpp"
 #include "event_sim.hpp"
 #include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/network_integration.h"
+#include "../lambda/network/network_thread_pool.h"
+#include "../lambda/network/enhanced_file_cache.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -90,6 +93,12 @@ static DocFormat detect_doc_format(const char* filename) {
 
 // Load document based on detected format
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
+    // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
+    if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
+        log_debug("Loading as remote HTML document (HTTP/HTTPS)");
+        return load_html_doc(base_url, (char*)filename, width, height);
+    }
+
     DocFormat format = detect_doc_format(filename);
 
     switch (format) {
@@ -637,6 +646,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     // Recreate surface with correct dimensions
     ui_context_create_surface(&ui_context, width, height);
 
+    // Network resources (owned by this function, shared across document lifetime)
+    NetworkThreadPool* thread_pool = nullptr;
+    EnhancedFileCache* file_cache = nullptr;
+
     Url* cwd = get_current_dir();
     if (cwd) {
         // Use provided document file or default to test HTML file
@@ -689,6 +702,18 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         ui_context.document = doc;
 
+        // Initialize network support for HTTP-loaded documents
+        // This enables async resource loading (CSS, images, fonts) during rendering
+        if (doc->html_root && file_to_load &&
+            (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
+            thread_pool = thread_pool_create(4);
+            file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+            if (thread_pool) {
+                radiant_init_network_support(doc, thread_pool, file_cache);
+                log_info("view: network support initialized for HTTP document");
+            }
+        }
+
         // Create RadiantState for interactive state management (caret, selection, focus, etc.)
         if (!doc->state) {
             doc->state = radiant_state_create(doc->pool, STATE_MODE_IN_PLACE);
@@ -709,6 +734,13 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // Render document
         if (doc && doc->view_tree) {
             render_html_doc(&ui_context, doc->view_tree, NULL);
+        }
+
+        // Discover and queue network resources after initial layout
+        // Resources (images, external CSS, fonts) will load async and trigger reflow via flush
+        if (doc->resource_manager) {
+            radiant_discover_document_resources(doc);
+            log_info("view: network resource discovery complete");
         }
         log_notice("view: render complete");
 
@@ -744,6 +776,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             event_sim_free(sim_ctx);
         }
         log_info("End of headless document viewer");
+        // Cleanup network resources before ui_context
+        if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+        if (thread_pool) thread_pool_destroy(thread_pool);
+        if (file_cache) enhanced_cache_destroy(file_cache);
         ui_context_cleanup(&ui_context);
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
@@ -823,6 +859,10 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     }
 
     log_info("End of document viewer");
+    // Cleanup network resources before ui_context
+    if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    if (thread_pool) thread_pool_destroy(thread_pool);
+    if (file_cache) enhanced_cache_destroy(file_cache);
     ui_context_cleanup(&ui_context);
     log_cleanup();
 
