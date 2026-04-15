@@ -471,6 +471,7 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
 static std::vector<JsTestParam> discover_all_js_tests() {
     static const char* dirs[] = {
         "test/js",
+        "test/node",
     };
     std::vector<JsTestParam> all;
     for (const char* d : dirs) {

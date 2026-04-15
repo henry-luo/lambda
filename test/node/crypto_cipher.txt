@@ -1,0 +1,14 @@
+cbc enc1 len > 0: false
+aes-256-cbc: Hello World
+aes-256-ctr: CTR mode test
+gcm authTag length: 16
+aes-256-gcm: GCM authenticated
+pbkdf2Sync length: 32
+pbkdf2 deterministic: true
+scryptSync length: 32
+scrypt deterministic: true
+scryptSync options length: 64
+getCiphers includes aes-256-cbc: true
+getCiphers includes aes-256-gcm: true
+createHash sha256: true
+createHmac works: true
