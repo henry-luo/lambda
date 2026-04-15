@@ -10912,6 +10912,25 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
             }
+            // setImmediate(callback) — schedule callback for next tick
+            if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
+                MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_setImmediate", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cb));
+            }
+            // clearImmediate(id) — cancel setImmediate
+            if (nl == 14 && strncmp(n, "clearImmediate", 14) == 0) {
+                MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                jm_call_void_1(mt, "js_clearImmediate",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
+                return jm_emit_null(mt);
+            }
+            // structuredClone(value) — deep clone
+            if (nl == 15 && strncmp(n, "structuredClone", 15) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_structuredClone", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
             // v15: fetch(url [, options])
             if (nl == 5 && strncmp(n, "fetch", 5) == 0) {
                 MIR_reg_t url_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
@@ -19604,7 +19623,8 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
         static const char* builtin_names[] = {
             "fs", "child_process", "path", "os", "url", "util",
             "process", "querystring", "events", "buffer",
-            "crypto", "dns", "zlib", "readline", "stream", "net", "tls", NULL
+            "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
+            "string_decoder", "assert", "timers", "console", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {

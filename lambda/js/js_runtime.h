@@ -616,6 +616,9 @@ Item js_setTimeout(Item callback, Item delay);         // returns timer id
 Item js_setInterval(Item callback, Item delay);        // returns timer id
 void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
+Item js_setImmediate(Item callback);                   // schedule for next tick
+void js_clearImmediate(Item id);
+Item js_structuredClone(Item value);                   // deep clone
 
 /**
  * Drain the event loop: process all microtasks, then fire due timers.

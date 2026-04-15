@@ -5,6 +5,7 @@
  * Registered as built-in module 'util' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -117,7 +118,9 @@ extern "C" Item js_util_format(Item args_item) {
                     arg_idx++;
                     break;
                 }
-                case 'j': {
+                case 'j':
+                case 'o':
+                case 'O': {
                     Item str = js_json_stringify(arg);
                     if (get_type_id(str) == LMD_TYPE_STRING) {
                         String* s = it2s(str);
@@ -299,6 +302,99 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     return (Item){.item = i2it(0)};
 }
 
+// util.callbackify(fn) — convert async/promise fn to callback style
+// simplified: wraps fn so the last arg is a callback called with (err, result)
+extern "C" Item js_util_callbackify(Item fn) {
+    // return fn unchanged (simplified stub — proper impl needs closure wrapping)
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return fn;
+    return fn;
+}
+
+// additional util.types.* functions
+extern "C" Item js_util_types_isUint8Array(Item obj) {
+    if (!js_is_typed_array(obj)) return (Item){.item = b2it(false)};
+    Map* m = obj.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (ta && ta->element_type == JS_TYPED_UINT8)
+        return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isPromise(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cls = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cls) == LMD_TYPE_STRING) {
+        String* s = it2s(cls);
+        if (s && s->len == 7 && memcmp(s->chars, "Promise", 7) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    // also check for .then method
+    Item then = js_property_get(obj, make_string_item("then"));
+    if (get_type_id(then) == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isFunction(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_FUNC)};
+}
+
+extern "C" Item js_util_types_isString(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_STRING)};
+}
+
+extern "C" Item js_util_types_isNumber(Item obj) {
+    TypeId t = get_type_id(obj);
+    return (Item){.item = b2it(t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT)};
+}
+
+extern "C" Item js_util_types_isBoolean(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_BOOL)};
+}
+
+extern "C" Item js_util_types_isNull(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_NULL)};
+}
+
+extern "C" Item js_util_types_isUndefined(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_UNDEFINED)};
+}
+
+extern "C" Item js_util_types_isNullOrUndefined(Item obj) {
+    TypeId t = get_type_id(obj);
+    return (Item){.item = b2it(t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED)};
+}
+
+extern "C" Item js_util_types_isObject(Item obj) {
+    TypeId t = get_type_id(obj);
+    return (Item){.item = b2it(t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY || t == LMD_TYPE_FUNC)};
+}
+
+extern "C" Item js_util_types_isPrimitive(Item obj) {
+    TypeId t = get_type_id(obj);
+    return (Item){.item = b2it(t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED ||
+                                t == LMD_TYPE_BOOL || t == LMD_TYPE_INT ||
+                                t == LMD_TYPE_FLOAT || t == LMD_TYPE_STRING)};
+}
+
+extern "C" Item js_util_types_isBuffer(Item obj) {
+    extern Item js_buffer_isBuffer(Item);
+    return js_buffer_isBuffer(obj);
+}
+
+extern "C" Item js_util_types_isError(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cls = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cls) == LMD_TYPE_STRING) {
+        String* s = it2s(cls);
+        if (s && s->len >= 5 && memcmp(s->chars + s->len - 5, "Error", 5) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    // check for .message + .stack
+    Item msg = js_property_get(obj, make_string_item("message"));
+    if (get_type_id(msg) == LMD_TYPE_STRING) return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
 // =============================================================================
 // util Module Namespace Object
 // =============================================================================
@@ -319,18 +415,40 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "format",              (void*)js_util_format, -1);
     js_util_set_method(util_namespace, "inspect",             (void*)js_util_inspect, 2);
     js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
+    js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
     js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
     js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
     js_util_set_method(util_namespace, "isDeepStrictEqual",   (void*)js_util_isDeepStrictEqual, 2);
 
     // util.types sub-namespace
     Item types = js_new_object();
-    js_util_set_method(types, "isDate",    (void*)js_util_types_isDate, 1);
-    js_util_set_method(types, "isRegExp",  (void*)js_util_types_isRegExp, 1);
-    js_util_set_method(types, "isArray",   (void*)js_util_types_isArray, 1);
-    js_util_set_method(types, "isMap",     (void*)js_util_types_isMap, 1);
-    js_util_set_method(types, "isSet",     (void*)js_util_types_isSet, 1);
+    js_util_set_method(types, "isDate",           (void*)js_util_types_isDate, 1);
+    js_util_set_method(types, "isRegExp",         (void*)js_util_types_isRegExp, 1);
+    js_util_set_method(types, "isArray",          (void*)js_util_types_isArray, 1);
+    js_util_set_method(types, "isMap",            (void*)js_util_types_isMap, 1);
+    js_util_set_method(types, "isSet",            (void*)js_util_types_isSet, 1);
+    js_util_set_method(types, "isUint8Array",     (void*)js_util_types_isUint8Array, 1);
+    js_util_set_method(types, "isPromise",        (void*)js_util_types_isPromise, 1);
+    js_util_set_method(types, "isFunction",       (void*)js_util_types_isFunction, 1);
+    js_util_set_method(types, "isString",         (void*)js_util_types_isString, 1);
+    js_util_set_method(types, "isNumber",         (void*)js_util_types_isNumber, 1);
+    js_util_set_method(types, "isBoolean",        (void*)js_util_types_isBoolean, 1);
+    js_util_set_method(types, "isNull",           (void*)js_util_types_isNull, 1);
+    js_util_set_method(types, "isUndefined",      (void*)js_util_types_isUndefined, 1);
+    js_util_set_method(types, "isNullOrUndefined",(void*)js_util_types_isNullOrUndefined, 1);
+    js_util_set_method(types, "isObject",         (void*)js_util_types_isObject, 1);
+    js_util_set_method(types, "isPrimitive",      (void*)js_util_types_isPrimitive, 1);
+    js_util_set_method(types, "isBuffer",         (void*)js_util_types_isBuffer, 1);
+    js_util_set_method(types, "isError",          (void*)js_util_types_isError, 1);
     js_property_set(util_namespace, make_string_item("types"), types);
+
+    // TextEncoder/TextDecoder — expose constructors on util namespace
+    extern Item js_text_encoder_new(void);
+    extern Item js_text_decoder_new(Item encoding_item);
+    Item te_ctor = js_new_function((void*)js_text_encoder_new, 0);
+    Item td_ctor = js_new_function((void*)js_text_decoder_new, 1);
+    js_property_set(util_namespace, make_string_item("TextEncoder"), te_ctor);
+    js_property_set(util_namespace, make_string_item("TextDecoder"), td_ctor);
 
     // default export
     Item default_key = make_string_item("default");
