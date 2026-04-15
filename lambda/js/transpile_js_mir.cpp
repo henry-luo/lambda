@@ -414,6 +414,7 @@ struct JsModuleConstEntry {
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
+    bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -14371,6 +14372,16 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                 }
                             }
                         }
+                    } else if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                        // let/const without initializer: set to undefined (exits TDZ)
+                        MIR_reg_t undef_reg = jm_new_reg(mt, "undef_init", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, undef_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                        log_debug("modvar: let/const '%s' init to undefined (exit TDZ)", vname);
                     } else {
                         // var redeclaration without init: no-op (don't reset to undefined)
                         log_debug("modvar: skip re-init for '%s' (no initializer)", vname);
@@ -21140,6 +21151,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 snprintf(mce.name, sizeof(mce.name), "%s", e->name);
                 mce.const_type = MCONST_MODVAR;
                 mce.int_val = mt->module_var_count++;
+                mce.is_implicit_global = true;
                 hashmap_set(mt->module_consts, &mce);
                 log_info("js-mir: implicit global '%s' → module_var[%d]", mce.name, (int)mce.int_val);
             }
@@ -22053,6 +22065,28 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, tdz_val));
+            }
+        }
+    }
+
+    // Initialize declared var module vars to undefined (not implicit globals,
+    // and not preamble-inherited entries from outer scope e.g. eval)
+    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
+    if (mt->module_consts) {
+        size_t var_iter = 0; void* var_item;
+        while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
+            if (mce->const_type == MCONST_MODVAR &&
+                mce->var_kind == JS_VAR_VAR && !mce->is_implicit_global &&
+                (int)mce->int_val >= preamble_var_limit) {
+                MIR_reg_t undef_val = jm_new_reg(mt, "var_init", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, undef_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
             }
         }
     }

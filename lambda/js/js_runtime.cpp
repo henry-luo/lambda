@@ -1356,6 +1356,18 @@ static double js_get_number(Item value) {
         return num;
     }
     case LMD_TYPE_MAP: {
+        // ToPrimitive: check Symbol.toPrimitive first (hint "number")
+        {
+            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+            Item to_prim = js_property_get(value, sym_key);
+            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
+                Item args[1] = { hint };
+                Item result = js_call_function(to_prim, value, args, 1);
+                if (get_type_id(result) != LMD_TYPE_MAP) return js_get_number(result);
+                return NAN;
+            }
+        }
         // ToPrimitive: wrapper objects with __primitiveValue__
         bool own_pv = false;
         Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
@@ -10471,19 +10483,29 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 9 && strncmp(method->chars, "normalize", 9) == 0) {
         String* s = it2s(str);
         if (!s || s->len == 0) return str;
-        // Determine requested form (default: NFC)
+        // Determine requested form (default: NFC when undefined)
         const char* form = "NFC";
-        if (argc > 0 && get_type_id(args[0]) == LMD_TYPE_STRING) {
-            String* f = it2s(args[0]);
-            if (f && f->len > 0) form = f->chars;
+        int form_len = 3;
+        if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
+            Item form_str = js_to_string(args[0]);
+            String* f = it2s(form_str);
+            if (f) { form = f->chars; form_len = (int)f->len; }
+        }
+        // Validate form name
+        bool valid_form = (form_len == 3 && strncmp(form, "NFC", 3) == 0) ||
+                          (form_len == 3 && strncmp(form, "NFD", 3) == 0) ||
+                          (form_len == 4 && strncmp(form, "NFKC", 4) == 0) ||
+                          (form_len == 4 && strncmp(form, "NFKD", 4) == 0);
+        if (!valid_form) {
+            return js_throw_range_error("The normalization form should be one of NFC, NFD, NFKC, NFKD");
         }
         char* normalized = NULL;
         int norm_len = 0;
-        if (strncmp(form, "NFD", 3) == 0 && form[3] == '\0')
+        if (form_len == 3 && form[2] == 'D')
             normalized = normalize_utf8proc_nfd(s->chars, s->len, &norm_len);
-        else if (strncmp(form, "NFKC", 4) == 0 && form[4] == '\0')
+        else if (form_len == 4 && form[3] == 'C')
             normalized = normalize_utf8proc_nfkc(s->chars, s->len, &norm_len);
-        else if (strncmp(form, "NFKD", 4) == 0 && form[4] == '\0')
+        else if (form_len == 4 && form[3] == 'D')
             normalized = normalize_utf8proc_nfkd(s->chars, s->len, &norm_len);
         else // NFC (default)
             normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
@@ -10493,11 +10515,30 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = s2it(result)};
     }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
+        // ES spec steps 6-8: compute limit, coerce separator, check limit=0
+        // Step 6: ToUint32(limit) — must happen before ToString(separator)
+        uint32_t lim = 0xFFFFFFFF; // 2^32 - 1
+        if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            double dlim = js_get_number(args[1]);
+            if (js_exception_pending) return ItemNull; // ToUint32 threw (e.g. Symbol.toPrimitive)
+            if (isnan(dlim) || dlim == 0.0 || isinf(dlim)) {
+                lim = isinf(dlim) && dlim > 0 ? 0xFFFFFFFF : 0;
+            } else {
+                // ToUint32: truncate then modulo 2^32
+                double rem = fmod(trunc(dlim), 4294967296.0);
+                if (rem < 0) rem += 4294967296.0;
+                lim = (uint32_t)rem;
+            }
+        }
+
+        // Step 7: process separator (ToString or regex check)
+        // Then Step 8: If lim=0, return empty array (after separator coercion)
         if (argc > 0) {
             Item sep = args[0];
             // check if separator is a regex (Map with __rd property)
             JsRegexData* rd = js_get_regex_data(sep);
             if (rd) {
+                if (lim == 0) return js_array_new(0);
                 // regex split
                 String* s = it2s(str);
                 if (!s || s->len == 0) {
@@ -10521,6 +10562,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                     // add substring before match
                     String* part = heap_strcpy(s->chars + pos, match_start - pos);
                     js_array_push(result, (Item){.item = s2it(part)});
+                    if (result.array && (uint32_t)result.array->length >= lim) return result;
                     // add capturing groups
                     for (int g = 1; g < total_groups; g++) {
                         if (match[g].data()) {
@@ -10529,18 +10571,15 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                         } else {
                             js_array_push(result, make_js_undefined());
                         }
+                        if (result.array && (uint32_t)result.array->length >= lim) return result;
                     }
                     pos = match_end;
                 }
                 // add remainder
                 String* tail = heap_strcpy(s->chars + pos, (int)s->len - pos);
                 js_array_push(result, (Item){.item = s2it(tail)});
-                // v20: apply limit parameter
-                if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-                    int limit = it2i(js_to_number(args[1]));
-                    if (limit >= 0 && result.array && result.array->length > limit)
-                        result.array->length = limit;
-                }
+                if (lim < 0xFFFFFFFF && result.array && result.array->length > (int)lim)
+                    result.array->length = (int)lim;
                 return result;
             }
         }
@@ -10548,26 +10587,25 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // undefined separator: return single-element array with whole string
         Item sep = argc > 0 ? args[0] : make_js_undefined();
         if (sep.item == ITEM_JS_UNDEFINED || get_type_id(sep) == LMD_TYPE_UNDEFINED) {
+            if (lim == 0) return js_array_new(0);
             Item result = js_array_new(1);
             js_array_set(result, (Item){.item = i2it(0)}, str);
             return result;
         }
         // coerce non-string separators (null, number, boolean) to string
+        // (ToString may throw for objects — must happen before lim==0 check)
         if (get_type_id(sep) != LMD_TYPE_STRING) {
             sep = js_to_string(sep);
         }
-        // v20: check for limit parameter
-        int split_limit = -1;
-        if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            split_limit = it2i(js_to_number(args[1]));
-        }
+        // Step 8: If lim = 0, return empty array (after separator coercion)
+        if (lim == 0) return js_array_new(0);
         Item result = fn_split(str, sep);
         // Clear is_content flag to prevent array flattening in JS context
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
             result.array->is_content = 0;
-            // apply limit
-            if (split_limit >= 0 && result.array->length > split_limit)
-                result.array->length = split_limit;
+            // apply limit (compare as unsigned to avoid (int)0xFFFFFFFF = -1 bug)
+            if (lim < 0xFFFFFFFF && result.array->length > (int)lim)
+                result.array->length = (int)lim;
         }
         return result;
     }
@@ -10575,8 +10613,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-        int64_t start = (int64_t)js_get_number(args[0]);
-        int64_t end = argc > 1 ? (int64_t)js_get_number(args[1]) : slen;
+        double dstart = js_get_number(args[0]);
+        int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
+        int64_t end = slen;
+        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            double dend = js_get_number(args[1]);
+            end = isnan(dend) ? 0 : (int64_t)dend;
+        }
         // JS substring: negative indices clamp to 0; swap if start > end
         if (start < 0) start = 0;
         if (end < 0) end = 0;
@@ -10590,11 +10633,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-        int64_t start = (int64_t)js_get_number(args[0]);
+        double dstart = js_get_number(args[0]);
+        int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
         if (start < 0) { start = slen + start; if (start < 0) start = 0; }
         int64_t length;
-        if (argc > 1) {
-            length = (int64_t)js_get_number(args[1]);
+        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            double dlength = js_get_number(args[1]);
+            length = isnan(dlength) ? 0 : (int64_t)dlength;
             if (length < 0) length = 0;
         } else {
             length = slen - start;
@@ -10608,8 +10653,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return str;
         String* s = it2s(str);
         int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
-        int64_t start = (int64_t)js_get_number(args[0]);
-        int64_t end = argc > 1 ? (int64_t)js_get_number(args[1]) : slen;
+        double dstart = js_get_number(args[0]);
+        int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
+        int64_t end = slen;
+        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            double dend = js_get_number(args[1]);
+            end = isnan(dend) ? 0 : (int64_t)dend;
+        }
         // slice: negative indices count from end
         if (start < 0) { start = slen + start; if (start < 0) start = 0; }
         if (end < 0) { end = slen + end; if (end < 0) end = 0; }
@@ -10625,7 +10675,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         String* s = it2s(str);
         if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name(""))};
-        int64_t idx = (argc >= 1) ? (int64_t)js_get_number(args[0]) : 0;
+        double didx = (argc >= 1) ? js_get_number(args[0]) : 0;
+        int64_t idx = isnan(didx) ? 0 : (int64_t)didx;
         if (idx < 0) return (Item){.item = s2it(heap_create_name(""))};
         // charAt uses UTF-16 unit index; extract the code unit as a 1-char string
         // (for BMP chars this is the char itself; for non-BMP this returns a surrogate half-char)
@@ -10634,7 +10685,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
         String* s = it2s(str);
         if (!s || s->len == 0) return js_make_number(NAN);
-        int target_idx = (argc >= 1) ? (int)js_get_number(args[0]) : 0;
+        double didx = (argc >= 1) ? js_get_number(args[0]) : 0;
+        int target_idx = isnan(didx) ? 0 : (int)didx;
         if (target_idx < 0) return js_make_number(NAN);
         // walk UTF-8 bytes, counting UTF-16 code units
         int utf16_idx = 0;
@@ -10670,11 +10722,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return js_make_number(NAN);
     }
     if (method->len == 11 && strncmp(method->chars, "codePointAt", 11) == 0) {
-        if (argc < 1) return ItemNull;
+        if (argc < 1) return make_js_undefined();
         String* s = it2s(str);
-        if (!s || s->len == 0) return ItemNull;
-        int target_idx = (int)js_get_number(args[0]);
-        if (target_idx < 0) return ItemNull;
+        if (!s || s->len == 0) return make_js_undefined();
+        double didx = js_get_number(args[0]);
+        int target_idx = isnan(didx) ? 0 : (int)didx;
+        if (target_idx < 0) return make_js_undefined();
         // walk UTF-8, counting UTF-16 code units to find the right position
         int utf16_idx = 0;
         int byte_pos = 0;
@@ -10693,7 +10746,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             utf16_idx += (cp >= 0x10000) ? 2 : 1;
             byte_pos += bytes;
         }
-        return ItemNull;
+        return make_js_undefined();
     }
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         Item result = str;

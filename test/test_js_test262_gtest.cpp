@@ -1915,7 +1915,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     written.insert(p.test_name);
                     // Only count as crash_exit if this is a NEW crash (not a known crasher re-confirming)
                     bool was_known_crash = known_crasher_tags.count(p.test_name) &&
-                                           known_crasher_tags[p.test_name].substr(0, 5) == "CRASH";
+                                           (known_crasher_tags[p.test_name].substr(0, 5) == "CRASH" ||
+                                            known_crasher_tags[p.test_name].substr(0, 7) == "TIMEOUT");
                     if (!was_known_crash) crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
