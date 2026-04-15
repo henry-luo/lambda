@@ -1,0 +1,13 @@
+bar
+qux
+hello world
+a&b
+object
+foo=bar&baz=qux
+hello%20world
+a%26b%3Dc
+hello world
+a&b=c
+1
+2
+a=1&b=2

@@ -19567,9 +19567,10 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
         snprintf(out, out_size, "%.*s", spec_len, specifier);
     }
 
-    // If doesn't end in .js, append .js
+    // If doesn't end in .js, append .js (skip for node: protocol specifiers)
     int len = (int)strlen(out);
-    if (len < 3 || strcmp(out + len - 3, ".js") != 0) {
+    bool has_node_prefix = (len >= 5 && strncmp(out, "node:", 5) == 0);
+    if (!has_node_prefix && (len < 3 || strcmp(out + len - 3, ".js") != 0)) {
         if (len + 3 < out_size) {
             strcat(out, ".js");
         }

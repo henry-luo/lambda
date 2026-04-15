@@ -315,6 +315,10 @@ static void js_module_cache_reset();
 // forward declarations for module namespace cache resets
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
+extern "C" void js_path_reset();
+extern "C" void js_os_reset();
+extern "C" void js_url_module_reset();
+extern "C" void js_util_reset();
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -367,6 +371,17 @@ extern "C" void js_batch_reset() {
     // reset module namespace caches (pool-allocated function wrappers become dangling)
     js_child_process_reset();
     js_fs_reset();
+    js_path_reset();
+    js_os_reset();
+    js_url_module_reset();
+    js_util_reset();
+    // reset new Phase 1 modules
+    extern void js_reset_querystring_module(void);
+    js_reset_querystring_module();
+    extern void js_reset_events_module(void);
+    js_reset_events_module();
+    extern void js_reset_buffer_module(void);
+    js_reset_buffer_module();
 }
 
 // Get current module var count (for checkpointing)
@@ -9126,16 +9141,30 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     // TextEncoder/TextDecoder instance methods (.encode, .decode)
+    // Only intercept for actual TextEncoder/TextDecoder objects
     {
         String* method = it2s(method_name);
         if (method) {
-            if (method->len == 6 && strncmp(method->chars, "encode", 6) == 0) {
-                Item str_arg = argc > 0 ? args[0] : ItemNull;
-                return js_text_encoder_encode(obj, str_arg);
+            bool is_text_codec = false;
+            {
+                bool has_cls = false;
+                Item cls = js_map_get_fast(obj.map, "__class_name__", 14, &has_cls);
+                if (has_cls && get_type_id(cls) == LMD_TYPE_STRING) {
+                    String* cname = it2s(cls);
+                    if ((cname->len == 11 && memcmp(cname->chars, "TextEncoder", 11) == 0) ||
+                        (cname->len == 11 && memcmp(cname->chars, "TextDecoder", 11) == 0))
+                        is_text_codec = true;
+                }
             }
-            if (method->len == 6 && strncmp(method->chars, "decode", 6) == 0) {
-                Item input_arg = argc > 0 ? args[0] : ItemNull;
-                return js_text_decoder_decode(obj, input_arg);
+            if (is_text_codec) {
+                if (method->len == 6 && strncmp(method->chars, "encode", 6) == 0) {
+                    Item str_arg = argc > 0 ? args[0] : ItemNull;
+                    return js_text_encoder_encode(obj, str_arg);
+                }
+                if (method->len == 6 && strncmp(method->chars, "decode", 6) == 0) {
+                    Item input_arg = argc > 0 ? args[0] : ItemNull;
+                    return js_text_decoder_decode(obj, input_arg);
+                }
             }
         }
     }
@@ -13746,6 +13775,60 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 18 && memcmp(spec->chars, "node:child_process", 18) == 0)) {
         extern Item js_get_child_process_namespace(void);
         return js_get_child_process_namespace();
+    }
+    // node:path
+    if ((spec->len == 4 && memcmp(spec->chars, "path", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "path.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:path", 9) == 0)) {
+        extern Item js_get_path_namespace(void);
+        return js_get_path_namespace();
+    }
+    // node:os
+    if ((spec->len == 2 && memcmp(spec->chars, "os", 2) == 0) ||
+        (spec->len == 5 && memcmp(spec->chars, "os.js", 5) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "node:os", 7) == 0)) {
+        extern Item js_get_os_namespace(void);
+        return js_get_os_namespace();
+    }
+    // node:url
+    if ((spec->len == 3 && memcmp(spec->chars, "url", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "url.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:url", 8) == 0)) {
+        extern Item js_get_url_namespace(void);
+        return js_get_url_namespace();
+    }
+    // node:util
+    if ((spec->len == 4 && memcmp(spec->chars, "util", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "util.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:util", 9) == 0)) {
+        extern Item js_get_util_namespace(void);
+        return js_get_util_namespace();
+    }
+    // node:process
+    if ((spec->len == 7 && memcmp(spec->chars, "process", 7) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "node:process", 12) == 0)) {
+        return js_get_process_object_value();
+    }
+    // node:querystring
+    if ((spec->len == 11 && memcmp(spec->chars, "querystring", 11) == 0) ||
+        (spec->len == 14 && memcmp(spec->chars, "querystring.js", 14) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "node:querystring", 16) == 0)) {
+        extern Item js_get_querystring_namespace(void);
+        return js_get_querystring_namespace();
+    }
+    // node:events
+    if ((spec->len == 6 && memcmp(spec->chars, "events", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "events.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:events", 11) == 0)) {
+        extern Item js_get_events_namespace(void);
+        return js_get_events_namespace();
+    }
+    // node:buffer
+    if ((spec->len == 6 && memcmp(spec->chars, "buffer", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "buffer.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:buffer", 11) == 0)) {
+        extern Item js_get_buffer_namespace(void);
+        return js_get_buffer_namespace();
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {

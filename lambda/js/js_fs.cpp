@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include "../../lib/mem.h"
+#include "../../lib/file.h"
 
 extern Input* js_input;
 
@@ -318,6 +319,204 @@ extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item) {
     return make_js_undefined();
 }
 
+// fs.copyFileSync(src, dest)
+extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
+    char src_buf[1024], dest_buf[1024];
+    const char* src = item_to_cstr(src_item, src_buf, sizeof(src_buf));
+    const char* dest = item_to_cstr(dest_item, dest_buf, sizeof(dest_buf));
+    if (!src || !dest) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_copyfile(NULL, &req, src, dest, 0, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) {
+        log_error("fs: copyFileSync: '%s' -> '%s': %s", src, dest, uv_strerror(r));
+    }
+    return make_js_undefined();
+}
+
+// fs.realpathSync(path) → string
+extern "C" Item js_fs_realpathSync(Item path_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_realpath(NULL, &req, path, NULL);
+    if (r < 0) {
+        uv_fs_req_cleanup(&req);
+        log_error("fs: realpathSync: '%s': %s", path, uv_strerror(r));
+        return ItemNull;
+    }
+    Item result = make_string_item((const char*)req.ptr);
+    uv_fs_req_cleanup(&req);
+    return result;
+}
+
+// fs.accessSync(path[, mode]) — throws if access check fails
+// mode: fs.constants.F_OK (0), R_OK (4), W_OK (2), X_OK (1)
+extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    int mode = 0; // F_OK by default
+    if (get_type_id(mode_item) == LMD_TYPE_INT) {
+        mode = (int)it2i(mode_item);
+    }
+
+    uv_fs_t req;
+    int r = uv_fs_access(NULL, &req, path, mode, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) {
+        log_error("fs: accessSync: '%s': %s", path, uv_strerror(r));
+        return js_throw_type_error("ENOENT: no such file or directory");
+    }
+    return make_js_undefined();
+}
+
+// fs.rmSync(path[, options]) — remove file or directory (optionally recursive)
+extern "C" Item js_fs_rmSync(Item path_item, Item options_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    bool recursive = false;
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        Item rec_key = make_string_item("recursive");
+        Item rec_val = js_property_get(options_item, rec_key);
+        recursive = js_is_truthy(rec_val);
+    }
+
+    if (recursive) {
+        // use lib/file.c recursive delete
+        int r = file_delete_recursive(path);
+        if (r != 0) {
+            log_error("fs: rmSync: recursive delete failed for '%s'", path);
+        }
+    } else {
+        // try unlink first, then rmdir
+        uv_fs_t req;
+        int r = uv_fs_unlink(NULL, &req, path, NULL);
+        uv_fs_req_cleanup(&req);
+        if (r < 0) {
+            r = uv_fs_rmdir(NULL, &req, path, NULL);
+            uv_fs_req_cleanup(&req);
+            if (r < 0) {
+                log_error("fs: rmSync: '%s': %s", path, uv_strerror(r));
+            }
+        }
+    }
+    return make_js_undefined();
+}
+
+// fs.mkdtempSync(prefix) → string
+extern "C" Item js_fs_mkdtempSync(Item prefix_item) {
+    char prefix_buf[1024];
+    const char* prefix = item_to_cstr(prefix_item, prefix_buf, sizeof(prefix_buf));
+    if (!prefix) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_mkdtemp(NULL, &req, prefix, NULL);
+    if (r < 0) {
+        uv_fs_req_cleanup(&req);
+        log_error("fs: mkdtempSync: %s", uv_strerror(r));
+        return ItemNull;
+    }
+    Item result = make_string_item(req.path);
+    uv_fs_req_cleanup(&req);
+    return result;
+}
+
+// fs.chmodSync(path, mode)
+extern "C" Item js_fs_chmodSync(Item path_item, Item mode_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    int mode = 0;
+    if (get_type_id(mode_item) == LMD_TYPE_INT) {
+        mode = (int)it2i(mode_item);
+    }
+
+    uv_fs_t req;
+    int r = uv_fs_chmod(NULL, &req, path, mode, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) {
+        log_error("fs: chmodSync: '%s': %s", path, uv_strerror(r));
+    }
+    return make_js_undefined();
+}
+
+// fs.symlinkSync(target, path)
+extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
+    char target_buf[1024], path_buf[1024];
+    const char* target = item_to_cstr(target_item, target_buf, sizeof(target_buf));
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!target || !path) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_symlink(NULL, &req, target, path, 0, NULL);
+    uv_fs_req_cleanup(&req);
+    if (r < 0) {
+        log_error("fs: symlinkSync: '%s' -> '%s': %s", target, path, uv_strerror(r));
+    }
+    return make_js_undefined();
+}
+
+// fs.readlinkSync(path) → string
+extern "C" Item js_fs_readlinkSync(Item path_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_readlink(NULL, &req, path, NULL);
+    if (r < 0) {
+        uv_fs_req_cleanup(&req);
+        log_error("fs: readlinkSync: '%s': %s", path, uv_strerror(r));
+        return ItemNull;
+    }
+    Item result = make_string_item((const char*)req.ptr);
+    uv_fs_req_cleanup(&req);
+    return result;
+}
+
+// fs.lstatSync(path) — like statSync but doesn't follow symlinks
+extern "C" Item js_fs_lstatSync(Item path_item) {
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) return ItemNull;
+
+    uv_fs_t req;
+    int r = uv_fs_lstat(NULL, &req, path, NULL);
+    if (r < 0) {
+        uv_fs_req_cleanup(&req);
+        log_error("fs: lstatSync: '%s': %s", path, uv_strerror(r));
+        return ItemNull;
+    }
+
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("size"), (Item){.item = i2it(req.statbuf.st_size)});
+    bool is_file = (req.statbuf.st_mode & S_IFMT) == S_IFREG;
+    bool is_dir = (req.statbuf.st_mode & S_IFMT) == S_IFDIR;
+    bool is_symlink_val = (req.statbuf.st_mode & S_IFMT) == S_IFLNK;
+    js_property_set(obj, make_string_item("isFile"), (Item){.item = b2it(is_file)});
+    js_property_set(obj, make_string_item("isDirectory"), (Item){.item = b2it(is_dir)});
+    js_property_set(obj, make_string_item("isSymbolicLink"), (Item){.item = b2it(is_symlink_val)});
+
+    double mtime_ms = (double)req.statbuf.st_mtim.tv_sec * 1000.0 +
+                      (double)req.statbuf.st_mtim.tv_nsec / 1000000.0;
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = mtime_ms;
+    Item mtime_val;
+    mtime_val.item = d2it(fp);
+    js_property_set(obj, make_string_item("mtimeMs"), mtime_val);
+
+    uv_fs_req_cleanup(&req);
+    return obj;
+}
+
 // =============================================================================
 // Asynchronous File Operations (callback-style)
 // =============================================================================
@@ -532,6 +731,25 @@ extern "C" Item js_get_fs_namespace(void) {
     // asynchronous (callback) methods
     js_fs_set_method(fs_namespace, "readFile",        (void*)js_fs_readFile, 2);
     js_fs_set_method(fs_namespace, "writeFile",       (void*)js_fs_writeFile, 3);
+
+    // additional sync methods
+    js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);
+    js_fs_set_method(fs_namespace, "realpathSync",    (void*)js_fs_realpathSync, 1);
+    js_fs_set_method(fs_namespace, "accessSync",      (void*)js_fs_accessSync, 2);
+    js_fs_set_method(fs_namespace, "rmSync",          (void*)js_fs_rmSync, 2);
+    js_fs_set_method(fs_namespace, "mkdtempSync",     (void*)js_fs_mkdtempSync, 1);
+    js_fs_set_method(fs_namespace, "chmodSync",       (void*)js_fs_chmodSync, 2);
+    js_fs_set_method(fs_namespace, "symlinkSync",     (void*)js_fs_symlinkSync, 2);
+    js_fs_set_method(fs_namespace, "readlinkSync",    (void*)js_fs_readlinkSync, 1);
+    js_fs_set_method(fs_namespace, "lstatSync",       (void*)js_fs_lstatSync, 1);
+
+    // fs.constants
+    Item constants = js_new_object();
+    js_property_set(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
+    js_property_set(constants, make_string_item("R_OK"), (Item){.item = i2it(4)});
+    js_property_set(constants, make_string_item("W_OK"), (Item){.item = i2it(2)});
+    js_property_set(constants, make_string_item("X_OK"), (Item){.item = i2it(1)});
+    js_property_set(fs_namespace, make_string_item("constants"), constants);
 
     // set "default" export to the namespace itself (for `import fs from 'fs'`)
     Item default_key = make_string_item("default");

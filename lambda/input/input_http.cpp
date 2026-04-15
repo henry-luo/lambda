@@ -29,9 +29,20 @@ static HttpConfig default_http_config = {
     .enable_compression = true
 };
 
+// Maximum response size (50 MB) — prevents unbounded memory growth from large pages
+#define HTTP_MAX_RESPONSE_SIZE (50 * 1024 * 1024)
+
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
+
+    // enforce maximum response size
+    if (response->size + total_size > HTTP_MAX_RESPONSE_SIZE) {
+        log_error("HTTP: Response exceeds maximum size (%d MB), aborting download",
+                  HTTP_MAX_RESPONSE_SIZE / (1024 * 1024));
+        return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
+    }
+
     char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_TEMP);  // tracked realloc: callers use mem_free()
 
     if (!new_data) {
@@ -123,7 +134,33 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) {
-        log_error("HTTP: Download failed: %s", curl_easy_strerror(res));
+        // Provide specific error messages for common failure modes
+        switch (res) {
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_SSL_CERTPROBLEM:
+            case CURLE_SSL_CIPHER:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+                log_error("HTTP: SSL/TLS certificate error for %s: %s", url, curl_easy_strerror(res));
+                break;
+            case CURLE_TOO_MANY_REDIRECTS:
+                log_error("HTTP: Redirect loop detected for %s (max %ld redirects exceeded)",
+                          url, config ? config->max_redirects : default_http_config.max_redirects);
+                break;
+            case CURLE_OPERATION_TIMEDOUT:
+                log_error("HTTP: Request timed out for %s (limit %lds)",
+                          url, config ? config->timeout_seconds : default_http_config.timeout_seconds);
+                break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+                log_error("HTTP: Could not resolve host for %s", url);
+                break;
+            case CURLE_COULDNT_CONNECT:
+                log_error("HTTP: Connection refused for %s", url);
+                break;
+            default:
+                log_error("HTTP: Download failed for %s: %s", url, curl_easy_strerror(res));
+                break;
+        }
         mem_free(response.data);  // tracked free: matches mem_realloc in write_response_callback
         curl_easy_cleanup(curl);
         return NULL;

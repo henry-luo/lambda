@@ -4,6 +4,7 @@
 #include "network_resource_manager.h"
 #include "network_downloader.h"
 #include "resource_loaders.h"
+#include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../lib/url.h"
@@ -238,6 +239,9 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     mgr->default_timeout_ms = 30000;  // 30 seconds per resource
     mgr->page_load_timeout_ms = 60000;  // 60 seconds total page load
     
+    // Phase 4: cookie jar for session management
+    mgr->cookie_jar = cookie_jar_create("./temp/cookies.dat");
+    
     log_debug("network: created resource manager (timeouts: per-resource=%dms, page=%dms)",
               mgr->default_timeout_ms, mgr->page_load_timeout_ms);
     
@@ -249,6 +253,12 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
     if (!mgr) return;
     
     log_debug("network: destroying resource manager");
+    
+    // Phase 4: destroy cookie jar (saves persistent cookies to disk)
+    if (mgr->cookie_jar) {
+        cookie_jar_destroy(mgr->cookie_jar);
+        mgr->cookie_jar = NULL;
+    }
     
     // free all resources in hashmap
     if (mgr->resources) {
@@ -294,6 +304,13 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     if (!mgr || !url) return NULL;
     
     pthread_mutex_lock(&mgr->mutex);
+    
+    // enforce maximum resources per page (500) to prevent runaway loading
+    if (mgr->total_resources >= 500) {
+        log_warn("network: max resources per page (500) reached, rejecting: %s", url);
+        pthread_mutex_unlock(&mgr->mutex);
+        return NULL;
+    }
     
     // check for existing resource (deduplication)
     ResourceEntry key = { .url = (char*)url, .res = NULL };
@@ -649,6 +666,35 @@ void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct Dom
     
     if (cancelled > 0) {
         log_debug("network: cancelled %d resources for element", cancelled);
+    }
+    
+    pthread_mutex_unlock(&mgr->mutex);
+}
+
+// cancel all in-flight downloads (called on navigation to abort old page's resources)
+void resource_manager_cancel_all(NetworkResourceManager* mgr) {
+    if (!mgr) return;
+    
+    pthread_mutex_lock(&mgr->mutex);
+    
+    int cancelled = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter((struct hashmap*)mgr->resources, &iter, &item)) {
+        ResourceEntry* entry = (ResourceEntry*)item;
+        if (entry->res) {
+            if (entry->res->state == STATE_PENDING || entry->res->state == STATE_DOWNLOADING) {
+                entry->res->state = STATE_FAILED;
+                if (entry->res->error_message) mem_free(entry->res->error_message);
+                entry->res->error_message = mem_strdup("Navigation cancelled", MEM_CAT_NETWORK);
+                mgr->failed_resources++;
+                cancelled++;
+            }
+        }
+    }
+    
+    if (cancelled > 0) {
+        log_info("network: cancelled %d in-flight resources due to navigation", cancelled);
     }
     
     pthread_mutex_unlock(&mgr->mutex);
