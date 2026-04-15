@@ -1087,9 +1087,16 @@ void line_align(LayoutContext* lycon) {
 
     if (text_align != CSS_VALUE_LEFT) {
         // Compute line metrics early — needed for shrink-to-fit overflow check
-        float line_width = lycon->line.advance_x - lycon->line.left;
+        // CSS 2.1 §9.5.1: When floats shorten line boxes, alignment (center/right/justify)
+        // must use the float-adjusted available width, not the full content width.
+        // line_width measures actual content span; available_width is the space to align within.
+        float line_left = lycon->line.has_float_intrusion ?
+            lycon->line.effective_left : lycon->line.left;
+        float line_right = lycon->line.has_float_intrusion ?
+            lycon->line.effective_right : lycon->line.right;
+        float line_width = lycon->line.advance_x - line_left;
         // CSS 2.1 §16.1: RTL text-indent narrows the available width for alignment
-        float available_width = lycon->block.content_width - lycon->line.text_indent_offset;
+        float available_width = (line_right - line_left) - lycon->line.text_indent_offset;
 
 
         // Skip centering/right alignment only when laying out content INSIDE an inline-block

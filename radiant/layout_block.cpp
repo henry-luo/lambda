@@ -5992,6 +5992,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     effective_left = lycon->line.has_float_intrusion ?
                         lycon->line.effective_left : lycon->line.left;
                     block->x = effective_left;
+                    // line_break→line_reset clears start_view; set it to
+                    // this inline-block so text-align applies to the new line.
+                    if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —
                     // push below the float to find room
