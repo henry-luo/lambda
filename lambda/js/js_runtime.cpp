@@ -315,6 +315,10 @@ static void js_module_cache_reset();
 // forward declarations for module namespace cache resets
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
+extern "C" void js_path_reset();
+extern "C" void js_os_reset();
+extern "C" void js_url_module_reset();
+extern "C" void js_util_reset();
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -367,6 +371,10 @@ extern "C" void js_batch_reset() {
     // reset module namespace caches (pool-allocated function wrappers become dangling)
     js_child_process_reset();
     js_fs_reset();
+    js_path_reset();
+    js_os_reset();
+    js_url_module_reset();
+    js_util_reset();
 }
 
 // Get current module var count (for checkpointing)
@@ -13746,6 +13754,39 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 18 && memcmp(spec->chars, "node:child_process", 18) == 0)) {
         extern Item js_get_child_process_namespace(void);
         return js_get_child_process_namespace();
+    }
+    // node:path
+    if ((spec->len == 4 && memcmp(spec->chars, "path", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "path.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:path", 9) == 0)) {
+        extern Item js_get_path_namespace(void);
+        return js_get_path_namespace();
+    }
+    // node:os
+    if ((spec->len == 2 && memcmp(spec->chars, "os", 2) == 0) ||
+        (spec->len == 5 && memcmp(spec->chars, "os.js", 5) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "node:os", 7) == 0)) {
+        extern Item js_get_os_namespace(void);
+        return js_get_os_namespace();
+    }
+    // node:url
+    if ((spec->len == 3 && memcmp(spec->chars, "url", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "url.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:url", 8) == 0)) {
+        extern Item js_get_url_namespace(void);
+        return js_get_url_namespace();
+    }
+    // node:util
+    if ((spec->len == 4 && memcmp(spec->chars, "util", 4) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "util.js", 7) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "node:util", 9) == 0)) {
+        extern Item js_get_util_namespace(void);
+        return js_get_util_namespace();
+    }
+    // node:process
+    if ((spec->len == 7 && memcmp(spec->chars, "process", 7) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "node:process", 12) == 0)) {
+        return js_get_process_object_value();
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {

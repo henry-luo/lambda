@@ -16,11 +16,18 @@
 #include "../format/format.h"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
+#include "../../lib/file.h"
 #include <cstring>
 #include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <time.h>
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#endif
 
 // forward declaration for JSON parser
 extern Item parse_json_to_item(Input* input, const char* json_string);
@@ -778,13 +785,165 @@ extern "C" Item js_get_process_argv(void) {
 // process object (lazy-initialized for `var p = process` standalone usage)
 static Item js_process_object = {.item = ITEM_NULL};
 
+// process.cwd()
+extern "C" Item js_process_cwd(void) {
+    char* cwd = file_getcwd();
+    if (!cwd) return (Item){.item = s2it(heap_create_name(""))};
+    Item result = (Item){.item = s2it(heap_create_name(cwd, strlen(cwd)))};
+    free(cwd);
+    return result;
+}
+
+// process.chdir(directory)
+extern "C" Item js_process_chdir(Item dir_item) {
+    if (get_type_id(dir_item) != LMD_TYPE_STRING) return make_js_undefined();
+    String* s = it2s(dir_item);
+    char buf[2048];
+    int len = (int)s->len;
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    memcpy(buf, s->chars, len);
+    buf[len] = '\0';
+    if (chdir(buf) != 0) {
+        log_error("process: chdir failed for '%s'", buf);
+    }
+    return make_js_undefined();
+}
+
+// process.exit([code])
+extern "C" Item js_process_exit(Item code_item) {
+    int code = 0;
+    TypeId type = get_type_id(code_item);
+    if (type == LMD_TYPE_INT) code = (int)it2i(code_item);
+    else if (type == LMD_TYPE_FLOAT) code = (int)it2d(code_item);
+    exit(code);
+    return make_js_undefined(); // unreachable
+}
+
+// process.uptime()
+extern "C" Item js_process_uptime(void) {
+    static double start_time = 0;
+    if (start_time == 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        start_time = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = now - start_time;
+    return (Item){.item = d2it(fp)};
+}
+
+// build process.env as a map of environment variables
+static Item build_process_env(void) {
+    Item env = js_new_object();
+    extern char** environ;
+    if (environ) {
+        for (char** e = environ; *e; e++) {
+            char* eq = strchr(*e, '=');
+            if (eq) {
+                Item key = (Item){.item = s2it(heap_create_name(*e, (size_t)(eq - *e)))};
+                Item val = (Item){.item = s2it(heap_create_name(eq + 1, strlen(eq + 1)))};
+                js_property_set(env, key, val);
+            }
+        }
+    }
+    return env;
+}
+
+// build process.stdout object with write() method
+static Item build_process_stdout(void) {
+    Item stdout_obj = js_new_object();
+    Item write_fn = js_new_function((void*)js_process_stdout_write, 1);
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    return stdout_obj;
+}
+
+// build process.stderr object with write() method
+static Item build_process_stderr(void) {
+    Item stderr_obj = js_new_object();
+    // reuse stdout_write for now (both write to fd)
+    Item write_fn = js_new_function((void*)js_process_stdout_write, 1);
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    return stderr_obj;
+}
+
+static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+    Item fn = js_new_function(func_ptr, param_count);
+    js_property_set(ns, key, fn);
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
         heap_register_gc_root(&js_process_object.item);
-        // Set argv
+
+        // argv
         Item argv_key = (Item){.item = s2it(heap_create_name("argv", 4))};
         js_property_set(js_process_object, argv_key, js_get_process_argv());
+
+        // pid, ppid
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("pid", 3))},
+            (Item){.item = i2it((int64_t)getpid())});
+#ifndef _WIN32
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("ppid", 4))},
+            (Item){.item = i2it((int64_t)getppid())});
+#endif
+
+        // platform, arch, version
+#ifdef __APPLE__
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("darwin", 6))});
+#elif defined(__linux__)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("linux", 5))});
+#elif defined(_WIN32)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("win32", 5))});
+#endif
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("arch", 4))},
+            (Item){.item = s2it(heap_create_name("arm64", 5))});
+#elif defined(__x86_64__) || defined(_M_X64)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("arch", 4))},
+            (Item){.item = s2it(heap_create_name("x64", 3))});
+#endif
+
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("version", 7))},
+            (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
+
+        // methods: cwd, chdir, exit, uptime, hrtime.bigint
+        js_process_set_method(js_process_object, "cwd", (void*)js_process_cwd, 0);
+        js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
+        js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
+        js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
+
+        // hrtime object with bigint() method
+        Item hrtime_obj = js_new_object();
+        js_process_set_method(hrtime_obj, "bigint", (void*)js_process_hrtime_bigint, 0);
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("hrtime", 6))}, hrtime_obj);
+
+        // env
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("env", 3))}, build_process_env());
+
+        // stdout, stderr
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stdout", 6))}, build_process_stdout());
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
     }
     return js_process_object;
 }
