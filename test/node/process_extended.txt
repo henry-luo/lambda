@@ -1,0 +1,9 @@
+versions type: object
+versions.node: string
+memoryUsage type: object
+rss > 0: true
+cpuUsage type: object
+umask type: number
+title type: string
+pid > 0: true
+ppid type: number

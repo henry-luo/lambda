@@ -46,40 +46,40 @@ Lock file: `lambda-node.lock` (hyphenated, scoped to the node ecosystem).
 
 Lambda's JS runtime already implements partial Node.js support:
 
-| Feature                       | Status         | Implementation                                                                                                                                                                                                                                      |
-| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node:fs` (sync)              | ✅ Partial      | `js_fs.cpp` — readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, mkdirSync, rmdirSync, renameSync, readdirSync, statSync, copyFileSync, symlinkSync, chmodSync, truncateSync, openSync, closeSync, readSync, writeSync, fstatSync |
-| `node:fs` (async)             | ✅ Partial      | readFile, writeFile (callback-based)                                                                                                                                                                                                                |
-| `node:child_process`          | ✅ Full         | `js_child_process.cpp` — exec, execSync, spawn, spawnSync via libuv uv_spawn                                                                                                                                                                        |
-| `node:crypto`                 | ✅ Full         | `js_crypto.cpp` — SHA-256/384/512, HMAC, createHash, createHmac, randomBytes, randomUUID, randomInt, getHashes, timingSafeEqual                                                                                                                     |
-| `node:path`                   | ✅ Full         | `js_path.cpp` — join, resolve, dirname, basename, extname, normalize, isAbsolute, relative, parse, format, sep, delimiter                                                                                                                           |
-| `node:url`                    | ✅ Full         | `js_url_module.cpp` — URL class, parse, format, resolve, fileURLToPath, pathToFileURL                                                                                                                                                               |
-| `node:os`                     | ✅ Full         | `js_os.cpp` — platform, arch, type, hostname, homedir, tmpdir, cpus (real CPU data), totalmem, freemem, uptime, loadavg, userInfo, networkInterfaces (real data), EOL, endianness                                                                   |
-| `node:events`                 | ✅ Full         | `js_events.cpp` — EventEmitter: on, once, off, emit (error auto-throw), removeAllListeners, listeners, rawListeners, prependListener, defaultMaxListeners                                                                                           |
-| `node:util`                   | ✅ Full         | `js_util.cpp` — format (%s/%d/%i/%f/%j/%o/%O), inspect, promisify, deprecate, callbackify, isDeepStrictEqual, debuglog, TextEncoder, TextDecoder, types.* (18 type checkers)                                                                        |
-| `node:buffer`                 | ✅ Full         | `js_buffer.cpp` — alloc, allocUnsafe, from, concat, toString, 14 read + 14 write BE/LE, toJSON, swap16/32/64, slice, includes, indexOf                                                                                                              |
-| `node:querystring`            | ✅ Full         | `js_querystring.cpp` — parse, stringify, escape, unescape                                                                                                                                                                                           |
-| `node:string_decoder`         | ✅ Full         | `js_string_decoder.cpp` — StringDecoder, write, end (UTF-8 multi-byte handling)                                                                                                                                                                     |
-| `node:assert`                 | ✅ Full         | `js_assert.cpp` — ok, equal, strictEqual, deepEqual, deepStrictEqual, notDeepEqual, notDeepStrictEqual, throws, fail, ifError, match, doesNotMatch (15 methods)                                                                                     |
-| `node:timers`                 | ✅ Alias        | Registered as importable module (wraps global timer functions)                                                                                                                                                                                      |
-| `node:console`                | ✅ Alias        | Registered as importable module (wraps global console)                                                                                                                                                                                              |
-| `process` global              | ✅ Full         | argv, env, exit, exitCode, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, on('exit'/'uncaughtException')                                                         |
-| `Buffer`                      | ✅ Full         | Extended Uint8Array: alloc, allocUnsafe, from, concat, endian read/write, includes, subarray, toJSON, swap16/32/64, 14 read + 14 write methods                                                                                                      |
-| `__dirname` / `__filename`    | ✅              | Set per-module during transpilation                                                                                                                                                                                                                 |
-| `require()`                   | ✅ Full         | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()`                                                                                                                                 |
-| ES Modules                    | ✅              | import/export with module registry                                                                                                                                                                                                                  |
-| `node:dns`                    | ✅ Full         | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve                                                                                                                                                                                           |
-| `node:zlib`                   | ✅ Full         | `js_zlib.cpp` — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotliCompressSync, brotliDecompressSync                                                                                                            |
-| `node:readline`               | ✅ Full         | `js_readline.cpp` — createInterface, question, close, on                                                                                                                                                                                            |
-| `node:stream`                 | ✅ Full         | `js_stream.cpp` — Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished                                                                                                                                                            |
-| `node:net`                    | ✅ Full         | `js_net.cpp` — createServer, createConnection, Socket, isIP/isIPv4/isIPv6                                                                                                                                                                           |
-| `node:tls`                    | ✅ Full         | `js_tls.cpp` — connect, createServer, createSecureContext, TLSSocket (wraps mbedTLS via serve/tls_handler)                                                                                                                                          |
-| `node:http`                   | ✅ Full         | `js_http.cpp` — createServer, request, get, IncomingMessage, ServerResponse (writeHead/write/end/setHeader), STATUS_CODES, METHODS                                                                                                                  |
-| `node:https`                  | ✅ Full         | `js_https.cpp` — createServer, request, get (thin wrapper over http + tls)                                                                                                                                                                          |
-| npm packages                  | ✅ Phase 2 done | `lambda node install`, semver resolution, `node_modules/` layout, `lambda-node.lock`                                                                                                                                                                |
-| npm bare specifier resolution | ✅ Phase 3      | `npm_resolve_module()` integrated into `jm_resolve_module_path()`, conditional exports support                                                                                                                                                      |
-| `lambda node task`            | ✅ Phase 3      | Runs `package.json` scripts via `shell_exec_line`, prepends `node_modules/.bin` to PATH                                                                                                                                                             |
-| `lambda node exec`            | ✅ Phase 3      | Runs package binaries from `node_modules/.bin`, auto-installs if missing                                                                                                                                                                            |
+| Feature                       | Status         | Implementation                                                                                                                                                                                                                                                              |
+| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node:fs` (sync)              | ✅ Partial      | `js_fs.cpp` — readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, mkdirSync, rmdirSync, renameSync, readdirSync, statSync, copyFileSync, symlinkSync, chmodSync, truncateSync, openSync, closeSync, readSync, writeSync, fstatSync                         |
+| `node:fs` (async)             | ✅ Partial      | readFile, writeFile (callback-based)                                                                                                                                                                                                                                        |
+| `node:child_process`          | ✅ Full         | `js_child_process.cpp` — exec, execSync, spawn, spawnSync via libuv uv_spawn                                                                                                                                                                                                |
+| `node:crypto`                 | ✅ Full         | `js_crypto.cpp` — SHA-256/384/512, HMAC, createHash, createHmac, randomBytes, randomUUID, randomInt, getHashes, timingSafeEqual                                                                                                                                             |
+| `node:path`                   | ✅ Full         | `js_path.cpp` — join, resolve, dirname, basename, extname, normalize, isAbsolute, relative, parse, format, sep, delimiter                                                                                                                                                   |
+| `node:url`                    | ✅ Full         | `js_url_module.cpp` — URL class, parse, format, resolve, fileURLToPath, pathToFileURL                                                                                                                                                                                       |
+| `node:os`                     | ✅ Full         | `js_os.cpp` — platform, arch, type, hostname, homedir, tmpdir, cpus (real CPU data), totalmem, freemem, uptime, loadavg, userInfo, networkInterfaces (real data), EOL, endianness                                                                                           |
+| `node:events`                 | ✅ Full         | `js_events.cpp` — EventEmitter: on, once, off, emit (error auto-throw), removeAllListeners, listeners, rawListeners, prependListener, defaultMaxListeners                                                                                                                   |
+| `node:util`                   | ✅ Full         | `js_util.cpp` — format (%s/%d/%i/%f/%j/%o/%O), inspect, promisify, deprecate, callbackify, isDeepStrictEqual, debuglog, TextEncoder, TextDecoder, types.* (18 type checkers)                                                                                                |
+| `node:buffer`                 | ✅ Full         | `js_buffer.cpp` — alloc, allocUnsafe, allocUnsafeSlow, from, concat, toString, 14 read + 14 write BE/LE, variable-width readUInt/Int BE/LE, BigInt64 read/write, static compare, toJSON, swap16/32/64, slice, includes, indexOf, instance method dispatch via prototype     |
+| `node:querystring`            | ✅ Full         | `js_querystring.cpp` — parse, stringify, escape, unescape                                                                                                                                                                                                                   |
+| `node:string_decoder`         | ✅ Full         | `js_string_decoder.cpp` — StringDecoder, write, end (UTF-8 multi-byte handling)                                                                                                                                                                                             |
+| `node:assert`                 | ✅ Full         | `js_assert.cpp` — ok, equal, strictEqual, deepEqual, deepStrictEqual, notDeepEqual, notDeepStrictEqual, throws, fail, ifError, match, doesNotMatch (15 methods)                                                                                                             |
+| `node:timers`                 | ✅ Alias        | Registered as importable module (wraps global timer functions)                                                                                                                                                                                                              |
+| `node:console`                | ✅ Alias        | Registered as importable module (wraps global console)                                                                                                                                                                                                                      |
+| `process` global              | ✅ Full         | argv, env, exit, exitCode, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, on('exit'/'uncaughtException')                                                                                 |
+| `Buffer`                      | ✅ Full         | Extended Uint8Array: alloc, allocUnsafe, allocUnsafeSlow, from, concat, endian read/write, variable-width read/write, BigInt64 read/write, static compare, includes, subarray, toJSON, swap16/32/64, instance methods via prototype (buf.toString(), buf.readUInt8(), etc.) |
+| `__dirname` / `__filename`    | ✅              | Set per-module during transpilation                                                                                                                                                                                                                                         |
+| `require()`                   | ✅ Full         | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()`                                                                                                                                                         |
+| ES Modules                    | ✅              | import/export with module registry                                                                                                                                                                                                                                          |
+| `node:dns`                    | ✅ Full         | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve                                                                                                                                                                                                                   |
+| `node:zlib`                   | ✅ Full         | `js_zlib.cpp` — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotliCompressSync, brotliDecompressSync                                                                                                                                    |
+| `node:readline`               | ✅ Full         | `js_readline.cpp` — createInterface, question, close, on                                                                                                                                                                                                                    |
+| `node:stream`                 | ✅ Full         | `js_stream.cpp` — Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished                                                                                                                                                                                    |
+| `node:net`                    | ✅ Full         | `js_net.cpp` — createServer, createConnection, Socket, isIP/isIPv4/isIPv6                                                                                                                                                                                                   |
+| `node:tls`                    | ✅ Full         | `js_tls.cpp` — connect, createServer, createSecureContext, TLSSocket (wraps mbedTLS via serve/tls_handler)                                                                                                                                                                  |
+| `node:http`                   | ✅ Full         | `js_http.cpp` — createServer, request, get, IncomingMessage, ServerResponse (writeHead/write/end/setHeader), STATUS_CODES, METHODS                                                                                                                                          |
+| `node:https`                  | ✅ Full         | `js_https.cpp` — createServer, request, get (thin wrapper over http + tls)                                                                                                                                                                                                  |
+| npm packages                  | ✅ Phase 2 done | `lambda node install`, semver resolution, `node_modules/` layout, `lambda-node.lock`                                                                                                                                                                                        |
+| npm bare specifier resolution | ✅ Phase 3      | `npm_resolve_module()` integrated into `jm_resolve_module_path()`, conditional exports support                                                                                                                                                                              |
+| `lambda node task`            | ✅ Phase 3      | Runs `package.json` scripts via `shell_exec_line`, prepends `node_modules/.bin` to PATH                                                                                                                                                                                     |
+| `lambda node exec`            | ✅ Phase 3      | Runs package binaries from `node_modules/.bin`, auto-installs if missing                                                                                                                                                                                                    |
 
 ### Existing C Library Foundations
 
@@ -257,24 +257,35 @@ Commonly imported for `promisify`, `inspect`, `types`, `TextEncoder`/`TextDecode
 
 Extend Uint8Array with Node.js Buffer semantics.
 
-| API | Priority | Notes |
-|-----|----------|-------|
-| `Buffer.from(str, enc)` | High | String → bytes with encoding |
-| `Buffer.alloc(size)` | High | Zero-filled allocation |
-| `Buffer.allocUnsafe(size)` | ✅ Done | Uninitialized (performance) |
-| `Buffer.concat(list)` | High | Join multiple buffers |
-| `buf.toString(enc)` | High | Decode to string (utf8, hex, base64, ascii) |
-| `buf.slice` / `buf.subarray` | ✅ Done | View into underlying memory |
-| `buf.write(str, off, len, enc)` | Medium | |
-| `buf.readUInt32BE/LE` etc. | ✅ Done | Endian-aware reads (UInt8/16/32, Int8/16/32, Float, Double) |
-| `buf.writeUInt32BE/LE` etc. | ✅ Done | Endian-aware writes (UInt8/16/32, Int8/16/32, Float/Double BE/LE — 14 methods) |
-| `buf.toJSON()` | ✅ Done | Returns `{type: "Buffer", data: [...]}` |
-| `buf.swap16/32/64` | ✅ Done | Byte-order swapping |
-| `buf.compare` / `buf.equals` | ✅ Done | |
-| `buf.copy(target)` | ✅ Done | |
-| `buf.fill(val)` | ✅ Done | |
-| `buf.includes(val)` | ✅ Done | Search buffer contents |
-| `buf.lastIndexOf(val)` | ✅ Done | Reverse search |
+| API                                 | Priority | Notes                                                                          |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------------ |
+| `Buffer.from(str, enc)`             | ✅ Done   | String → bytes with encoding                                                   |
+| `Buffer.alloc(size)`                | ✅ Done   | Zero-filled allocation                                                         |
+| `Buffer.allocUnsafe(size)`          | ✅ Done   | Uninitialized (performance)                                                    |
+| `Buffer.concat(list)`               | ✅ Done   | Join multiple buffers                                                          |
+| `buf.toString(enc)`                 | ✅ Done   | Decode to string (utf8, hex, base64, ascii)                                    |
+| `buf.slice` / `buf.subarray`        | ✅ Done   | View into underlying memory                                                    |
+| `buf.write(str, off, len, enc)`     | ✅ Done   |                                                                                |
+| `buf.readUInt32BE/LE` etc.          | ✅ Done   | Endian-aware reads (UInt8/16/32, Int8/16/32, Float, Double)                    |
+| `buf.writeUInt32BE/LE` etc.         | ✅ Done   | Endian-aware writes (UInt8/16/32, Int8/16/32, Float/Double BE/LE — 14 methods) |
+| `buf.readUIntBE/LE(off, len)`       | ✅ Done   | Variable-width unsigned read (1–6 bytes)                                       |
+| `buf.readIntBE/LE(off, len)`        | ✅ Done   | Variable-width signed read (1–6 bytes)                                         |
+| `buf.writeUIntBE/LE(val, off, len)` | ✅ Done   | Variable-width unsigned write (1–6 bytes)                                      |
+| `buf.writeIntBE/LE(val, off, len)`  | ✅ Done   | Variable-width signed write (1–6 bytes)                                        |
+| `buf.readBigInt64BE/LE`             | ✅ Done   | 64-bit signed BigInt read                                                      |
+| `buf.readBigUInt64BE/LE`            | ✅ Done   | 64-bit unsigned BigInt read                                                    |
+| `buf.writeBigInt64BE/LE`            | ✅ Done   | 64-bit signed BigInt write                                                     |
+| `buf.writeBigUInt64BE/LE`           | ✅ Done   | 64-bit unsigned BigInt write                                                   |
+| `Buffer.compare(a, b)`              | ✅ Done   | Static two-buffer comparison                                                   |
+| `Buffer.allocUnsafeSlow(size)`      | ✅ Done   | Non-pooled uninitialized allocation                                            |
+| Instance method dispatch            | ✅ Done   | `buf.toString()`, `buf.readUInt8(0)` etc. via buffer prototype                 |
+| `buf.toJSON()`                      | ✅ Done   | Returns `{type: "Buffer", data: [...]}`                                        |
+| `buf.swap16/32/64`                  | ✅ Done   | Byte-order swapping                                                            |
+| `buf.compare` / `buf.equals`        | ✅ Done   |                                                                                |
+| `buf.copy(target)`                  | ✅ Done   |                                                                                |
+| `buf.fill(val)`                     | ✅ Done   |                                                                                |
+| `buf.includes(val)`                 | ✅ Done   | Search buffer contents                                                         |
+| `buf.lastIndexOf(val)`              | ✅ Done   | Reverse search                                                                 |
 
 **Strategy**: Implement Buffer as a subclass of Uint8Array with additional methods. Encodings backed by native C helpers (base64 from existing `atob`/`btoa`, hex trivial).
 
@@ -335,18 +346,20 @@ Required by `fs.createReadStream`, HTTP, and many npm packages.
 
 **Backing**: mbedTLS (already linked for TLS) + native SHA
 
-| API | Priority | C Backing |
-|-----|----------|-----------|
-| `createHash(alg)` | ✅ Done | Native SHA-256/384/512, streaming update/digest |
-| `createHmac(alg, key)` | ✅ Done | Native HMAC with SHA-256/384/512 |
-| `randomBytes(n)` | ✅ Done | `/dev/urandom` (Unix), BCryptGenRandom (Windows) |
-| `randomUUID()` | ✅ Done | UUID v4 from random bytes |
-| `randomInt(min, max)` | ✅ Done | Uniform random integer in range |
-| `getHashes()` | ✅ Done | Returns ["sha256", "sha384", "sha512"] |
-| `timingSafeEqual(a, b)` | ✅ Done | Constant-time comparison |
-| `createCipheriv` / `createDecipheriv` | Medium | mbedTLS AES |
-| `pbkdf2` / `scrypt` | Medium | mbedTLS KDF |
-| `subtle` (Web Crypto) | Low | SubtleCrypto API |
+| API                                   | Priority | C Backing                                        |
+| ------------------------------------- | -------- | ------------------------------------------------ |
+| `createHash(alg)`                     | ✅ Done   | Native SHA-256/384/512, streaming update/digest  |
+| `createHmac(alg, key)`                | ✅ Done   | Native HMAC with SHA-256/384/512                 |
+| `randomBytes(n)`                      | ✅ Done   | `/dev/urandom` (Unix), BCryptGenRandom (Windows) |
+| `randomUUID()`                        | ✅ Done   | UUID v4 from random bytes                        |
+| `randomInt(min, max)`                 | ✅ Done   | Uniform random integer in range                  |
+| `getHashes()`                         | ✅ Done   | Returns ["sha256", "sha384", "sha512"]           |
+| `timingSafeEqual(a, b)`               | ✅ Done   | Constant-time comparison                         |
+| `createCipheriv` / `createDecipheriv` | ✅ Done   | mbedTLS AES-CBC/CTR/GCM (128/192/256)            |
+| `pbkdf2` / `pbkdf2Sync`              | ✅ Done   | mbedTLS `mbedtls_pkcs5_pbkdf2_hmac_ext`          |
+| `scryptSync`                          | ✅ Done   | Pure Salsa20/8 + BlockMix + ROMix implementation |
+| `getCiphers()`                        | ✅ Done   | Returns 9 supported AES cipher names             |
+| `subtle` (Web Crypto)                 | ✅ Done   | digest, encrypt, decrypt (AES-CBC/CTR/GCM)       |
 
 #### `node:url`
 
@@ -737,14 +750,14 @@ Item js_resolve_node_builtin(const char* module_name) {
 
 ### Phase 1: Core Modules (Tier 1) — ✅ COMPLETE
 
-Wire existing C libraries to JS module objects. All built-in modules implemented, 588/588 baseline tests passing.
+Wire existing C libraries to JS module objects. All built-in modules implemented, 589/589 baseline tests passing.
 
 | Task | Effort | Status |
 |------|--------|--------|
 | `node:path` module | Small | ✅ Done — `js_path.cpp` (12 methods + 2 properties) |
 | `node:os` module | Small | ✅ Done — `js_os.cpp` (17 methods + EOL; cpus() real CPU data, networkInterfaces() real data) |
 | `node:process` extensions | Medium | ✅ Done — pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr, exitCode, on('exit'/'uncaughtException') |
-| `node:buffer` full API | Medium | ✅ Done — alloc, allocUnsafe, from, concat, 14 read + 14 write endian methods, toJSON, swap16/32/64, includes, subarray |
+| `node:buffer` full API | Medium | ✅ Done — alloc, allocUnsafe, allocUnsafeSlow, from, concat, 14+8 read + 14+8 write endian methods, variable-width read/write, BigInt64 read/write, static compare, toJSON, swap16/32/64, includes, subarray, instance method dispatch via prototype |
 | `node:util` (promisify, inspect, format, types) | Medium | ✅ Done — `js_util.cpp`, 8 top-level (incl. debuglog) + TextEncoder/TextDecoder + 18 types.* checkers |
 | `node:events` polyfill | Medium | ✅ Done — EventEmitter (17 methods incl. prependListener, rawListeners, defaultMaxListeners, error auto-throw) |
 | `node:fs` remaining sync APIs | Small | ✅ Done — 24 sync + 2 async methods (incl. openSync, closeSync, readSync, writeSync, fstatSync) |
@@ -786,7 +799,7 @@ CJS/ESM interop infrastructure implemented. `require()` works with local modules
 
 ### Phase 4: Extended Modules (Tier 2) — ✅ COMPLETE
 
-All Tier 2 extended modules implemented. 23 built-in modules registered in `js_module_get()` (added http, https), 588/588 baseline tests passing.
+All Tier 2 extended modules implemented. 23 built-in modules registered in `js_module_get()` (added http, https), 589/589 baseline tests passing.
 
 | Task                                 | Effort | Status |
 | ------------------------------------ | ------ | ------ |
@@ -899,7 +912,7 @@ Run selected test suites from real npm packages:
 - ✅ `Buffer.from("hello").toString("hex")` returns `"68656c6c6f"`
 - ✅ `const { promisify } = require("util")` works
 - ✅ EventEmitter on/emit/off works correctly
-- ✅ All Tier 1 modules pass targeted test suites (588/588 baseline)
+- ✅ All Tier 1 modules pass targeted test suites (589/589 baseline)
 
 **Phase 2 complete when:** ✅ ACHIEVED
 - ✅ `lambda node install` reads `package.json`, downloads from npm, creates `node_modules/`

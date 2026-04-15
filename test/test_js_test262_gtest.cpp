@@ -661,10 +661,63 @@ static std::vector<Test262Param> discover_all_tests() {
         {"GeneratorPrototype", "GeneratorPrototype"},
         {"WeakMap", "WeakMap"},
         {"WeakSet", "WeakSet"},
+        {"Symbol", "Symbol"},
+        {"DataView", "DataView"},
+        {"Proxy", "Proxy"},
+        {"Reflect", "Reflect"},
+        {"AsyncFunction", "AsyncFunction"},
+        {"AsyncGeneratorFunction", "AsyncGeneratorFunction"},
+        {"AsyncGeneratorPrototype", "AsyncGeneratorPrototype"},
+        {"BigInt", "BigInt"},
+        {"Uint8Array", "Uint8Array"},
+        {"ArrayIteratorPrototype", "ArrayIteratorPrototype"},
+        {"MapIteratorPrototype", "MapIteratorPrototype"},
+        {"SetIteratorPrototype", "SetIteratorPrototype"},
+        {"StringIteratorPrototype", "StringIteratorPrototype"},
+        {"RegExpStringIteratorPrototype", "RegExpStringIteratorPrototype"},
+        {"AsyncFromSyncIteratorPrototype", "AsyncFromSyncIteratorPrototype"},
+        {"AggregateError", "AggregateError"},
+        {"AsyncIteratorPrototype", "AsyncIteratorPrototype"},
+        {"Atomics", "Atomics"},
+        {"Iterator", "Iterator"},
+        {"SharedArrayBuffer", "SharedArrayBuffer"},
+        {"ThrowTypeError", "ThrowTypeError"},
     };
     for (auto& cat : builtin_cats) {
         std::string dir = std::string(TEST262_ROOT) + "/test/built-ins/" + cat.subdir;
         discover_tests_recursive(dir, "built_ins", cat.name, tests);
+    }
+
+    // Annex B tests — built-ins subcategories
+    struct { const char* subdir; const char* name; } annexb_builtin_cats[] = {
+        {"Array", "Array"},
+        {"Date", "Date"},
+        {"escape", "escape"},
+        {"Function", "Function"},
+        {"Object", "Object"},
+        {"RegExp", "RegExp"},
+        {"String", "String"},
+        {"TypedArrayConstructors", "TypedArrayConstructors"},
+        {"unescape", "unescape"},
+    };
+    for (auto& cat : annexb_builtin_cats) {
+        std::string dir = std::string(TEST262_ROOT) + "/test/annexB/built-ins/" + cat.subdir;
+        discover_tests_recursive(dir, "annexB_built_ins", cat.name, tests);
+    }
+
+    // Annex B tests — language subcategories
+    struct { const char* subdir; const char* name; } annexb_language_cats[] = {
+        {"comments", "comments"},
+        {"eval-code", "eval_code"},
+        {"expressions", "expressions"},
+        {"function-code", "function_code"},
+        {"global-code", "global_code"},
+        {"literals", "literals"},
+        {"statements", "statements"},
+    };
+    for (auto& cat : annexb_language_cats) {
+        std::string dir = std::string(TEST262_ROOT) + "/test/annexB/language/" + cat.subdir;
+        discover_tests_recursive(dir, "annexB_language", cat.name, tests);
     }
 
     // Deduplicate test names (GTest requires unique names)
@@ -1860,7 +1913,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
                             p.test_name.c_str(), p.test_path.c_str());
                     written.insert(p.test_name);
-                    crash_exit++;
+                    // Only count as crash_exit if this is a NEW crash (not a known crasher re-confirming)
+                    bool was_known_crash = known_crasher_tags.count(p.test_name) &&
+                                           known_crasher_tags[p.test_name].substr(0, 5) == "CRASH";
+                    if (!was_known_crash) crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
                     // Was a CRASH entry but now passes individually — release from quarantine.

@@ -1,0 +1,11 @@
+gzip compressed: true
+gzip smaller or has header: true
+gunzip result: hello world
+deflate compressed: true
+inflate result: hello world
+deflateRaw compressed: true
+inflateRaw result: hello world
+unzip result: hello world
+Z_NO_FLUSH: true
+Z_FINISH: true
+large roundtrip: true
