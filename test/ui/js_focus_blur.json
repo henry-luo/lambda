@@ -1,0 +1,23 @@
+{
+  "name": "JS onfocus/onblur: focus and blur handlers",
+  "html": "test/ui/js_focus_blur.html",
+  "description": "Tests onfocus and onblur handlers on input fields. Verifies focus sets className and updates log text.",
+  "events": [
+    {"type": "log", "message": "=== js_focus_blur: focus and blur handlers ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#focus-log"}, "equals": "No focus events yet"},
+
+    {"type": "log", "message": "Step 2: Focus field1 — onfocus should fire"},
+    {"type": "focus", "target": {"selector": "#field1"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify focus handler fired"},
+    {"type": "assert_attribute", "target": {"selector": "#field1"}, "attribute": "class", "equals": "focused", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#focus-log"}, "equals": "field1 focused"},
+    {"type": "assert_attribute", "target": {"selector": "#focus-log"}, "attribute": "class", "equals": "has-focus"},
+
+    {"type": "log", "message": "=== js_focus_blur complete ==="}
+  ]
+}

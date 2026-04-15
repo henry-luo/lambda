@@ -2608,23 +2608,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         } else {
             // Block-level child encountered
-            // CSS 2.1: Block children break inline flow (block-in-inline)
-            // First, flush any accumulated inline content before the block
-            if (inline_max_sum > 0) {
-                sizes.min_content = max(sizes.min_content, inline_min_sum);
-                sizes.max_content = max(sizes.max_content, inline_max_sum);
-                log_debug("  block-in-inline: flushing inline run max=%.1f, min=%.1f before block %s",
-                          inline_max_sum, inline_min_sum,
-                          child->is_element() ? child->as_element()->node_name() : "?");
-                // Reset for next inline run after the block
-                inline_max_sum = 0;
-                inline_min_sum = 0;
-            }
 
-            // Detect if this block child is floated
-            // CSS Sizing 3 §5: Floated children are out-of-flow but contribute to
-            // the container's intrinsic size. At max-content (infinite width), floats
-            // arrange side-by-side, so their widths are summed.
+            // Detect if this block child is floated BEFORE flushing inline content.
+            // CSS 2.1 §9.5: Floats don't break inline flow — inline content wraps
+            // around them. So preceding inline content must NOT be flushed when we
+            // encounter a floated child; it stays in the inline run and will be
+            // combined with float_width_alongside_inline at the end.
             bool child_is_float = false;
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
@@ -2648,6 +2637,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         }
                     }
                 }
+            }
+
+            // CSS 2.1: Non-floated block children break inline flow (block-in-inline).
+            // Floats do NOT break inline flow — inline content wraps around them.
+            // Only flush inline content for non-floated block children.
+            if (!child_is_float && inline_max_sum > 0) {
+                sizes.min_content = max(sizes.min_content, inline_min_sum);
+                sizes.max_content = max(sizes.max_content, inline_max_sum);
+                log_debug("  block-in-inline: flushing inline run max=%.1f, min=%.1f before block %s",
+                          inline_max_sum, inline_min_sum,
+                          child->is_element() ? child->as_element()->node_name() : "?");
+                // Reset for next inline run after the block
+                inline_max_sum = 0;
+                inline_min_sum = 0;
             }
 
             // For block-level children: take max of each

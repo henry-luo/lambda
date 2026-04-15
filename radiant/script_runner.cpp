@@ -37,6 +37,8 @@
 #include <setjmp.h>
 #include <unistd.h>
 
+extern __thread EvalContext* context;
+
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
@@ -686,8 +688,10 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     log_info("collect_and_compile_event_handlers: found %d handlers, compiling", registry->count);
 
     // Compile handler wrapper functions using the retained MIR preamble context.
-    // This adds the __evt_handler_N functions to the same MIR context that has
-    // the page's <script> functions, so handler code can call clicked(), toggle(), etc.
+    // The with_preamble call creates a new MIR context that can see preamble-defined
+    // functions (clicked(), toggle(), etc.). We need the thread-local EvalContext
+    // set up with the retained heap so the transpiler reuses it (reusing_context=true),
+    // which causes the new MIR context to be deferred rather than destroyed.
     JsPreambleState* preamble = (JsPreambleState*)dom_doc->js_preamble_state;
     Runtime runtime = {};
     runtime.dom_doc = dom_doc;
@@ -696,9 +700,25 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     runtime.name_pool = (NamePool*)dom_doc->js_runtime_name_pool;
     runtime.reuse_pool = (Pool*)dom_doc->js_runtime_pool;
 
+    // Set up thread-local eval context so transpiler sees reusing_context=true.
+    // This prevents the new MIR context from being destroyed — it gets deferred instead.
+    EvalContext handler_compile_ctx = {};
+    handler_compile_ctx.heap = runtime.heap;
+    handler_compile_ctx.nursery = runtime.nursery;
+    handler_compile_ctx.name_pool = runtime.name_pool;
+    handler_compile_ctx.pool = runtime.heap ? runtime.heap->pool : nullptr;
+    EvalContext* saved_ctx = context;
+    context = &handler_compile_ctx;
+
     Item compile_result = transpile_js_to_mir_with_preamble(&runtime, compile_buf->str,
                                                              "<event-handlers>", preamble);
     strbuf_free(compile_buf);
+
+    // Get the new MIR context before restoring the old eval context.
+    // The handler functions were compiled in this new context.
+    MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
+
+    context = saved_ctx;
 
     TypeId result_type = get_type_id(compile_result);
     if (result_type == LMD_TYPE_ERROR) {
@@ -708,16 +728,26 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
 
-    // Resolve compiled function pointers via find_func in the MIR context
-    MIR_context_t mir_ctx = (MIR_context_t)dom_doc->js_mir_ctx;
+    if (!handler_mir_ctx) {
+        log_error("collect_and_compile_event_handlers: no deferred MIR context found");
+        hashmap_free(registry->element_map);
+        pool_destroy(reg_pool);
+        return;
+    }
+
+    // Resolve compiled function pointers via find_func_prefix in the handler MIR context
     int resolved = 0;
     size_t iter = 0;
     void* item;
     while (hashmap_iter(registry->element_map, &iter, &item)) {
         JsEventHandler* h = (JsEventHandler*)item;
         while (h) {
-            // handler_source was reused to store the function name
-            void* fn_ptr = find_func(mir_ctx, h->handler_source);
+            // handler_source stores the base function name (e.g., "__evt_handler_0").
+            // The JS transpiler mangles it to "_js___evt_handler_0_<byte_offset>".
+            // Use prefix matching to find the compiled function.
+            char prefix[128];
+            snprintf(prefix, sizeof(prefix), "_js_%s_", h->handler_source);
+            void* fn_ptr = find_func_prefix(handler_mir_ctx, prefix);
             if (fn_ptr) {
                 h->compiled_func = fn_ptr;
                 resolved++;

@@ -106,19 +106,25 @@ static int parse_mods_string(const char* mods_str) {
 
 // Helper: recursively find text view containing target string and get its absolute position
 // Returns true if found, sets out_x and out_y to center of first match
+// block_abs_x/y tracks the absolute position of the nearest block ancestor,
+// matching how target_text_view uses evcon->block.x/y + text_rect->x/y.
 static bool find_text_position_recursive(View* view, const char* target_text,
-                                         float parent_abs_x, float parent_abs_y,
+                                         float block_abs_x, float block_abs_y,
                                          float* out_x, float* out_y) {
     if (!view || !target_text) return false;
 
-    // calculate absolute position of this view
-    // For text views, x/y are the same as the first TextRect's x/y (relative to parent block)
-    // For block views, x/y are relative to parent block's border box
-    float abs_x = parent_abs_x + view->x;
-    float abs_y = parent_abs_y + view->y;
+    // Only block views contribute to the absolute offset.
+    // Inline spans and text nodes have x/y that duplicate their TextRect positions
+    // (both are relative to the containing block), so we must not accumulate them.
+    float child_block_abs_x = block_abs_x;
+    float child_block_abs_y = block_abs_y;
+    if (view->is_block()) {
+        child_block_abs_x = block_abs_x + view->x;
+        child_block_abs_y = block_abs_y + view->y;
+    }
 
-    log_debug("find_text: view_type=%d, x=%.1f, y=%.1f, parent_abs=(%.1f, %.1f), abs=(%.1f, %.1f)",
-              view->view_type, view->x, view->y, parent_abs_x, parent_abs_y, abs_x, abs_y);
+    log_debug("find_text: view_type=%d, x=%.1f, y=%.1f, block_abs=(%.1f, %.1f)",
+              view->view_type, view->x, view->y, child_block_abs_x, child_block_abs_y);
 
     // check if this is a text view with matching text
     if (view->view_type == RDT_VIEW_TEXT) {
@@ -128,6 +134,7 @@ static bool find_text_position_recursive(View* view, const char* target_text,
             const char* match = strstr(text_view->text, target_text);
             if (match) {
                 // Found a match - calculate position of the target text within the TextRect
+                // TextRect x/y are relative to containing block, matching the hit test
                 TextRect* rect = text_view->rect;
                 if (rect) {
                     // Find the character offset of the match within the text
@@ -141,9 +148,8 @@ static bool find_text_position_recursive(View* view, const char* target_text,
 
                         if (match_offset >= rect_start && match_offset < rect_end) {
                             // Match is in this TextRect - calculate x position
-                            // Since we can't get exact glyph widths here, position near
-                            // the START of the target text with a small offset
-                            float text_x = parent_abs_x + rect->x;
+                            // Use block_abs + rect position to match hit test coordinate system
+                            float text_x = child_block_abs_x + rect->x;
                             int chars_before = match_offset - rect_start;
 
                             // Use average char width, but only to find the start position
@@ -156,7 +162,7 @@ static bool find_text_position_recursive(View* view, const char* target_text,
                             float click_x = match_start_x + 3.0f;  // 3 pixels into first char
 
                             *out_x = click_x;
-                            *out_y = parent_abs_y + rect->y + rect->height / 2;
+                            *out_y = child_block_abs_y + rect->y + rect->height / 2;
                             log_info("event_sim: found target_text '%s' at (%.1f, %.1f), match_offset=%d, rect=(%.1f, %.1f, %.1f, %.1f)",
                                      target_text, *out_x, *out_y, match_offset, rect->x, rect->y, rect->width, rect->height);
                             return true;
@@ -165,8 +171,8 @@ static bool find_text_position_recursive(View* view, const char* target_text,
                     }
                     // Match not found in any rect - fallback to first rect center
                     rect = text_view->rect;
-                    *out_x = parent_abs_x + rect->x + rect->width / 2;
-                    *out_y = parent_abs_y + rect->y + rect->height / 2;
+                    *out_x = child_block_abs_x + rect->x + rect->width / 2;
+                    *out_y = child_block_abs_y + rect->y + rect->height / 2;
                     log_warn("event_sim: target_text '%s' found in text but not in any TextRect, using center", target_text);
                     return true;
                 } else {
@@ -176,13 +182,13 @@ static bool find_text_position_recursive(View* view, const char* target_text,
         }
     }
 
-    // For block elements, pass absolute position to children
-    // Note: text view children don't exist, only element children
+    // Pass block absolute position to children
+    // Only block views shift the coordinate origin; inline views don't
     DomElement* elem = view->as_element();
     if (elem) {
         View* child = (View*)elem->first_child;
         while (child) {
-            if (find_text_position_recursive(child, target_text, abs_x, abs_y, out_x, out_y)) {
+            if (find_text_position_recursive(child, target_text, child_block_abs_x, child_block_abs_y, out_x, out_y)) {
                 return true;
             }
             child = (View*)child->next_sibling;

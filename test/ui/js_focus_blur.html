@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Focus/Blur: focus and blur handlers</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  input { padding: 8px; margin: 5px; font-size: 16px; border: 2px solid #ccc; }
+  input.focused { border-color: blue; }
+  #focus-log { margin-top: 10px; padding: 5px; min-height: 20px; }
+</style>
+<script>
+  function onFieldFocus() {
+    document.getElementById('field1').className = 'focused';
+    document.getElementById('focus-log').textContent = 'field1 focused';
+    document.getElementById('focus-log').className = 'has-focus';
+  }
+  function onFieldBlur() {
+    document.getElementById('field1').className = 'idle';
+    document.getElementById('focus-log').textContent = 'field1 blurred';
+    document.getElementById('focus-log').className = 'no-focus';
+  }
+</script>
+</head>
+<body>
+  <input id="field1" class="" type="text" onfocus="onFieldFocus()" onblur="onFieldBlur()" placeholder="Focus me">
+  <input id="field2" type="text" placeholder="Click here to blur field1">
+  <div id="focus-log">No focus events yet</div>
+</body>
+</html>

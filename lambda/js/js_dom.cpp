@@ -2212,6 +2212,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             parse_class_names(elem, class_str);
             // also update the native element attribute
             dom_element_set_attribute(elem, "class", class_str);
+            js_dom_mutation_notify();
             log_debug("js_dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -2228,6 +2229,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             id_copy[len] = '\0';
             elem->id = id_copy;
             dom_element_set_attribute(elem, "id", id_str);
+            js_dom_mutation_notify();
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }

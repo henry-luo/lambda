@@ -1,0 +1,28 @@
+{
+  "name": "block-in-inline-005: onclick toggles display block↔inline",
+  "html": "test/layout/data/js/block-in-inline-005.htm",
+  "description": "Click on body toggles #test between display:block and display:inline. Text should collapse into one line when #test becomes inline.",
+  "events": [
+    {"type": "log", "message": "=== block-in-inline-005: onclick toggles display ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Verify initial state — #test has class 'block'"},
+    {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "block"},
+
+    {"type": "log", "message": "Step 2: Click body to toggle #test to inline"},
+    {"type": "click", "target": {"selector": "body"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify #test is now inline"},
+    {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "inline", "assert_timeout": 500},
+
+    {"type": "log", "message": "Step 4: Click body again to toggle #test back to block"},
+    {"type": "click", "target": {"selector": "body"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 5: Verify #test is back to block"},
+    {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "block", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== block-in-inline-005 complete ==="}
+  ]
+}

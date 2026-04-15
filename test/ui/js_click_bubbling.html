@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Click: event bubbling</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #outer { padding: 20px; background: #ddd; border: 2px solid #999; }
+  #outer.outer-clicked { background: #fdd; border-color: red; }
+  #inner { padding: 15px; background: #bbb; margin: 10px; }
+  #inner.inner-clicked { background: #dfd; }
+  #result { margin-top: 10px; min-height: 20px; }
+</style>
+<script>
+  function outerClicked() {
+    document.getElementById('outer').className = 'outer-clicked';
+    document.getElementById('result').textContent = 'outer clicked';
+  }
+</script>
+</head>
+<body>
+  <div id="outer" class="idle" onclick="outerClicked()">
+    <div id="inner">Click me — event should bubble to outer</div>
+  </div>
+  <div id="result">No click yet</div>
+</body>
+</html>

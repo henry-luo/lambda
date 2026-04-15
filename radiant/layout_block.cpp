@@ -3904,21 +3904,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
-    // CSS 2.2 9.5.1: Float positioning relative to preceding content
-    // When a float appears after inline content on the current line, it must be
-    // positioned below the current line. The preceding inline content has already
-    // been committed to the current line and cannot reflow around the float.
-    // Placing the float at the current line's Y would cause overlap.
     bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
 
+    // When a float appears after inline content on the current line (is_line_start=false),
+    // offset its Y by one line height so it doesn't overlap the current line's content.
+    // Ideally, CSS 2.1 §9.5.1 says "the outer top of the floated box is aligned with
+    // the top of the current line box", but our engine commits inline content before
+    // processing floats and can't reflow text around the float. This offset compensates
+    // by placing the float below the current line, which matches more tests in practice.
     if (is_float && !pa_line->is_line_start) {
-        // Float appears after inline content - position below current line
         float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
         block->y = pa_block->advance_y + line_height;
-        log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
-                  block->y, pa_block->advance_y, line_height);
-    } else if (is_float) {
-        log_debug("%s Float positioned at line start: y=%.1f", block->source_loc(), block->y);
+        log_debug("%s Float after inline content: y=%.1f (advance_y=%.1f + line_height=%.1f)",
+                  block->source_loc(), block->y, pa_block->advance_y, line_height);
     }
 
     log_debug("%s block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d", block->source_loc(),

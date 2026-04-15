@@ -1,0 +1,28 @@
+{
+  "name": "JS multi-event: mouseover → mousedown → click pipeline",
+  "html": "test/ui/js_multi_event.html",
+  "description": "Tests that multiple event types (onmouseover, onmousedown, onclick) on the same element all fire correctly in sequence. Each handler sets a different className and log text.",
+  "events": [
+    {"type": "log", "message": "=== js_multi_event: mouseover → mousedown → click ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "no event"},
+
+    {"type": "log", "message": "Step 2: Move mouse over #box — onmouseover should fire"},
+    {"type": "mouse_move", "target": {"selector": "#box"}},
+    {"type": "wait", "ms": 200},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "hover", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "mouseover"},
+
+    {"type": "log", "message": "Step 3: Click #box — mousedown then click should fire in sequence"},
+    {"type": "click", "target": {"selector": "#box"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 4: After click, the last handler to fire is onclick"},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "class", "equals": "clicked", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "click"},
+
+    {"type": "log", "message": "=== js_multi_event complete ==="}
+  ]
+}

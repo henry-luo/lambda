@@ -1843,12 +1843,57 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
 }
 
 /**
+ * Check if content starts with a UTF-8 BOM (EF BB BF).
+ */
+static bool has_utf8_bom(const char* html, size_t len) {
+    return len >= 3 &&
+           (unsigned char)html[0] == 0xEF &&
+           (unsigned char)html[1] == 0xBB &&
+           (unsigned char)html[2] == 0xBF;
+}
+
+/**
+ * Quick heuristic: check if content with high bytes appears to be valid UTF-8.
+ * Scans up to 4096 bytes. If we find multi-byte UTF-8 sequences and no invalid
+ * sequences, the content is likely UTF-8 regardless of what the meta tag says.
+ * Returns true if content appears to be valid UTF-8 (has multi-byte sequences).
+ * Returns false if content is all-ASCII (ambiguous) or has invalid UTF-8 sequences.
+ */
+static bool content_looks_utf8(const char* html, size_t len) {
+    size_t scan_len = len < 4096 ? len : 4096;
+    int multi_byte_count = 0;
+    for (size_t i = 0; i < scan_len; ) {
+        unsigned char c = (unsigned char)html[i];
+        if (c < 0x80) { i++; continue; }
+        // check for valid UTF-8 multi-byte sequence
+        int seq_len = 0;
+        if ((c & 0xE0) == 0xC0) seq_len = 2;
+        else if ((c & 0xF0) == 0xE0) seq_len = 3;
+        else if ((c & 0xF8) == 0xF0) seq_len = 4;
+        else return false; // invalid UTF-8 lead byte
+        if (i + seq_len > scan_len) break; // truncated at scan boundary, don't fail
+        for (int j = 1; j < seq_len; j++) {
+            if (((unsigned char)html[i + j] & 0xC0) != 0x80) return false; // invalid continuation
+        }
+        multi_byte_count++;
+        i += seq_len;
+    }
+    return multi_byte_count > 0;
+}
+
+/**
  * Detect charset from HTML content by scanning for <meta charset="..."> or
  * <meta http-equiv="Content-Type" content="...; charset=..."> within the first 1024 bytes.
  * Returns the charset name (e.g., "iso-8859-1") or nullptr if UTF-8 or not specified.
+ * Per HTML spec, UTF-8 BOM takes precedence over meta charset declarations.
+ * Also skips conversion if content is already valid UTF-8 (e.g., file saved as UTF-8
+ * but with a legacy meta charset tag).
  */
 static const char* detect_html_charset(const char* html, size_t len) {
     if (!html || len == 0) return nullptr;
+
+    // Per HTML spec: BOM takes precedence over all other charset declarations
+    if (has_utf8_bom(html, len)) return nullptr;
 
     // only scan the first 1024 bytes (charset must appear early per HTML spec)
     size_t scan_len = len < 1024 ? len : 1024;
@@ -1888,6 +1933,15 @@ static const char* detect_html_charset(const char* html, size_t len) {
         }
 
         log_info("[charset] Detected non-UTF-8 charset: %s", charset_buf);
+
+        // Safety check: if the content already contains valid UTF-8 multi-byte
+        // sequences, the meta charset is likely stale/wrong (file was re-saved as
+        // UTF-8 without updating the meta tag). Converting would double-encode.
+        if (content_looks_utf8(html, len)) {
+            log_info("[charset] Content already appears to be valid UTF-8, ignoring meta charset '%s'", charset_buf);
+            return nullptr;
+        }
+
         return charset_buf;
     }
 

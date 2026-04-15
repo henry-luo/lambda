@@ -1,0 +1,23 @@
+{
+  "name": "JS onclick: event bubbling from child to parent",
+  "html": "test/ui/js_click_bubbling.html",
+  "description": "Tests that onclick on a parent element fires when clicking a child (event bubbling). Verifies the handler walks up the DOM tree to find the handler.",
+  "events": [
+    {"type": "log", "message": "=== js_click_bubbling: event bubbling ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial state"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "No click yet"},
+    {"type": "assert_attribute", "target": {"selector": "#outer"}, "attribute": "class", "equals": "idle"},
+
+    {"type": "log", "message": "Step 2: Click #inner — event should bubble to #outer's onclick"},
+    {"type": "click", "target": {"selector": "#inner"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify outer's handler fired via bubbling"},
+    {"type": "assert_attribute", "target": {"selector": "#outer"}, "attribute": "class", "equals": "outer-clicked", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "outer clicked"},
+
+    {"type": "log", "message": "=== js_click_bubbling complete ==="}
+  ]
+}

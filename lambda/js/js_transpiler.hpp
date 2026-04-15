@@ -156,6 +156,9 @@ void preamble_state_destroy(JsPreambleState* state);
 // Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)
 void jm_cleanup_deferred_mir();
 
+// Get the most recently deferred MIR context (for function pointer lookup after with_preamble compilation)
+void* jm_get_last_deferred_mir_ctx();
+
 // Transpile a pre-built JS AST to MIR (used by TS transpiler)
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename);
 
