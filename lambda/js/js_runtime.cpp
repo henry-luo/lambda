@@ -397,6 +397,10 @@ extern "C" void js_batch_reset() {
     js_net_reset();
     extern void js_tls_reset(void);
     js_tls_reset();
+    extern void js_string_decoder_reset(void);
+    js_string_decoder_reset();
+    extern void js_assert_reset(void);
+    js_assert_reset();
 }
 
 // Get current module var count (for checkpointing)
@@ -13893,6 +13897,52 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 8 && memcmp(spec->chars, "node:tls", 8) == 0)) {
         extern Item js_get_tls_namespace(void);
         return js_get_tls_namespace();
+    }
+    // node:string_decoder
+    if ((spec->len == 14 && memcmp(spec->chars, "string_decoder", 14) == 0) ||
+        (spec->len == 17 && memcmp(spec->chars, "string_decoder.js", 17) == 0) ||
+        (spec->len == 19 && memcmp(spec->chars, "node:string_decoder", 19) == 0)) {
+        extern Item js_get_string_decoder_namespace(void);
+        return js_get_string_decoder_namespace();
+    }
+    // node:assert
+    if ((spec->len == 6 && memcmp(spec->chars, "assert", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "assert.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:assert", 11) == 0)) {
+        extern Item js_get_assert_namespace(void);
+        return js_get_assert_namespace();
+    }
+    // node:timers — alias to global timer functions
+    if ((spec->len == 6 && memcmp(spec->chars, "timers", 6) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:timers", 11) == 0)) {
+        // return a namespace with setTimeout/setInterval/etc
+        static Item timers_ns = {0};
+        if (timers_ns.item == 0) {
+            extern Item js_setTimeout(Item, Item);
+            extern Item js_setInterval(Item, Item);
+            extern void js_clearTimeout(Item);
+            extern void js_clearInterval(Item);
+            extern Item js_setImmediate(Item);
+            timers_ns = js_new_object();
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setTimeout", 10))},
+                            js_new_function((void*)js_setTimeout, 2));
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setInterval", 11))},
+                            js_new_function((void*)js_setInterval, 2));
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("clearTimeout", 12))},
+                            js_new_function((void*)js_clearTimeout, 1));
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("clearInterval", 13))},
+                            js_new_function((void*)js_clearInterval, 1));
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("setImmediate", 12))},
+                            js_new_function((void*)js_setImmediate, 1));
+            js_property_set(timers_ns, (Item){.item = s2it(heap_create_name("default", 7))}, timers_ns);
+        }
+        return timers_ns;
+    }
+    // node:console — alias to global console
+    if ((spec->len == 7 && memcmp(spec->chars, "console", 7) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "node:console", 12) == 0)) {
+        extern Item js_get_console_object_value(void);
+        return js_get_console_object_value();
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {

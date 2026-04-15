@@ -256,6 +256,41 @@ extern "C" Item js_ee_getMaxListeners(Item emitter) {
     return val;
 }
 
+// ─── emitter.prependListener(event, listener) ───────────────────────────────
+// Adds listener to beginning of listeners array.
+extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    Item arr = get_listeners_array(emitter, event_name);
+    // rebuild with listener at front
+    int64_t len = js_array_length(arr);
+    Item new_arr = js_array_new((int)(len + 1));
+    js_array_push(new_arr, listener);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(new_arr, js_array_get_int(arr, i));
+    }
+    Item map = get_events_map(emitter);
+    js_property_set(map, event_name, new_arr);
+    return emitter;
+}
+
+// ─── emitter.prependOnceListener(event, listener) ───────────────────────────
+extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item listener) {
+    if (emitter.item == 0) return ItemNull;
+    Item arr = get_listeners_array(emitter, event_name);
+    int64_t len = js_array_length(arr);
+    Item new_arr = js_array_new((int)(len + 1));
+    js_array_push(new_arr, listener);
+    for (int64_t i = 0; i < len; i++) {
+        js_array_push(new_arr, js_array_get_int(arr, i));
+    }
+    Item map = get_events_map(emitter);
+    js_property_set(map, event_name, new_arr);
+    // mark as once
+    Item set = get_once_set(emitter);
+    js_array_push(set, listener);
+    return emitter;
+}
+
 // ─── new EventEmitter() constructor ─────────────────────────────────────────
 extern "C" Item js_ee_constructor(void) {
     Item emitter = js_new_object();
@@ -300,6 +335,8 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(events_namespace, "eventNames",          (void*)js_ee_eventNames, 1);
     ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_setMaxListeners, 2);
     ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
+    ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
+    ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
 
     // default export is the constructor
     js_property_set(events_namespace, make_string_item("default"), events_namespace);

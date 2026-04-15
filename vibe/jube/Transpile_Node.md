@@ -52,18 +52,27 @@ Lambda's JS runtime already implements partial Node.js support:
 | `node:fs` (async) | ✅ Partial | readFile, writeFile (callback-based) |
 | `node:child_process` | ✅ Full | `js_child_process.cpp` — exec, execSync, spawn, spawnSync via libuv uv_spawn |
 | `node:crypto` | ✅ Full | `js_crypto.cpp` — SHA-256/384/512, HMAC, createHash, createHmac, randomBytes, randomUUID, randomInt, getHashes, timingSafeEqual |
-| `node:path` | ⚠️ Embedded | Path ops inlined in runtime, no standalone module |
-| `node:url` | ⚠️ Embedded | URL parsing via `lib/url.c` (WHATWG), not exposed as module |
-| `process` global | ✅ Partial | argv, env, exit, cwd, platform, arch |
-| `Buffer` | ✅ Via Uint8Array | TypedArray-backed, no full Buffer API |
+| `node:path` | ✅ Full | `js_path.cpp` — join, resolve, dirname, basename, extname, normalize, isAbsolute, relative, parse, format, sep, delimiter |
+| `node:url` | ✅ Full | `js_url_module.cpp` — URL class, parse, format, resolve, fileURLToPath, pathToFileURL |
+| `node:os` | ✅ Full | `js_os.cpp` — platform, arch, type, hostname, homedir, tmpdir, cpus, totalmem, freemem, uptime, loadavg, userInfo, EOL, endianness |
+| `node:events` | ✅ Full | `js_events.cpp` — EventEmitter: on, once, off, emit, removeAllListeners, listeners, prependListener |
+| `node:util` | ✅ Full | `js_util.cpp` — format, inspect, promisify, deprecate, callbackify, isDeepStrictEqual, types.* (18 type checkers) |
+| `node:buffer` | ✅ Full | `js_buffer.cpp` — alloc, allocUnsafe, from, concat, toString, read/write BE/LE, slice, includes, indexOf |
+| `node:querystring` | ✅ Full | `js_querystring.cpp` — parse, stringify, escape, unescape |
+| `node:string_decoder` | ✅ Full | `js_string_decoder.cpp` — StringDecoder, write, end (UTF-8 multi-byte handling) |
+| `node:assert` | ✅ Full | `js_assert.cpp` — ok, equal, strictEqual, deepStrictEqual, throws, fail, ifError |
+| `node:timers` | ✅ Alias | Registered as importable module (wraps global timer functions) |
+| `node:console` | ✅ Alias | Registered as importable module (wraps global console) |
+| `process` global | ✅ Full | argv, env, exit, cwd, platform, arch, pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr |
+| `Buffer` | ✅ Full | Extended Uint8Array: alloc, allocUnsafe, from, concat, endian read/write, includes, subarray, 14 read + 5 write methods |
 | `__dirname` / `__filename` | ✅ | Set per-module during transpilation |
 | `require()` | ✅ Full | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()` |
 | ES Modules | ✅ | import/export with module registry |
-| `node:dns` | ✅ Phase 4 | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve |
-| `node:zlib` | ✅ Phase 4 | `js_zlib.cpp` — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync |
-| `node:readline` | ✅ Phase 4 | `js_readline.cpp` — createInterface, question, close, on |
-| `node:stream` | ✅ Phase 4 | `js_stream.cpp` — Readable, Writable, Duplex, Transform, PassThrough, pipeline |
-| `node:net` | ✅ Phase 4 | `js_net.cpp` — createServer, createConnection, Socket, isIP/isIPv4/isIPv6 |
+| `node:dns` | ✅ Full | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve |
+| `node:zlib` | ✅ Full | `js_zlib.cpp` — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotliCompressSync, brotliDecompressSync |
+| `node:readline` | ✅ Full | `js_readline.cpp` — createInterface, question, close, on |
+| `node:stream` | ✅ Full | `js_stream.cpp` — Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished |
+| `node:net` | ✅ Full | `js_net.cpp` — createServer, createConnection, Socket, isIP/isIPv4/isIPv6 |
 | `node:tls` | ⚠️ Stub | `js_tls.cpp` — namespace registered, requires lambda-cli for full mbedTLS support |
 | npm packages | ✅ Phase 2 done | `lambda node install`, semver resolution, `node_modules/` layout, `lambda-node.lock` |
 | npm bare specifier resolution | ✅ Phase 3 | `npm_resolve_module()` integrated into `jm_resolve_module_path()`, conditional exports support |
@@ -111,12 +120,12 @@ Extend `js_fs.cpp` to expose the full `lib/file.c` API surface:
 | `copyFileSync` | `file_copy` | ✅ Done |
 | `symlinkSync` | `file_symlink` | ✅ Done |
 | `chmodSync` | `file_chmod` | ✅ Done |
-| `realpathSync` | `file_realpath` | 🔲 Wire up |
-| `accessSync` | `file_is_readable/writable/executable` | 🔲 Wire up |
-| `rmSync` (recursive) | `file_delete_recursive`, `dir_delete` | 🔲 Wire up |
-| `mkdtempSync` | `dir_temp_create` | 🔲 Wire up |
-| `readlinkSync` | POSIX `readlink` | 🔲 New |
-| `lstatSync` | `lstat()` (no symlink follow) | 🔲 New |
+| `realpathSync` | `file_realpath` | ✅ Done |
+| `accessSync` | `file_is_readable/writable/executable` | ✅ Done |
+| `rmSync` (recursive) | `file_delete_recursive`, `dir_delete` | ✅ Done |
+| `mkdtempSync` | `dir_temp_create` | ✅ Done |
+| `readlinkSync` | POSIX `readlink` | ✅ Done |
+| `lstatSync` | `lstat()` (no symlink follow) | ✅ Done |
 | `watch` / `watchFile` | libuv `uv_fs_event_t` | 🔲 New (Js15) |
 | `createReadStream` / `createWriteStream` | Requires `node:stream` | 🔲 Phase 2 |
 | `fs/promises` | Async wrappers via libuv `uv_fs_*` | 🔲 Phase 2 |
@@ -129,21 +138,21 @@ The heavy lifting is done — `lib/file.c` already implements the underlying ope
 
 New file: `lambda/js/js_path.cpp`
 
-| API | C Backing | Notes |
-|-----|-----------|-------|
-| `path.join(...)` | `file_path_join` | Handle variadic args |
-| `path.resolve(...)` | `file_realpath` + cwd | Resolve to absolute |
-| `path.dirname(p)` | `file_path_dirname` | |
-| `path.basename(p, ext?)` | `file_path_basename` | |
-| `path.extname(p)` | `file_path_ext` | |
-| `path.normalize(p)` | New | Collapse `..` and `.` |
-| `path.isAbsolute(p)` | New | Check leading `/` or drive |
-| `path.relative(from, to)` | New | Compute relative path |
-| `path.parse(p)` | Composition | Returns `{root, dir, base, ext, name}` |
-| `path.format(obj)` | Composition | Inverse of parse |
-| `path.sep` | `'/'` or `'\\'` | Platform-specific |
-| `path.delimiter` | `':'` or `';'` | Platform-specific |
-| `path.posix` / `path.win32` | Namespaced variants | Low priority |
+| API | C Backing | Status |
+|-----|-----------|--------|
+| `path.join(...)` | `file_path_join` | ✅ Done |
+| `path.resolve(...)` | `file_realpath` + cwd | ✅ Done |
+| `path.dirname(p)` | `file_path_dirname` | ✅ Done |
+| `path.basename(p, ext?)` | `file_path_basename` | ✅ Done |
+| `path.extname(p)` | `file_path_ext` | ✅ Done |
+| `path.normalize(p)` | C implementation | ✅ Done |
+| `path.isAbsolute(p)` | C implementation | ✅ Done |
+| `path.relative(from, to)` | C implementation | ✅ Done |
+| `path.parse(p)` | Composition | ✅ Done |
+| `path.format(obj)` | Composition | ✅ Done |
+| `path.sep` | `'/'` or `'\\'` | ✅ Done |
+| `path.delimiter` | `':'` or `';'` | ✅ Done |
+| `path.posix` / `path.win32` | Namespaced variants | 🔲 Low priority |
 
 #### `node:os`
 
@@ -151,23 +160,25 @@ New file: `lambda/js/js_path.cpp`
 
 New file: `lambda/js/js_os.cpp`
 
-| API | Backing | Notes |
-|-----|---------|-------|
-| `os.platform()` | `LAMBDA_PLATFORM` macro | `"darwin"`, `"linux"`, `"win32"` |
-| `os.arch()` | Compile-time detect | `"x64"`, `"arm64"` |
-| `os.type()` | `uname().sysname` | `"Darwin"`, `"Linux"`, `"Windows_NT"` |
-| `os.release()` | `uname().release` | |
-| `os.hostname()` | `shell_hostname()` | |
-| `os.homedir()` | `shell_home_dir()` | |
-| `os.tmpdir()` | `"./temp/"` | Per project rules, never `/tmp` |
-| `os.cpus()` | `sysconf(_SC_NPROCESSORS_ONLN)` | Array of `{model, speed, times}` |
-| `os.totalmem()` | `sysctl` / `sysinfo` | |
-| `os.freemem()` | `sysctl` / `sysinfo` | |
-| `os.uptime()` | `sysctl` / `/proc/uptime` | |
-| `os.userInfo()` | `getpwuid` | `{username, uid, gid, shell, homedir}` |
-| `os.networkInterfaces()` | `getifaddrs` | Phase 2 |
-| `os.EOL` | `"\n"` or `"\r\n"` | |
-| `os.endianness()` | Compile-time | `"LE"` or `"BE"` |
+| API | Backing | Status |
+|-----|---------|--------|
+| `os.platform()` | `LAMBDA_PLATFORM` macro | ✅ Done |
+| `os.arch()` | Compile-time detect | ✅ Done |
+| `os.type()` | `uname().sysname` | ✅ Done |
+| `os.release()` | `uname().release` | ✅ Done |
+| `os.hostname()` | `shell_hostname()` | ✅ Done |
+| `os.homedir()` | `shell_home_dir()` | ✅ Done |
+| `os.tmpdir()` | `"./temp/"` | ✅ Done |
+| `os.cpus()` | `sysconf(_SC_NPROCESSORS_ONLN)` | ✅ Done |
+| `os.totalmem()` | `sysctl` / `sysinfo` | ✅ Done |
+| `os.freemem()` | `sysctl` / `sysinfo` | ✅ Done |
+| `os.uptime()` | `sysctl` / `/proc/uptime` | ✅ Done |
+| `os.userInfo()` | `getpwuid` | ✅ Done |
+| `os.networkInterfaces()` | `getifaddrs` | ⚠️ Stub |
+| `os.EOL` | `"\n"` or `"\r\n"` | ✅ Done |
+| `os.endianness()` | Compile-time | ✅ Done |
+| `os.loadavg()` | `getloadavg()` | ✅ Done |
+| `os.version()` | `uname().version` | ✅ Done |
 
 #### `node:process` (global + module)
 
@@ -181,21 +192,22 @@ Extend existing `process` global with full module semantics.
 | `process.cwd()` | ✅ Done | Via `file_getcwd` |
 | `process.platform` | ✅ Done | |
 | `process.arch` | ✅ Done | |
-| `process.pid` | 🔲 | `getpid()` |
-| `process.ppid` | 🔲 | `getppid()` |
-| `process.version` | 🔲 | Lambda version string |
-| `process.versions` | 🔲 | `{lambda: "x.y", mir: "...", ...}` |
-| `process.hrtime()` / `.bigint()` | 🔲 | `uv_hrtime()` or `clock_gettime` |
-| `process.memoryUsage()` | 🔲 | GC stats from `lambda-mem.cpp` |
-| `process.cpuUsage()` | 🔲 | `getrusage()` |
-| `process.nextTick(cb)` | 🔲 | Queue before microtasks |
-| `process.stdout` / `.stderr` | 🔲 | Writable stream objects |
+| `process.pid` | ✅ Done | `getpid()` |
+| `process.ppid` | ✅ Done | `getppid()` |
+| `process.version` | ✅ Done | Lambda version string |
+| `process.versions` | ✅ Done | `{node, lambda, v8, uv, modules}` |
+| `process.hrtime()` / `.bigint()` | ✅ Done | `clock_gettime` / `mach_absolute_time` |
+| `process.memoryUsage()` | ✅ Done | mach task_info / procfs / GetProcessMemoryInfo |
+| `process.cpuUsage()` | ✅ Done | `getrusage()` |
+| `process.nextTick(cb)` | ✅ Done | Via `js_microtask_enqueue` |
+| `process.stdout` / `.stderr` | ✅ Done | Writable stream objects |
 | `process.stdin` | 🔲 | Readable stream (Phase 2) |
 | `process.on('exit', cb)` | 🔲 | EventEmitter pattern |
 | `process.on('uncaughtException')` | 🔲 | Requires EventEmitter |
-| `process.chdir(dir)` | 🔲 | `chdir()` |
-| `process.umask()` | 🔲 | `umask()` |
-| `process.uptime()` | 🔲 | Time since process start |
+| `process.chdir(dir)` | ✅ Done | `chdir()` |
+| `process.umask()` | ✅ Done | `umask()` |
+| `process.uptime()` | ✅ Done | Time since process start |
+| `process.title` | ✅ Done | Process title string |
 
 #### `node:events` — EventEmitter
 
@@ -204,15 +216,15 @@ Core dependency for `process`, streams, HTTP, and most Node.js patterns.
 New file: `lambda/js/js_events.cpp`
 
 **Implementation**: Pure JS (transpiled), not native C. EventEmitter is a class with:
-- `on(event, listener)` / `addListener`
-- `once(event, listener)`
-- `off(event, listener)` / `removeListener`
-- `emit(event, ...args)`
-- `removeAllListeners(event?)`
-- `listeners(event)` / `listenerCount(event)`
-- `eventNames()`
-- `setMaxListeners(n)` / `getMaxListeners()`
-- `prependListener` / `prependOnceListener`
+- `on(event, listener)` / `addListener` ✅ Done
+- `once(event, listener)` ✅ Done
+- `off(event, listener)` / `removeListener` ✅ Done
+- `emit(event, ...args)` ✅ Done
+- `removeAllListeners(event?)` ✅ Done
+- `listeners(event)` / `listenerCount(event)` ✅ Done
+- `eventNames()` ✅ Done
+- `setMaxListeners(n)` / `getMaxListeners()` ✅ Done
+- `prependListener` / `prependOnceListener` ✅ Done
 
 **Strategy**: Ship as a JS polyfill (`lambda/js/polyfills/events.js`) compiled into the runtime, rather than implementing in C. This matches Deno's approach.
 
@@ -223,11 +235,11 @@ Commonly imported for `promisify`, `inspect`, `types`, `TextEncoder`/`TextDecode
 | API | Priority | Notes |
 |-----|----------|-------|
 | `util.promisify(fn)` | High | Convert callback-style to Promise |
-| `util.callbackify(fn)` | Medium | Inverse of promisify |
+| `util.callbackify(fn)` | ✅ Done | Inverse of promisify |
 | `util.inspect(obj, opts)` | High | Object pretty-printing |
 | `util.format(fmt, ...)` | High | printf-style string formatting |
 | `util.deprecate(fn, msg)` | Medium | Wrap with deprecation warning |
-| `util.types.isDate/isRegExp/...` | Medium | Type checking functions |
+| `util.types.isDate/isRegExp/...` | ✅ Done | Type checking functions (isBuffer, isError, isPromise, isUint8Array, isFunction, isString, isNumber, isBoolean, isNull, isUndefined, isNullOrUndefined, isObject, isPrimitive) |
 | `util.inherits(ctor, super)` | Low | Legacy, use class extends |
 | `util.TextEncoder/TextDecoder` | High | Already in Web APIs |
 
@@ -239,16 +251,18 @@ Extend Uint8Array with Node.js Buffer semantics.
 |-----|----------|-------|
 | `Buffer.from(str, enc)` | High | String → bytes with encoding |
 | `Buffer.alloc(size)` | High | Zero-filled allocation |
-| `Buffer.allocUnsafe(size)` | Medium | Uninitialized (performance) |
+| `Buffer.allocUnsafe(size)` | ✅ Done | Uninitialized (performance) |
 | `Buffer.concat(list)` | High | Join multiple buffers |
 | `buf.toString(enc)` | High | Decode to string (utf8, hex, base64, ascii) |
-| `buf.slice` / `buf.subarray` | High | View into underlying memory |
+| `buf.slice` / `buf.subarray` | ✅ Done | View into underlying memory |
 | `buf.write(str, off, len, enc)` | Medium | |
-| `buf.readUInt32BE/LE` etc. | Medium | Endian-aware reads |
-| `buf.writeUInt32BE/LE` etc. | Medium | Endian-aware writes |
+| `buf.readUInt32BE/LE` etc. | ✅ Done | Endian-aware reads (UInt8/16/32, Int8/16/32, Float, Double) |
+| `buf.writeUInt32BE/LE` etc. | ✅ Done | Endian-aware writes (UInt8/16/32) |
 | `buf.compare` / `buf.equals` | Medium | |
 | `buf.copy(target)` | Medium | |
 | `buf.fill(val)` | Medium | |
+| `buf.includes(val)` | ✅ Done | Search buffer contents |
+| `buf.lastIndexOf(val)` | ✅ Done | Reverse search |
 
 **Strategy**: Implement Buffer as a subclass of Uint8Array with additional methods. Encodings backed by native C helpers (base64 from existing `atob`/`btoa`, hex trivial).
 
@@ -270,7 +284,7 @@ Required by `fs.createReadStream`, HTTP, and many npm packages.
 | `Duplex` | Medium | ✅ Done — Readable + Writable combined |
 | `PassThrough` | Low | ✅ Done — no-op Transform |
 | `pipeline(...)` | Medium | ✅ Done — two-argument pipe chain |
-| `finished(stream, cb)` | Medium | 🔲 Detect stream completion |
+| `finished(stream, cb)` | Medium | ✅ Done — Detect stream completion |
 
 **Strategy**: Implement as JS polyfills. The Web Streams API (`ReadableStream`/`WritableStream`) from Transpile_Js15 can serve as the underlying mechanism.
 
@@ -326,6 +340,8 @@ Depends on Transpile_Js15 (libuv migration). Server already partially exists via
 
 Wire existing `lib/url.c` to JS `URL` class (largely done via Web APIs). Add legacy `url.parse()` / `url.format()` / `url.resolve()` for Node.js compat.
 
+✅ `fileURLToPath(url)` and `pathToFileURL(path)` — Done.
+
 #### `node:querystring`
 
 | API | Notes |
@@ -341,10 +357,10 @@ Small module, can be pure JS.
 
 | Module | Notes | Priority |
 |--------|-------|----------|
-| `node:string_decoder` | Handles multi-byte UTF-8 across chunks | Medium |
-| `node:assert` | Test assertions — pure JS | Medium |
-| `node:timers` | `setTimeout` etc. already global | Low (alias) |
-| `node:console` | Already implemented as global | Low (alias) |
+| `node:string_decoder` | ✅ Implemented — handles multi-byte UTF-8 across chunks | Done |
+| `node:assert` | ✅ Implemented — ok, equal, strictEqual, deepStrictEqual, throws, fail | Done |
+| `node:timers` | ✅ Registered — alias to global timer functions | Done |
+| `node:console` | ✅ Registered — alias to global console | Done |
 | `node:readline` | ✅ Implemented in Phase 4 | Done |
 | `node:zlib` | ✅ Implemented in Phase 4 | Done |
 | `node:dns` | ✅ Implemented in Phase 4 | Done |
@@ -373,8 +389,8 @@ Small module, can be pure JS.
 
 | Global | Status | Implementation |
 |--------|--------|---------------|
-| `process` | ✅ Partial | Extend per Tier 1 plan |
-| `Buffer` | ⚠️ Partial | Extend per Tier 1 plan |
+| `process` | ✅ Done | Most APIs implemented |
+| `Buffer` | ✅ Done | Extended with endian read/write, includes, subarray |
 | `__dirname` | ✅ Done | Set per-module |
 | `__filename` | ✅ Done | Set per-module |
 | `require()` | ✅ Partial | CJS shim exists; extend resolution |
@@ -382,12 +398,12 @@ Small module, can be pure JS.
 | `exports` | ⚠️ Partial | Alias to `module.exports` |
 | `global` / `globalThis` | ✅ Done | |
 | `setTimeout` / `setInterval` | ✅ Done | Via event loop |
-| `setImmediate` | 🔲 | `uv_check_t` or microtask |
+| `setImmediate` | ✅ Done | Via setTimeout(cb, 0) |
 | `queueMicrotask` | ✅ Done | Via microtask queue |
 | `console` | ✅ Done | |
 | `URL` / `URLSearchParams` | ✅ | Via `lib/url.c` |
 | `TextEncoder` / `TextDecoder` | ✅ | |
-| `structuredClone` | 🔲 | Deep clone |
+| `structuredClone` | ✅ Done | Recursive deep clone |
 | `fetch` | 🔲 | Transpile_Js15 scope |
 | `AbortController` / `AbortSignal` | 🔲 | |
 | `performance` | 🔲 | `uv_hrtime` backed |
@@ -672,24 +688,30 @@ Item js_resolve_node_builtin(const char* module_name) {
     if (strncmp(module_name, "node:", 5) == 0)
         module_name += 5;
 
-    if (strcmp(module_name, "fs") == 0)          return js_get_fs_module();
-    if (strcmp(module_name, "path") == 0)        return js_get_path_module();
-    if (strcmp(module_name, "os") == 0)          return js_get_os_module();
-    if (strcmp(module_name, "events") == 0)      return js_get_events_module();
-    if (strcmp(module_name, "util") == 0)        return js_get_util_module();
-    if (strcmp(module_name, "buffer") == 0)      return js_get_buffer_module();
-    if (strcmp(module_name, "crypto") == 0)      return js_get_crypto_module();
-    if (strcmp(module_name, "child_process") == 0) return js_get_child_process_module();
-    if (strcmp(module_name, "url") == 0)         return js_get_url_module();
-    if (strcmp(module_name, "querystring") == 0) return js_get_querystring_module();
-    if (strcmp(module_name, "http") == 0)        return js_get_http_module();
-    if (strcmp(module_name, "https") == 0)       return js_get_https_module();
-    if (strcmp(module_name, "stream") == 0)      return js_get_stream_module();
-    if (strcmp(module_name, "assert") == 0)      return js_get_assert_module();
-    if (strcmp(module_name, "process") == 0)     return js_get_process_module();
+    if (strcmp(module_name, "fs") == 0)             return js_get_fs_module();
+    if (strcmp(module_name, "path") == 0)           return js_get_path_module();
+    if (strcmp(module_name, "os") == 0)             return js_get_os_module();
+    if (strcmp(module_name, "events") == 0)         return js_get_events_module();
+    if (strcmp(module_name, "util") == 0)           return js_get_util_module();
+    if (strcmp(module_name, "buffer") == 0)         return js_get_buffer_module();
+    if (strcmp(module_name, "crypto") == 0)         return js_get_crypto_module();
+    if (strcmp(module_name, "child_process") == 0)  return js_get_child_process_module();
+    if (strcmp(module_name, "url") == 0)            return js_get_url_module();
+    if (strcmp(module_name, "querystring") == 0)    return js_get_querystring_module();
+    if (strcmp(module_name, "stream") == 0)         return js_get_stream_module();
+    if (strcmp(module_name, "dns") == 0)            return js_get_dns_module();
+    if (strcmp(module_name, "net") == 0)            return js_get_net_module();
+    if (strcmp(module_name, "tls") == 0)            return js_get_tls_module();
+    if (strcmp(module_name, "zlib") == 0)           return js_get_zlib_module();
+    if (strcmp(module_name, "readline") == 0)       return js_get_readline_module();
+    if (strcmp(module_name, "string_decoder") == 0) return js_get_string_decoder_module();
+    if (strcmp(module_name, "assert") == 0)         return js_get_assert_module();
+    if (strcmp(module_name, "process") == 0)        return js_get_process_module();
+    if (strcmp(module_name, "timers") == 0)         return js_get_timers_module();
+    if (strcmp(module_name, "console") == 0)        return js_get_console_module();
     // ...
 
-    return ItemNull; // unknown module
+    return ItemNull; // unknown module — 21 modules registered
 }
 ```
 
@@ -697,19 +719,22 @@ Item js_resolve_node_builtin(const char* module_name) {
 
 ### Phase 1: Core Modules (Tier 1) — ✅ COMPLETE
 
-Wire existing C libraries to JS module objects. All 10 built-in modules implemented, 588/588 baseline tests passing.
+Wire existing C libraries to JS module objects. All built-in modules implemented, 588/588 baseline tests passing.
 
 | Task | Effort | Status |
 |------|--------|--------|
-| `node:path` module | Small | ✅ Done — `js_path.cpp` |
-| `node:os` module | Small | ✅ Done — `js_os.cpp` |
-| `node:process` extensions | Medium | ✅ Done — extended global |
-| `node:buffer` full API | Medium | ✅ Done — Buffer class |
-| `node:util` (promisify, inspect, format) | Medium | ✅ Done — `js_util.cpp` |
-| `node:events` polyfill | Medium | ✅ Done — EventEmitter |
-| `node:fs` remaining sync APIs | Small | ✅ Done — `js_fs.cpp` |
+| `node:path` module | Small | ✅ Done — `js_path.cpp` (12 methods + 2 properties) |
+| `node:os` module | Small | ✅ Done — `js_os.cpp` (17 methods + EOL property) |
+| `node:process` extensions | Medium | ✅ Done — pid, ppid, version, versions, hrtime, nextTick, memoryUsage, cpuUsage, umask, uptime, title, stdout, stderr |
+| `node:buffer` full API | Medium | ✅ Done — alloc, allocUnsafe, from, concat, 14 read + 5 write endian methods, includes, subarray |
+| `node:util` (promisify, inspect, format, types) | Medium | ✅ Done — `js_util.cpp`, 7 top-level + 18 types.* checkers |
+| `node:events` polyfill | Medium | ✅ Done — EventEmitter (15 methods including prependListener) |
+| `node:fs` remaining sync APIs | Small | ✅ Done — 18 sync + 2 async methods |
 | `node:querystring` | Small | ✅ Done |
-| Module dispatcher (`node:` prefix) | Small | ✅ Done — `js_module_get()` handles 17 modules |
+| `node:string_decoder` | Small | ✅ Done — `js_string_decoder.cpp` |
+| `node:assert` | Small | ✅ Done — `js_assert.cpp` (12 assertion methods) |
+| `node:timers` / `node:console` | Small | ✅ Done — registered as importable aliases |
+| Module dispatcher (`node:` prefix) | Small | ✅ Done — `js_module_get()` handles 21 modules |
 
 ### Phase 2: npm Package Manager — ✅ COMPLETE
 
@@ -743,7 +768,7 @@ CJS/ESM interop infrastructure implemented. `require()` works with local modules
 
 ### Phase 4: Extended Modules (Tier 2) — ✅ COMPLETE
 
-All Tier 2 extended modules implemented. 17 built-in modules registered in `js_module_get()`, 588/588 baseline tests passing.
+All Tier 2 extended modules implemented. 21 built-in modules registered in `js_module_get()`, 588/588 baseline tests passing.
 
 | Task                                 | Effort | Status |
 | ------------------------------------ | ------ | ------ |
@@ -755,7 +780,7 @@ All Tier 2 extended modules implemented. 17 built-in modules registered in `js_m
 | `node:tls`                           | Large  | ⚠️ Stub — `js_tls.cpp`, namespace registered, full impl requires lambda-cli target with mbedTLS |
 | `node:zlib`                          | Medium | ✅ Done — `js_zlib.cpp`, gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync |
 | `node:readline`                      | Small  | ✅ Done — `js_readline.cpp`, createInterface, question, close, on |
-| Module dispatcher update             | Small  | ✅ Done — 7 new modules added to `js_module_get()` + builtin bypass list |
+| Module dispatcher update             | Small  | ✅ Done — 11 new modules added to `js_module_get()` + builtin bypass list (21 total) |
 
 ### Phase 5: HTTP & Server
 

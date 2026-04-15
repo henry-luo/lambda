@@ -316,6 +316,28 @@ extern "C" Item js_os_userInfo(void) {
     return obj;
 }
 
+// os.loadavg() — returns [1min, 5min, 15min] load averages
+extern "C" Item js_os_loadavg(void) {
+    Item arr = js_array_new(3);
+#ifndef _WIN32
+    double loadavg[3] = {0, 0, 0};
+    getloadavg(loadavg, 3);
+    for (int i = 0; i < 3; i++) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = loadavg[i];
+        js_array_push(arr, (Item){.item = d2it(fp)});
+    }
+#else
+    // Windows doesn't have getloadavg
+    for (int i = 0; i < 3; i++) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = 0.0;
+        js_array_push(arr, (Item){.item = d2it(fp)});
+    }
+#endif
+    return arr;
+}
+
 // =============================================================================
 // os Module Namespace Object
 // =============================================================================
@@ -348,6 +370,7 @@ extern "C" Item js_get_os_namespace(void) {
     js_os_set_method(os_namespace, "version",           (void*)js_os_version, 0);
     js_os_set_method(os_namespace, "networkInterfaces", (void*)js_os_networkInterfaces, 0);
     js_os_set_method(os_namespace, "userInfo",          (void*)js_os_userInfo, 0);
+    js_os_set_method(os_namespace, "loadavg",           (void*)js_os_loadavg, 0);
 
     // constants
 #ifdef _WIN32

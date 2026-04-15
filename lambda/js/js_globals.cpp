@@ -24,9 +24,13 @@
 #include <time.h>
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
+#include <psapi.h>
 #define getpid _getpid
 #else
 #include <unistd.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #endif
 
 // forward declaration for JSON parser
@@ -41,6 +45,8 @@ static bool js_is_symbol_item(Item item);
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/task_info.h>
 #endif
 
 static inline Item make_js_undefined() {
@@ -869,6 +875,113 @@ static Item build_process_stderr(void) {
     return stderr_obj;
 }
 
+// process.nextTick(callback, ...args) — queue callback before microtasks
+extern "C" Item js_process_nextTick(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // schedule as microtask (matches Node.js semantics closely enough)
+    extern void js_microtask_enqueue(Item func);
+    js_microtask_enqueue(callback);
+    return make_js_undefined();
+}
+
+// process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
+extern "C" Item js_process_memoryUsage(void) {
+    Item result = js_new_object();
+    // approximate memory info
+#ifdef __APPLE__
+    struct task_basic_info info;
+    mach_msg_type_number_t size = TASK_BASIC_INFO_COUNT;
+    kern_return_t kr = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&info, &size);
+    int64_t rss = (kr == KERN_SUCCESS) ? (int64_t)info.resident_size : 0;
+#elif defined(__linux__)
+    int64_t rss = 0;
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        long pages = 0;
+        if (fscanf(f, "%*ld %ld", &pages) == 1)
+            rss = (int64_t)pages * sysconf(_SC_PAGESIZE);
+        fclose(f);
+    }
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    int64_t rss = 0;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        rss = (int64_t)pmc.WorkingSetSize;
+#else
+    int64_t rss = 0;
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("rss", 3))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapTotal", 9))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapUsed", 8))},
+                    (Item){.item = i2it(rss / 2)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("external", 8))},
+                    (Item){.item = i2it(0)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("arrayBuffers", 12))},
+                    (Item){.item = i2it(0)});
+    return result;
+}
+
+// process.cpuUsage() — returns {user, system} in microseconds
+extern "C" Item js_process_cpuUsage(void) {
+    Item result = js_new_object();
+#ifndef _WIN32
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    int64_t user_us = (int64_t)usage.ru_utime.tv_sec * 1000000 + (int64_t)usage.ru_utime.tv_usec;
+    int64_t sys_us = (int64_t)usage.ru_stime.tv_sec * 1000000 + (int64_t)usage.ru_stime.tv_usec;
+#else
+    int64_t user_us = 0, sys_us = 0;
+    FILETIME create, exit_t, kernel, user_ft;
+    if (GetProcessTimes(GetCurrentProcess(), &create, &exit_t, &kernel, &user_ft)) {
+        ULARGE_INTEGER u, k;
+        u.LowPart = user_ft.dwLowDateTime; u.HighPart = user_ft.dwHighDateTime;
+        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
+        user_us = (int64_t)(u.QuadPart / 10); // 100ns → us
+        sys_us = (int64_t)(k.QuadPart / 10);
+    }
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("user", 4))},
+                    (Item){.item = i2it(user_us)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("system", 6))},
+                    (Item){.item = i2it(sys_us)});
+    return result;
+}
+
+// process.umask([mask]) — get/set file mode creation mask
+extern "C" Item js_process_umask(Item mask_item) {
+#ifndef _WIN32
+    TypeId tid = get_type_id(mask_item);
+    if (tid == LMD_TYPE_INT) {
+        mode_t old = umask((mode_t)it2i(mask_item));
+        return (Item){.item = i2it((int64_t)old)};
+    }
+    // get current and restore
+    mode_t current = umask(0);
+    umask(current);
+    return (Item){.item = i2it((int64_t)current)};
+#else
+    return (Item){.item = i2it(0)};
+#endif
+}
+
+// build process.versions object
+static Item build_process_versions(void) {
+    Item versions = js_new_object();
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("node", 4))},
+                    (Item){.item = s2it(heap_create_name("20.0.0", 6))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("lambda", 6))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("v8", 2))},
+                    (Item){.item = s2it(heap_create_name("0.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("uv", 2))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
+                    (Item){.item = s2it(heap_create_name("115", 3))});
+    return versions;
+}
+
 static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
     Item fn = js_new_function(func_ptr, param_count);
@@ -928,6 +1041,19 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
         js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
         js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
+        js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, 1);
+        js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
+        js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
+        js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
+
+        // versions object
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("versions", 8))}, build_process_versions());
+
+        // title
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("title", 5))},
+            (Item){.item = s2it(heap_create_name("lambda", 6))});
 
         // hrtime object with bigint() method
         Item hrtime_obj = js_new_object();
@@ -946,6 +1072,93 @@ extern "C" Item js_get_process_object_value(void) {
             (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
     }
     return js_process_object;
+}
+
+// =============================================================================
+// setImmediate / clearImmediate
+// =============================================================================
+
+// setImmediate(callback) — schedule callback as a microtask (next tick)
+extern "C" Item js_setImmediate(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // use setTimeout with 0 delay for setImmediate semantics
+    extern Item js_setTimeout(Item cb, Item delay);
+    return js_setTimeout(callback, (Item){.item = i2it(0)});
+}
+
+// clearImmediate(id) — cancel a setImmediate
+extern "C" void js_clearImmediate(Item id) {
+    extern void js_clearTimeout(Item id);
+    js_clearTimeout(id);
+}
+
+// =============================================================================
+// structuredClone(value) — deep clone
+// =============================================================================
+
+static Item structured_clone_impl(Item value, int depth) {
+    if (depth > 100) return value; // prevent infinite recursion
+    TypeId tid = get_type_id(value);
+
+    // primitives: return as-is
+    if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+        tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
+        tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_STRING) {
+        return value;
+    }
+
+    // arrays: deep clone each element
+    if (tid == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(value);
+        Item result = js_array_new((int)len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = js_array_get_int(value, i);
+            js_array_push(result, structured_clone_impl(elem, depth + 1));
+        }
+        return result;
+    }
+
+    // typed array: copy buffer
+    extern bool js_is_typed_array(Item item);
+    if (js_is_typed_array(value)) {
+        Map* m = value.map;
+        JsTypedArray* ta = (JsTypedArray*)m->data;
+        if (ta && ta->data && ta->byte_length > 0) {
+            extern Item js_typed_array_new(int element_type, int length);
+            Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
+            Map* cm = clone.map;
+            JsTypedArray* cta = (JsTypedArray*)cm->data;
+            if (cta && cta->data) {
+                memcpy(cta->data, ta->data, ta->byte_length);
+            }
+            return clone;
+        }
+        return value;
+    }
+
+    // maps/objects: clone properties
+    if (tid == LMD_TYPE_MAP) {
+        Item result = js_new_object();
+        Item keys = js_object_keys(value);
+        int64_t len = js_array_length(keys);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(keys, i);
+            Item val = js_property_get(value, key);
+            js_property_set(result, key, structured_clone_impl(val, depth + 1));
+        }
+        return result;
+    }
+
+    // functions can't be cloned
+    if (tid == LMD_TYPE_FUNC) {
+        return value;
+    }
+
+    return value;
+}
+
+extern "C" Item js_structuredClone(Item value) {
+    return structured_clone_impl(value, 0);
 }
 
 // =============================================================================

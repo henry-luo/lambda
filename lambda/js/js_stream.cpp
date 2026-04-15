@@ -33,6 +33,10 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
 // cached key items
 static Item key_on;
 static Item key_emit;
@@ -470,6 +474,41 @@ extern "C" Item js_readable_from(Item iterable) {
     return readable;
 }
 
+// ─── stream.finished(stream, callback) ──────────────────────────────────────
+// Detect when a stream is no longer readable/writable/errored. Calls callback
+// when the stream is consumed or an error occurs.
+extern "C" Item js_stream_finished(Item stream, Item callback) {
+    ensure_keys();
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+
+    // check if already finished/destroyed
+    Item fin = js_property_get(stream, key_finished);
+    Item des = js_property_get(stream, key_destroyed);
+    bool is_done = (get_type_id(fin) == LMD_TYPE_BOOL && it2b(fin)) ||
+                   (get_type_id(des) == LMD_TYPE_BOOL && it2b(des));
+
+    if (is_done) {
+        // call callback immediately with no error
+        Item args[1] = { ItemNull };
+        js_call_function(callback, ItemNull, args, 1);
+        return make_js_undefined();
+    }
+
+    // register on 'end', 'finish', 'error', 'close' events
+    extern Item js_ee_on(Item, Item, Item);
+    Item end_event = make_string_item("end");
+    Item finish_event = make_string_item("finish");
+    Item error_event = make_string_item("error");
+    Item close_event = make_string_item("close");
+
+    js_ee_on(stream, end_event, callback);
+    js_ee_on(stream, finish_event, callback);
+    js_ee_on(stream, error_event, callback);
+    js_ee_on(stream, close_event, callback);
+
+    return make_js_undefined();
+}
+
 // =============================================================================
 // stream Module Namespace
 // =============================================================================
@@ -494,6 +533,7 @@ extern "C" Item js_get_stream_namespace(void) {
     stream_set_method(stream_namespace, "Transform",   (void*)js_transform_new, 0);
     stream_set_method(stream_namespace, "PassThrough", (void*)js_passthrough_new, 0);
     stream_set_method(stream_namespace, "pipeline",    (void*)js_stream_pipeline, 2);
+    stream_set_method(stream_namespace, "finished",    (void*)js_stream_finished, 2);
 
     // Readable.from as a static method
     Item readable_constructor = js_property_get(stream_namespace, make_string_item("Readable"));
