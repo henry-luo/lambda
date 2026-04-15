@@ -337,6 +337,10 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
     ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
     ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
+    ee_set_method(events_namespace, "rawListeners",        (void*)js_ee_listeners, 2); // same as listeners (no wrappers)
+
+    // static property: defaultMaxListeners = 10
+    js_property_set(events_namespace, make_string_item("defaultMaxListeners"), (Item){.item = i2it(10)});
 
     // default export is the constructor
     js_property_set(events_namespace, make_string_item("default"), events_namespace);

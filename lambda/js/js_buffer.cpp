@@ -711,6 +711,212 @@ extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_i
     return (Item){.item = i2it(off + 4)};
 }
 
+// ─── Signed Integer Write Methods ────────────────────────────────────────────
+
+extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off >= blen) return (Item){.item = i2it(off + 1)};
+    int64_t v = 0;
+    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    data[off] = (uint8_t)(v & 0xFF);
+    return (Item){.item = i2it(off + 1)};
+}
+
+extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 2 > blen) return (Item){.item = i2it(off + 2)};
+    int64_t v = 0;
+    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    data[off]     = (uint8_t)((v >> 8) & 0xFF);
+    data[off + 1] = (uint8_t)(v & 0xFF);
+    return (Item){.item = i2it(off + 2)};
+}
+
+extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 2 > blen) return (Item){.item = i2it(off + 2)};
+    int64_t v = 0;
+    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    data[off]     = (uint8_t)(v & 0xFF);
+    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
+    return (Item){.item = i2it(off + 2)};
+}
+
+extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 4 > blen) return (Item){.item = i2it(off + 4)};
+    int64_t v = 0;
+    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    data[off]     = (uint8_t)((v >> 24) & 0xFF);
+    data[off + 1] = (uint8_t)((v >> 16) & 0xFF);
+    data[off + 2] = (uint8_t)((v >> 8) & 0xFF);
+    data[off + 3] = (uint8_t)(v & 0xFF);
+    return (Item){.item = i2it(off + 4)};
+}
+
+extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 4 > blen) return (Item){.item = i2it(off + 4)};
+    int64_t v = 0;
+    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    data[off]     = (uint8_t)(v & 0xFF);
+    data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
+    data[off + 2] = (uint8_t)((v >> 16) & 0xFF);
+    data[off + 3] = (uint8_t)((v >> 24) & 0xFF);
+    return (Item){.item = i2it(off + 4)};
+}
+
+// ─── Float/Double Write Methods ──────────────────────────────────────────────
+
+extern "C" Item js_buffer_writeFloatBE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 4 > blen) return (Item){.item = i2it(off + 4)};
+    float val = 0;
+    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (float)it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (float)it2i(value_item);
+    uint32_t bits;
+    memcpy(&bits, &val, 4);
+    data[off]     = (uint8_t)((bits >> 24) & 0xFF);
+    data[off + 1] = (uint8_t)((bits >> 16) & 0xFF);
+    data[off + 2] = (uint8_t)((bits >> 8) & 0xFF);
+    data[off + 3] = (uint8_t)(bits & 0xFF);
+    return (Item){.item = i2it(off + 4)};
+}
+
+extern "C" Item js_buffer_writeFloatLE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 4 > blen) return (Item){.item = i2it(off + 4)};
+    float val = 0;
+    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = (float)it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (float)it2i(value_item);
+    uint32_t bits;
+    memcpy(&bits, &val, 4);
+    data[off]     = (uint8_t)(bits & 0xFF);
+    data[off + 1] = (uint8_t)((bits >> 8) & 0xFF);
+    data[off + 2] = (uint8_t)((bits >> 16) & 0xFF);
+    data[off + 3] = (uint8_t)((bits >> 24) & 0xFF);
+    return (Item){.item = i2it(off + 4)};
+}
+
+extern "C" Item js_buffer_writeDoubleBE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 8 > blen) return (Item){.item = i2it(off + 8)};
+    double val = 0;
+    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (double)it2i(value_item);
+    uint64_t bits;
+    memcpy(&bits, &val, 8);
+    for (int j = 7; j >= 0; j--) {
+        data[off + (7 - j)] = (uint8_t)((bits >> (j * 8)) & 0xFF);
+    }
+    return (Item){.item = i2it(off + 8)};
+}
+
+extern "C" Item js_buffer_writeDoubleLE(Item buf, Item value_item, Item offset_item) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    int off = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) off = (int)it2i(offset_item);
+    if (!data || off < 0 || off + 8 > blen) return (Item){.item = i2it(off + 8)};
+    double val = 0;
+    if (get_type_id(value_item) == LMD_TYPE_FLOAT) val = it2d(value_item);
+    else if (get_type_id(value_item) == LMD_TYPE_INT) val = (double)it2i(value_item);
+    uint64_t bits;
+    memcpy(&bits, &val, 8);
+    for (int j = 0; j < 8; j++) {
+        data[off + j] = (uint8_t)((bits >> (j * 8)) & 0xFF);
+    }
+    return (Item){.item = i2it(off + 8)};
+}
+
+// ─── toJSON ──────────────────────────────────────────────────────────────────
+
+extern "C" Item js_buffer_toJSON(Item buf) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("type"), make_string_item("Buffer"));
+    Item arr = js_array_new(blen);
+    if (data) {
+        for (int i = 0; i < blen; i++) {
+            js_array_push(arr, (Item){.item = i2it((int64_t)data[i])});
+        }
+    }
+    js_property_set(result, make_string_item("data"), arr);
+    return result;
+}
+
+// ─── swap16 / swap32 ─────────────────────────────────────────────────────────
+
+extern "C" Item js_buffer_swap16(Item buf) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen % 2 != 0) return buf;
+    for (int i = 0; i < blen; i += 2) {
+        uint8_t tmp = data[i];
+        data[i] = data[i + 1];
+        data[i + 1] = tmp;
+    }
+    return buf;
+}
+
+extern "C" Item js_buffer_swap32(Item buf) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen % 4 != 0) return buf;
+    for (int i = 0; i < blen; i += 4) {
+        uint8_t t0 = data[i], t1 = data[i + 1];
+        data[i] = data[i + 3];
+        data[i + 1] = data[i + 2];
+        data[i + 2] = t1;
+        data[i + 3] = t0;
+    }
+    return buf;
+}
+
+extern "C" Item js_buffer_swap64(Item buf) {
+    int blen = 0;
+    uint8_t* data = buffer_data(buf, &blen);
+    if (!data || blen % 8 != 0) return buf;
+    for (int i = 0; i < blen; i += 8) {
+        for (int j = 0; j < 4; j++) {
+            uint8_t tmp = data[i + j];
+            data[i + j] = data[i + 7 - j];
+            data[i + 7 - j] = tmp;
+        }
+    }
+    return buf;
+}
+
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
 static Item buffer_namespace = {0};
@@ -769,6 +975,19 @@ extern "C" Item js_get_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "writeUInt16LE", (void*)js_buffer_writeUInt16LE, 3);
     buf_set_method(buffer_namespace, "writeUInt32BE", (void*)js_buffer_writeUInt32BE, 3);
     buf_set_method(buffer_namespace, "writeUInt32LE", (void*)js_buffer_writeUInt32LE, 3);
+    buf_set_method(buffer_namespace, "writeInt8",     (void*)js_buffer_writeInt8, 3);
+    buf_set_method(buffer_namespace, "writeInt16BE",  (void*)js_buffer_writeInt16BE, 3);
+    buf_set_method(buffer_namespace, "writeInt16LE",  (void*)js_buffer_writeInt16LE, 3);
+    buf_set_method(buffer_namespace, "writeInt32BE",  (void*)js_buffer_writeInt32BE, 3);
+    buf_set_method(buffer_namespace, "writeInt32LE",  (void*)js_buffer_writeInt32LE, 3);
+    buf_set_method(buffer_namespace, "writeFloatBE",  (void*)js_buffer_writeFloatBE, 3);
+    buf_set_method(buffer_namespace, "writeFloatLE",  (void*)js_buffer_writeFloatLE, 3);
+    buf_set_method(buffer_namespace, "writeDoubleBE", (void*)js_buffer_writeDoubleBE, 3);
+    buf_set_method(buffer_namespace, "writeDoubleLE", (void*)js_buffer_writeDoubleLE, 3);
+    buf_set_method(buffer_namespace, "toJSON",        (void*)js_buffer_toJSON, 1);
+    buf_set_method(buffer_namespace, "swap16",        (void*)js_buffer_swap16, 1);
+    buf_set_method(buffer_namespace, "swap32",        (void*)js_buffer_swap32, 1);
+    buf_set_method(buffer_namespace, "swap64",        (void*)js_buffer_swap64, 1);
 
     // Buffer is the default export
     js_property_set(buffer_namespace, make_string_item("Buffer"), buffer_namespace);

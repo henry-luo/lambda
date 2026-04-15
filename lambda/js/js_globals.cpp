@@ -988,6 +988,44 @@ static void js_process_set_method(Item ns, const char* name, void* func_ptr, int
     js_property_set(ns, key, fn);
 }
 
+// ─── process.on(event, listener) ────────────────────────────────────────────
+// simple event emitter for process: supports 'exit', 'uncaughtException', 'beforeExit'
+#define MAX_PROCESS_LISTENERS 32
+static Item process_exit_listeners[MAX_PROCESS_LISTENERS] = {};
+static int process_exit_listener_count = 0;
+static Item process_uncaught_listeners[MAX_PROCESS_LISTENERS] = {};
+static int process_uncaught_listener_count = 0;
+
+extern "C" Item js_process_on(Item event_name, Item listener) {
+    if (get_type_id(event_name) != LMD_TYPE_STRING) return js_process_object;
+    if (get_type_id(listener) != LMD_TYPE_FUNC) return js_process_object;
+    String* ev = it2s(event_name);
+    if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+        if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
+            process_exit_listeners[process_exit_listener_count++] = listener;
+        }
+    } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+        if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
+            process_uncaught_listeners[process_uncaught_listener_count++] = listener;
+        }
+    }
+    // return process for chaining
+    return js_process_object;
+}
+
+extern "C" void js_process_emit_exit(int code) {
+    extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+    Item code_item = (Item){.item = i2it((int64_t)code)};
+    for (int i = 0; i < process_exit_listener_count; i++) {
+        js_call_function(process_exit_listeners[i], js_process_object, &code_item, 1);
+    }
+}
+
+extern "C" void js_process_reset_listeners(void) {
+    process_exit_listener_count = 0;
+    process_uncaught_listener_count = 0;
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
@@ -1045,6 +1083,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
         js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
+        js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
 
         // versions object
         js_property_set(js_process_object,
@@ -2771,7 +2810,16 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
 
     // Convert name to string for comparison
-    Item name_str_item = js_to_string(name);
+    // v41: Symbol keys must be converted to __sym_N internal format, not human-readable string
+    Item name_str_item;
+    if (get_type_id(name) == LMD_TYPE_INT && it2i(name) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(name) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        name_str_item = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    } else {
+        name_str_item = js_to_string(name);
+    }
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
 
@@ -5441,7 +5489,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v18: handle function objects — prototype, name, length, and custom properties
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        Item k = js_to_string(key);
+        Item k;
+        // v41: Symbol keys → __sym_N format
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else {
+            k = js_to_string(key);
+        }
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
@@ -6439,6 +6496,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // Convert Symbol keys to __sym_N string format so marker checks work
+    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;

@@ -3602,6 +3602,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name(nm, nl))};
                             js_property_set(fn->prototype, tag_key, tag_val);
+                            // v41: Mark Symbol.toStringTag non-writable, non-enumerable per spec
+                            js_mark_non_writable(fn->prototype, tag_key);
+                            js_mark_non_enumerable(fn->prototype, tag_key);
                         }
                         // v76: Populate Map/Set prototype methods for test262 compliance
                         if (nl == 3 && strncmp(nm, "Map", 3) == 0) {
@@ -5336,10 +5339,17 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) table = arraybuffer_methods;
     if (!table) return;
 
+    JsFunction* fn = (JsFunction*)ctor_item.function;
     for (int i = 0; table[i].name; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(table[i].name, table[i].len))};
+        // Skip if already populated (e.g. Number.parseInt/parseFloat set by
+        // js_populate_number_ctor to preserve identity with global builtins)
+        if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            Item existing = map_get(fn->properties_map.map, key);
+            if (existing.item != ItemNull.item) continue;
+        }
         Item method = js_lookup_constructor_static(ctor_name, ctor_len, table[i].name, table[i].len);
         if (method.item != ItemNull.item) {
-            Item key = (Item){.item = s2it(heap_create_name(table[i].name, table[i].len))};
             js_func_init_property(ctor_item, key, method);
             js_mark_non_enumerable(ctor_item, key);
         }
@@ -11693,6 +11703,9 @@ static Item js_get_math_object() {
         // v18n: Add Symbol.toStringTag for Math (stored as __sym_4 to match Object.prototype.toString)
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_math_object, tag_k, (Item){.item = s2it(heap_create_name("Math", 4))});
+        // v41: Mark Symbol.toStringTag as non-writable, non-enumerable (configurable: true per spec)
+        js_mark_non_writable(js_math_object, tag_k);
+        js_mark_non_enumerable(js_math_object, tag_k);
         // Populate Math constants (non-writable, non-enumerable, non-configurable per spec)
         struct { const char* name; double val; } mc[] = {
             {"PI", M_PI}, {"E", M_E}, {"LN2", M_LN2}, {"LN10", M_LN10},
@@ -11757,6 +11770,9 @@ extern "C" Item js_get_json_object_value() {
         heap_register_gc_root(&js_json_object.item);
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_json_object, tag_k, (Item){.item = s2it(heap_create_name("JSON", 4))});
+        // v41: Mark Symbol.toStringTag as non-writable, non-enumerable (configurable: true per spec)
+        js_mark_non_writable(js_json_object, tag_k);
+        js_mark_non_enumerable(js_json_object, tag_k);
         // v28: add parse and stringify as callable function properties
         struct { const char* name; int id; int pc; } jm[] = {
             {"parse", JS_BUILTIN_JSON_PARSE, 2},
