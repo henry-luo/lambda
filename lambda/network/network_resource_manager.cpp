@@ -4,6 +4,7 @@
 #include "network_resource_manager.h"
 #include "network_downloader.h"
 #include "resource_loaders.h"
+#include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
 #include "../../radiant/state_store.hpp"
 #include "../../lib/url.h"
@@ -238,6 +239,9 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     mgr->default_timeout_ms = 30000;  // 30 seconds per resource
     mgr->page_load_timeout_ms = 60000;  // 60 seconds total page load
     
+    // Phase 4: cookie jar for session management
+    mgr->cookie_jar = cookie_jar_create("./temp/cookies.dat");
+    
     log_debug("network: created resource manager (timeouts: per-resource=%dms, page=%dms)",
               mgr->default_timeout_ms, mgr->page_load_timeout_ms);
     
@@ -249,6 +253,12 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
     if (!mgr) return;
     
     log_debug("network: destroying resource manager");
+    
+    // Phase 4: destroy cookie jar (saves persistent cookies to disk)
+    if (mgr->cookie_jar) {
+        cookie_jar_destroy(mgr->cookie_jar);
+        mgr->cookie_jar = NULL;
+    }
     
     // free all resources in hashmap
     if (mgr->resources) {

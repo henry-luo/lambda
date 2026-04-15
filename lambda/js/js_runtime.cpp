@@ -6707,7 +6707,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 js_throw_value(js_new_error_with_name(tn, msg));
                 return ItemNull;
             }
-        } else if (tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT64) {
+        } else if ((tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT64)
+                   || js_key_is_symbol(this_val)) {
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item msg = (Item){.item = s2it(heap_create_name("Number.prototype method requires that 'this' be a Number"))};
             js_throw_value(js_new_error_with_name(tn, msg));

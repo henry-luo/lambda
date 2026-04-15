@@ -1,6 +1,7 @@
 #include "handler.hpp"
 #include "state_store.hpp"
 #include "form_control.hpp"
+#include "browsing_session.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -24,6 +25,7 @@ DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, in
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
+void update_window_title(const char* title);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
@@ -1747,6 +1749,19 @@ View* find_view(View* view, DomNode* node) {
     return NULL;
 }
 
+// find a DomElement by its id attribute (for fragment navigation)
+static DomElement* find_element_by_id(DomElement* root, const char* id) {
+    if (!root || !id) return nullptr;
+    const char* elem_id = dom_element_get_attribute(root, "id");
+    if (elem_id && strcmp(elem_id, id) == 0) return root;
+    for (DomNode* child_node = root->first_child; child_node; child_node = child_node->next_sibling) {
+        if (!child_node->is_element()) continue;
+        DomElement* found = find_element_by_id(child_node->as_element(), id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
 /**
  * Calculate absolute window position from view-relative coordinates.
  * Walks up the parent chain accumulating block positions.
@@ -2872,6 +2887,36 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.new_url) {
             log_debug("opening_url:%s", evcon.new_url);
+            const char* new_url = evcon.new_url;
+
+            // -- Fragment-only navigation: scroll to #id without loading a new page --
+            if (new_url[0] == '#' && doc->root) {
+                const char* fragment_id = new_url + 1;  // skip '#'
+                log_info("browse_nav: fragment navigation to #%s", fragment_id);
+                DomElement* target_elem = find_element_by_id(doc->root, fragment_id);
+                if (target_elem) {
+                    View* target_view = find_view(doc->view_tree->root, (DomNode*)target_elem);
+                    if (target_view) {
+                        // get root scroller and scroll to element's y position
+                        ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+                        if (root_block && root_block->scroller && root_block->scroller->pane) {
+                            ScrollPane* pane = root_block->scroller->pane;
+                            float target_y = target_view->y;
+                            target_y = target_y < 0 ? 0 : (target_y > pane->v_max_scroll ? pane->v_max_scroll : target_y);
+                            pane->v_scroll_position = target_y;
+                            log_info("browse_nav: scrolled to #%s at y=%.0f", fragment_id, target_y);
+                            uicon->document->state->is_dirty = true;
+                        }
+                    } else {
+                        log_warn("browse_nav: element #%s found but no view for it", fragment_id);
+                    }
+                } else {
+                    log_warn("browse_nav: element #%s not found in document", fragment_id);
+                }
+                to_repaint();
+                break;
+            }
+
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
@@ -2954,14 +2999,36 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
             else {
-                DomDocument* old_doc = evcon.ui_context->document;
-                // load the new document
-                // Use viewport dimensions (already in CSS logical pixels)
+                // -- Main page navigation: route through browsing session for history management --
                 int css_vw = evcon.ui_context->viewport_width;
                 int css_vh = evcon.ui_context->viewport_height;
-                evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url,
-                    css_vw, css_vh);
-                free_document(old_doc);
+                BrowsingSession* session = evcon.ui_context->browsing_session;
+                DomDocument* new_doc = nullptr;
+                if (session) {
+                    // save current scroll position in history
+                    ViewBlock* root_block = doc->view_tree ? (ViewBlock*)doc->view_tree->root : nullptr;
+                    if (root_block && root_block->scroller && root_block->scroller->pane) {
+                        session_save_scroll_position(session, root_block->scroller->pane->v_scroll_position);
+                    }
+                    log_info("browse_nav: navigating via session to %s", new_url);
+                    new_doc = session_navigate(session, evcon.ui_context, new_url, css_vw, css_vh);
+                } else {
+                    // no session (local file, headless), fallback to direct navigation
+                    log_info("browse_nav: no session, navigating directly to %s", new_url);
+                    DomDocument* old_doc = evcon.ui_context->document;
+                    new_doc = show_html_doc(evcon.ui_context->document->url, (char*)new_url, css_vw, css_vh);
+                    free_document(old_doc);
+                }
+                if (new_doc) {
+                    // update window title from <title> tag
+                    const char* page_title = session ? session_current_title(session) : nullptr;
+                    if (!page_title) page_title = session_extract_title(new_doc);
+                    if (page_title) {
+                        char title_buf[512];
+                        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
+                        update_window_title(title_buf);
+                    }
+                }
             }
             to_repaint();
         }

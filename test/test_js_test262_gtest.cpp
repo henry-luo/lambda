@@ -114,6 +114,9 @@ static bool g_use_stripped = false;  // use comment-stripped test files from TES
 // Target: ES2020 compliance. All features ≤ES2020 are in scope.
 // Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
+    // === ES2015 features (not implemented) ===
+    "tail-call-optimization",                     // Proper tail calls (100K+ recursion, hangs without TCO)
+
     // === ES2021 features ===
     "WeakRef",                                    // Weak references
     "FinalizationRegistry",                       // GC callback hooks
@@ -1770,19 +1773,26 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                     timeout_names.insert(std::string(ns));
                                 }
                             } else if (is_slow) {
-                                // preserve SLOW_ entries only if test was not re-run this session
-                                // (re-run tests will be re-emitted from fresh timing data below)
+                                // preserve SLOW_ entries only if test was not re-run this session,
+                                // or if re-run and still slow (>= 3s). Tests that ran faster
+                                // are released from quarantine and return to batch execution.
+                                char slow_buf[2048];
+                                strncpy(slow_buf, tbuf, sizeof(slow_buf));
+                                slow_buf[sizeof(slow_buf)-1] = '\0';
                                 char* ft = strchr(tbuf, '\t');
                                 if (ft) {
                                     char* ns = ft + 1;
                                     char* st = strchr(ns, '\t');
-                                    char* name_copy = ns;
                                     if (st) { *st = '\0'; }
-                                    std::string name(name_copy);
-                                    // only preserve if not in this run's results (quarantined tests
-                                    // have exit_code=124 set above, so they won't be re-emitted)
-                                    timeout_lines.push_back(std::string(tbuf));
-                                    timeout_names.insert(name);
+                                    std::string name(ns);
+                                    auto br_it = batch_results.find(name);
+                                    if (br_it == batch_results.end() ||
+                                        br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
+                                        // not re-run or still slow → preserve
+                                        timeout_lines.push_back(std::string(slow_buf));
+                                        timeout_names.insert(name);
+                                    }
+                                    // else: re-run and now fast → release from quarantine
                                 }
                             } else {
                                 // # comment lines
