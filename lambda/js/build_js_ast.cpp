@@ -14,6 +14,46 @@
 // forward declarations
 static char js_decode_escape_char(char c);
 
+// Encode a Unicode code point as WTF-8 (allows lone surrogates, unlike utf8_encode).
+// Returns number of bytes written (1-4), or 0 on error.
+static inline size_t wtf8_encode(uint32_t cp, char* buf) {
+    if (cp < 0x80)   { buf[0] = (char)cp; return 1; }
+    if (cp < 0x800)  { buf[0] = (char)(0xC0|(cp>>6)); buf[1] = (char)(0x80|(cp&0x3F)); return 2; }
+    if (cp < 0x10000){ buf[0] = (char)(0xE0|(cp>>12)); buf[1] = (char)(0x80|((cp>>6)&0x3F)); buf[2] = (char)(0x80|(cp&0x3F)); return 3; }
+    if (cp <= 0x10FFFF) { buf[0] = (char)(0xF0|(cp>>18)); buf[1] = (char)(0x80|((cp>>12)&0x3F)); buf[2] = (char)(0x80|((cp>>6)&0x3F)); buf[3] = (char)(0x80|(cp&0x3F)); return 4; }
+    return 0;
+}
+
+// Parse a 4-hex-digit \uXXXX escape from src at position i (pointing at 'u'),
+// handling surrogate pair combination. Updates i to point past the consumed chars.
+// Returns bytes written to out buffer.
+static size_t js_decode_unicode_escape(const char* src, size_t content_len, size_t* io_i, char* out) {
+    size_t i = *io_i; // i points at the 'u' in \uXXXX
+    if (i + 4 >= content_len) { return 0; }
+    char hex[5] = {src[i+1], src[i+2], src[i+3], src[i+4], 0};
+    uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
+    *io_i = i + 4; // skip uXXXX (caller already skipped backslash)
+
+    // check for surrogate pair: lead \uD800-\uDBFF followed by \uDC00-\uDFFF
+    if (cp >= 0xD800 && cp <= 0xDBFF && *io_i + 2 < content_len
+        && src[*io_i + 1] == '\\' && src[*io_i + 2] == 'u') {
+        size_t j = *io_i + 2; // points at 'u' of second escape
+        if (j + 4 < content_len) {
+            char hex2[5] = {src[j+1], src[j+2], src[j+3], src[j+4], 0};
+            uint32_t lo = (uint32_t)strtoul(hex2, NULL, 16);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                // valid surrogate pair → combine into supplementary code point
+                uint32_t combined = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                *io_i = j + 4; // skip \uXXXX of the trail surrogate
+                return utf8_encode(combined, out);
+            }
+        }
+    }
+
+    // lone surrogate or BMP char — use WTF-8 (allows surrogates)
+    return wtf8_encode(cp, out);
+}
+
 // External Tree-sitter TypeScript parser (unified: handles both JS and TS)
 extern "C" {
     const TSLanguage *tree_sitter_typescript(void);
@@ -235,16 +275,16 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                     char hex[7] = {0};
                                     memcpy(hex, src + hex_start, hex_len);
                                     uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
-                                    out += utf8_encode(cp, temp_str + out);
+                                    out += wtf8_encode(cp, temp_str + out);
                                     i = hex_end; // skip past closing }
                                 } else {
                                     temp_str[out++] = src[i]; // keep as-is
                                 }
                             } else if (i + 5 < content_len) {
-                                char hex[5] = {src[i+2], src[i+3], src[i+4], src[i+5], 0};
-                                uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
-                                out += utf8_encode(cp, temp_str + out);
-                                i += 5; // skip \uXXXX
+                                // \uXXXX — handles surrogate pairs
+                                size_t ui = i + 1; // points at 'u'
+                                out += js_decode_unicode_escape(src, content_len, &ui, temp_str + out);
+                                i = ui; // skip past consumed chars
                             } else {
                                 temp_str[out++] = src[i]; // keep as-is
                             }
@@ -2237,11 +2277,11 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
             if (source.length >= 2 && source.str[0] == '\\') {
                 char esc = source.str[1];
                 if (esc == 'u' && source.length >= 6 && source.str[2] != '{') {
-                    // \uXXXX — 4-hex-digit Unicode escape, encode as UTF-8
+                    // \uXXXX — 4-hex-digit Unicode escape, encode as WTF-8 (allows surrogates)
                     char hex[5] = {source.str[2], source.str[3], source.str[4], source.str[5], 0};
                     uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
                     if (quasi_len < (int)sizeof(quasi_buf) - 4)
-                        quasi_len += (int)utf8_encode(code, quasi_buf + quasi_len);
+                        quasi_len += (int)wtf8_encode(code, quasi_buf + quasi_len);
                 } else if (esc == 'u' && source.length >= 4 && source.str[2] == '{') {
                     // \u{XXXXX} — Unicode code point escape
                     int hex_end = 3;
@@ -2252,7 +2292,7 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                         memcpy(hex, source.str + 3, hex_len);
                         uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
                         if (quasi_len < (int)sizeof(quasi_buf) - 4)
-                            quasi_len += (int)utf8_encode(code, quasi_buf + quasi_len);
+                            quasi_len += (int)wtf8_encode(code, quasi_buf + quasi_len);
                     }
                 } else if (esc == 'x' && source.length >= 4) {
                     // \xXX — 2-hex-digit escape
