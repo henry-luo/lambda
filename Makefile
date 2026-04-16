@@ -387,7 +387,7 @@ define run_make_with_error_summary
 	echo ""; \
 	echo "📋 Build Summary:"; \
 	echo "================"; \
-	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
+	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | grep -v -E "warning:|Warning:|WARNING:" | wc -l | tr -d ' '`; \
 	WARNING_COUNT=`grep -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
 	echo "Errors: $$ERROR_COUNT"; \
 	echo "Warnings: $$WARNING_COUNT"; \
@@ -395,7 +395,7 @@ define run_make_with_error_summary
 	if [ "$$ERROR_COUNT" -gt 0 ] 2>/dev/null; then \
 		echo "🔴 ERRORS FOUND:"; \
 		echo "================"; \
-		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
+		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | grep -v -E "warning:|Warning:|WARNING:" | while IFS=: read -r line_num content; do \
 			file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:[0-9]+:" | head -1); \
 			if [ -z "$$file_info" ]; then \
 				file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:" | head -1); \
@@ -443,7 +443,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall ensure-yaml-submodule \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
@@ -878,7 +878,7 @@ test-all-baseline: build-test
 	@echo "Running BASELINE test suites only..."
 	@node test/test_run.js --category=baseline --parallel
 
-test-lambda-baseline: build-test
+test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
@@ -928,7 +928,13 @@ node-official-update-baseline: build-test
 	@echo "Running Node.js official test suite and updating baseline..."
 	@./test/test_node_official_gtest.exe --update-baseline
 
-test-input-baseline: build-test
+ensure-yaml-submodule:
+	@if [ ! -f test/yaml/README.md ]; then \
+		echo "Initializing test/yaml submodule..."; \
+		git submodule update --init test/yaml; \
+	fi
+
+test-input-baseline: build-test ensure-yaml-submodule
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "=============================================================="
