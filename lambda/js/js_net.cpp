@@ -463,11 +463,22 @@ extern "C" Item js_net_Socket(void) {
 // =============================================================================
 
 static Item net_namespace = {0};
+static int net_auto_select_family_timeout = 250; // Node.js default
 
 static void net_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = make_string_item(name);
     Item fn = js_new_function(func_ptr, param_count);
     js_property_set(ns, key, fn);
+}
+
+static Item js_net_getDefaultAutoSelectFamilyAttemptTimeout(void) {
+    return (Item){.item = i2it(net_auto_select_family_timeout)};
+}
+
+static Item js_net_setDefaultAutoSelectFamilyAttemptTimeout(Item timeout_item) {
+    if (get_type_id(timeout_item) == LMD_TYPE_INT)
+        net_auto_select_family_timeout = (int)it2i(timeout_item);
+    return (Item){.item = ITEM_UNDEFINED};
 }
 
 extern "C" Item js_get_net_namespace(void) {
@@ -482,6 +493,10 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "isIP",             (void*)js_net_isIP, 1);
     net_set_method(net_namespace, "isIPv4",           (void*)js_net_isIPv4, 1);
     net_set_method(net_namespace, "isIPv6",           (void*)js_net_isIPv6, 1);
+    net_set_method(net_namespace, "getDefaultAutoSelectFamilyAttemptTimeout",
+                   (void*)js_net_getDefaultAutoSelectFamilyAttemptTimeout, 0);
+    net_set_method(net_namespace, "setDefaultAutoSelectFamilyAttemptTimeout",
+                   (void*)js_net_setDefaultAutoSelectFamilyAttemptTimeout, 1);
 
     Item default_key = make_string_item("default");
     js_property_set(net_namespace, default_key, net_namespace);

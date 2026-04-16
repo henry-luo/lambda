@@ -1180,6 +1180,56 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("exitCode", 8))},
             (Item){.item = i2it(0)});
+
+        // config — minimal process.config for Node.js compat
+        {
+            Item config_obj = js_new_object();
+            Item variables_obj = js_new_object();
+            js_property_set(variables_obj,
+                (Item){.item = s2it(heap_create_name("v8_enable_i18n_support", 21))},
+                (Item){.item = i2it(0)});
+            js_property_set(variables_obj,
+                (Item){.item = s2it(heap_create_name("node_shared", 11))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(variables_obj,
+                (Item){.item = s2it(heap_create_name("node_use_ffi", 12))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(config_obj,
+                (Item){.item = s2it(heap_create_name("variables", 9))},
+                variables_obj);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("config", 6))},
+                config_obj);
+        }
+
+        // features — minimal process.features for Node.js compat
+        {
+            Item features_obj = js_new_object();
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("inspector", 9))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("debug", 5))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("uv", 2))},
+                (Item){.item = ITEM_TRUE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("tls_alpn", 8))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("tls_sni", 7))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("tls_ocsp", 8))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("tls", 3))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("features", 8))},
+                features_obj);
+        }
     }
     return js_process_object;
 }
@@ -7463,6 +7513,7 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
 
         // populate global functions as own properties
         static const struct { const char* name; int len; int param_count; } global_fns[] = {
@@ -7472,6 +7523,13 @@ extern "C" Item js_get_global_this() {
             {"decodeURI", 9, 1}, {"encodeURI", 9, 1},
             {"decodeURIComponent", 18, 1}, {"encodeURIComponent", 18, 1},
             {"escape", 6, 1}, {"unescape", 8, 1},
+            // Timer and scheduling functions (Node.js globals)
+            {"setTimeout", 10, 2}, {"setInterval", 11, 2},
+            {"clearTimeout", 12, 1}, {"clearInterval", 13, 1},
+            {"setImmediate", 12, 1}, {"clearImmediate", 14, 1},
+            {"queueMicrotask", 14, 1},
+            // Web API globals
+            {"structuredClone", 15, 1}, {"fetch", 5, 2},
             {NULL, 0, 0}
         };
         for (int i = 0; global_fns[i].name; i++) {
@@ -7479,6 +7537,16 @@ extern "C" Item js_get_global_this() {
             Item fn = js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
             js_property_set(js_global_this_obj, name_item, fn);
         }
+
+        // Node.js: 'global' is an alias for globalThis
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("global", 6))}, js_global_this_obj);
+
+        // AbortController stub constructor
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("AbortController", 15))},
+            js_get_global_builtin_fn(
+                (Item){.item = s2it(heap_create_name("AbortController", 15))},
+                (Item){.item = i2it(0)}));
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);

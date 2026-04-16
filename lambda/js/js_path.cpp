@@ -50,26 +50,44 @@ static Item make_string_item(const char* str) {
 extern "C" Item js_path_basename(Item path_item, Item ext_item) {
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return make_string_item("");
+    if (!path || !*path) return make_string_item("");
 
-    const char* base = file_path_basename(path);
-    if (!base) return make_string_item("");
+    int path_len = (int)strlen(path);
+
+    // strip trailing separators (POSIX: only '/')
+    int end = path_len - 1;
+#ifdef _WIN32
+    while (end >= 0 && (path[end] == '/' || path[end] == '\\')) end--;
+#else
+    while (end >= 0 && path[end] == '/') end--;
+#endif
+    if (end < 0) return make_string_item("/");
+
+    // find start of basename (after last separator)
+    int start = end;
+#ifdef _WIN32
+    while (start > 0 && path[start - 1] != '/' && path[start - 1] != '\\') start--;
+#else
+    while (start > 0 && path[start - 1] != '/') start--;
+#endif
+
+    int base_len = end - start + 1;
+    const char* base = path + start;
 
     // if ext provided, strip it from the end
     if (get_type_id(ext_item) == LMD_TYPE_STRING) {
         char ext_buf[256];
         const char* ext = item_to_cstr(ext_item, ext_buf, sizeof(ext_buf));
         if (ext) {
-            int base_len = (int)strlen(base);
             int ext_len = (int)strlen(ext);
-            if (ext_len > 0 && ext_len < base_len &&
+            if (ext_len > 0 && ext_len <= base_len &&
                 memcmp(base + base_len - ext_len, ext, ext_len) == 0) {
                 return make_string_item(base, base_len - ext_len);
             }
         }
     }
 
-    return make_string_item(base);
+    return make_string_item(base, base_len);
 }
 
 // path.dirname(path)
@@ -534,6 +552,26 @@ extern "C" Item js_get_path_namespace(void) {
     js_property_set(path_namespace, make_string_item("sep"), js_path_get_sep());
     js_property_set(path_namespace, make_string_item("delimiter"), js_path_get_delimiter());
 
+    // path.posix = path (on POSIX systems, posix is the same as the default)
+    js_property_set(path_namespace, make_string_item("posix"), path_namespace);
+
+    // path.win32 — stub namespace with same methods but win32 separator behavior
+    // (needed for Node.js compat; full win32 path semantics deferred)
+    Item win32_ns = js_new_object();
+    js_path_set_method(win32_ns, "basename",   (void*)js_path_basename, 2);
+    js_path_set_method(win32_ns, "dirname",    (void*)js_path_dirname, 1);
+    js_path_set_method(win32_ns, "extname",    (void*)js_path_extname, 1);
+    js_path_set_method(win32_ns, "isAbsolute", (void*)js_path_isAbsolute, 1);
+    js_path_set_method(win32_ns, "join",       (void*)js_path_join, -1);
+    js_path_set_method(win32_ns, "resolve",    (void*)js_path_resolve, -1);
+    js_path_set_method(win32_ns, "normalize",  (void*)js_path_normalize, 1);
+    js_path_set_method(win32_ns, "relative",   (void*)js_path_relative, 2);
+    js_path_set_method(win32_ns, "parse",      (void*)js_path_parse, 1);
+    js_path_set_method(win32_ns, "format",     (void*)js_path_format, 1);
+    js_property_set(win32_ns, make_string_item("sep"), make_string_item("\\"));
+    js_property_set(win32_ns, make_string_item("delimiter"), make_string_item(";"));
+    js_property_set(path_namespace, make_string_item("win32"), win32_ns);
+
     // default export
     Item default_key = make_string_item("default");
     js_property_set(path_namespace, default_key, path_namespace);
@@ -543,4 +581,10 @@ extern "C" Item js_get_path_namespace(void) {
 
 extern "C" void js_path_reset(void) {
     path_namespace = (Item){0};
+}
+
+extern "C" Item js_get_path_win32_namespace(void) {
+    // ensure path namespace is initialized
+    Item ns = js_get_path_namespace();
+    return js_property_get(ns, make_string_item("win32"));
 }
