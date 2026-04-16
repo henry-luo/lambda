@@ -34,6 +34,8 @@ typedef struct {
 
     // Phase 18: Dirty-region tracking for render tree clipping
     DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
+    Bound dirty_union;             // union bbox of all dirty rects (CSS pixels, valid when dirty_tracker != NULL)
+    bool has_dirty_union;          // true when dirty_union is valid
 
     // LIFO scratch allocator for scoped temporary buffers (pixel buffers, clip masks, etc.)
     ScratchArena scratch;

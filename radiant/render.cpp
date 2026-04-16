@@ -2092,8 +2092,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     auto rbv_start = std::chrono::high_resolution_clock::now();
     double children_time = 0; // will accumulate time in child render calls
     g_render_block_count++;
-    // Phase 18: Early exit if block is entirely outside all dirty regions
-    if (rdcon->dirty_tracker && !rdcon->dirty_tracker->full_repaint && rdcon->dirty_tracker->dirty_list) {
+    // Phase 18: Early exit if block is entirely outside the dirty union bbox.
+    // Must use the union bbox (not individual rects) because the display list
+    // replay clips to the union — parent backgrounds paint the whole union,
+    // so all blocks within it must be re-rendered.
+    if (rdcon->has_dirty_union) {
         float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
         float abs_x = rdcon->block.x / s + block->x;
         float abs_y = rdcon->block.y / s + block->y;
@@ -2102,16 +2105,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         // add margin to avoid clipping positioned descendants that overflow
         float margin = 50.0f;
         abs_x -= margin; abs_y -= margin; bw += margin * 2; bh += margin * 2;
-        bool intersects = false;
-        DirtyRect* dr = rdcon->dirty_tracker->dirty_list;
-        while (dr) {
-            if (abs_x < dr->x + dr->width && abs_x + bw > dr->x &&
-                abs_y < dr->y + dr->height && abs_y + bh > dr->y) {
-                intersects = true;
-                break;
-            }
-            dr = dr->next;
-        }
+        Bound* du = &rdcon->dirty_union;
+        bool intersects = (abs_x < du->right && abs_x + bw > du->left &&
+                           abs_y < du->bottom && abs_y + bh > du->top);
         if (!intersects) return;
     }
 
@@ -3294,7 +3290,20 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         selective = true;
         // Phase 18: Pass dirty tracker to render context for subtree clipping
         rdcon.dirty_tracker = &state->dirty_tracker;
-        log_debug("render_html_doc: selective clear (dirty regions present)");
+        // Precompute dirty union bbox (CSS pixels) for consistent culling & replay clipping
+        DirtyRect* first = state->dirty_tracker.dirty_list;
+        float du_l = first->x, du_t = first->y;
+        float du_r = first->x + first->width, du_b = first->y + first->height;
+        for (DirtyRect* d = first->next; d; d = d->next) {
+            if (d->x < du_l) du_l = d->x;
+            if (d->y < du_t) du_t = d->y;
+            if (d->x + d->width > du_r) du_r = d->x + d->width;
+            if (d->y + d->height > du_b) du_b = d->y + d->height;
+        }
+        rdcon.dirty_union = {du_l, du_t, du_r, du_b};
+        rdcon.has_dirty_union = true;
+        log_debug("render_html_doc: selective clear (dirty union: %.0f,%.0f - %.0f,%.0f)",
+                  du_l, du_t, du_r, du_b);
     } else {
         // Full clear
         fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
@@ -3396,8 +3405,9 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         tile_grid_destroy(&grid);
     } else {
         // --- Single-threaded replay (fallback) ---
+        DirtyTracker* replay_dirty = selective ? &state->dirty_tracker : nullptr;
         dl_replay(&display_list, &rdcon.vec, rdcon.ui_context->surface,
-                  &rdcon.block.clip, &rdcon.scratch, rdcon.scale);
+                  &rdcon.block.clip, &rdcon.scratch, rdcon.scale, replay_dirty);
 
         auto t_replay_end = high_resolution_clock::now();
         log_info("[TIMING] dl_replay: %.1fms (%d items)",
