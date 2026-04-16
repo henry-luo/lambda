@@ -1511,6 +1511,21 @@ fuzz-radiant: build
 	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
 	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
 
+# Lambda JS Engine Fuzzy Testing
+# Generates and mutates JavaScript programs to test JS engine robustness
+
+# Quick JS fuzz (2 minutes)
+fuzz-js-quick: build
+	@echo "Running JS engine fuzzy tests (quick: 2 minutes)..."
+	@chmod +x test/fuzzy/js/test_fuzzy_js.sh
+	@./test/fuzzy/js/test_fuzzy_js.sh --duration=120
+
+# Full JS fuzz (default 5 minutes, override with duration=N)
+fuzz-js: build
+	@echo "Running JS engine fuzzy tests..."
+	@chmod +x test/fuzzy/js/test_fuzzy_js.sh
+	@./test/fuzzy/js/test_fuzzy_js.sh --duration=$(or $(duration),300)
+
 test-integration:
 	@echo "Running integration tests..."
 	@if [ -f "test/test_integration.sh" ]; then \

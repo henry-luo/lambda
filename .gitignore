@@ -145,6 +145,8 @@ test/fuzzy/lambda/crashes/
 test/fuzzy/radiant/results/crashes/
 test/fuzzy/radiant/results/timeouts/
 test/fuzzy/radiant/regression/
+test/fuzzy/js/results/crashes/
+test/fuzzy/js/results/timeouts/
 
 test/event/
 test/events/
