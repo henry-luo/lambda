@@ -5992,6 +5992,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     effective_left = lycon->line.has_float_intrusion ?
                         lycon->line.effective_left : lycon->line.left;
                     block->x = effective_left;
+                    // line_break→line_reset clears start_view; set it to
+                    // this inline-block so text-align applies to the new line.
+                    if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —
                     // push below the float to find room
@@ -6150,10 +6153,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // Their height is tracked separately and used in a second pass to
                     // expand the line box if needed.
                     lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
+                    lycon->line.max_top_height = max(lycon->line.max_top_height, block_flow_height);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
                     // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
                     lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
+                    lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, block_flow_height);
                 }
                 else {
                     // For other vertical-align values (sub, super, middle, etc.)
@@ -6872,7 +6877,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         // apply CSS relative/sticky positioning after normal layout
-        if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
+        // CSS 2.1 §9.4.3: For inline-blocks, relative positioning is deferred to
+        // view_vertical_align() because the second-pass vertical alignment overwrites
+        // y. Applying offsets here would be lost when view_vertical_align sets y.
+        if (block->position && block->position->position == CSS_VALUE_RELATIVE
+            && block->view_type != RDT_VIEW_INLINE_BLOCK) {
             log_debug("%s Applying relative positioning", elmt->source_loc());
             layout_relative_positioned(lycon, block);
         } else if (block->position && block->position->position == CSS_VALUE_STICKY) {

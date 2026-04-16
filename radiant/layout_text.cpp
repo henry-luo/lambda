@@ -1239,6 +1239,8 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_replaced_content = false;
     lycon->line.has_cjk_text = false;
     lycon->line.max_top_bottom_height = 0;
+    lycon->line.max_top_height = 0;
+    lycon->line.max_bottom_height = 0;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
@@ -1432,12 +1434,16 @@ void line_break(LayoutContext* lycon) {
     // 1) inline content exceeds the strut (original condition), OR
     // 2) a different inline font needs baseline alignment with the strut
     //    (e.g., 32px caption text inside 128px Ahem div).
+    // 3) top/bottom-aligned inline content is present (needs second-pass positioning).
     // Case 2 is guarded by has_different_inline_font to avoid triggering for
     // same-font tight line-height (line-height < font-height) where max_ascender
     // is reduced by negative half-leading, not by a different font.
     if (lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender ||
-        lycon->line.has_different_inline_font) {
+        lycon->line.has_different_inline_font ||
+        lycon->line.max_top_bottom_height > 0 ||
+        lycon->line.max_top_height > 0 ||
+        lycon->line.max_bottom_height > 0) {
         // apply vertical alignment
         log_debug("apply vertical adjustment for the line");
         View* view = lycon->line.start_view;
@@ -1598,8 +1604,10 @@ void line_break(LayoutContext* lycon) {
     // CSS 2.1 §10.8.1 second pass: expand line box for vertical-align:top/bottom elements.
     // These elements don't participate in baseline-relative height calculation (first pass).
     // If any top/bottom-aligned element is taller than the first-pass line box, expand it.
-    if (lycon->line.max_top_bottom_height > used_line_height) {
-        used_line_height = lycon->line.max_top_bottom_height;
+    float max_tb = max(lycon->line.max_top_bottom_height,
+        max(lycon->line.max_top_height, lycon->line.max_bottom_height));
+    if (max_tb > used_line_height) {
+        used_line_height = max_tb;
     }
 
     lycon->block.advance_y += used_line_height;
@@ -1939,11 +1947,26 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             ascender += va_offset;
             descender -= va_offset;
         }
-        log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f",
-            lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset);
-        // Save max_descender before this text's contribution, for trailing whitespace rollback
-        lycon->line.max_desc_before_last_text = lycon->line.max_descender;
-        lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+        log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f va=%d",
+            lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset, lycon->line.vertical_align);
+        // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+        // in the first-pass baseline-relative line box height calculation.
+        // Their inline box height is tracked separately and used in a second pass
+        // to expand the line box if needed.
+        if (lycon->line.vertical_align == CSS_VALUE_TOP) {
+            float inline_box_height = ascender + descender;
+            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, inline_box_height);
+            lycon->line.max_top_height = max(lycon->line.max_top_height, inline_box_height);
+        } else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
+            float inline_box_height = ascender + descender;
+            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, inline_box_height);
+            lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, inline_box_height);
+        } else {
+            // Save max_descender before this text's contribution, for trailing whitespace rollback
+            lycon->line.max_desc_before_last_text = lycon->line.max_descender;
+            lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+            lycon->line.max_descender = max(lycon->line.max_descender, descender);
+        }
         // CSS 2.1 §10.8.1: Track if any inline text uses a different font from the
         // block's strut. When the strut font differs, the vertical alignment pass must
         // run to position content relative to the strut's baseline.
@@ -1951,7 +1974,6 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             lycon->font.font_handle != lycon->line.line_start_font.font_handle) {
             lycon->line.has_different_inline_font = true;
         }
-        lycon->line.max_descender = max(lycon->line.max_descender, descender);
         log_debug("output_text: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",
             ascender, descender, lycon->line.max_ascender, lycon->line.max_descender);
         if (descender > 9) {
@@ -2456,8 +2478,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         fb_asc += half_leading;
                         fb_desc += half_leading;
                     }
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
-                    lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
+                    // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+                    // in first-pass baseline-relative line box height. Track separately.
+                    if (lycon->line.vertical_align == CSS_VALUE_TOP) {
+                        float fb_inline_box_height = fb_asc + fb_desc;
+                        lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
+                        lycon->line.max_top_height = max(lycon->line.max_top_height, fb_inline_box_height);
+                    } else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
+                        float fb_inline_box_height = fb_asc + fb_desc;
+                        lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
+                        lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, fb_inline_box_height);
+                    } else {
+                        lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
+                        lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
+                    }
                     if (fb_desc > 9) {
                         log_debug("FALLBACK font: LARGE fb_desc=%.1f fb_asc=%.1f lh_normal=%d",
                             fb_desc, fb_asc, lycon->block.line_height_is_normal);
