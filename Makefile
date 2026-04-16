@@ -1502,14 +1502,14 @@ test-fuzzy-extended: build
 # Quick radiant fuzz (2 minutes)
 fuzz-radiant-quick: build
 	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=120
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=120
 
 # Full radiant fuzz (default 5 minutes, override with duration=N)
 fuzz-radiant: build
 	@echo "Running Radiant layout fuzzy tests..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
 
 test-integration:
 	@echo "Running integration tests..."
