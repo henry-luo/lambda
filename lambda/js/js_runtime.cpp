@@ -98,6 +98,7 @@ static int js_pending_call_argc = 0;
 // Populated during js_main execution, read by class method closures.
 #define JS_MAX_MODULE_VARS 2048
 static Item js_module_vars[JS_MAX_MODULE_VARS];
+static Item* js_active_module_vars = js_module_vars;
 static int js_module_var_count = 0;
 
 // Epoch counter: incremented on batch reset to invalidate cached heap objects.
@@ -209,13 +210,13 @@ extern "C" Item js_make_setter_key(Item key) {
 
 extern "C" void js_set_module_var(int index, Item value) {
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
-        js_module_vars[index] = value;
+        js_active_module_vars[index] = value;
     }
 }
 
 extern "C" Item js_get_module_var(int index) {
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
-        return js_module_vars[index];
+        return js_active_module_vars[index];
     }
     return ItemNull;
 }
@@ -230,6 +231,37 @@ extern "C" void js_reset_module_vars() {
         heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
         module_vars_rooted = true;
     }
+}
+
+// Save/restore module vars for nested require() — prevents inner module
+// from clobbering the outer module's live variables via js_reset_module_vars().
+extern "C" Item* js_save_module_vars(int* out_count) {
+    *out_count = JS_MAX_MODULE_VARS;
+    Item* saved = (Item*)mem_alloc(JS_MAX_MODULE_VARS * sizeof(Item), MEM_CAT_TEMP);
+    memcpy(saved, js_module_vars, JS_MAX_MODULE_VARS * sizeof(Item));
+    return saved;
+}
+
+extern "C" void js_restore_module_vars(Item* saved, int count) {
+    if (!saved) return;
+    memcpy(js_module_vars, saved, count * sizeof(Item));
+    mem_free(saved);
+}
+
+// Allocate a per-module variable array (used by CJS modules)
+extern "C" Item* js_alloc_module_vars(void) {
+    Item* vars = (Item*)pool_calloc(js_input->pool, JS_MAX_MODULE_VARS * sizeof(Item));
+    heap_register_gc_root_range((uint64_t*)vars, JS_MAX_MODULE_VARS);
+    return vars;
+}
+
+// Get/set the active module vars pointer
+extern "C" Item* js_get_active_module_vars(void) {
+    return js_active_module_vars;
+}
+
+extern "C" void js_set_active_module_vars(Item* vars) {
+    js_active_module_vars = vars ? vars : js_module_vars;
 }
 
 // =============================================================================
@@ -324,8 +356,9 @@ extern "C" void js_util_reset();
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
-    // reset module variable table
+    // reset module variable table and active pointer
     js_reset_module_vars();
+    js_active_module_vars = js_module_vars;
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
     module_registry_cleanup();
     // clear JS module cache (specifier String* pointers become dangling after heap reset)
@@ -406,6 +439,8 @@ extern "C" void js_batch_reset() {
     js_string_decoder_reset();
     extern void js_assert_reset(void);
     js_assert_reset();
+    extern void js_node_test_reset(void);
+    js_node_test_reset();
 }
 
 // Get current module var count (for checkpointing)
@@ -422,6 +457,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         js_module_vars[i] = (Item){0};
     }
     js_module_var_count = checkpoint_var_count;
+    js_active_module_vars = js_module_vars; // reset to static fallback
     // reset strict mode — prevents strict-mode test from poisoning subsequent non-strict tests
     js_strict_mode = false;
     // clear module registry (frees strdup/calloc per registered module)
@@ -2193,6 +2229,7 @@ struct JsFunction {
     Item properties_map; // v18: backing map for arbitrary properties (0 if none)
     uint8_t flags;   // v20: bit 0 = is_generator
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
+    Item* module_vars; // Per-module variable array (NULL for built-in functions)
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1
@@ -5857,6 +5894,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
+    fn->module_vars = js_active_module_vars; // bind to creating module's vars
     js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
 }
@@ -5873,6 +5911,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->env = env;
     fn->env_size = env_size;
     fn->prototype = ItemNull;
+    fn->module_vars = js_active_module_vars; // bind to creating module's vars
     return (Item){.function = (Function*)fn};
 }
 
@@ -7969,7 +8008,11 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         } else {
             js_new_target = make_js_undefined(); // regular call: new.target is undefined
         }
+        Item* prev_modvars = js_active_module_vars;
+        if (fn->module_vars && fn->module_vars != js_active_module_vars)
+            js_active_module_vars = fn->module_vars;
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
         js_new_target = prev_nt;
         return result;
@@ -7986,7 +8029,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     } else {
         js_new_target = make_js_undefined(); // regular call: new.target is undefined
     }
+    // Switch to callee's module vars if it belongs to a different module
+    Item* prev_modvars = js_active_module_vars;
+    if (fn->module_vars && fn->module_vars != js_active_module_vars)
+        js_active_module_vars = fn->module_vars;
     Item result = js_invoke_fn(fn, args, arg_count);
+    js_active_module_vars = prev_modvars;
     js_current_this = prev_this;
     js_new_target = prev_nt;
     return result;
@@ -14862,6 +14910,20 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_path_namespace(void);
         return js_get_path_namespace();
     }
+    // path/posix, node:path/posix — returns the same path namespace (POSIX on POSIX)
+    if ((spec->len == 10 && memcmp(spec->chars, "path/posix", 10) == 0) ||
+        (spec->len == 13 && memcmp(spec->chars, "path/posix.js", 13) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "node:path/posix", 15) == 0)) {
+        extern Item js_get_path_namespace(void);
+        return js_get_path_namespace();
+    }
+    // path/win32, node:path/win32 — returns path.win32 sub-namespace
+    if ((spec->len == 10 && memcmp(spec->chars, "path/win32", 10) == 0) ||
+        (spec->len == 13 && memcmp(spec->chars, "path/win32.js", 13) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "node:path/win32", 15) == 0)) {
+        extern Item js_get_path_win32_namespace(void);
+        return js_get_path_win32_namespace();
+    }
     // node:os
     if ((spec->len == 2 && memcmp(spec->chars, "os", 2) == 0) ||
         (spec->len == 5 && memcmp(spec->chars, "os.js", 5) == 0) ||
@@ -14986,6 +15048,13 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_assert_namespace(void);
         return js_get_assert_namespace();
     }
+    // assert/strict, node:assert/strict — same as assert (always strict in our impl)
+    if ((spec->len == 13 && memcmp(spec->chars, "assert/strict", 13) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "assert/strict.js", 16) == 0) ||
+        (spec->len == 18 && memcmp(spec->chars, "node:assert/strict", 18) == 0)) {
+        extern Item js_get_assert_namespace(void);
+        return js_get_assert_namespace();
+    }
     // node:timers — alias to global timer functions
     if ((spec->len == 6 && memcmp(spec->chars, "timers", 6) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:timers", 11) == 0)) {
@@ -15017,6 +15086,29 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 12 && memcmp(spec->chars, "node:console", 12) == 0)) {
         extern Item js_get_console_object_value(void);
         return js_get_console_object_value();
+    }
+    // node:test — basic test runner (test, describe, it)
+    if ((spec->len == 9 && memcmp(spec->chars, "node:test", 9) == 0)) {
+        extern Item js_get_node_test_namespace(void);
+        return js_get_node_test_namespace();
+    }
+    // worker_threads — minimal stub (isMainThread: true)
+    if ((spec->len == 14 && memcmp(spec->chars, "worker_threads", 14) == 0) ||
+        (spec->len == 17 && memcmp(spec->chars, "worker_threads.js", 17) == 0) ||
+        (spec->len == 19 && memcmp(spec->chars, "node:worker_threads", 19) == 0)) {
+        static Item wt_ns = {0};
+        if (wt_ns.item == 0) {
+            wt_ns = js_new_object();
+            heap_register_gc_root(&wt_ns.item);
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("isMainThread", 12))},
+                            (Item){.item = ITEM_TRUE});
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("parentPort", 10))},
+                            ItemNull);
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("workerData", 10))},
+                            ItemNull);
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("default", 7))}, wt_ns);
+        }
+        return wt_ns;
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {
