@@ -1,0 +1,39 @@
+{
+  "name": "Phase 7b - Scroll mutation with scroll_to",
+  "html": "test/ui/test_phase7b_scroll_mutation.html",
+  "viewport": {"width": 800, "height": 600},
+  "description": "Test scroll_to absolute positioning and assert_scroll with negate",
+  "events": [
+    {"type": "log", "message": "=== Phase 7b: Scroll Mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial scroll at top"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 1},
+
+    {"type": "log", "message": "Step 2: scroll_to y=400 (section 2)"},
+    {"type": "scroll_to", "x": 0, "y": 400},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 3: Verify scroll position at y=400"},
+    {"type": "assert_scroll", "x": 0, "y": 400, "tolerance": 5},
+
+    {"type": "log", "message": "Step 4: Verify NOT at top (negate)"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 10, "negate": true},
+
+    {"type": "log", "message": "Step 5: scroll_to y=1200 (section 4)"},
+    {"type": "scroll_to", "x": 0, "y": 1200},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 6: Verify scroll position at y=1200"},
+    {"type": "assert_scroll", "x": 0, "y": 1200, "tolerance": 5},
+
+    {"type": "log", "message": "Step 7: scroll_to back to top"},
+    {"type": "scroll_to", "x": 0, "y": 0},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 8: Verify back at top"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 1},
+
+    {"type": "log", "message": "=== Phase 7b complete ==="}
+  ]
+}

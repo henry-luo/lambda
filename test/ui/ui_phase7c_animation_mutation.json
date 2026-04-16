@@ -1,0 +1,28 @@
+{
+  "name": "Phase 7c - Animation advance_time",
+  "html": "test/ui/test_phase7c_animation_mutation.html",
+  "viewport": {"width": 800, "height": 600},
+  "description": "Test advance_time event and animated assert_style tolerance comparison",
+  "events": [
+    {"type": "log", "message": "=== Phase 7c: Animation Mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial opacity is 1"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "equals": "1"},
+
+    {"type": "log", "message": "Step 2: Verify initial background-color"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "background-color", "equals": "rgb(50, 100, 200)"},
+
+    {"type": "log", "message": "Step 3: advance_time 500ms (no active animation, should be no-op)"},
+    {"type": "advance_time", "ms": 500, "steps": 10},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 4: Verify opacity still 1 after advance (animated tolerance)"},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "equals": "1", "animated": true, "tolerance": 0.05},
+
+    {"type": "log", "message": "Step 5: Verify text content still present"},
+    {"type": "assert_text", "target": {"selector": "#label"}, "contains": "Animation Test"},
+
+    {"type": "log", "message": "=== Phase 7c complete ==="}
+  ]
+}
