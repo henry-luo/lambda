@@ -841,9 +841,13 @@ void css_animation_tick(AnimationInstance* anim, float t) {
 
     // update bounds from element's current layout position (may have been
     // zero at creation time because css_animation_create runs before layout)
-    ViewSpan* span = (ViewSpan*)anim->target;
-    anim->bounds[0] = span->x;
-    anim->bounds[1] = span->y;
+    // use absolute coordinates (walk parent chain) for correct dirty-region marking
+    View* span = (View*)anim->target;
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* p = span->parent_view();
+    while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
+    anim->bounds[0] = abs_x;
+    anim->bounds[1] = abs_y;
     anim->bounds[2] = span->width;
     anim->bounds[3] = span->height;
 }
@@ -891,10 +895,13 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     inst->tick = css_animation_tick;
     inst->on_finish = css_animation_finish;
 
-    // set bounds from element's layout
-    ViewSpan* span = (ViewSpan*)element;
-    inst->bounds[0] = span->x;
-    inst->bounds[1] = span->y;
+    // set bounds from element's layout (absolute coordinates for dirty-region marking)
+    View* span = (View*)element;
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* pe = span->parent_view();
+    while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }
+    inst->bounds[0] = abs_x;
+    inst->bounds[1] = abs_y;
     inst->bounds[2] = span->width;
     inst->bounds[3] = span->height;
 
