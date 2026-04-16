@@ -4906,6 +4906,10 @@ extern "C" Item js_number_property(Item prop_name) {
 
 extern "C" Item js_object_values(Item object) {
     TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_NULL || object.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return js_array_new(0);
+    }
     if (type == LMD_TYPE_STRING) {
         String* str = it2s(object);
         int slen = str ? (int)str->len : 0;
@@ -4935,6 +4939,10 @@ extern "C" Item js_object_values(Item object) {
 
 extern "C" Item js_object_entries(Item object) {
     TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_NULL || object.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return js_array_new(0);
+    }
     if (type == LMD_TYPE_STRING) {
         String* str = it2s(object);
         int slen = str ? (int)str->len : 0;
