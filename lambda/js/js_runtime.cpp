@@ -1380,7 +1380,19 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_MAP) {
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
-            return own_ip ? 0 : 1;  // class objects are "function"
+            if (own_ip) return 0;  // class objects are "function"
+            // Function.prototype is callable per spec
+            bool own_cn = false;
+            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn_val);
+                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                    bool own_proto = false;
+                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                    if (own_proto) return 0;  // "function", not "object"
+                }
+            }
+            return 1;
         }
         if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
             type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
@@ -1393,7 +1405,19 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_MAP) {
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
-            return own_ip ? 1 : 0;
+            if (own_ip) return 1;
+            // Function.prototype is callable per spec
+            bool own_cn = false;
+            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn_val);
+                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                    bool own_proto = false;
+                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                    if (own_proto) return 1;
+                }
+            }
+            return 0;
         }
         return 0;
     default: return 0;
@@ -2219,6 +2243,20 @@ extern "C" Item js_typeof(Item value) {
         if (own_ip) {
             result = "function";
             goto done;
+        }
+        // Function.prototype is callable per spec, typeof should return "function"
+        bool own_cn = false;
+        Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+        if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+            String* cn_str = it2s(cn_val);
+            if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                bool own_proto = false;
+                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                if (own_proto) {
+                    result = "function";
+                    goto done;
+                }
+            }
         }
         result = "object";
         break;

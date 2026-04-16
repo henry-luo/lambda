@@ -1779,11 +1779,13 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         JsNameSetEntry* ref = (JsNameSetEntry*)item;
         if (jm_name_set_has(params, ref->name)) continue;    // local param
         if (jm_name_set_has(locals, ref->name)) continue;    // local var
-        if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
+        // NFE self-reference: check before outer_scope guard since NFE name
+        // is not in outer scope but still needs to be captured
         if (self_name[0] && strcmp(ref->name, self_name) == 0) {
             has_self_ref = true;
             continue; // handle after we know if there are other captures
         }
+        if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
         // Skip module-level constants — they're resolved at compile time via module_consts,
         // not at runtime via closure environment.
         // BUT: if a parent function declares a local with the same name, the parent's
@@ -1811,7 +1813,10 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     // Only add self-capture for non-top-level functions (parent_index >= 0) — top-level
     // function declarations are hoisted and uniquely resolve via module var table.
     // Keeping top-level functions capture-free preserves tail-call optimization.
-    if (has_self_ref && self_name[0] && fc->parent_index >= 0) {
+    // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
+    // since their name is not in the module var table even when top-level.
+    bool is_func_expr = fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
+    if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr)) {
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
             fc->captures[fc->capture_count].scope_env_slot = -1;
@@ -13077,14 +13082,22 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 
             // Detect self-capture via assignment target hint:
             // e.g. sc_loop1_75 = function(l) { ... sc_loop1_75(l.cdr) ... }
+            // Also detect NFE self-reference via the function's own name:
+            // e.g. var f = function myName() { return myName; }
             int self_ref_slot_fe = -1;
+            char nfe_self_name[128] = {0};
+            if (fn->name && fn->name->chars) {
+                snprintf(nfe_self_name, sizeof(nfe_self_name), "_js_%.*s",
+                    (int)fn->name->len, fn->name->chars);
+            }
 
             for (int i = 0; i < fc->capture_count; i++) {
                 int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
-                if (mt->assign_target_vname && strcmp(fc->captures[i].name, mt->assign_target_vname) == 0) {
+                if ((mt->assign_target_vname && strcmp(fc->captures[i].name, mt->assign_target_vname) == 0) ||
+                    (nfe_self_name[0] && strcmp(fc->captures[i].name, nfe_self_name) == 0)) {
                     self_ref_slot_fe = slot;
                     continue;
                 }
