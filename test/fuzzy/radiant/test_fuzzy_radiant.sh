@@ -163,16 +163,17 @@ except Exception:
                 log_verbose "  ${GREEN}PASS (no output)${NC}: $basename"
             fi
             ;;
-        124)
-            # Timeout
+        124|137)
+            # Timeout: 124=SIGTERM from timeout(1), 137=SIGKILL from timeout(1)
+            # when process doesn't exit after SIGTERM (e.g., stuck after JS timeout)
             TESTS_TIMEOUT=$((TESTS_TIMEOUT + 1))
             local ts
             ts=$(date +%Y%m%d_%H%M%S)
             cp "$html_file" "$TIMEOUT_DIR/timeout_${ts}_${TESTS_TIMEOUT}.html"
             echo -e "  ${YELLOW}TIMEOUT${NC}: $basename ($label)"
             ;;
-        134|136|137|138|139)
-            # SIGABRT=134, SIGFPE=136, SIGKILL=137, SIGBUS=138, SIGSEGV=139
+        134|136|138|139)
+            # SIGABRT=134, SIGFPE=136, SIGBUS=138, SIGSEGV=139
             TESTS_CRASHED=$((TESTS_CRASHED + 1))
             local ts
             ts=$(date +%Y%m%d_%H%M%S)

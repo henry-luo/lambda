@@ -3478,6 +3478,12 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     if (builtin.item == ItemNull.item) {
                         builtin = js_lookup_builtin_method(LMD_TYPE_MAP, name_str->chars, (int)name_str->len);
                     }
+                    // Symbol.iterator (__sym_1) — virtual property on Array/String prototypes
+                    if (builtin.item == ItemNull.item && name_str->len == 7 && strncmp(name_str->chars, "__sym_1", 7) == 0) {
+                        if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) {
+                            builtin = js_property_get(obj, name);
+                        }
+                    }
                     if (builtin.item != ItemNull.item) {
                         Item desc = js_new_object();
                         js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, builtin);
@@ -5876,6 +5882,10 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_BOOL;
     // Skip "constructor" — handled separately
     if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
+    // Symbol.iterator (__sym_1) is a virtual property on Array and String prototypes
+    if (len == 7 && strncmp(name, "__sym_1", 7) == 0) {
+        if (lookup_type == LMD_TYPE_ARRAY || lookup_type == LMD_TYPE_STRING) return true;
+    }
     Item builtin = js_lookup_builtin_method(lookup_type, name, len);
     return builtin.item != ItemNull.item;
 }

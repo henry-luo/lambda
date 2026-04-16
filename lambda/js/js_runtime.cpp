@@ -343,6 +343,15 @@ extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
     }
 }
 
+// Const assignment check: throw TypeError when assigning to a const variable
+extern "C" void js_throw_const_assign(const char* name, int name_len) {
+    char buf[256];
+    int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+    Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
+    js_throw_value(js_new_error_with_name(tn, msg));
+}
+
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
 // forward declarations for module namespace cache resets
@@ -1380,7 +1389,19 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_MAP) {
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
-            return own_ip ? 0 : 1;  // class objects are "function"
+            if (own_ip) return 0;  // class objects are "function"
+            // Function.prototype is callable per spec
+            bool own_cn = false;
+            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn_val);
+                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                    bool own_proto = false;
+                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                    if (own_proto) return 0;  // "function", not "object"
+                }
+            }
+            return 1;
         }
         if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
             type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
@@ -1393,7 +1414,19 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         if (type == LMD_TYPE_MAP) {
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
-            return own_ip ? 1 : 0;
+            if (own_ip) return 1;
+            // Function.prototype is callable per spec
+            bool own_cn = false;
+            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn_val);
+                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                    bool own_proto = false;
+                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                    if (own_proto) return 1;
+                }
+            }
+            return 0;
         }
         return 0;
     default: return 0;
@@ -2220,6 +2253,20 @@ extern "C" Item js_typeof(Item value) {
             result = "function";
             goto done;
         }
+        // Function.prototype is callable per spec, typeof should return "function"
+        bool own_cn = false;
+        Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
+        if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
+            String* cn_str = it2s(cn_val);
+            if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
+                bool own_proto = false;
+                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                if (own_proto) {
+                    result = "function";
+                    goto done;
+                }
+            }
+        }
         result = "object";
         break;
     }
@@ -2593,6 +2640,8 @@ enum JsBuiltinId {
     JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS,
     JS_BUILTIN_REFLECT_SET,
     JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF,
+    // Iterator protocol: [Symbol.iterator]() { return this; }
+    JS_BUILTIN_ITER_IDENTITY, // returns this_val (for iterators that are their own iterable)
     JS_BUILTIN_MAX
 };
 
@@ -3390,6 +3439,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 return js_cssom_rule_decl_get_property(object, key);
             case MAP_KIND_ITERATOR:
                 // v28: iterators are opaque engine-internal objects
+                // [Symbol.iterator]() returns this (iterators are their own iterable)
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* sk = it2s(key);
+                    if (sk->len == 7 && strncmp(sk->chars, "__sym_1", 7) == 0) {
+                        return js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+                    }
+                }
                 return make_js_undefined();
             }
         }
@@ -3514,6 +3570,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
                     String* cn_str = it2s(cn);
                     if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                        // String.prototype[Symbol.iterator]
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+                        }
                         builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
                     } else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
@@ -3603,6 +3663,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 8 && strncmp(str_key->chars, "__sym_10", 8) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SPLIT, "[Symbol.split]", 2);
                     } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
+                        // Array.prototype[Symbol.iterator] → values
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+                        }
                         // Array.prototype methods: resolve via Array builtin table
                         builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
@@ -7217,9 +7281,25 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
         return result;
     }
+    // Iterator identity: [Symbol.iterator]() { return this; }
+    case JS_BUILTIN_ITER_IDENTITY: {
+        return this_val;
+    }
     // String iterator
     case JS_BUILTIN_STRING_ITER: {
         // String.prototype[Symbol.iterator]() — creates a string iterator object
+        // RequireObjectCoercible(this): throw TypeError for null/undefined
+        {
+            TypeId tt = get_type_id(this_val);
+            if (tt == LMD_TYPE_NULL || tt == LMD_TYPE_UNDEFINED || this_val.item == 0) {
+                extern Item js_new_error_with_name(Item type_name, Item message);
+                extern void js_throw_value(Item error);
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+                Item msg = (Item){.item = s2it(heap_create_name("String.prototype[Symbol.iterator] requires that 'this' not be null or undefined", 78))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return ItemNull;
+            }
+        }
         // this_val is the string
         Item str_item = js_to_string(this_val);
         Item iter = js_new_object();
@@ -7230,6 +7310,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Set Symbol.toStringTag for [object String Iterator]
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
                          (Item){.item = s2it(heap_create_name("String Iterator", 15))});
+        // [Symbol.iterator]() returns this
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     case JS_BUILTIN_STRING_ITER_NEXT: {
@@ -7719,6 +7802,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         (Item){.item = i2it(cd->type)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_COLL_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        // [Symbol.iterator]() returns this
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     case JS_BUILTIN_COLL_ITER_NEXT: {
@@ -12460,6 +12546,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(0)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     // values() — returns array iterator (kind=1: values)
@@ -12471,6 +12559,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(1)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     // entries() — returns array iterator (kind=2: entries [index, value])
@@ -12482,6 +12572,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(2)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
 
@@ -13458,6 +13550,10 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     Item tag_val = (Item){.item = s2it(heap_create_name(
         is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
     js_property_set(obj, tag_key, tag_val);
+    // Set [Symbol.iterator]() to return this (generators are their own iterable)
+    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+    js_property_set(obj, si_key, si_fn);
 
     return obj;
 }
