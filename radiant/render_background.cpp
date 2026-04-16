@@ -333,7 +333,6 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
 
     if (has_radius || needs_rounded_clip || rdcon->has_transform) {
-        RdtVector* vec = &rdcon->vec;
         const RdtMatrix* xform = get_transform(rdcon);
 
         RdtPath* p = rdt_path_new();
@@ -348,14 +347,13 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
         build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
 
         RdtPath* clip = create_bg_clip_path(rdcon);
-        rdt_push_clip(vec, clip, NULL);
-        rdt_fill_path(vec, p, color, RDT_FILL_WINDING, xform);
-        rdt_pop_clip(vec);
+        rc_push_clip(rdcon, clip, NULL);
+        rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, xform);
+        rc_pop_clip(rdcon);
         rdt_path_free(clip);
         rdt_path_free(p);
     } else {
-        ImageSurface* surface = rdcon->ui_context->surface;
-        fill_surface_rect(surface, &rect, color.c, &rdcon->block.clip,
+        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
             rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 }
@@ -449,10 +447,10 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     }
 
     RdtPath* clip = create_bg_clip_path(rdcon);
-    rdt_push_clip(vec, clip, NULL);
-    rdt_fill_linear_gradient(vec, p, x1, y1, x2, y2, stops, gradient->stop_count,
+    rc_push_clip(rdcon, clip, NULL);
+    rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, stops, gradient->stop_count,
                              RDT_FILL_WINDING, xform);
-    rdt_pop_clip(vec);
+    rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
 }
@@ -551,10 +549,10 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     }
 
     RdtPath* clip = create_bg_clip_path(rdcon);
-    rdt_push_clip(vec, clip, NULL);
-    rdt_fill_radial_gradient(vec, p, cx, cy, radius, stops, gradient->stop_count,
+    rc_push_clip(rdcon, clip, NULL);
+    rc_fill_radial_gradient(rdcon, p, cx, cy, radius, stops, gradient->stop_count,
                              RDT_FILL_WINDING, xform);
-    rdt_pop_clip(vec);
+    rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
 }
@@ -1006,9 +1004,9 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         // Clip to block clip region and fill
         RdtPath* clip_path = create_bg_clip_path(rdcon);
-        rdt_push_clip(&rdcon->vec, clip_path, xform);
-        rdt_fill_path(&rdcon->vec, shadow_path, s->color, RDT_FILL_WINDING, xform);
-        rdt_pop_clip(&rdcon->vec);
+        rc_push_clip(rdcon, clip_path, xform);
+        rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_WINDING, xform);
+        rc_pop_clip(rdcon);
         rdt_path_free(shadow_path);
         rdt_path_free(clip_path);
 
@@ -1091,9 +1089,9 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             RdtPath* clip_path = rdt_path_new();
             rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
 
-            rdt_push_clip(&rdcon->vec, clip_path, xform);
-            rdt_fill_path(&rdcon->vec, fill_path, s->color, RDT_FILL_WINDING, xform);
-            rdt_pop_clip(&rdcon->vec);
+            rc_push_clip(rdcon, clip_path, xform);
+            rc_fill_path(rdcon, fill_path, s->color, RDT_FILL_WINDING, xform);
+            rc_pop_clip(rdcon);
             rdt_path_free(fill_path);
             rdt_path_free(clip_path);
             continue;
@@ -1183,9 +1181,9 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         // Clip to element border-box and fill with even-odd rule
         RdtPath* clip_path = create_bg_clip_path(rdcon);
-        rdt_push_clip(&rdcon->vec, clip_path, xform);
-        rdt_fill_path(&rdcon->vec, shadow_path, s->color, RDT_FILL_EVEN_ODD, xform);
-        rdt_pop_clip(&rdcon->vec);
+        rc_push_clip(rdcon, clip_path, xform);
+        rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_EVEN_ODD, xform);
+        rc_pop_clip(rdcon);
         rdt_path_free(shadow_path);
         rdt_path_free(clip_path);
 
@@ -1290,9 +1288,9 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
 /**
  * Render a single tile of a background image using the raster blit path.
  */
-static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
+static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
                          ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
-    blit_surface_scaled(img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR, clip_shapes, clip_depth);
+    rc_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR, clip_shapes, clip_depth);
 }
 
 /**
@@ -1313,9 +1311,9 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* ti
 
     // Clip to block clip region
     RdtPath* clip_path = create_bg_clip_path(rdcon);
-    rdt_push_clip(&rdcon->vec, clip_path, &m);
-    rdt_picture_draw(&rdcon->vec, pic, 255, &m);
-    rdt_pop_clip(&rdcon->vec);
+    rc_push_clip(rdcon, clip_path, &m);
+    rc_draw_picture(rdcon, pic, 255, &m);
+    rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
     rdt_picture_free(pic);
 }
@@ -1450,7 +1448,7 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
             if (is_svg) {
                 render_bg_tile_tvg(rdcon, img, &tile_rect);
             } else {
-                blit_bg_tile(img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
+                blit_bg_tile(rdcon, img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
                              rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         }

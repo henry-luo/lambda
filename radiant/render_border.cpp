@@ -88,7 +88,7 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
     float x = rect.x, y = rect.y, W = rect.width, H = rect.height;
 
     RdtPath* clip = create_border_clip_path(rdcon);
-    rdt_push_clip(vec, clip, NULL);
+    rc_push_clip(rdcon, clip, NULL);
 
     // top-left polygon: covers top side + left side
     RdtPath* tl_path = rdt_path_new();
@@ -99,7 +99,7 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
     rdt_path_line_to(tl_path, x + bw_left, y + H - bw_bottom);
     rdt_path_line_to(tl_path, x, y + H);
     rdt_path_close(tl_path);
-    rdt_fill_path(vec, tl_path, tl_color, RDT_FILL_WINDING, xform);
+    rc_fill_path(rdcon, tl_path, tl_color, RDT_FILL_WINDING, xform);
     rdt_path_free(tl_path);
 
     // bottom-right polygon: covers bottom side + right side
@@ -111,10 +111,10 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
     rdt_path_line_to(br_path, x + W - bw_right, y + H - bw_bottom);
     rdt_path_line_to(br_path, x + W - bw_right, y + bw_top);
     rdt_path_close(br_path);
-    rdt_fill_path(vec, br_path, br_color, RDT_FILL_WINDING, xform);
+    rc_fill_path(rdcon, br_path, br_color, RDT_FILL_WINDING, xform);
     rdt_path_free(br_path);
 
-    rdt_pop_clip(vec);
+    rc_pop_clip(rdcon);
     rdt_path_free(clip);
 
     log_debug("[BORDER] inset/outset trapezoid tl=#%02x%02x%02x br=#%02x%02x%02x",
@@ -139,16 +139,16 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             RdtVector* vec = &rdcon->vec;
             const RdtMatrix* xform = get_transform(rdcon);
             RdtPath* clip = create_border_clip_path(rdcon);
-            rdt_push_clip(vec, clip, NULL);
+            rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             rdt_path_move_to(p, rect.x, rect.y);
             rdt_path_line_to(p, rect.x + rect.width, rect.y);
             rdt_path_line_to(p, rect.x + rect.width - bwr, rect.y + bwt);
             rdt_path_line_to(p, rect.x + bwl, rect.y + bwt);
             rdt_path_close(p);
-            rdt_fill_path(vec, p, c, RDT_FILL_WINDING, xform);
+            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
             rdt_path_free(p);
-            rdt_pop_clip(vec);
+            rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }
         static void bottom(RenderContext* rdcon, Rect rect, float bwb, float bwr, float bwl, Color c) {
@@ -156,7 +156,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             RdtVector* vec = &rdcon->vec;
             const RdtMatrix* xform = get_transform(rdcon);
             RdtPath* clip = create_border_clip_path(rdcon);
-            rdt_push_clip(vec, clip, NULL);
+            rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             float bot = rect.y + rect.height;
             rdt_path_move_to(p, rect.x + bwl, bot - bwb);
@@ -164,9 +164,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             rdt_path_line_to(p, rect.x + rect.width, bot);
             rdt_path_line_to(p, rect.x, bot);
             rdt_path_close(p);
-            rdt_fill_path(vec, p, c, RDT_FILL_WINDING, xform);
+            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
             rdt_path_free(p);
-            rdt_pop_clip(vec);
+            rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }
         static void left(RenderContext* rdcon, Rect rect, float bwl, float bwt, float bwb, Color c) {
@@ -174,16 +174,16 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             RdtVector* vec = &rdcon->vec;
             const RdtMatrix* xform = get_transform(rdcon);
             RdtPath* clip = create_border_clip_path(rdcon);
-            rdt_push_clip(vec, clip, NULL);
+            rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             rdt_path_move_to(p, rect.x, rect.y);
             rdt_path_line_to(p, rect.x + bwl, rect.y + bwt);
             rdt_path_line_to(p, rect.x + bwl, rect.y + rect.height - bwb);
             rdt_path_line_to(p, rect.x, rect.y + rect.height);
             rdt_path_close(p);
-            rdt_fill_path(vec, p, c, RDT_FILL_WINDING, xform);
+            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
             rdt_path_free(p);
-            rdt_pop_clip(vec);
+            rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }
         static void right(RenderContext* rdcon, Rect rect, float bwr, float bwt, float bwb, Color c) {
@@ -191,7 +191,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             RdtVector* vec = &rdcon->vec;
             const RdtMatrix* xform = get_transform(rdcon);
             RdtPath* clip = create_border_clip_path(rdcon);
-            rdt_push_clip(vec, clip, NULL);
+            rc_push_clip(rdcon, clip, NULL);
             RdtPath* p = rdt_path_new();
             float rg = rect.x + rect.width;
             rdt_path_move_to(p, rg - bwr, rect.y + bwt);
@@ -199,9 +199,9 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             rdt_path_line_to(p, rg, rect.y + rect.height);
             rdt_path_line_to(p, rg - bwr, rect.y + rect.height - bwb);
             rdt_path_close(p);
-            rdt_fill_path(vec, p, c, RDT_FILL_WINDING, xform);
+            rc_fill_path(rdcon, p, c, RDT_FILL_WINDING, xform);
             rdt_path_free(p);
-            rdt_pop_clip(vec);
+            rc_pop_clip(rdcon);
             rdt_path_free(clip);
         }
     };
@@ -440,7 +440,7 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (border->width.left > 0 && border->left_style != CSS_VALUE_NONE &&
         border->left_style != CSS_VALUE_HIDDEN && border->left_color.a > 0) {
         Rect border_rect = {rect.x, rect.y, border->width.left, rect.height};
-        fill_surface_rect(surface, &border_rect, border->left_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        rc_fill_surface_rect(rdcon, surface, &border_rect, border->left_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.right > 0 && border->right_style != CSS_VALUE_NONE &&
@@ -449,13 +449,13 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rect.x + rect.width - border->width.right, rect.y,
             border->width.right, rect.height
         };
-        fill_surface_rect(surface, &border_rect, border->right_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        rc_fill_surface_rect(rdcon, surface, &border_rect, border->right_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.top > 0 && border->top_style != CSS_VALUE_NONE &&
         border->top_style != CSS_VALUE_HIDDEN && border->top_color.a > 0) {
         Rect border_rect = {rect.x, rect.y, rect.width, border->width.top};
-        fill_surface_rect(surface, &border_rect, border->top_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        rc_fill_surface_rect(rdcon, surface, &border_rect, border->top_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 
     if (border->width.bottom > 0 && border->bottom_style != CSS_VALUE_NONE &&
@@ -464,7 +464,7 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rect.x, rect.y + rect.height - border->width.bottom,
             rect.width, border->width.bottom
         };
-        fill_surface_rect(surface, &border_rect, border->bottom_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        rc_fill_surface_rect(rdcon, surface, &border_rect, border->bottom_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
 }
 
@@ -582,7 +582,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         Color c = border->top_color;
 
         RdtPath* clip = create_border_clip_path(rdcon);
-        rdt_push_clip(vec, clip, NULL);
+        rc_push_clip(rdcon, clip, NULL);
 
         if (style == CSS_VALUE_DOUBLE && w >= 3) {
             float line_w = floorf(w / 3.0f);
@@ -590,7 +590,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
             // Outer border
             RdtPath* outer = build_rounded_border_path(rect, border);
-            rdt_stroke_path(vec, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+            rc_stroke_path(rdcon, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
             // Inner border (inset by w - line_w)
@@ -604,7 +604,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
             RdtPath* inner = build_rounded_border_path(inner_rect, border);
             border->radius = orig_r;
-            rdt_stroke_path(vec, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+            rc_stroke_path(rdcon, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
         } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
@@ -629,7 +629,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
             // Outer half
             RdtPath* outer = build_rounded_border_path(rect, border);
-            rdt_stroke_path(vec, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+            rc_stroke_path(rdcon, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
             // Inner half
@@ -643,7 +643,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
             RdtPath* inner = build_rounded_border_path(inner_rect, border);
             border->radius = orig_r;
-            rdt_stroke_path(vec, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+            rc_stroke_path(rdcon, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
         } else if (style == CSS_VALUE_INSET || style == CSS_VALUE_OUTSET) {
@@ -654,13 +654,13 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
 
             if (!has_radius) {
-                rdt_pop_clip(vec);
+                rc_pop_clip(rdcon);
                 rdt_path_free(clip);
                 render_inset_outset_trapezoid(rdcon, rect, w, w, w, w, tl_color, br_color);
                 return;
             } else {
                 RdtPath* shape = build_rounded_border_path(rect, border);
-                rdt_stroke_path(vec, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
+                rc_stroke_path(rdcon, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
                 rdt_path_free(shape);
             }
 
@@ -670,12 +670,12 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             float dash[2];
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(style, w, dash, &cap);
-            rdt_stroke_path(vec, shape, c, w, cap, RDT_JOIN_MITER,
+            rc_stroke_path(rdcon, shape, c, w, cap, RDT_JOIN_MITER,
                             dash_count > 0 ? dash : NULL, dash_count, xform);
             rdt_path_free(shape);
         }
 
-        rdt_pop_clip(vec);
+        rc_pop_clip(rdcon);
         rdt_path_free(clip);
     } else {
         // Non-uniform borders: render each side with its own style/color/width
@@ -771,10 +771,10 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     int dash_count = get_dash_pattern(outline->style, w, dash, &cap);
 
     RdtPath* clip = create_border_clip_path(rdcon);
-    rdt_push_clip(vec, clip, NULL);
-    rdt_stroke_path(vec, p, outline->color, w, cap, RDT_JOIN_MITER,
+    rc_push_clip(rdcon, clip, NULL);
+    rc_stroke_path(rdcon, p, outline->color, w, cap, RDT_JOIN_MITER,
                     dash_count > 0 ? dash : NULL, dash_count, xform);
-    rdt_pop_clip(vec);
+    rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
 
