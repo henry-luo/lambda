@@ -1478,15 +1478,15 @@ test-benchmark:
 # Run fuzzy tests (quick mode: 5 minutes)
 test-fuzzy: build
 	@echo "Running fuzzy tests (quick mode: 5 minutes)..."
-	@chmod +x test/fuzzy/test_fuzzy.sh
-	@./test/fuzzy/test_fuzzy.sh --duration=300
+	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
+	@./test/fuzzy/lambda/test_fuzzy.sh --duration=300
 	@echo "✅ Fuzzy tests completed"
 
 # Run extended fuzzy tests (1 hour)
 test-fuzzy-extended: build
 	@echo "Running extended fuzzy tests (1 hour)..."
-	@chmod +x test/fuzzy/test_fuzzy.sh
-	@./test/fuzzy/test_fuzzy.sh --duration=3600
+	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
+	@./test/fuzzy/lambda/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
 
 # Radiant Layout Engine Fuzzy Testing
