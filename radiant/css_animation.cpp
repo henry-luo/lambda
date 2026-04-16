@@ -225,6 +225,8 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
 
     TransformFunction* tf = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
     if (!tf) return NULL;
+    tf->translate_x_percent = NAN;
+    tf->translate_y_percent = NAN;
 
     if (name_len == 10 && strncmp(name_start, "translateX", 10) == 0) {
         tf->type = TRANSFORM_TRANSLATEX;
@@ -638,6 +640,8 @@ static TransformFunction* interpolate_transform_func(TransformFunction* a, Trans
     if (!a && !b) return NULL;
 
     TransformFunction* result = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
+    result->translate_x_percent = NAN;
+    result->translate_y_percent = NAN;
 
     if (a && b && a->type == b->type) {
         result->type = a->type;
@@ -850,6 +854,37 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     anim->bounds[1] = abs_y;
     anim->bounds[2] = span->width;
     anim->bounds[3] = span->height;
+
+    // expand bounds to cover transform displacement (translateX/Y moves visual
+    // position beyond the static layout box, so dirty region must include both)
+    ViewSpan* vs = (ViewSpan*)anim->target;
+    if (vs->transform && vs->transform->functions) {
+        TransformFunction* tf = vs->transform->functions;
+        while (tf) {
+            if (tf->type == TRANSFORM_TRANSLATE || tf->type == TRANSFORM_TRANSLATEX ||
+                tf->type == TRANSFORM_TRANSLATEY) {
+                float tx = tf->params.translate.x;
+                float ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent))
+                    tx = tf->translate_x_percent * span->width / 100.0f;
+                if (!std::isnan(tf->translate_y_percent))
+                    ty = tf->translate_y_percent * span->height / 100.0f;
+                if (tx > 0) anim->bounds[2] += tx;
+                else { anim->bounds[0] += tx; anim->bounds[2] -= tx; }
+                if (ty > 0) anim->bounds[3] += ty;
+                else { anim->bounds[1] += ty; anim->bounds[3] -= ty; }
+            } else if (tf->type == TRANSFORM_SCALE || tf->type == TRANSFORM_SCALEX ||
+                       tf->type == TRANSFORM_SCALEY || tf->type == TRANSFORM_ROTATE) {
+                // scale/rotate can expand bounds — use generous margin
+                float margin = span->width > span->height ? span->width : span->height;
+                anim->bounds[0] -= margin * 0.5f;
+                anim->bounds[1] -= margin * 0.5f;
+                anim->bounds[2] += margin;
+                anim->bounds[3] += margin;
+            }
+            tf = tf->next;
+        }
+    }
 }
 
 void css_animation_finish(AnimationInstance* anim) {
