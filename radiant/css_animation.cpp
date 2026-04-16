@@ -813,6 +813,14 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             apply_animated_value(state->element, prop_a);
         }
     }
+
+    // update bounds from element's current layout position (may have been
+    // zero at creation time because css_animation_create runs before layout)
+    ViewSpan* span = (ViewSpan*)anim->target;
+    anim->bounds[0] = span->x;
+    anim->bounds[1] = span->y;
+    anim->bounds[2] = span->width;
+    anim->bounds[3] = span->height;
 }
 
 void css_animation_finish(AnimationInstance* anim) {
@@ -1005,8 +1013,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (dur_node) {
         StyleNode* sn = (StyleNode*)dur_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.duration = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.duration = val;
         }
     }
 
@@ -1015,8 +1025,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (delay_node) {
         StyleNode* sn = (StyleNode*)delay_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.delay = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.delay = val;
         }
     }
 

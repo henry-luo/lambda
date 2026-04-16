@@ -1,4 +1,4 @@
-# Radiant Multi-Threaded Rendering & Unified Animation Pipeline
+./lambda.exe view test/html/animation_test.html# Radiant Multi-Threaded Rendering & Unified Animation Pipeline
 
 **Status**: In Progress — Phase 6 Complete  
 **Date**: April 2026  
