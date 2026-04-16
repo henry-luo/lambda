@@ -89,7 +89,7 @@ static char* generate_cache_filename(const char* url, const char* cache_dir) {
 }
 
 // Download HTTP/HTTPS resource and return content in memory
-char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config) {
+char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config, char** effective_url) {
     if (!init_curl()) {
         return NULL;
     }
@@ -178,6 +178,18 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     }
 
     log_debug("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n", response.size, url, response_code);
+
+    // Capture effective URL after redirects (may differ from original url)
+    if (effective_url) {
+        char* eff_url = NULL;
+        curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &eff_url);
+        if (eff_url && strcmp(eff_url, url) != 0) {
+            *effective_url = mem_strdup(eff_url, MEM_CAT_TEMP);
+            log_debug("HTTP: Effective URL after redirect: %s", *effective_url);
+        } else {
+            *effective_url = NULL;
+        }
+    }
 
     if (content_size) {
         *content_size = response.size;
@@ -376,6 +388,11 @@ void free_fetch_response(FetchResponse* response) {
     }
     response->response_header_count = 0;
 
+    if (response->effective_url) {
+        mem_free(response->effective_url);
+        response->effective_url = NULL;
+    }
+
     mem_free(response);
 }
 
@@ -481,6 +498,16 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
 
     // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);
+
+    // Capture effective URL after redirects
+    char* eff_url = NULL;
+    curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &eff_url);
+    if (eff_url && strcmp(eff_url, url) != 0) {
+        response->effective_url = mem_strdup(eff_url, MEM_CAT_TEMP);
+        log_debug("HTTP: Effective URL after redirect: %s", response->effective_url);
+    } else {
+        response->effective_url = NULL;
+    }
 
     log_debug("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n",
            response->size, url, response->status_code);

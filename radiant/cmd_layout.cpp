@@ -892,8 +892,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             char css_path[1024];
             bool is_http_css = false;
 
-            if (href[0] == '/' && href[1] != '/') {
-                // Absolute local path - use as-is
+            if (href[0] == '/' && href[1] != '/'
+                && (!base_path || (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0))) {
+                // Absolute local path - use as-is (only when base is not HTTP)
                 strncpy(css_path, href, sizeof(css_path) - 1);
                 css_path[sizeof(css_path) - 1] = '\0';
             } else if (strstr(href, "://") != nullptr) {
@@ -2089,7 +2090,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         const char* url_str = url_get_href(html_url);
         log_debug("[Lambda CSS] Downloading HTML from URL: %s", url_str);
         size_t content_size = 0;
-        html_content = download_http_content(url_str, &content_size, nullptr);
+        char* eff_url = nullptr;
+        html_content = download_http_content(url_str, &content_size, nullptr, &eff_url);
+        // Update document URL if redirected (e.g. google.com → www.google.com)
+        if (eff_url) {
+            Url* redirected_url = url_parse(eff_url);
+            if (redirected_url && redirected_url->is_valid) {
+                log_info("[redirect] Updating document URL: %s → %s", url_str, eff_url);
+                html_url = redirected_url;
+            }
+            mem_free(eff_url);
+        }
         if (!html_content) {
             log_error("Failed to download HTML from URL: %s", url_str);
             // generate error page instead of returning nullptr
