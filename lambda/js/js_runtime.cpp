@@ -712,10 +712,6 @@ extern "C" Item js_to_number(Item value) {
         return (Item){.item = i2it(val)};
     }
 
-    case LMD_TYPE_INT:
-        // Already a number (int), convert to float for consistency
-        return value;
-
     case LMD_TYPE_FLOAT:
         return value;
 
@@ -725,14 +721,51 @@ extern "C" Item js_to_number(Item value) {
             return (Item){.item = i2it(0)};  // Empty string -> 0
         }
         // v20: Trim whitespace before parsing (ES spec: WhiteSpace + LineTerminator)
+        // Includes full Unicode StrWhiteSpaceChar set
         const char* start = str->chars;
         const char* end = str->chars + str->len;
-        while (start < end && (*start == ' ' || *start == '\t' || *start == '\n' ||
-               *start == '\r' || *start == '\f' || *start == '\v' ||
-               *start == (char)0xA0)) start++;
-        while (end > start && (*(end-1) == ' ' || *(end-1) == '\t' || *(end-1) == '\n' ||
-               *(end-1) == '\r' || *(end-1) == '\f' || *(end-1) == '\v' ||
-               *(end-1) == (char)0xA0)) end--;
+        // Trim leading whitespace
+        while (start < end) {
+            unsigned char c = (unsigned char)*start;
+            // ASCII whitespace
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') { start++; continue; }
+            // 2-byte: U+00A0 (NBSP)
+            if (c == 0xC2 && start + 1 < end && (unsigned char)start[1] == 0xA0) { start += 2; continue; }
+            // 3-byte sequences
+            if (c == 0xE1 && start + 2 < end && (unsigned char)start[1] == 0x9A && (unsigned char)start[2] == 0x80) { start += 3; continue; } // U+1680
+            if (c == 0xE2 && start + 2 < end) {
+                unsigned char b1 = (unsigned char)start[1], b2 = (unsigned char)start[2];
+                if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) { start += 3; continue; } // U+2000-U+200A
+                if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) { start += 3; continue; } // U+2028, U+2029
+                if (b1 == 0x80 && b2 == 0xAF) { start += 3; continue; } // U+202F
+                if (b1 == 0x81 && b2 == 0x9F) { start += 3; continue; } // U+205F
+            }
+            if (c == 0xE3 && start + 2 < end && (unsigned char)start[1] == 0x80 && (unsigned char)start[2] == 0x80) { start += 3; continue; } // U+3000
+            if (c == 0xEF && start + 2 < end && (unsigned char)start[1] == 0xBB && (unsigned char)start[2] == 0xBF) { start += 3; continue; } // U+FEFF
+            break;
+        }
+        // Trim trailing whitespace
+        while (end > start) {
+            unsigned char c = (unsigned char)*(end - 1);
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') { end--; continue; }
+            if (c == 0xA0 && end - 1 > start && (unsigned char)*(end - 2) == 0xC2) { end -= 2; continue; } // U+00A0
+            if (c == 0x80 && end - 2 > start) {
+                unsigned char p2 = (unsigned char)*(end - 3), p1 = (unsigned char)*(end - 2);
+                if (p2 == 0xE1 && p1 == 0x9A) { end -= 3; continue; } // U+1680
+                if (p2 == 0xE3 && p1 == 0x80) { end -= 3; continue; } // U+3000
+            }
+            if (end - 2 > start && (unsigned char)*(end - 3) == 0xE2) {
+                unsigned char p1 = (unsigned char)*(end - 2);
+                if (p1 == 0x80) {
+                    if (c >= 0x80 && c <= 0x8A) { end -= 3; continue; } // U+2000-U+200A
+                    if (c == 0xA8 || c == 0xA9) { end -= 3; continue; } // U+2028, U+2029
+                    if (c == 0xAF) { end -= 3; continue; } // U+202F
+                }
+                if (p1 == 0x81 && c == 0x9F) { end -= 3; continue; } // U+205F
+            }
+            if (c == 0xBF && end - 2 > start && (unsigned char)*(end - 3) == 0xEF && (unsigned char)*(end - 2) == 0xBB) { end -= 3; continue; } // U+FEFF
+            break;
+        }
         if (start == end) {
             return (Item){.item = i2it(0)};  // Whitespace-only string -> 0
         }
@@ -821,6 +854,12 @@ extern "C" Item js_to_number(Item value) {
         return (Item){.item = d2it(result)};
     }
 
+    case LMD_TYPE_INT:
+        // Already a number (int). JS symbols are also encoded as negative ints,
+        // but we don't throw here to avoid breaking internal callers.
+        // User-facing functions (isFinite, isNaN, Number()) check separately.
+        return value;
+
     default:
         // v16: Objects/arrays — check for Symbol.toPrimitive before returning NaN
         if (type == LMD_TYPE_MAP) {
@@ -830,24 +869,63 @@ extern "C" Item js_to_number(Item value) {
             if (pv_found && pv.item != ItemNull.item) {
                 return js_to_number(pv);
             }
+            // Check @@toPrimitive (Symbol.toPrimitive stored as __sym_2)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
             Item to_prim = js_property_get(value, sym_key);
-            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+            if (js_check_exception()) return ItemNull;
+            if (to_prim.item != ItemNull.item && get_type_id(to_prim) != LMD_TYPE_UNDEFINED) {
+                // ES spec: If @@toPrimitive is not callable, throw TypeError
+                if (get_type_id(to_prim) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("@@toPrimitive is not a function");
+                    return ItemNull;
+                }
                 Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
                 Item args[1] = { hint };
                 Item result = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
+                // ES spec: If result is object, throw TypeError
+                TypeId rt = get_type_id(result);
+                if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
+                // ES spec: ToNumber(symbol) throws TypeError
+                if (rt == LMD_TYPE_INT && it2i(result) <= -(int64_t)JS_SYMBOL_BASE) {
+                    js_throw_type_error("Cannot convert a Symbol value to a number");
+                    return ItemNull;
+                }
                 return js_to_number(result);
             }
-            // try valueOf()
+            // ToPrimitive hint "number": try valueOf() first, then toString()
             bool found = false;
             Item valueOf_fn = js_map_get_fast(value.map, "valueOf", 7, &found);
             if (!found) valueOf_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
+            bool vo_callable = false;
             if (valueOf_fn.item != ItemNull.item && get_type_id(valueOf_fn) == LMD_TYPE_FUNC) {
+                vo_callable = true;
                 Item result = js_call_function(valueOf_fn, value, NULL, 0);
+                if (js_check_exception()) return ItemNull;
                 TypeId rt = get_type_id(result);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) {
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_ELEMENT) {
                     return js_to_number(result);
                 }
+            }
+            // valueOf returned object or wasn't callable — try toString()
+            bool ts_found = false;
+            Item ts_fn = js_map_get_fast(value.map, "toString", 8, &ts_found);
+            if (!ts_found) ts_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("toString", 8))});
+            if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(ts_fn, value, NULL, 0);
+                if (js_check_exception()) return ItemNull;
+                TypeId rt = get_type_id(result);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_ELEMENT) {
+                    return js_to_number(result);
+                }
+            }
+            // Both valueOf and toString returned objects → TypeError
+            if (vo_callable || (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC)) {
+                js_throw_type_error("Cannot convert object to primitive value");
+                return ItemNull;
             }
         }
         // Arrays: ToPrimitive → toString → ToNumber (e.g. +[] → +"" → 0, +[1] → +"1" → 1)
@@ -1421,6 +1499,11 @@ static Item js_make_number(double d) {
 // Arithmetic Operators
 // =============================================================================
 
+// Helper: check if an Item is a JS Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
+static inline bool js_is_symbol(Item v) {
+    return get_type_id(v) == LMD_TYPE_INT && it2i(v) <= -(int64_t)JS_SYMBOL_BASE;
+}
+
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -1562,18 +1645,21 @@ extern "C" Item js_add(Item left, Item right) {
     }
 
     // Numeric addition — use double arithmetic for JS semantics
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     double l = js_get_number(left);
     double r = js_get_number(right);
     return js_make_number(l + r);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     double l = js_get_number(left);
     double r = js_get_number(right);
     return js_make_number(l - r);
 }
 
 extern "C" Item js_multiply(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // Use double arithmetic for JS semantics (no integer overflow errors)
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -1581,6 +1667,7 @@ extern "C" Item js_multiply(Item left, Item right) {
 }
 
 extern "C" Item js_divide(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // Use double arithmetic for correct JS semantics:
     // x/0 → Infinity, -x/0 → -Infinity, 0/0 → NaN (IEEE 754)
     double l = js_get_number(left);
@@ -1589,6 +1676,7 @@ extern "C" Item js_divide(Item left, Item right) {
 }
 
 extern "C" Item js_modulo(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     // fn_mod does not support float types, so keep custom implementation
     // that handles JS numeric coercion correctly
     double l = js_get_number(left);
@@ -1597,6 +1685,7 @@ extern "C" Item js_modulo(Item left, Item right) {
 }
 
 extern "C" Item js_power(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     double base_d = js_get_number(js_to_number(left));
     double exp_d = js_get_number(js_to_number(right));
     return js_make_number(js_math_pow_d(base_d, exp_d));
@@ -1957,41 +2046,48 @@ extern "C" int64_t js_double_to_int32(double d) {
 }
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l & r)};
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l | r)};
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
     return (Item){.item = i2it(l ^ r)};
 }
 
 extern "C" Item js_bitwise_not(Item operand) {
+    if (js_is_symbol(operand)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t val = js_to_int32(js_get_number(operand));
     return (Item){.item = i2it(~val)};
 }
 
 extern "C" Item js_left_shift(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it(l << r)};
 }
 
 extern "C" Item js_right_shift(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it(l >> r)};
 }
 
 extern "C" Item js_unsigned_right_shift(Item left, Item right) {
+    if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     uint32_t l = (uint32_t)js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
     return (Item){.item = i2it((int64_t)(l >> r))};
@@ -2002,10 +2098,20 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
 // =============================================================================
 
 extern "C" Item js_unary_plus(Item operand) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    if (get_type_id(operand) == LMD_TYPE_INT && it2i(operand) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     return js_to_number(operand);
 }
 
 extern "C" Item js_unary_minus(Item operand) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    if (get_type_id(operand) == LMD_TYPE_INT && it2i(operand) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     Item num = js_to_number(operand);
     // v18p: Integer 0 negated must produce float -0.0 per IEEE 754 / ECMAScript spec
     if (get_type_id(num) == LMD_TYPE_INT && it2i(num) == 0) {
@@ -12947,6 +13053,15 @@ extern "C" Item js_new_number_wrapper(Item arg) {
     js_property_set(obj, pv_key, js_to_number(arg));
     js_wrapper_set_proto(obj, "Number", 6);
     return obj;
+}
+
+// ES spec: new Number(arg) — checks symbol before creating wrapper
+extern "C" Item js_new_number_checked(Item arg) {
+    if (get_type_id(arg) == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
+    return js_new_number_wrapper(arg);
 }
 
 // Create a Boolean wrapper object

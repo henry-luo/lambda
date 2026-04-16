@@ -1539,6 +1539,7 @@ JitImport jit_runtime_imports[] = {
     {"js_func_init_property", FPTR(js_func_init_property)},
     {"js_mark_all_non_enumerable", FPTR(js_mark_all_non_enumerable)},
     {"js_new_number_wrapper", FPTR(js_new_number_wrapper)},
+    {"js_new_number_checked", FPTR(js_new_number_checked)},
     {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
     {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},
 

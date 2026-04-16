@@ -295,6 +295,7 @@ void js_mark_non_writable(Item object, Item name);
 void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);
+Item js_new_number_checked(Item arg);
 Item js_new_boolean_wrapper(Item arg);
 Item js_new_string_wrapper(Item arg);
 void js_link_base_prototype(Item proto_marker, Item base_ctor);

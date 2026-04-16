@@ -1432,6 +1432,8 @@ extern "C" Item js_parseFloat(Item str_item) {
             // U+205F: E2 81 9F
             if (b1 == 0x81 && b2 == 0x9F) { p += 3; continue; }
         }
+        // U+1680 (Ogham space mark): E1 9A 80
+        if ((unsigned char)p[0] == 0xE1 && (unsigned char)p[1] == 0x9A && (unsigned char)p[2] == 0x80) { p += 3; continue; }
         // U+3000 (ideographic space): E3 80 80
         if ((unsigned char)p[0] == 0xE3 && (unsigned char)p[1] == 0x80 && (unsigned char)p[2] == 0x80) { p += 3; continue; }
         break;
@@ -1496,7 +1498,13 @@ extern "C" Item js_parseFloat(Item str_item) {
 }
 
 extern "C" Item js_isNaN(Item value) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     Item num = js_to_number(value);
+    if (js_check_exception()) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -1506,7 +1514,13 @@ extern "C" Item js_isNaN(Item value) {
 }
 
 extern "C" Item js_isFinite(Item value) {
+    // ES spec: ToNumber(Symbol) throws TypeError
+    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     Item num = js_to_number(value);
+    if (js_check_exception()) return ItemNull;
     TypeId type = get_type_id(num);
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(num);
@@ -7073,10 +7087,54 @@ extern "C" Item js_btoa(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
+// ES spec: encodeURI/encodeURIComponent must throw URIError for lone surrogates.
+// In CESU-8 (how Lambda stores JS strings), surrogates appear as:
+//   High surrogates U+D800-U+DBFF: ED A0 80 - ED AF BF
+//   Low surrogates  U+DC00-U+DFFF: ED B0 80 - ED BF BF
+// A valid pair is high followed immediately by low. Anything else is lone.
+static bool js_has_lone_surrogate(const char* s, int len) {
+    for (int i = 0; i < len; ) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == 0xED && i + 2 < len) {
+            unsigned char b1 = (unsigned char)s[i + 1];
+            if (b1 >= 0xA0 && b1 <= 0xAF) {
+                // high surrogate — check for following low surrogate
+                if (i + 5 < len && (unsigned char)s[i + 3] == 0xED) {
+                    unsigned char nb1 = (unsigned char)s[i + 4];
+                    if (nb1 >= 0xB0 && nb1 <= 0xBF) {
+                        i += 6; // valid pair, skip both
+                        continue;
+                    }
+                }
+                return true; // lone high surrogate
+            } else if (b1 >= 0xB0 && b1 <= 0xBF) {
+                return true; // lone low surrogate (not preceded by high)
+            }
+            i += 3; // non-surrogate ED sequence
+        } else if (c >= 0xF0) { i += 4; }
+        else if (c >= 0xE0) { i += 3; }
+        else if (c >= 0xC0) { i += 2; }
+        else { i += 1; }
+    }
+    return false;
+}
+
+static Item js_throw_uri_error(const char* msg) {
+    Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+    Item m  = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    js_throw_value(js_new_error_with_name(tn, m));
+    return ItemNull;
+}
+
 extern "C" Item js_encodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    // ES spec: throw URIError for lone surrogates
+    if (js_has_lone_surrogate(s->chars, s->len)) {
+        return js_throw_uri_error("URI malformed");
+    }
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
@@ -7117,6 +7175,10 @@ extern "C" Item js_encodeURI(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    // ES spec: throw URIError for lone surrogates
+    if (js_has_lone_surrogate(s->chars, s->len)) {
+        return js_throw_uri_error("URI malformed");
+    }
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
@@ -7346,6 +7408,19 @@ extern "C" Item js_get_global_this() {
         double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *inf_p = INFINITY;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, (Item){.item = d2it(inf_p)});
+
+        // ES spec: NaN, Infinity, undefined are non-writable, non-enumerable, non-configurable
+        static const char* ro_globals[] = {"NaN", "Infinity", "undefined", NULL};
+        for (int i = 0; ro_globals[i]; i++) {
+            int nlen = (int)strlen(ro_globals[i]);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "__ne_%s", ro_globals[i]);
+            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
+            snprintf(buf, sizeof(buf), "__nw_%s", ro_globals[i]);
+            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
+            snprintf(buf, sizeof(buf), "__nc_%s", ro_globals[i]);
+            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
+        }
 
         // populate constructor functions on globalThis
         static const struct { const char* name; int len; } ctor_names[] = {

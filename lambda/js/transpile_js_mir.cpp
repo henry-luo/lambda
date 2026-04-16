@@ -10726,13 +10726,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // isNaN(val)
             if (nl == 5 && strncmp(n, "isNaN", 5) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_isNaN", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             // isFinite(val)
             if (nl == 8 && strncmp(n, "isFinite", 8) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_isFinite", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -10742,9 +10742,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_unary_plus", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
-            // String(val) — toString
+            // String(val) — toString; String() with no args returns ""
             if (nl == 6 && strncmp(n, "String", 6) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                if (!call->arguments) {
+                    return jm_box_string_literal(mt, "", 0);
+                }
+                MIR_reg_t val = jm_transpile_box_item(mt, call->arguments);
                 return jm_call_1(mt, "js_to_string_val", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -15526,10 +15529,10 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
     }
 
-    // new Number(arg) — wrapper object with __primitiveValue__
+    // new Number(arg) — wrapper object with __primitiveValue__ (checks symbol)
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) {
         MIR_reg_t arg_val = first_arg ? first_arg : jm_box_int_const(mt, 0);
-        return jm_call_1(mt, "js_new_number_wrapper", MIR_T_I64,
+        return jm_call_1(mt, "js_new_number_checked", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val));
     }
 
