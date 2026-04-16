@@ -42,6 +42,61 @@ static Item make_string_item(const char* str) {
 }
 
 // =============================================================================
+// Internal helper: normalize a path string in-place
+// Resolves '.' and '..' segments, collapses duplicate separators
+// =============================================================================
+static int normalize_path_buf(const char* path, char* result, int result_size) {
+    const char* segments[256];
+    int seg_count = 0;
+    bool is_absolute = (path[0] == '/');
+    bool had_trailing_sep = false;
+
+    int plen = (int)strlen(path);
+    if (plen > 0 && path[plen - 1] == '/') had_trailing_sep = true;
+
+    // tokenize into a temp buffer (strtok modifies)
+    char temp[4096];
+    if (plen >= (int)sizeof(temp)) plen = (int)sizeof(temp) - 1;
+    memcpy(temp, path, plen);
+    temp[plen] = '\0';
+
+    char* tok = strtok(temp, "/");
+    while (tok && seg_count < 256) {
+        if (strcmp(tok, ".") == 0) {
+            // skip
+        } else if (strcmp(tok, "..") == 0) {
+            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
+                seg_count--;
+            } else if (!is_absolute) {
+                segments[seg_count++] = "..";
+            }
+        } else {
+            segments[seg_count++] = tok;
+        }
+        tok = strtok(NULL, "/");
+    }
+
+    // rebuild
+    int pos = 0;
+    if (is_absolute) {
+        result[pos++] = '/';
+    }
+    for (int i = 0; i < seg_count; i++) {
+        if (i > 0) result[pos++] = '/';
+        int slen = (int)strlen(segments[i]);
+        if (pos + slen >= result_size - 1) break;
+        memcpy(result + pos, segments[i], slen);
+        pos += slen;
+    }
+    if (pos == 0) {
+        result[0] = '.';
+        pos = 1;
+    }
+    result[pos] = '\0';
+    return pos;
+}
+
+// =============================================================================
 // Path Operations
 // =============================================================================
 
@@ -175,7 +230,11 @@ extern "C" Item js_path_join(Item args_item) {
     }
 
     if (result_len == 0) return make_string_item(".");
-    return make_string_item(result, result_len);
+
+    // normalize the result (resolve . and .. segments)
+    char normalized[4096];
+    int nlen = normalize_path_buf(result, normalized, sizeof(normalized));
+    return make_string_item(normalized, nlen);
 }
 
 // path.resolve(...paths)
@@ -241,7 +300,9 @@ extern "C" Item js_path_resolve(Item args_item) {
     }
 
     // path doesn't exist — normalize manually (remove trailing slashes, resolve . and ..)
-    return make_string_item(resolved);
+    char normalized[4096];
+    int nlen = normalize_path_buf(resolved, normalized, sizeof(normalized));
+    return make_string_item(normalized, nlen);
 }
 
 // path.normalize(path)
@@ -260,54 +321,9 @@ extern "C" Item js_path_normalize(Item path_item) {
     }
 
     // fallback: basic normalization for non-existent paths
-    // remove double separators, resolve . and ..
     char result[4096];
-    const char* segments[256];
-    int seg_count = 0;
-    bool is_absolute = (path[0] == '/');
-
-    // tokenize
-    char temp[4096];
-    int tlen = (int)strlen(path);
-    if (tlen >= (int)sizeof(temp)) tlen = (int)sizeof(temp) - 1;
-    memcpy(temp, path, tlen);
-    temp[tlen] = '\0';
-
-    char* tok = strtok(temp, "/");
-    while (tok && seg_count < 256) {
-        if (strcmp(tok, ".") == 0) {
-            // skip
-        } else if (strcmp(tok, "..") == 0) {
-            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
-                seg_count--;
-            } else if (!is_absolute) {
-                segments[seg_count++] = "..";
-            }
-        } else {
-            segments[seg_count++] = tok;
-        }
-        tok = strtok(NULL, "/");
-    }
-
-    // rebuild
-    int pos = 0;
-    if (is_absolute) {
-        result[pos++] = '/';
-    }
-    for (int i = 0; i < seg_count; i++) {
-        if (i > 0) result[pos++] = '/';
-        int slen = (int)strlen(segments[i]);
-        if (pos + slen >= (int)sizeof(result) - 1) break;
-        memcpy(result + pos, segments[i], slen);
-        pos += slen;
-    }
-    if (pos == 0) {
-        result[0] = '.';
-        pos = 1;
-    }
-    result[pos] = '\0';
-
-    return make_string_item(result, pos);
+    int rlen = normalize_path_buf(path, result, sizeof(result));
+    return make_string_item(result, rlen);
 }
 
 // path.relative(from, to)

@@ -2665,6 +2665,12 @@ extern "C" int js_function_get_arity(Item fn_item) {
     return fn->arity;
 }
 
+extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* jsfn = (JsFunction*)fn_item.function;
+    jsfn->prototype = proto;
+}
+
 // P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.
 // Skips the class-index lookup in gc_heap_alloc and uses the bump-pointer fast path.
 #define JS_MAP_SIZE_CLASS 1
@@ -11961,24 +11967,65 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         JsFunction* fn = (JsFunction*)callback.function;
         Item accumulator;
         int start_idx;
+        bool has_extra = (src->extra != 0);
         if (argc >= 2) {
             accumulator = args[1];
             start_idx = 0;
         } else {
-            if (src->length == 0) {
+            // find first non-hole element as initial accumulator (ES spec 22.1.3.21 step 8)
+            // A slot is "present" if it's not a hole, or if a getter is defined for it
+            int k = 0;
+            bool found = false;
+            for (; k < src->length; k++) {
+                if (src->items[k].item != JS_DELETED_SENTINEL_VAL) {
+                    accumulator = js_array_element(arr, k);
+                    found = true;
+                    break;
+                }
+                if (has_extra) {
+                    // check if a getter or setter is defined for this index (property exists)
+                    Map* props = (Map*)(uintptr_t)src->extra;
+                    char gk[64];
+                    snprintf(gk, sizeof(gk), "__get_%d", k);
+                    bool gk_found = false;
+                    js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                    if (!gk_found) {
+                        snprintf(gk, sizeof(gk), "__set_%d", k);
+                        js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                    }
+                    if (gk_found) {
+                        accumulator = js_array_element(arr, k);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
                 Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
                 Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
                 Item error = js_new_error_with_name(type_name, msg_item);
                 js_throw_value(error);
                 return ItemNull;
             }
-            accumulator = js_array_element(arr, 0);
-            start_idx = 1;
+            start_idx = k + 1;
         }
         int len = src->length;  // spec: capture length before loop
         for (int i = start_idx; i < len; i++) {
-            // v25: skip holes (deleted elements) per ES spec
-            if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
+            // v25: skip holes per ES spec, but not if a property descriptor is defined
+            if (i >= src->length) continue;
+            if (src->items[i].item == JS_DELETED_SENTINEL_VAL) {
+                if (!has_extra) continue;
+                Map* props = (Map*)(uintptr_t)src->extra;
+                char gk[64];
+                snprintf(gk, sizeof(gk), "__get_%d", i);
+                bool gk_found = false;
+                js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                if (!gk_found) {
+                    snprintf(gk, sizeof(gk), "__set_%d", i);
+                    js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                }
+                if (!gk_found) continue;
+            }
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
         }
@@ -12486,21 +12533,61 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         JsFunction* fn = (JsFunction*)callback.function;
         Item accumulator;
         int start_idx;
+        bool has_extra = (src->extra != 0);
         if (argc >= 2) {
             accumulator = args[1];
             start_idx = src->length - 1;
         } else {
-            if (src->length == 0) {
+            // find last non-hole element as initial accumulator (ES spec 22.1.3.22 step 8)
+            int k = src->length - 1;
+            bool found = false;
+            for (; k >= 0; k--) {
+                if (src->items[k].item != JS_DELETED_SENTINEL_VAL) {
+                    accumulator = js_array_element(arr, k);
+                    found = true;
+                    break;
+                }
+                if (has_extra) {
+                    Map* props = (Map*)(uintptr_t)src->extra;
+                    char gk[64];
+                    snprintf(gk, sizeof(gk), "__get_%d", k);
+                    bool gk_found = false;
+                    js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                    if (!gk_found) {
+                        snprintf(gk, sizeof(gk), "__set_%d", k);
+                        js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                    }
+                    if (gk_found) {
+                        accumulator = js_array_element(arr, k);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
                 Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
                 Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
                 Item error = js_new_error_with_name(type_name, msg_item);
                 js_throw_value(error);
                 return ItemNull;
             }
-            accumulator = js_array_element(arr, src->length - 1);
-            start_idx = src->length - 2;
+            start_idx = k - 1;
         }
         for (int i = start_idx; i >= 0; i--) {
+            // skip holes per ES spec, but not if a property descriptor is defined
+            if (src->items[i].item == JS_DELETED_SENTINEL_VAL) {
+                if (!has_extra) continue;
+                Map* props = (Map*)(uintptr_t)src->extra;
+                char gk[64];
+                snprintf(gk, sizeof(gk), "__get_%d", i);
+                bool gk_found = false;
+                js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                if (!gk_found) {
+                    snprintf(gk, sizeof(gk), "__set_%d", i);
+                    js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                }
+                if (!gk_found) continue;
+            }
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
         }

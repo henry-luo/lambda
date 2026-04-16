@@ -315,13 +315,78 @@ extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item li
     return emitter;
 }
 
+// ─── Instance method wrappers (use js_get_this() for emitter) ────────────────
+// These wrappers allow prototype methods to work as instance.method(event, fn)
+// where 'this' provides the emitter instead of the first explicit argument.
+
+extern "C" Item js_get_this(void);
+
+static Item js_ee_inst_on(Item event_name, Item listener) {
+    return js_ee_on(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_once(Item event_name, Item listener) {
+    return js_ee_once(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_off(Item event_name, Item listener) {
+    return js_ee_off(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_emit(Item event_name, Item args_rest) {
+    // emit is variadic — re-build args with emitter prepended
+    Item emitter = js_get_this();
+    // Build full args: [emitter, event_name, ...rest]
+    // The original js_ee_emit expects (emitter, event, ...rest) as variadic
+    // For now use direct call since we have the rest array
+    return js_ee_emit(emitter, event_name, args_rest);
+}
+static Item js_ee_inst_removeAllListeners(Item event_name) {
+    return js_ee_removeAllListeners(js_get_this(), event_name);
+}
+static Item js_ee_inst_listeners(Item event_name) {
+    return js_ee_listeners(js_get_this(), event_name);
+}
+static Item js_ee_inst_listenerCount(Item event_name) {
+    return js_ee_listenerCount(js_get_this(), event_name);
+}
+static Item js_ee_inst_eventNames(void) {
+    return js_ee_eventNames(js_get_this());
+}
+static Item js_ee_inst_setMaxListeners(Item n) {
+    return js_ee_setMaxListeners(js_get_this(), n);
+}
+static Item js_ee_inst_getMaxListeners(void) {
+    return js_ee_getMaxListeners(js_get_this());
+}
+static Item js_ee_inst_prependListener(Item event_name, Item listener) {
+    return js_ee_prependListener(js_get_this(), event_name, listener);
+}
+static Item js_ee_inst_prependOnceListener(Item event_name, Item listener) {
+    return js_ee_prependOnceListener(js_get_this(), event_name, listener);
+}
+
 // ─── new EventEmitter() constructor ─────────────────────────────────────────
+static Item ee_prototype = {0};
+
+extern "C" void js_function_set_prototype(Item fn_item, Item proto);
+
 extern "C" Item js_ee_constructor(void) {
+    // When called via 'new EventEmitter()', js_current_this is the pre-built
+    // object with __proto__ already set. Initialize it and return undefined
+    // so the runtime uses the pre-built object (preserving prototype chain).
+    Item this_val = js_get_this();
+    if (get_type_id(this_val) == LMD_TYPE_MAP) {
+        js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+        js_property_set(this_val, events_key, js_new_object());
+        js_property_set(this_val, once_key, js_array_new(0));
+        return make_js_undefined();
+    }
+    // Fallback: direct call (not via new) — create a new object with prototype
     Item emitter = js_new_object();
     js_property_set(emitter, make_string_item("__class_name__"), make_string_item("EventEmitter"));
-    // initialize storage
     js_property_set(emitter, events_key, js_new_object());
     js_property_set(emitter, once_key, js_array_new(0));
+    if (ee_prototype.item != 0) {
+        js_set_prototype(emitter, ee_prototype);
+    }
     return emitter;
 }
 
@@ -342,17 +407,34 @@ extern "C" Item js_get_events_namespace(void) {
     events_namespace = js_new_object();
     js_property_set(events_namespace, make_string_item("__class_name__"), make_string_item("EventEmitter"));
 
+    // Create prototype object with instance methods (this-based wrappers)
+    ee_prototype = js_new_object();
+    ee_set_method(ee_prototype, "on",                  (void*)js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "addListener",         (void*)js_ee_inst_on, 2);
+    ee_set_method(ee_prototype, "once",                (void*)js_ee_inst_once, 2);
+    ee_set_method(ee_prototype, "off",                 (void*)js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "removeListener",      (void*)js_ee_inst_off, 2);
+    ee_set_method(ee_prototype, "emit",                (void*)js_ee_inst_emit, -2);
+    ee_set_method(ee_prototype, "removeAllListeners",  (void*)js_ee_inst_removeAllListeners, 1);
+    ee_set_method(ee_prototype, "listeners",           (void*)js_ee_inst_listeners, 1);
+    ee_set_method(ee_prototype, "listenerCount",       (void*)js_ee_inst_listenerCount, 1);
+    ee_set_method(ee_prototype, "eventNames",          (void*)js_ee_inst_eventNames, 0);
+    ee_set_method(ee_prototype, "setMaxListeners",     (void*)js_ee_inst_setMaxListeners, 1);
+    ee_set_method(ee_prototype, "getMaxListeners",     (void*)js_ee_inst_getMaxListeners, 0);
+    ee_set_method(ee_prototype, "prependListener",     (void*)js_ee_inst_prependListener, 2);
+    ee_set_method(ee_prototype, "prependOnceListener", (void*)js_ee_inst_prependOnceListener, 2);
+    ee_set_method(ee_prototype, "rawListeners",        (void*)js_ee_inst_listeners, 1);
+
     // EventEmitter constructor
     ee_set_method(events_namespace, "EventEmitter", (void*)js_ee_constructor, 0);
 
-    // Prototype methods (used as EventEmitter.prototype.*)
-    // Also put on namespace for direct use
+    // Also put methods on namespace for direct use (e.g. events.on(emitter, event, fn))
     ee_set_method(events_namespace, "on",                  (void*)js_ee_on, 3);
-    ee_set_method(events_namespace, "addListener",         (void*)js_ee_on, 3); // alias
+    ee_set_method(events_namespace, "addListener",         (void*)js_ee_on, 3);
     ee_set_method(events_namespace, "once",                (void*)js_ee_once, 3);
     ee_set_method(events_namespace, "off",                 (void*)js_ee_off, 3);
-    ee_set_method(events_namespace, "removeListener",      (void*)js_ee_off, 3); // alias
-    ee_set_method(events_namespace, "emit",                (void*)js_ee_emit, -3); // emitter, event, ...rest args
+    ee_set_method(events_namespace, "removeListener",      (void*)js_ee_off, 3);
+    ee_set_method(events_namespace, "emit",                (void*)js_ee_emit, -3);
     ee_set_method(events_namespace, "removeAllListeners",  (void*)js_ee_removeAllListeners, 2);
     ee_set_method(events_namespace, "listeners",           (void*)js_ee_listeners, 2);
     ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 2);
@@ -361,7 +443,20 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
     ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
     ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
-    ee_set_method(events_namespace, "rawListeners",        (void*)js_ee_listeners, 2); // same as listeners (no wrappers)
+    ee_set_method(events_namespace, "rawListeners",        (void*)js_ee_listeners, 2);
+
+    // Set EventEmitter.prototype to the prototype object
+    js_property_set(events_namespace, make_string_item("prototype"), ee_prototype);
+    // Set __instance_proto__ so 'new EventEmitter()' (MAP constructor path)
+    // sets up the prototype chain on instances correctly
+    js_property_set(events_namespace, make_string_item("__instance_proto__"), ee_prototype);
+    // Set __ctor__ so 'new EventEmitter()' calls the constructor to init storage
+    Item ee_ctor = js_property_get(events_namespace, make_string_item("EventEmitter"));
+    js_property_set(events_namespace, make_string_item("__ctor__"), ee_ctor);
+    // Also set prototype on the constructor function's internal field
+    if (get_type_id(ee_ctor) == LMD_TYPE_FUNC) {
+        js_function_set_prototype(ee_ctor, ee_prototype);
+    }
 
     // static property: defaultMaxListeners = 10
     js_property_set(events_namespace, make_string_item("defaultMaxListeners"), (Item){.item = i2it(10)});
@@ -374,5 +469,6 @@ extern "C" Item js_get_events_namespace(void) {
 
 extern "C" void js_reset_events_module(void) {
     events_namespace = (Item){0};
+    ee_prototype = (Item){0};
     keys_initialized = false;
 }

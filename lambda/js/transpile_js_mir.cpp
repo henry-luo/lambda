@@ -9406,6 +9406,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_0(mt, "js_donotevaluate");
                 return jm_emit_undefined(mt);
             }
+            // isConstructor(fn) — test262 harness helper
+            if (id->name->len == 13 && strncmp(id->name->chars, "isConstructor", 13) == 0 && arg_count == 1) {
+                JsAstNode* a1 = call->arguments;
+                MIR_reg_t fn_reg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                return jm_call_1(mt, "js_is_constructor", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+            }
         }
     }
 #endif // !NDEBUG
