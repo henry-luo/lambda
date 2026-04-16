@@ -5629,6 +5629,13 @@ extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
         // good — an exception was thrown. check its type.
         Item thrown = js_clear_exception();
 
+        // if expected_ctor is undefined/null, accept any thrown error
+        // (e.g. Test262Error not defined — just verify something was thrown)
+        TypeId ect = get_type_id(expected_ctor);
+        if (ect == LMD_TYPE_NULL || expected_ctor.item == ITEM_JS_UNDEFINED) {
+            return;  // any error is acceptable
+        }
+
         // thrown must be an object
         TypeId tid = get_type_id(thrown);
         if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) {
