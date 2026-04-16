@@ -24,6 +24,7 @@ static bool should_skip_flex_item(ViewElement* item);
 float calculate_item_baseline(ViewElement* item);
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item);
 static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layout);
+extern bool is_only_whitespace(const char* str);
 
 // ============================================================================
 // Flex Item Property Helpers (support both flex items and form controls)
@@ -2179,7 +2180,15 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
     // Single pass through all children
     while (child) {
         // Skip non-element nodes (text nodes)
+        // CSS Flexbox §4: "if the entire sequence of child text runs contains
+        // only white space... it is instead not rendered"
         if (!child->is_element()) {
+            if (child->is_text()) {
+                const char* text = (const char*)child->text_data();
+                if (!text || is_only_whitespace(text)) {
+                    child->view_type = RDT_VIEW_NONE;
+                }
+            }
             child = child->next_sibling;
             continue;
         }

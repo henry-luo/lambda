@@ -742,6 +742,13 @@ DisplayValue resolve_display_value(void* child) {
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
         bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
 
+        // HTML spec §14.3.1: The hidden attribute (UA stylesheet: [hidden] { display: none })
+        // Must check before CSS cascade since it's a presentational hint
+        if (dom_elem && dom_elem->has_attribute("hidden")) {
+            DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+            return none_display;
+        }
+
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
         // when display:none is set by UA defaults for hidden inputs, respect it
