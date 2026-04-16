@@ -2593,6 +2593,8 @@ enum JsBuiltinId {
     JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS,
     JS_BUILTIN_REFLECT_SET,
     JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF,
+    // Iterator protocol: [Symbol.iterator]() { return this; }
+    JS_BUILTIN_ITER_IDENTITY, // returns this_val (for iterators that are their own iterable)
     JS_BUILTIN_MAX
 };
 
@@ -3390,6 +3392,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 return js_cssom_rule_decl_get_property(object, key);
             case MAP_KIND_ITERATOR:
                 // v28: iterators are opaque engine-internal objects
+                // [Symbol.iterator]() returns this (iterators are their own iterable)
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* sk = it2s(key);
+                    if (sk->len == 7 && strncmp(sk->chars, "__sym_1", 7) == 0) {
+                        return js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+                    }
+                }
                 return make_js_undefined();
             }
         }
@@ -7225,6 +7234,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(false)});
         return result;
     }
+    // Iterator identity: [Symbol.iterator]() { return this; }
+    case JS_BUILTIN_ITER_IDENTITY: {
+        return this_val;
+    }
     // String iterator
     case JS_BUILTIN_STRING_ITER: {
         // String.prototype[Symbol.iterator]() — creates a string iterator object
@@ -7250,6 +7263,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Set Symbol.toStringTag for [object String Iterator]
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
                          (Item){.item = s2it(heap_create_name("String Iterator", 15))});
+        // [Symbol.iterator]() returns this
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     case JS_BUILTIN_STRING_ITER_NEXT: {
@@ -7739,6 +7755,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         (Item){.item = i2it(cd->type)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_COLL_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        // [Symbol.iterator]() returns this
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     case JS_BUILTIN_COLL_ITER_NEXT: {
@@ -12455,6 +12474,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(0)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     // values() — returns array iterator (kind=1: values)
@@ -12466,6 +12487,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(1)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
     // entries() — returns array iterator (kind=2: entries [index, value])
@@ -12477,6 +12500,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(2)});
         Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
         js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
         return iter;
     }
 
@@ -13453,6 +13478,10 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     Item tag_val = (Item){.item = s2it(heap_create_name(
         is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
     js_property_set(obj, tag_key, tag_val);
+    // Set [Symbol.iterator]() to return this (generators are their own iterable)
+    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+    js_property_set(obj, si_key, si_fn);
 
     return obj;
 }
