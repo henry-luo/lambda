@@ -6039,6 +6039,42 @@ extern "C" Item js_number_is_safe_integer(Item value);
 extern "C" Item js_parseInt(Item str_item, Item radix_item);
 extern "C" Item js_parseFloat(Item str_item);
 
+// HasProperty: check own + prototype chain (ES spec [[HasProperty]])
+static bool js_has_property(Item obj, Item key) {
+    // String primitives: character indices 0..length-1 are always present
+    if (get_type_id(obj) == LMD_TYPE_STRING) {
+        String* s = it2s(obj);
+        if (!s) return false;
+        Item k = js_to_string(key);
+        String* ks = it2s(k);
+        if (!ks) return false;
+        if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) return true;
+        // parse numeric index
+        bool is_num = (ks->len > 0 && ks->len <= 10);
+        int64_t idx = 0;
+        if (is_num) {
+            for (int i = 0; i < (int)ks->len; i++) {
+                char c = ks->chars[i];
+                if (c < '0' || c > '9') { is_num = false; break; }
+                idx = idx * 10 + (c - '0');
+            }
+            if (is_num && ks->len > 1 && ks->chars[0] == '0') is_num = false;
+        }
+        if (is_num && idx >= 0 && idx < (int64_t)s->len) return true;
+        return false;
+    }
+    if (it2b(js_has_own_property(obj, key))) return true;
+    // walk prototype chain
+    Item proto = js_get_prototype(obj);
+    int depth = 0;
+    while (proto.item != ItemNull.item && depth < 32) {
+        if (it2b(js_has_own_property(proto, key))) return true;
+        proto = js_get_prototype(proto);
+        depth++;
+    }
+    return false;
+}
+
 // Convert an array-like object (MAP with length + numeric indices) to an Array
 static Item js_array_like_to_array(Item obj) {
     // Get length property
@@ -6049,11 +6085,14 @@ static Item js_array_like_to_array(Item obj) {
     if (len > 100000) len = 100000; // safety cap
     Item result = js_array_new(len);
     Array* arr = result.array;
+    Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
     for (int i = 0; i < len; i++) {
         char buf[16];
         int blen = snprintf(buf, sizeof(buf), "%d", i);
         Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
-        Item val = js_property_get(obj, idx_key);
+        // ES spec: check HasProperty (includes prototype chain) to preserve holes
+        bool has = js_has_property(obj, idx_key);
+        Item val = has ? js_property_get(obj, idx_key) : hole;
         if (i < arr->capacity) {
             arr->items[i] = val;
             if (i >= arr->length) arr->length = i + 1;
@@ -10101,6 +10140,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
 
     // string-based replace
     String* search = it2s(js_to_string(args[0]));
+    if (js_exception_pending) return make_js_undefined();
     if (!search || search->len == 0) {
         if (is_replace_all) {
             // replaceAll("", repl): insert replacement between every character and at start/end
@@ -11276,6 +11316,17 @@ static inline Item js_array_element(Item arr_item, int idx) {
     return arr->items[idx];
 }
 
+// Wrapper for MIR-compiled direct array method calls: isolates js_array_method_real_this
+// so that an outer .call() context (e.g. slice.call(arrayLike)) doesn't leak into
+// nested array method calls (e.g. getCalls.push(0) inside a getter).
+extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc) {
+    Item saved = js_array_method_real_this;
+    js_array_method_real_this = (Item){0};
+    Item result = js_array_method(arr, method_name, args, argc);
+    js_array_method_real_this = saved;
+    return result;
+}
+
 extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
@@ -11286,6 +11337,25 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
 
     // push - mutating
     if (method->len == 4 && strncmp(method->chars, "push", 4) == 0) {
+        // Generic object push (ES spec §23.1.3.22): works on any object with length
+        TypeId cb_type = get_type_id(cb_this);
+        if (cb_type == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
+            // Get length from the original object
+            Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+            Item len_val = js_property_get(cb_this, len_key);
+            int64_t length = (int64_t)js_get_number(len_val);
+            if (length < 0 || get_type_id(len_val) == LMD_TYPE_UNDEFINED ||
+                get_type_id(len_val) == LMD_TYPE_NULL) length = 0;
+            for (int i = 0; i < argc; i++) {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%lld", (long long)(length + i));
+                Item idx_key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+                js_property_set(cb_this, idx_key, args[i]);
+            }
+            int64_t new_len = length + argc;
+            js_property_set(cb_this, len_key, (Item){.item = i2it((int)new_len)});
+            return (Item){.item = i2it((int)new_len)};
+        }
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
         for (int i = 0; i < argc; i++) {
             js_array_push_item_direct(arr.array, args[i]);
@@ -11294,6 +11364,25 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // pop - mutating
     if (method->len == 3 && strncmp(method->chars, "pop", 3) == 0) {
+        // Generic object pop (ES spec §23.1.3.21)
+        TypeId cb_type = get_type_id(cb_this);
+        if (cb_type == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
+            Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+            Item len_val = js_property_get(cb_this, len_key);
+            int64_t length = (int64_t)js_get_number(len_val);
+            if (length <= 0 || get_type_id(len_val) == LMD_TYPE_UNDEFINED) {
+                js_property_set(cb_this, len_key, (Item){.item = i2it(0)});
+                return make_js_undefined();
+            }
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%lld", (long long)(length - 1));
+            Item idx_key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+            Item result = js_property_get(cb_this, idx_key);
+            // Delete the property (set to undefined sentinel) and decrement length
+            js_property_set(cb_this, idx_key, make_js_undefined());
+            js_property_set(cb_this, len_key, (Item){.item = i2it((int)(length - 1))});
+            return result;
+        }
         if (arr_type != LMD_TYPE_ARRAY || arr.array->length == 0) return make_js_undefined();
         Item last = arr.array->items[arr.array->length - 1];
         arr.array->length--;

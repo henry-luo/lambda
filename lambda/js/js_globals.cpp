@@ -1522,6 +1522,69 @@ extern "C" Item js_isFinite(Item value) {
 // Number Methods
 // =============================================================================
 
+// ES-spec rounding helper: round to 'keep' significant digits using round-half-up.
+// Uses string-based rounding on snprintf output to avoid intermediate FP precision loss.
+// out_digits: receives the rounded significant digit characters
+// out_len: receives the count of significant digits
+// out_exp: receives the (possibly adjusted) base-10 exponent
+static void js_round_sig_digits(double abs_d, int keep,
+                                char* out_digits, int* out_len, int* out_exp) {
+    // Format with full double precision (20 decimal places = 21 sig digits)
+    char wide[64];
+    snprintf(wide, sizeof(wide), "%.20e", abs_d);
+
+    // Parse: digit.digits e [+/-] exp
+    char all_digits[32];
+    int all_count = 0;
+    char* p = wide;
+    all_digits[all_count++] = *p++; // first significant digit
+    if (*p == '.') p++;
+    while (*p && *p != 'e' && all_count < 30) {
+        all_digits[all_count++] = *p++;
+    }
+    int exp_val = 0;
+    if (*p == 'e') exp_val = atoi(p + 1);
+
+    // Copy first 'keep' digits (pad with '0' if needed)
+    for (int i = 0; i < keep; i++) {
+        out_digits[i] = (i < all_count) ? all_digits[i] : '0';
+    }
+    *out_len = keep;
+    *out_exp = exp_val;
+
+    // Check rounding digit at position 'keep'
+    if (keep < all_count) {
+        int rd = all_digits[keep] - '0';
+        bool round_up = false;
+        if (rd > 5) {
+            round_up = true;
+        } else if (rd == 5) {
+            // ES spec: ties round up (pick larger n)
+            // But first check if remaining digits make it > 0.5
+            round_up = true; // assume tie → round up
+            for (int i = keep + 1; i < all_count; i++) {
+                if (all_digits[i] != '0') {
+                    round_up = true; // definitely > 0.5
+                    break;
+                }
+            }
+        }
+        if (round_up) {
+            for (int i = keep - 1; i >= 0; i--) {
+                out_digits[i]++;
+                if (out_digits[i] <= '9') break;
+                out_digits[i] = '0';
+                if (i == 0) {
+                    // Carry out: result becomes 10...0, adjust exponent
+                    out_digits[0] = '1';
+                    for (int j = 1; j < keep; j++) out_digits[j] = '0';
+                    (*out_exp)++;
+                }
+            }
+        }
+    }
+}
+
 extern "C" Item js_toFixed(Item num_item, Item digits_item) {
     double num;
     TypeId type = get_type_id(num_item);
@@ -1534,17 +1597,20 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
     }
 
     // Step 1-4 per spec: validate fractionDigits BEFORE checking NaN
+    // ES spec: ToInteger(fractionDigits) — call ToNumber first, then truncate
     int digits = 0;
     TypeId dtype = get_type_id(digits_item);
-    if (dtype == LMD_TYPE_INT) {
-        digits = (int)it2i(digits_item);
-    } else if (dtype == LMD_TYPE_FLOAT) {
-        double fd = it2d(digits_item);
-        if (!isfinite(fd)) return js_throw_range_error("toFixed() digits argument must be between 0 and 100");
-        digits = (int)fd;
-    } else if (dtype != LMD_TYPE_UNDEFINED) {
-        // coerce non-numeric to 0 (e.g. NaN string → 0)
+    if (dtype == LMD_TYPE_UNDEFINED) {
         digits = 0;
+    } else {
+        Item coerced = js_to_number(digits_item);
+        if (js_check_exception()) return ItemNull;
+        TypeId ct = get_type_id(coerced);
+        double fd = 0;
+        if (ct == LMD_TYPE_INT) fd = (double)it2i(coerced);
+        else if (ct == LMD_TYPE_FLOAT) fd = it2d(coerced);
+        if (isnan(fd)) fd = 0;
+        digits = (int)fd;
     }
 
     // ES spec: RangeError if digits < 0 or > 100
@@ -1560,8 +1626,114 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
         ? (Item){.item = s2it(heap_create_name("Infinity", 8))}
         : (Item){.item = s2it(heap_create_name("-Infinity", 9))};
 
+    // ES spec step 9: If x >= 10^21, return ToString(x)
+    if (fabs(num) >= 1e21) {
+        return js_to_string(num_item);
+    }
+
     char buf[128];
-    snprintf(buf, sizeof(buf), "%.*f", digits, num);
+    bool negative = num < 0;
+    double abs_num = fabs(num);
+
+    // Use string-based rounding: format with full precision, then round manually
+    // to avoid intermediate floating-point precision loss
+    if (abs_num == 0.0) {
+        char* p = buf;
+        if (negative) *p++ = '-';
+        *p++ = '0';
+        if (digits > 0) {
+            *p++ = '.';
+            for (int i = 0; i < digits; i++) *p++ = '0';
+        }
+        *p = '\0';
+    } else {
+        // Get significant digits and exponent via helper
+        char sig[128];
+        int sig_len, exp_val;
+        // Number of significant digits needed: exponent + 1 + digits
+        int exp_est = (int)floor(log10(abs_num));
+        int keep = exp_est + 1 + digits;
+        if (keep <= 0) {
+            // Value is too small for any digit at this precision
+            // Check if we should round up to 10^(-digits)
+            char wide[64];
+            snprintf(wide, sizeof(wide), "%.20e", abs_num);
+            // Parse exponent from wide
+            char* ep = strchr(wide, 'e');
+            int we = ep ? atoi(ep + 1) : 0;
+            // The value is abs_num = sig * 10^we, we need to check if abs_num * 10^digits >= 0.5
+            // i.e., if the (digits+1)th decimal place rounds up
+            // Simplified: if keep == 0, check the first sig digit for >= 5
+            // if keep < 0, result is always 0
+            bool round_up = false;
+            if (keep == 0) {
+                // First sig digit determines rounding
+                int first_digit = wide[0] - '0';
+                if (first_digit > 5) round_up = true;
+                else if (first_digit == 5) {
+                    // Check remaining digits
+                    round_up = true;
+                    char* dp = wide + 2; // skip first digit and '.'
+                    while (*dp && *dp != 'e') {
+                        if (*dp != '0') { round_up = true; break; }
+                        dp++;
+                    }
+                }
+            }
+            char* p = buf;
+            if (round_up) {
+                if (negative) *p++ = '-';
+                // Result: 0.00...01 with digits decimal places
+                *p++ = '0';
+                if (digits > 0) {
+                    *p++ = '.';
+                    for (int i = 0; i < digits - 1; i++) *p++ = '0';
+                    *p++ = '1';
+                } else {
+                    *p++ = '1'; // shouldn't happen since keep=0 implies exp+1+d=0
+                }
+            } else {
+                *p++ = '0';
+                if (digits > 0) {
+                    *p++ = '.';
+                    for (int i = 0; i < digits; i++) *p++ = '0';
+                }
+            }
+            *p = '\0';
+        } else {
+            if (keep > 21) keep = 21; // clamp to double precision
+            js_round_sig_digits(abs_num, keep, sig, &sig_len, &exp_val);
+            // Build fixed-point string from significant digits and exponent
+            // The number is: sig_digits * 10^(exp_val - sig_len + 1)
+            // Integer part has exp_val + 1 digits, fractional part has digits digits
+            char* p = buf;
+            if (negative) *p++ = '-';
+            int int_part_len = exp_val + 1; // number of digits before decimal
+            if (int_part_len <= 0) {
+                *p++ = '0';
+                if (digits > 0) {
+                    *p++ = '.';
+                    for (int i = 0; i < -int_part_len && i < digits; i++) *p++ = '0';
+                    int remaining = digits - (-int_part_len);
+                    for (int i = 0; i < remaining && i < sig_len; i++) *p++ = sig[i];
+                    int written = (-int_part_len) + (remaining < sig_len ? remaining : sig_len);
+                    for (int i = written; i < digits; i++) *p++ = '0';
+                }
+            } else {
+                for (int i = 0; i < int_part_len; i++) {
+                    *p++ = (i < sig_len) ? sig[i] : '0';
+                }
+                if (digits > 0) {
+                    *p++ = '.';
+                    for (int i = 0; i < digits; i++) {
+                        int si = int_part_len + i;
+                        *p++ = (si < sig_len) ? sig[si] : '0';
+                    }
+                }
+            }
+            *p = '\0';
+        }
+    }
     return (Item){.item = s2it(heap_create_name(buf))};
 }
 
@@ -1679,35 +1851,62 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         // Range check after NaN/Infinity per spec
         if (precision < 1 || precision > 100) {
             return js_throw_range_error("toPrecision() argument must be between 1 and 100");
-        }        // Use %e to get the exponent, then decide format
-        char ebuf[128];
-        snprintf(ebuf, sizeof(ebuf), "%.*e", precision - 1, d);
-        // Parse exponent from ebuf
-        char* epos = strchr(ebuf, 'e');
-        int exponent = epos ? atoi(epos + 1) : 0;
-        char buf[128];
-        if (exponent >= 0 && exponent < precision) {
-            // Fixed-point format: e.g. 100.00(5) or 1.00(3)
-            int frac_digits = precision - 1 - exponent;
-            if (frac_digits < 0) frac_digits = 0;
-            snprintf(buf, sizeof(buf), "%.*f", frac_digits, d);
-        } else if (exponent < 0 && exponent >= -6) {
-            // Small number: 0.000123(2) → use fixed-point with enough decimals
-            int frac_digits = precision - 1 - exponent; // e.g. 2 - 1 - (-4) = 5
-            snprintf(buf, sizeof(buf), "%.*f", frac_digits, d);
-        } else {
-            // Use exponential format
-            snprintf(buf, sizeof(buf), "%.*e", precision - 1, d);
-            // Normalize exponent format: remove leading zeros, use e+ or e-
-            // C's %e uses e+01, JS uses e+1
-            char* ep = strchr(buf, 'e');
-            if (ep) {
-                char sign = ep[1];
-                int exp_val = atoi(ep + 1);
-                char exp_buf[16];
-                snprintf(exp_buf, sizeof(exp_buf), "e%c%d", sign, abs(exp_val));
-                strcpy(ep, exp_buf);
+        }
+        bool negative = d < 0;
+        double abs_d = fabs(d);
+        if (abs_d == 0.0) {
+            // Handle ±0: 0, 0.0, 0.00, etc.
+            char buf[128];
+            char* p = buf;
+            if (negative) *p++ = '-';
+            *p++ = '0';
+            if (precision > 1) {
+                *p++ = '.';
+                for (int i = 1; i < precision; i++) *p++ = '0';
             }
+            *p = '\0';
+            return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
+        int exponent = (int)floor(log10(abs_d));
+        char buf[256];
+        // Use string-based rounding for all precisions
+        char sig[128];
+        int sig_len, sig_exp;
+        js_round_sig_digits(abs_d, precision, sig, &sig_len, &sig_exp);
+        exponent = sig_exp; // may be adjusted by carry
+
+        // Format: choose fixed-point, small-decimal, or exponential
+        if (exponent >= 0 && exponent < precision) {
+            // Fixed-point: e.g. 123, 1.23, 12.3
+            char* p = buf;
+            if (negative) *p++ = '-';
+            int int_digits = exponent + 1;
+            for (int i = 0; i < int_digits && i < sig_len; i++) *p++ = sig[i];
+            if (int_digits < sig_len) {
+                *p++ = '.';
+                for (int i = int_digits; i < sig_len; i++) *p++ = sig[i];
+            }
+            *p = '\0';
+        } else if (exponent < 0 && exponent >= -6) {
+            // Small number: 0.00123
+            char* p = buf;
+            if (negative) *p++ = '-';
+            *p++ = '0';
+            *p++ = '.';
+            for (int i = 0; i < -(exponent + 1); i++) *p++ = '0';
+            for (int i = 0; i < sig_len; i++) *p++ = sig[i];
+            *p = '\0';
+        } else {
+            // Exponential: 1.23e+5 or 1.23e-7
+            char* p = buf;
+            if (negative) *p++ = '-';
+            *p++ = sig[0];
+            if (sig_len > 1) {
+                *p++ = '.';
+                for (int i = 1; i < sig_len; i++) *p++ = sig[i];
+            }
+            snprintf(p, sizeof(buf) - (size_t)(p - buf), "e%c%d",
+                exponent >= 0 ? '+' : '-', exponent >= 0 ? exponent : -exponent);
         }
         return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
@@ -1735,28 +1934,72 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         if (has_frac && (frac < 0 || frac > 100)) {
             return js_throw_range_error("toExponential() argument must be between 0 and 100");
         }
-        char buf[128];
-        if (!has_frac) {
-            snprintf(buf, sizeof(buf), "%e", d);
-            // Remove trailing zeros after decimal in exponent format
-            char* e = strchr(buf, 'e');
-            if (e) {
-                char* p = e - 1;
-                while (p > buf && *p == '0') p--;
-                if (*p == '.') p--;
-                memmove(p + 1, e, strlen(e) + 1);
+        char buf[256];
+        bool negative = d < 0;
+        double abs_d = fabs(d);
+        if (abs_d == 0.0) {
+            // Handle ±0 specially
+            if (!has_frac) {
+                snprintf(buf, sizeof(buf), "%s0e+0", negative ? "-" : "");
+            } else {
+                char* p = buf;
+                if (negative) *p++ = '-';
+                *p++ = '0';
+                if (frac > 0) {
+                    *p++ = '.';
+                    for (int i = 0; i < frac; i++) *p++ = '0';
+                }
+                snprintf(p, sizeof(buf) - (size_t)(p - buf), "e+0");
             }
         } else {
-            snprintf(buf, sizeof(buf), "%.*e", frac, d);
+            // ES spec: find e,n such that n × 10^(e-f) ≈ x, round half up
+            int exp = (int)floor(log10(abs_d));
+            int digits = has_frac ? frac + 1 : 0;
+            if (!has_frac) {
+                // No fractionDigits: use shortest unique representation
+                // Try increasing precision until round-trip matches
+                char* p = buf;
+                if (negative) *p++ = '-';
+                char tbuf[64];
+                int best_frac = 0;
+                for (int try_frac = 0; try_frac <= 20; try_frac++) {
+                    snprintf(tbuf, sizeof(tbuf), "%.*e", try_frac, abs_d);
+                    double roundtrip;
+                    sscanf(tbuf, "%lf", &roundtrip);
+                    if (roundtrip == abs_d) {
+                        best_frac = try_frac;
+                        break;
+                    }
+                    best_frac = try_frac;
+                }
+                snprintf(p, sizeof(buf) - (size_t)(p - buf), "%.*e", best_frac, abs_d);
+            } else {
+                // Use string-based rounding for ES-spec round-half-up
+                char sig[128];
+                int sig_len, sig_exp;
+                js_round_sig_digits(abs_d, frac + 1, sig, &sig_len, &sig_exp);
+                // Build exponential string
+                char* p = buf;
+                if (negative) *p++ = '-';
+                *p++ = sig[0];
+                if (frac > 0) {
+                    *p++ = '.';
+                    for (int i = 1; i < sig_len && i <= frac; i++) *p++ = sig[i];
+                    // Pad with zeros if needed
+                    for (int i = sig_len; i <= frac; i++) *p++ = '0';
+                }
+                snprintf(p, sizeof(buf) - (size_t)(p - buf), "e%c%d",
+                    sig_exp >= 0 ? '+' : '-', sig_exp >= 0 ? sig_exp : -sig_exp);
+            }
         }
         // Normalize exponent: remove leading zeros (e+07 -> e+7)
         char* e = strchr(buf, 'e');
         if (e) {
             char sign = e[1]; // '+' or '-'
-            char* digits = e + 2;
-            while (*digits == '0' && *(digits + 1)) digits++;
+            char* digits_p = e + 2;
+            while (*digits_p == '0' && *(digits_p + 1)) digits_p++;
             char norm[16];
-            snprintf(norm, sizeof(norm), "e%c%s", sign, digits);
+            snprintf(norm, sizeof(norm), "e%c%s", sign, digits_p);
             strcpy(e, norm);
         }
         return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -4049,6 +4292,39 @@ extern "C" Item js_object_keys(Item object) {
         return result;
     }
 
+    // Functions: return enumerable properties from properties_map
+    if (type == LMD_TYPE_FUNC) {
+        Item result = js_array_new(0);
+        JsFuncProps* fn_props = (JsFuncProps*)object.function;
+        if (fn_props->properties_map.item != 0 && get_type_id(fn_props->properties_map) == LMD_TYPE_MAP) {
+            Map* pm = fn_props->properties_map.map;
+            if (pm && pm->type) {
+                TypeMap* pmt = (TypeMap*)pm->type;
+                ShapeEntry* e = pmt->shape;
+                while (e) {
+                    const char* s = e->name->str;
+                    int slen = (int)e->name->length;
+                    // skip internal markers (__ne_, __nw_, __nc_, etc.)
+                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    // skip deleted sentinels
+                    Item val = _map_read_field(e, pm->data);
+                    if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+                    // skip non-enumerable properties
+                    if (slen > 0 && slen < 200) {
+                        char ne_key[256];
+                        snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", slen, s);
+                        bool ne_found = false;
+                        Item ne_val = js_map_get_fast_ext(pm, ne_key, (int)strlen(ne_key), &ne_found);
+                        if (ne_found && js_is_truthy(ne_val)) { e = e->next; continue; }
+                    }
+                    js_array_push(result, (Item){.item = s2it(heap_create_name(s, slen))});
+                    e = e->next;
+                }
+            }
+        }
+        return result;
+    }
+
     if (type != LMD_TYPE_MAP) {
         return js_array_new(0);
     }
@@ -4261,6 +4537,11 @@ extern "C" Item js_for_in_keys(Item object) {
 
     // for arrays: return indices as string keys (own only, same as before)
     if (type == LMD_TYPE_ARRAY) {
+        return js_object_keys(object);
+    }
+
+    // for functions: return enumerable own properties from properties_map
+    if (type == LMD_TYPE_FUNC) {
         return js_object_keys(object);
     }
 

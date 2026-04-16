@@ -10519,7 +10519,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
             }
             if (recv_type == LMD_TYPE_ARRAY) {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
@@ -10619,7 +10619,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // ARRAY path
             jm_emit_label(mt, l_array);
             {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
@@ -17410,6 +17410,13 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg)));
             }
 
+            // Save and clear any pending exception so finally body starts
+            // with a clean exception state. This lets try/catch inside the
+            // finally correctly catch only exceptions thrown within it,
+            // not the outer pending exception (ES spec §13.15.8 step 7-8).
+            MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+
             if (try_node->finalizer->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 jm_push_scope(mt);
                 jm_init_block_tdz(mt, try_node->finalizer);  // v20 TDZ
@@ -17424,6 +17431,25 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
                     MIR_new_reg_op(mt->ctx, saved_cptn)));
+            }
+
+            // Restore saved exception if finally completed normally.
+            // If the finally body threw a new exception, it takes precedence
+            // (per spec). Otherwise, re-throw the saved pending exception.
+            {
+                MIR_reg_t new_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                MIR_label_t skip_restore = jm_new_label(mt);
+                // if new exception pending, skip restore (new takes precedence)
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, skip_restore),
+                    MIR_new_reg_op(mt->ctx, new_exc)));
+                // if saved exception was pending, re-throw it
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, skip_restore),
+                    MIR_new_reg_op(mt->ctx, saved_exc_flag)));
+                jm_call_void_1(mt, "js_throw_value",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc_val));
+                jm_emit_label(mt, skip_restore);
             }
 
             // Pop the generator finally context (pushed for yield re-init)

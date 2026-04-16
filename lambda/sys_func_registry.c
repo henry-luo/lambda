@@ -1276,6 +1276,7 @@ JitImport jit_runtime_imports[] = {
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
+    {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},
     {"js_math_apply", FPTR(js_math_apply)},
     {"js_method_call_apply", FPTR(js_method_call_apply)},
