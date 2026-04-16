@@ -462,8 +462,50 @@ static void replay_draw_glyph(ImageSurface* surface, const DlDrawGlyph* g) {
 
 void dl_replay(DisplayList* dl, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
-               ScratchArena* scratch, float scale) {
+               ScratchArena* scratch, float scale,
+               DirtyTracker* dirty_tracker) {
     log_debug("[DL_REPLAY] replaying %d items", dl->count);
+
+    // Phase 19: When replaying during selective repaint, clip all rendering to
+    // the union bounding box of dirty regions.  This prevents parent-block
+    // backgrounds (recorded at full-viewport clip) from overwriting preserved
+    // surface content outside the dirty areas.
+    Bound dirty_union = {};
+    bool has_dirty_clip = false;
+    RdtPath* dirty_clip_path = nullptr;
+    if (dirty_tracker && dirty_tracker->dirty_list && !dirty_tracker->full_repaint) {
+        // compute union bounding box of all dirty rects (in physical pixels)
+        DirtyRect* dr = dirty_tracker->dirty_list;
+        float dl = dr->x * scale, dt = dr->y * scale;
+        float dr_right = (dr->x + dr->width) * scale;
+        float dr_bottom = (dr->y + dr->height) * scale;
+        dr = dr->next;
+        while (dr) {
+            float rx = dr->x * scale;
+            float ry = dr->y * scale;
+            float rr = (dr->x + dr->width) * scale;
+            float rb = (dr->y + dr->height) * scale;
+            if (rx < dl) dl = rx;
+            if (ry < dt) dt = ry;
+            if (rr > dr_right) dr_right = rr;
+            if (rb > dr_bottom) dr_bottom = rb;
+            dr = dr->next;
+        }
+        dirty_union = {dl, dt, dr_right, dr_bottom};
+        has_dirty_clip = true;
+
+        // push a ThorVG clip path covering the dirty union (clips vector ops)
+        dirty_clip_path = rdt_path_new();
+        rdt_path_move_to(dirty_clip_path, dl, dt);
+        rdt_path_line_to(dirty_clip_path, dr_right, dt);
+        rdt_path_line_to(dirty_clip_path, dr_right, dr_bottom);
+        rdt_path_line_to(dirty_clip_path, dl, dr_bottom);
+        rdt_path_close(dirty_clip_path);
+        rdt_push_clip(vec, dirty_clip_path, nullptr);
+
+        log_debug("[DL_REPLAY] dirty clip: (%.0f,%.0f)-(%.0f,%.0f)",
+                  dl, dt, dr_right, dr_bottom);
+    }
 
     // backdrop stack for mix-blend-mode (DL_SAVE_BACKDROP / DL_APPLY_BLEND_MODE pairs)
     #define DL_MAX_BACKDROP_DEPTH 16
@@ -528,7 +570,17 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         }
 
         case DL_DRAW_GLYPH: {
-            replay_draw_glyph(surface, &item->draw_glyph);
+            if (has_dirty_clip) {
+                // tighten glyph clip to dirty union
+                DlDrawGlyph tightened = item->draw_glyph;
+                tightened.clip.left   = std::max(tightened.clip.left,   dirty_union.left);
+                tightened.clip.top    = std::max(tightened.clip.top,    dirty_union.top);
+                tightened.clip.right  = std::min(tightened.clip.right,  dirty_union.right);
+                tightened.clip.bottom = std::min(tightened.clip.bottom, dirty_union.bottom);
+                replay_draw_glyph(surface, &tightened);
+            } else {
+                replay_draw_glyph(surface, &item->draw_glyph);
+            }
             break;
         }
 
@@ -565,6 +617,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             DlFillSurfaceRect* r = &item->fill_surface_rect;
             Rect rect = {r->x, r->y, r->w, r->h};
             Bound bound = r->clip;
+            if (has_dirty_clip) {
+                bound.left   = std::max(bound.left,   dirty_union.left);
+                bound.top    = std::max(bound.top,    dirty_union.top);
+                bound.right  = std::min(bound.right,  dirty_union.right);
+                bound.bottom = std::min(bound.bottom, dirty_union.bottom);
+            }
             fill_surface_rect(surface, &rect, r->color, &bound, nullptr, 0);
             break;
         }
@@ -573,6 +631,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
             Rect dst_rect = {r->dst_x, r->dst_y, r->dst_w, r->dst_h};
             Bound bound = r->clip;
+            if (has_dirty_clip) {
+                bound.left   = std::max(bound.left,   dirty_union.left);
+                bound.top    = std::max(bound.top,    dirty_union.top);
+                bound.right  = std::min(bound.right,  dirty_union.right);
+                bound.bottom = std::min(bound.bottom, dirty_union.bottom);
+            }
             blit_surface_scaled((ImageSurface*)r->src_surface, nullptr,
                                 surface, &dst_rect, &bound,
                                 (ScaleMode)r->scale_mode, nullptr, 0);
@@ -646,6 +710,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             DlApplyFilter* r = &item->apply_filter;
             Rect rect = {r->x, r->y, r->w, r->h};
             Bound bound = r->clip;
+            if (has_dirty_clip) {
+                bound.left   = std::max(bound.left,   dirty_union.left);
+                bound.top    = std::max(bound.top,    dirty_union.top);
+                bound.right  = std::min(bound.right,  dirty_union.right);
+                bound.bottom = std::min(bound.bottom, dirty_union.bottom);
+            }
             apply_css_filters(scratch, surface, (FilterProp*)r->filter, &rect, &bound);
             break;
         }
@@ -659,6 +729,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 
     if (backdrop_sp > 0) {
         log_error("[DL_REPLAY] unbalanced backdrop stack: %d entries left", backdrop_sp);
+    }
+
+    // pop the dirty-region clip pushed at the start of selective replay
+    if (dirty_clip_path) {
+        rdt_pop_clip(vec);
+        rdt_path_free(dirty_clip_path);
     }
 
     log_debug("[DL_REPLAY] done");
