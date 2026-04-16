@@ -373,7 +373,43 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
     // If CSS background is present, it's already rendered by render_block_view
 
-    // Button text is rendered via normal child content rendering in render_block_view
+    // For void elements like <input type="submit">, render value text directly
+    // (child content rendering only works for <button>text</button> style elements)
+    if (!block->first_child && form->value && *form->value && block->font) {
+        Color text_color = make_color(0, 0, 0);
+        if (block->in_line) {
+            text_color.r = block->in_line->color.r;
+            text_color.g = block->in_line->color.g;
+            text_color.b = block->in_line->color.b;
+            text_color.a = block->in_line->color.a;
+        }
+
+        // Measure text width for horizontal centering
+        FontBox fbox = {0};
+        setup_font(rdcon->ui_context, &fbox, block->font);
+        float text_width = 0;
+        if (fbox.font_handle) {
+            float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                ? rdcon->ui_context->pixel_ratio : 1.0f;
+            const unsigned char* p = (const unsigned char*)form->value;
+            const unsigned char* p_end = p + strlen(form->value);
+            while (p < p_end) {
+                uint32_t codepoint;
+                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                if (bytes <= 0) { p++; continue; }
+                p += bytes;
+                FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                if (glyph) text_width += glyph->advance_x / pixel_ratio;
+            }
+            text_width *= s;
+        }
+
+        float font_size_scaled = block->font->font_size * s;
+        float text_x = x + (w - text_width) / 2;
+        float text_y = y + (h - font_size_scaled) / 2;
+        render_simple_string(rdcon, form->value, text_x, text_y, block->font, text_color);
+    }
 
     log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",
               x, y, w, h, has_css_background);

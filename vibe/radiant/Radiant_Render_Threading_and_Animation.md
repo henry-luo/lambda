@@ -863,7 +863,107 @@ ThorVG's Lottie loader + JerryScript expressions add ~150KB+ to the binary. This
 
 ---
 
-## 8. Summary
+## 8. Animation Performance Tuning ✅ Complete
+
+**Goal**: Eliminate visual flickering and reduce per-frame render cost during CSS animations.
+
+### 8.1 Problem: Full-Page Repaint Every Frame
+
+Profiling `animation_test.html` (7 animation sections, 32px circles with `translateX(0→160px)`) revealed two root causes of flickering:
+
+1. **Expanded transform bounds**: `css_animation_tick` was *expanding* `anim->bounds` width/height by the translate displacement. A 32px ball at `translateX=80` produced a 112px-wide dirty rect; at `translateX=160`, a 192px-wide rect covering the entire animation track. With previous-bounds tracking marking *both* old and new positions dirty, the union grew even larger.
+
+2. **Off-screen animations**: Animations below the viewport fold (y=800..1719) still ticked and marked dirty regions. The dirty union bbox `(0,0)-(1096,1719)` covered the entire document — Phase 18 culling was ineffective, and `dl_replay` clipped to the full page.
+
+**Symptoms**:
+- Dirty union: `(0,0)-(1096,1719)` — entire page (viewport was only 1200×800)
+- 106 blocks, 777 DL items re-rendered every frame (effectively full repaint)
+- ~33ms record + ~10ms replay = ~43ms/frame ≈ 23 FPS (debug build)
+- Inconsistent frame pacing caused visible flickering/stuttering
+
+### 8.2 Fix 1: Tight Transform Dirty Bounds
+
+**File**: `radiant/css_animation.cpp`
+
+Changed translate handling from "expand bounds size" to "offset bounds position":
+
+```c
+// Before: EXPAND — dirty rect covers static + transformed position
+if (tx > 0) anim->bounds[2] += tx;
+else { anim->bounds[0] += tx; anim->bounds[2] -= tx; }
+
+// After: OFFSET — dirty rect covers only the transformed position
+anim->bounds[0] += tx;
+anim->bounds[1] += ty;
+```
+
+The previous-bounds tracking in `animation_scheduler_tick()` already saves the old bounds *before* the tick and marks both old and new positions dirty — so the offset approach correctly dirties both the departure and arrival positions as two small rects instead of one large expanded rect.
+
+Scale/rotate transforms still use the generous margin expansion (they genuinely expand the visual footprint).
+
+### 8.3 Fix 2: Viewport Clipping for Dirty Marks
+
+**Files**: `radiant/state_store.hpp`, `radiant/state_store.cpp`, `radiant/window.cpp`
+
+Added viewport bounds to `DirtyTracker`:
+
+```c
+typedef struct DirtyTracker {
+    DirtyRect* dirty_list;
+    Arena* arena;
+    bool full_repaint;
+    bool full_reflow;
+    float viewport_y;        // visible viewport top (CSS px)
+    float viewport_height;   // visible viewport height (CSS px, 0 = no clip)
+} DirtyTracker;
+```
+
+In `dirty_mark_rect()`, dirty rects entirely outside the viewport are skipped; partially visible rects are clipped to viewport bounds:
+
+```c
+if (tracker->viewport_height > 0) {
+    float vt = tracker->viewport_y;
+    float vb = vt + tracker->viewport_height;
+    if (y + height < vt || y > vb) return;       // entirely off-screen
+    if (y < vt) { height -= (vt - y); y = vt; }  // clip top
+    if (y + height > vb) { height = vb - y; }     // clip bottom
+}
+```
+
+In `window.cpp`, the viewport bounds are set from the scroll position and viewport height before each animation tick:
+
+```c
+float scroll_y = 0;
+if (root->scroller && root->scroller->pane)
+    scroll_y = root->scroller->pane->v_scroll_position;
+state->dirty_tracker.viewport_y = scroll_y;
+state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
+```
+
+### 8.4 Results
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| DL items / frame | 777 | 386 | 50% fewer |
+| Blocks / frame | 106 | 53 | 50% fewer |
+| Dirty union height | 1719 px | 800 px | Viewport-clipped |
+| `render_block_view` (debug) | ~33 ms | ~33 ms | Same (debug overhead) |
+| `render_block_view` (release) | — | ~12 ms | — |
+| `dl_replay` (release) | — | ~9 ms | — |
+| Total frame time (release) | — | ~21 ms (~47 FPS) | — |
+
+**Validation**: 5241/5241 Radiant baseline + 2730/2730 Lambda baseline tests pass.
+
+### 8.5 Remaining Bottleneck
+
+The dirty union still spans the full viewport width `(0,0)-(1042,800)` because multiple animation tracks are vertically distributed across the visible area. ThorVG `bound` operations (46 calls, ~30ms in debug) dominate the recording phase. Further optimization paths:
+
+- **Retained sub-tree fast path** (§3.11): For transform/opacity-only changes, skip re-recording and update the display list element group in-place. This would reduce recording to near-zero for pure transform animations.
+- **Finer dirty granularity**: Track dirty rects per animation element rather than coalescing into a single union — would enable per-tile culling that skips tiles outside any individual animation's rect.
+
+---
+
+## 9. Summary
 
 | Component | Approach | Status | Key Decision |
 |-----------|----------|--------|--------------|
@@ -875,6 +975,7 @@ ThorVG's Lottie loader + JerryScript expressions add ~150KB+ to the binary. This
 | GIF animation | Multi-frame decoder + frame swap | ✅ Done | Decode-all-upfront via giflib, pixel pointer swap |
 | Lottie animation | ThorVG `Animation` API wrapper | ✅ Done | Dedicated SwCanvas per player, auto-detect by extension/content |
 | Transform/opacity fast path | Retained display sub-trees | Deferred | Element groups in flat list; in-place transform/opacity update |
+| Animation perf tuning | Tight bounds + viewport clip | ✅ Done | Offset translate bounds, skip off-screen dirty marks |
 | JS animation | **Deferred** | — | rAF, Web Animations API deferred to JS integration stage |
 | Parallelized layout | **Deferred** | — | Layout is inherently sequential; keep single-threaded |
 | Compositor thread | **Deferred** | — | Premature without GPU compositing |

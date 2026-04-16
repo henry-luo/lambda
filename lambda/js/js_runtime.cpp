@@ -2665,6 +2665,12 @@ extern "C" int js_function_get_arity(Item fn_item) {
     return fn->arity;
 }
 
+extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* jsfn = (JsFunction*)fn_item.function;
+    jsfn->prototype = proto;
+}
+
 // P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.
 // Skips the class-index lookup in gc_heap_alloc and uses the bump-pointer fast path.
 #define JS_MAP_SIZE_CLASS 1

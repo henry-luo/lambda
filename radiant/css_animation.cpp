@@ -855,8 +855,10 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     anim->bounds[2] = span->width;
     anim->bounds[3] = span->height;
 
-    // expand bounds to cover transform displacement (translateX/Y moves visual
-    // position beyond the static layout box, so dirty region must include both)
+    // offset bounds by transform displacement so dirty region covers the
+    // element's actual visual position (not expanded to include both static
+    // and transformed positions — the previous-bounds tracking in
+    // animation_scheduler_tick handles the old position separately)
     ViewSpan* vs = (ViewSpan*)anim->target;
     if (vs->transform && vs->transform->functions) {
         TransformFunction* tf = vs->transform->functions;
@@ -869,10 +871,8 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                     tx = tf->translate_x_percent * span->width / 100.0f;
                 if (!std::isnan(tf->translate_y_percent))
                     ty = tf->translate_y_percent * span->height / 100.0f;
-                if (tx > 0) anim->bounds[2] += tx;
-                else { anim->bounds[0] += tx; anim->bounds[2] -= tx; }
-                if (ty > 0) anim->bounds[3] += ty;
-                else { anim->bounds[1] += ty; anim->bounds[3] -= ty; }
+                anim->bounds[0] += tx;
+                anim->bounds[1] += ty;
             } else if (tf->type == TRANSFORM_SCALE || tf->type == TRANSFORM_SCALEX ||
                        tf->type == TRANSFORM_SCALEY || tf->type == TRANSFORM_ROTATE) {
                 // scale/rotate can expand bounds — use generous margin

@@ -196,11 +196,121 @@ extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return ItemNull;
 
+    int mode = 0777;
+    bool recursive = false;
+
+    // options can be an integer (mode) or an object { recursive, mode }
+    if (get_type_id(options) == LMD_TYPE_INT) {
+        mode = (int)it2i(options);
+    } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
+        mode = (int)it2d(options);
+    } else if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item mode_val = js_property_get(options, make_string_item("mode"));
+        if (get_type_id(mode_val) == LMD_TYPE_INT) mode = (int)it2i(mode_val);
+        else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) mode = (int)it2d(mode_val);
+        Item rec_val = js_property_get(options, make_string_item("recursive"));
+        recursive = js_is_truthy(rec_val);
+    }
+
+    if (recursive) {
+        // create parent directories as needed
+        char tmp[1024];
+        snprintf(tmp, sizeof(tmp), "%s", path);
+        for (char* p = tmp + 1; *p; p++) {
+            if (*p == '/') {
+                *p = '\0';
+                uv_fs_t req;
+                uv_fs_mkdir(NULL, &req, tmp, mode, NULL);
+                uv_fs_req_cleanup(&req);
+                *p = '/';
+            }
+        }
+    }
+
     uv_fs_t req;
-    int r = uv_fs_mkdir(NULL, &req, path, 0755, NULL);
+    int r = uv_fs_mkdir(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
+
+    if (recursive) {
+        // for recursive, return the first directory created (or undefined)
+        return make_js_undefined();
+    }
     if (r < 0 && r != UV_EEXIST) {
         log_error("fs: mkdirSync: '%s': %s", path, uv_strerror(r));
+        return js_new_error(make_string_item(uv_strerror(r)));
+    }
+    return make_js_undefined();
+}
+
+// fs.mkdir(path[, options], callback) — async version
+extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callback_item) {
+    Item callback = callback_item;
+    Item options = options_or_cb;
+
+    // if second arg is a function, it's the callback (no options)
+    if (get_type_id(options_or_cb) == LMD_TYPE_FUNC) {
+        callback = options_or_cb;
+        options = ItemNull;
+    }
+
+    // perform the operation synchronously
+    char path_buf[1024];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path) {
+        if (get_type_id(callback) == LMD_TYPE_FUNC) {
+            Item err = make_string_item("EINVAL: invalid path");
+            Item args[1] = {err};
+            js_call_function(callback, ItemNull, args, 1);
+        }
+        return make_js_undefined();
+    }
+
+    int mode = 0777;
+    bool recursive = false;
+
+    if (get_type_id(options) == LMD_TYPE_INT) {
+        mode = (int)it2i(options);
+    } else if (get_type_id(options) == LMD_TYPE_FLOAT) {
+        mode = (int)it2d(options);
+    } else if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item mode_val = js_property_get(options, make_string_item("mode"));
+        if (get_type_id(mode_val) == LMD_TYPE_INT) mode = (int)it2i(mode_val);
+        else if (get_type_id(mode_val) == LMD_TYPE_FLOAT) mode = (int)it2d(mode_val);
+        Item rec_val = js_property_get(options, make_string_item("recursive"));
+        recursive = js_is_truthy(rec_val);
+    }
+
+    if (recursive) {
+        char tmp[1024];
+        snprintf(tmp, sizeof(tmp), "%s", path);
+        for (char* p = tmp + 1; *p; p++) {
+            if (*p == '/') {
+                *p = '\0';
+                uv_fs_t req;
+                uv_fs_mkdir(NULL, &req, tmp, mode, NULL);
+                uv_fs_req_cleanup(&req);
+                *p = '/';
+            }
+        }
+    }
+
+    uv_fs_t req;
+    int r = uv_fs_mkdir(NULL, &req, path, mode, NULL);
+    uv_fs_req_cleanup(&req);
+
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        if (r < 0 && !(recursive && r == UV_EEXIST)) {
+            Item err = js_new_error(make_string_item(uv_strerror(r)));
+            js_property_set(err, make_string_item("code"),
+                make_string_item(r == UV_EEXIST ? "EEXIST" :
+                                 r == UV_ENOENT ? "ENOENT" :
+                                 r == UV_EACCES ? "EACCES" : "ERR_FS"));
+            Item args[1] = {err};
+            js_call_function(callback, ItemNull, args, 1);
+        } else {
+            Item args[1] = {ItemNull};
+            js_call_function(callback, ItemNull, args, 1);
+        }
     }
     return make_js_undefined();
 }
@@ -926,6 +1036,7 @@ extern "C" Item js_get_fs_namespace(void) {
     // asynchronous (callback) methods
     js_fs_set_method(fs_namespace, "readFile",        (void*)js_fs_readFile, 2);
     js_fs_set_method(fs_namespace, "writeFile",       (void*)js_fs_writeFile, 3);
+    js_fs_set_method(fs_namespace, "mkdir",           (void*)js_fs_mkdir_async, 3);
 
     // additional sync methods
     js_fs_set_method(fs_namespace, "copyFileSync",    (void*)js_fs_copyFileSync, 2);

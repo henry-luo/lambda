@@ -71,6 +71,8 @@ typedef struct DirtyTracker {
     Arena* arena;                  // arena for dirty rect allocation
     bool full_repaint;             // entire viewport needs repaint
     bool full_reflow;              // entire document needs relayout
+    float viewport_y;              // visible viewport top (CSS px, for clipping)
+    float viewport_height;         // visible viewport height (CSS px, 0 = no clip)
 } DirtyTracker;
 
 /**

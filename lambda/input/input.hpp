@@ -116,9 +116,10 @@ typedef struct FetchResponse {
     char** response_headers;
     int response_header_count;
     char* content_type;
+    char* effective_url;  // final URL after redirects (NULL if no redirect)
 } FetchResponse;
 
-char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config);
+char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config, char** effective_url = nullptr);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 FetchResponse* http_fetch(const char* url, const FetchConfig* config);

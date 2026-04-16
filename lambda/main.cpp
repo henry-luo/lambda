@@ -2398,6 +2398,9 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
 
+            // Use effective URL (after redirects) for base tag injection
+            const char* base_url_for_inject = (response->effective_url) ? response->effective_url : original_url;
+
             // Get file extension from Content-Type
             effective_ext = content_type_to_extension(response->content_type);
             log_info("HTTP Content-Type: %s -> extension: %s",
@@ -2406,7 +2409,7 @@ int main(int argc, char *argv[]) {
 
             // Write to temp file with appropriate extension
             char temp_path[256];
-            snprintf(temp_path, sizeof(temp_path), "/tmp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
+            snprintf(temp_path, sizeof(temp_path), "./temp/lambda_view_http%s", effective_ext ? effective_ext : ".html");
             FILE* f = fopen(temp_path, "wb");
             if (f) {
                 // For HTML content, inject a <base> tag to preserve the original URL context
@@ -2424,10 +2427,10 @@ int main(int argc, char *argv[]) {
                             // Write content before insertion point
                             fwrite(response->data, 1, head_end - response->data, f);
                             // Inject base tag
-                            fprintf(f, "\n<base href=\"%s\">\n", original_url);
+                            fprintf(f, "\n<base href=\"%s\">\n", base_url_for_inject);
                             // Write rest of content
                             fwrite(head_end, 1, response->size - (head_end - response->data), f);
-                            log_info("Injected <base href=\"%s\"> into HTML", original_url);
+                            log_info("Injected <base href=\"%s\"> into HTML", base_url_for_inject);
                         } else {
                             fwrite(response->data, 1, response->size, f);
                         }
@@ -2437,17 +2440,17 @@ int main(int argc, char *argv[]) {
                         if (html_end) {
                             html_end++;
                             fwrite(response->data, 1, html_end - response->data, f);
-                            fprintf(f, "\n<head><base href=\"%s\"></head>\n", original_url);
+                            fprintf(f, "\n<head><base href=\"%s\"></head>\n", base_url_for_inject);
                             fwrite(html_end, 1, response->size - (html_end - response->data), f);
-                            log_info("Injected <head><base href=\"%s\"></head> into HTML", original_url);
+                            log_info("Injected <head><base href=\"%s\"></head> into HTML", base_url_for_inject);
                         } else {
                             fwrite(response->data, 1, response->size, f);
                         }
                     } else {
                         // No head or html tag, prepend base tag
-                        fprintf(f, "<base href=\"%s\">\n", original_url);
+                        fprintf(f, "<base href=\"%s\">\n", base_url_for_inject);
                         fwrite(response->data, 1, response->size, f);
-                        log_info("Prepended <base href=\"%s\"> to HTML", original_url);
+                        log_info("Prepended <base href=\"%s\"> to HTML", base_url_for_inject);
                     }
                 } else {
                     fwrite(response->data, 1, response->size, f);

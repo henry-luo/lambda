@@ -526,6 +526,15 @@ void dirty_mark_rect(DirtyTracker* tracker, float x, float y, float width, float
 
     if (tracker->full_repaint) return;  // already marked for full repaint
 
+    // clip to viewport — skip rects entirely outside visible area
+    if (tracker->viewport_height > 0) {
+        float vt = tracker->viewport_y;
+        float vb = vt + tracker->viewport_height;
+        if (y + height < vt || y > vb) return;
+        if (y < vt) { height -= (vt - y); y = vt; }
+        if (y + height > vb) { height = vb - y; }
+    }
+
     // Check if we should coalesce with existing rects
     DirtyRect* dr = tracker->dirty_list;
     while (dr) {

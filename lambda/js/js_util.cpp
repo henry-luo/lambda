@@ -100,10 +100,40 @@ extern "C" Item js_util_format(Item args_item) {
                 case 'i': {
                     Item num = js_to_number(arg);
                     TypeId t = get_type_id(num);
+                    double val = 0;
+                    bool is_nan = false;
                     if (t == LMD_TYPE_INT) {
-                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)it2i(num));
+                        val = (double)it2i(num);
                     } else if (t == LMD_TYPE_FLOAT) {
-                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", (int)it2d(num));
+                        val = it2d(num);
+                        if (val != val) is_nan = true; // NaN check
+                    } else {
+                        is_nan = true;
+                    }
+
+                    if (is_nan) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "NaN");
+                    } else if (val == 1.0/0.0) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "Infinity");
+                    } else if (val == -1.0/0.0) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "-Infinity");
+                    } else if (val == 0.0 && (1.0 / val) < 0) {
+                        // negative zero
+                        if (spec == 'i') {
+                            pos += snprintf(buf + pos, sizeof(buf) - pos, "0"); // parseInt(-0) = 0
+                        } else {
+                            pos += snprintf(buf + pos, sizeof(buf) - pos, "-0");
+                        }
+                    } else if (val == (double)(long long)val && val >= -1e15 && val <= 1e15) {
+                        // integer value: print without decimal
+                        if (spec == 'i') {
+                            pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
+                        } else {
+                            pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
+                        }
+                    } else {
+                        // float or very large value: print using %g
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%g", val);
                     }
                     arg_idx++;
                     break;

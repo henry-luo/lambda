@@ -993,6 +993,16 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Tick active animations
         if (state && state->animation_scheduler && state->animation_scheduler->has_active_animations) {
+            // set viewport bounds so off-screen animations don't inflate dirty region
+            float scroll_y = 0;
+            if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
+                ViewBlock* root = (ViewBlock*)ui_context.document->view_tree->root;
+                if (root->scroller && root->scroller->pane)
+                    scroll_y = root->scroller->pane->v_scroll_position;
+            }
+            state->dirty_tracker.viewport_y = scroll_y;
+            state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
+
             bool still_active = animation_scheduler_tick(state->animation_scheduler,
                                                          currentTime, &state->dirty_tracker);
             state->needs_repaint = true;
