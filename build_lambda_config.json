@@ -1773,6 +1773,26 @@
                         ],
                         "binary": "test_animation_gtest.exe",
                         "icon": "🎬"
+                    },
+                    {
+                        "source": "test_css_animation_gtest.cpp",
+                        "name": "CSS Animation Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp",
+                            "radiant/css_animation.cpp",
+                            "lambda/input/css/css_value.cpp",
+                            "lib/avl_tree.c"
+                        ],
+                        "binary": "test_css_animation_gtest.exe",
+                        "icon": "🎨"
                     }
                 ],
                 "type": "library"
