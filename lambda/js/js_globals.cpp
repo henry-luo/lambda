@@ -3288,6 +3288,11 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     (el == 7 && strncmp(en, "Promise", 7) == 0) ||
                     (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
                     (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+                    (el == 5 && strncmp(en, "Array", 5) == 0) ||
+                    (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
+                    (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
+                    (el == 4 && strncmp(en, "Date", 4) == 0) ||
+                    (el == 8 && strncmp(en, "Function", 8) == 0) ||
                     js_is_typed_array_ctor_name(en, el);
             }
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
