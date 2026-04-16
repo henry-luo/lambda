@@ -2393,12 +2393,44 @@ extern "C" Item js_string_raw(Item* args, int argc) {
 // Console multi-argument log
 // =============================================================================
 
+// forward declaration for util.format
+extern "C" Item js_util_format(Item args_item);
+
+// check if a string contains printf-style format specifiers
+static bool has_format_specifiers(String* s) {
+    for (int i = 0; i < (int)s->len - 1; i++) {
+        if (s->chars[i] == '%') {
+            char next = s->chars[i + 1];
+            if (next == 's' || next == 'd' || next == 'i' || next == 'f' ||
+                next == 'j' || next == 'o' || next == 'O') {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 extern "C" void js_console_log_multi(Item* args, int argc) {
-    for (int i = 0; i < argc; i++) {
-        if (i > 0) fputc(' ', stdout);
-        Item str = js_to_string(args[i]);
-        String* s = it2s(str);
-        if (s) fwrite(s->chars, 1, s->len, stdout);
+    // if first arg is a string with format specifiers and there are more args,
+    // use util.format-style substitution (matches Node.js console.log behavior)
+    if (argc >= 2 && get_type_id(args[0]) == LMD_TYPE_STRING &&
+        has_format_specifiers(it2s(args[0]))) {
+        Item arr = js_array_new(0);
+        for (int i = 0; i < argc; i++) {
+            js_array_push(arr, args[i]);
+        }
+        Item formatted = js_util_format(arr);
+        if (get_type_id(formatted) == LMD_TYPE_STRING) {
+            String* s = it2s(formatted);
+            if (s) fwrite(s->chars, 1, s->len, stdout);
+        }
+    } else {
+        for (int i = 0; i < argc; i++) {
+            if (i > 0) fputc(' ', stdout);
+            Item str = js_to_string(args[i]);
+            String* s = it2s(str);
+            if (s) fwrite(s->chars, 1, s->len, stdout);
+        }
     }
     fputc('\n', stdout);
     fflush(stdout);
