@@ -452,7 +452,8 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
-	    test-ui-automation test-reactive-ui test-redex-baseline
+	    test-ui-automation test-reactive-ui test-redex-baseline \
+	    node-official node-official-update-baseline
 
 # Help target - shows available commands
 help:
@@ -916,6 +917,16 @@ test262-update-baseline: build-test
 test262-strip:
 	@echo "Stripping comments from test262 files..."
 	@python3 utils/strip_test262_comments.py
+
+# Node.js official test suite: run official Node.js tests from ref/node/test/parallel/
+node-official: build-test
+	@echo "Running Node.js official test suite..."
+	@./test/test_node_official_gtest.exe
+
+# Node.js official: update baseline with current passing set
+node-official-update-baseline: build-test
+	@echo "Running Node.js official test suite and updating baseline..."
+	@./test/test_node_official_gtest.exe --update-baseline
 
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
