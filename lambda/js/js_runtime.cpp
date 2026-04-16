@@ -3514,6 +3514,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
                     String* cn_str = it2s(cn);
                     if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                        // String.prototype[Symbol.iterator]
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+                        }
                         builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
                     } else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
@@ -3603,6 +3607,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 8 && strncmp(str_key->chars, "__sym_10", 8) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SPLIT, "[Symbol.split]", 2);
                     } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
+                        // Array.prototype[Symbol.iterator] → values
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+                        }
                         // Array.prototype methods: resolve via Array builtin table
                         builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
@@ -7220,6 +7228,18 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     // String iterator
     case JS_BUILTIN_STRING_ITER: {
         // String.prototype[Symbol.iterator]() — creates a string iterator object
+        // RequireObjectCoercible(this): throw TypeError for null/undefined
+        {
+            TypeId tt = get_type_id(this_val);
+            if (tt == LMD_TYPE_NULL || tt == LMD_TYPE_UNDEFINED || this_val.item == 0) {
+                extern Item js_new_error_with_name(Item type_name, Item message);
+                extern void js_throw_value(Item error);
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+                Item msg = (Item){.item = s2it(heap_create_name("String.prototype[Symbol.iterator] requires that 'this' not be null or undefined", 78))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return ItemNull;
+            }
+        }
         // this_val is the string
         Item str_item = js_to_string(this_val);
         Item iter = js_new_object();
