@@ -1,6 +1,6 @@
 # Radiant Multi-Threaded Rendering & Unified Animation Pipeline
 
-**Status**: In Progress — Phase 1 Complete  
+**Status**: In Progress — Phase 2 Complete  
 **Date**: April 2026  
 
 ---
@@ -646,16 +646,45 @@ Key design choices:
 - Canvas clear happens *before* display list recording (not recorded)
 - Tiled export path (`render_html_doc_tiled`) unaffected — `dl` stays NULL
 
-### Phase 2: Tile-Based Rasterization
+### Phase 2: Tile-Based Rasterization ✅ Complete
 
 **Goal**: Parallel rasterization on worker threads.
 
-1. Implement `TileGrid` partitioning
-2. Implement `RenderPool` (pthread-based worker pool)
-3. Per-worker thread-local ThorVG canvas
-4. Display list replay with tile-bounds culling
-5. Tile compositing to final surface
-6. **Validation**: Pixel-identical output; benchmark on 4-core / 8-core machines
+1. ✅ Implement `TileGrid` partitioning
+2. ✅ Implement `RenderPool` (pthread-based worker pool)
+3. ✅ Per-worker thread-local ThorVG canvas
+4. ✅ Display list replay with tile-bounds culling
+5. ✅ Tile compositing to final surface
+6. ✅ **Validation**: 5237/5237 radiant baseline tests pass (8 threads, fully parallel)
+
+**Implementation details** (April 16, 2026):
+
+| File | Role |
+|------|------|
+| `radiant/tile_pool.h` | Header: `TileGrid`, `Tile`, `RenderPool`, `TileJob`, `WorkerState` structs |
+| `radiant/tile_pool.cpp` | Full implementation: tile grid init/destroy/clear/composite, pthread worker pool, `dl_replay_tile()` with bounds culling + coordinate translation |
+| `radiant/render.cpp` | Wired tiled replay into `render_html_doc()`: grid init → pool dispatch → composite → present; `render_pool_shutdown()` for cleanup |
+| `radiant/render.hpp` | Added `render_pool_shutdown()` declaration |
+| `radiant/rdt_vector_tvg.cpp` | `tile_offset_x`/`tile_offset_y` for ThorVG scene wrapper offset; `rdt_picture_draw_dup()` with mutex for thread-safe `tvg_paint_duplicate`; `rdt_vector_set_target()` for tile rebinding |
+| `radiant/rdt_vector.hpp` | Added `rdt_vector_set_tile_offset_x/y`, `rdt_vector_set_target`, `rdt_picture_draw_dup` |
+| `radiant/ui_context.cpp` | Calls `render_pool_shutdown()` before `rdt_engine_term()` for proper cleanup ordering |
+
+Key design choices:
+- 256 CSS px tiles (512 physical at 2x) — matches Chrome's tile size
+- `pthread` worker pool with `mutex` + `condvar` synchronization (no atomics needed)
+- `thread_local WorkerState` per worker: own ThorVG `SwCanvas`, `Pool`, `Arena`, `ScratchArena`
+- Two coordinate translation strategies:
+  - **ThorVG vector ops** (fill_rect, paths, gradients, images): scene wrapper in `tvg_push_draw_remove` translates by `(-tile_offset_x, -tile_offset_y)` automatically
+  - **Direct-pixel ops** (glyphs, fill_surface_rect, blit_surface_scaled, opacity, blend, filter): manual tile-local coordinate translation with bounds clamped to `[0, tile_w/h]`
+- `rdt_picture_draw_dup()`: duplicates ThorVG paint via `tvg_paint_duplicate()` so the original stays intact for other tiles; protected by `g_tvg_dup_mutex` (ThorVG's `Picture::duplicate()` mutates shared non-atomic state)
+- `RADIANT_RENDER_THREADS` env var controls thread count (default: hardware threads; `1` = single-threaded `dl_replay()` fallback)
+- Per-tile clip depth save stack (avoids writing to shared display list)
+- Per-tile backdrop stack for `mix-blend-mode` save/restore
+- `render_pool_shutdown()` joins worker threads and destroys their ThorVG canvases before `tvg_engine_term()`
+
+Bugs found and fixed during implementation:
+- **Unclamped tile-local clip bounds** (root cause of SIGBUS/SIGSEGV): direct-pixel ops passed translated clip bounds without clamping to tile dimensions, causing out-of-bounds pixel writes in `fill_surface_rect`, `blit_surface_scaled`, `apply_css_filters`
+- **`tvg_paint_duplicate` race condition**: ThorVG's `Picture::Impl::duplicate()` increments a non-atomic `sharing` counter and calls `load()` which mutates the source loader — serialized with a dedicated mutex
 
 ### Phase 3: Animation Scheduler
 

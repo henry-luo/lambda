@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
 #include "render.hpp"
+#include "animation.h"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -116,6 +117,8 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
     // init vector rendering engine
     rdt_engine_init(1);
+    // init animation timing presets (cubic-bezier ease, ease-in, ease-out, ease-in-out)
+    timing_init_presets();
     // load default fonts for vector engine to render text later
     const char* vec_fonts[] = {
         "Times New Roman", "Times",  // default serif
