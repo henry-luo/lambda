@@ -6829,6 +6829,7 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
+                    if (mt->is_global_strict || mt->is_module) jm_emit_exc_propagate_check(mt);
                 }
             } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
                 // obj.prop-- — check for static field first
@@ -6862,6 +6863,7 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
+                    if (mt->is_global_strict || mt->is_module) jm_emit_exc_propagate_check(mt);
                 }
             }
         }
@@ -8043,6 +8045,17 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+        // v27: propagate strict mode TypeError from property set
+        if (mt->is_global_strict || mt->is_module) {
+            if (asgn->op != JS_OP_AND_ASSIGN && asgn->op != JS_OP_OR_ASSIGN &&
+                asgn->op != JS_OP_NULLISH_ASSIGN) {
+                jm_emit_exc_propagate_check(mt);
+            } else {
+                // Logical assignment may call js_property_set even when short-circuited;
+                // clear any stale exception to prevent it leaking to later checks
+                jm_call_void_0(mt, "js_clear_exception");
+            }
+        }
 
         // v20: arguments[i] → param aliasing
         // When writing arguments[N] with a literal integer index that maps to a param,
@@ -20841,16 +20854,26 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     JsProgramNode* program = (JsProgramNode*)root;
 
     // v20: Detect program-level "use strict" directive
+    // Scan first few statements (var declarations may be hoisted before it)
     mt->is_global_strict = false;
-    if (program->body && program->body->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-        JsExpressionStatementNode* es = (JsExpressionStatementNode*)program->body;
-        if (es->expression && es->expression->node_type == JS_AST_NODE_LITERAL) {
-            JsLiteralNode* lit = (JsLiteralNode*)es->expression;
-            if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value &&
-                lit->value.string_value->len == 10 &&
-                strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
-                mt->is_global_strict = true;
+    {
+        JsAstNode* n = program->body;
+        for (int i = 0; i < 10 && n; i++, n = n->next) {
+            if (n->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+                JsExpressionStatementNode* es = (JsExpressionStatementNode*)n;
+                if (es->expression && es->expression->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* lit = (JsLiteralNode*)es->expression;
+                    if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value &&
+                        lit->value.string_value->len == 10 &&
+                        strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
+                        mt->is_global_strict = true;
+                        break;
+                    }
+                }
+                break; // first expression statement that isn't "use strict" — stop
             }
+            // skip hoisted var declarations
+            if (n->node_type != JS_AST_NODE_VARIABLE_DECLARATION) break;
         }
     }
 
