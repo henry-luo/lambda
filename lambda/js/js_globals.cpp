@@ -2475,7 +2475,7 @@ extern "C" Item js_instanceof(Item left, Item right) {
         }
     }
 
-    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (get_type_id(left) != LMD_TYPE_MAP && get_type_id(left) != LMD_TYPE_ARRAY && get_type_id(left) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
 
     // If right is a function, use ES spec OrdinaryHasInstance:
     // Walk left's __proto__ chain comparing against right.prototype
@@ -2486,17 +2486,15 @@ extern "C" Item js_instanceof(Item left, Item right) {
         Item func_proto = js_property_get(right, proto_key);
         if (func_proto.item != ItemNull.item && get_type_id(func_proto) == LMD_TYPE_MAP) {
             // Walk left's __proto__ chain looking for func_proto (identity check)
-            Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-            Item obj = left;
+            // Use js_get_prototype_of for each step (handles arrays, functions, builtins)
+            Item obj = js_get_prototype_of(left);
             int depth = 0;
-            while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-                Item obj_proto = map_get(obj.map, proto_key_item);
-                if (obj_proto.item != 0 && get_type_id(obj_proto) == LMD_TYPE_MAP) {
-                    if (obj_proto.map == func_proto.map) {
-                        return (Item){.item = b2it(true)};
-                    }
+            while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+                TypeId ot = get_type_id(obj);
+                if (ot == LMD_TYPE_MAP && obj.map == func_proto.map) {
+                    return (Item){.item = b2it(true)};
                 }
-                obj = obj_proto;
+                obj = js_get_prototype_of(obj);
                 depth++;
             }
         }
@@ -2550,9 +2548,9 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
         return (Item){.item = b2it(lt == LMD_TYPE_ARRAY)};
     }
-    // v20: Object check — any object (MAP) is instanceof Object (includes user-defined instances)
+    // v20: Object check — any object type is instanceof Object
     if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
-        return (Item){.item = b2it(lt == LMD_TYPE_MAP)};
+        return (Item){.item = b2it(lt == LMD_TYPE_MAP || lt == LMD_TYPE_ARRAY || lt == LMD_TYPE_FUNC)};
     }
     // v20: Function check — any function is instanceof Function
     if (rn->len == 8 && strncmp(rn->chars, "Function", 8) == 0) {
@@ -3054,9 +3052,6 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             return ItemNull;
         }
     }
-    // create new object inheriting from target's (or newTarget's) prototype
-    Item proto_source = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
-    Item new_obj = js_constructor_create_object(proto_source);
     // extract args from array
     int argc = 0;
     Item* args = NULL;
@@ -3070,6 +3065,13 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             }
         }
     }
+    // create new object inheriting from target's (or newTarget's) prototype
+    Item proto_source = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
+    Item new_obj = js_constructor_create_object(proto_source);
+    // Set new.target so that js_ctor_requires_new allows the call through
+    extern void js_set_new_target(Item target);
+    Item nt_val = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
+    js_set_new_target(nt_val);
     Item result = js_call_function(target, new_obj, args, argc);
     // if constructor returned an object, use it; otherwise return new_obj
     TypeId rt = get_type_id(result);
@@ -3453,6 +3455,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                         lookup_type = LMD_TYPE_FUNC;
                     else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)
                         lookup_type = LMD_TYPE_INT;
+                    else if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0)
+                        lookup_type = LMD_TYPE_BOOL;
 
                     Item builtin = ItemNull;
                     if (lookup_type != (TypeId)0) {
@@ -5856,7 +5860,7 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
     else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
     else if (cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) lookup_type = LMD_TYPE_MAP;
-    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_MAP;
+    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_BOOL;
     // Skip "constructor" — handled separately
     if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
     Item builtin = js_lookup_builtin_method(lookup_type, name, len);
@@ -7685,6 +7689,26 @@ void js_ctor_cache_reset() {
 // Dummy func_ptr for constructors (makes typeof return "function")
 static Item js_ctor_placeholder() { return ItemNull; }
 
+// v49: Constructor that requires 'new' — throws TypeError when called as a function.
+// Used for Map, Set, WeakMap, WeakSet, Promise, ArrayBuffer, DataView, etc.
+extern "C" Item js_get_new_target();
+static Item js_ctor_requires_new() {
+    // Check if there's a pending new.target (set by Reflect.construct or 'new')
+    Item nt = js_get_new_target();
+    if (get_type_id(nt) == LMD_TYPE_FUNC) {
+        // Called via Reflect.construct — allow it (return placeholder, actual
+        // construction is handled by name-based dispatch in js_new_from_class_object)
+        return ItemNull;
+    }
+    // Called without 'new' — throw TypeError
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+    Item msg = (Item){.item = s2it(heap_create_name("Constructor requires 'new'", 26))};
+    extern void js_throw_value(Item value);
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    js_throw_value(js_new_error_with_name(tn, msg));
+    return ItemNull;
+}
+
 // v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
 static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
 static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
@@ -7944,6 +7968,11 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_SYNTAX_ERROR) fn->func_ptr = (void*)js_ctor_syntax_error_fn;
     else if (ctor_id == JS_CTOR_URI_ERROR) fn->func_ptr = (void*)js_ctor_uri_error_fn;
     else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
+    else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
+             ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
+             ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
+             (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY))
+        fn->func_ptr = (void*)js_ctor_requires_new;
     else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
     fn->formal_length = -1; // -1 = use param_count for .length

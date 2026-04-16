@@ -7,6 +7,7 @@
 #include "form_control.hpp"
 #include "font_face.h"
 #include "../lib/font/font.h"
+#include "css_animation.h"
 
 #include <chrono>
 
@@ -585,6 +586,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                                  : lycon->font.style->font_size;
 
             resolve_css_styles(dom_elem, lycon);
+
+            // CSS Animations: check if element has animation-name and start animations
+            if (lycon->ui_context) {
+                css_animation_resolve(dom_elem, lycon);
+            }
 
             // CSS 2.1 §15.2: When CSS changes an element's font-size, UA-default
             // margins specified in 'em' units (specificity -1) must be re-resolved

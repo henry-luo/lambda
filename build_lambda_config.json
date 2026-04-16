@@ -1773,6 +1773,71 @@
                         ],
                         "binary": "test_animation_gtest.exe",
                         "icon": "🎬"
+                    },
+                    {
+                        "source": "test_css_animation_gtest.cpp",
+                        "name": "CSS Animation Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp",
+                            "radiant/css_animation.cpp",
+                            "lambda/input/css/css_value.cpp",
+                            "lib/avl_tree.c"
+                        ],
+                        "binary": "test_css_animation_gtest.exe",
+                        "icon": "🎨"
+                    },
+                    {
+                        "source": "test_gif_player_gtest.cpp",
+                        "name": "GIF Animation Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "gif",
+                            "png",
+                            "turbojpeg",
+                            "zlib"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp",
+                            "radiant/gif_player.cpp",
+                            "lib/image.c"
+                        ],
+                        "binary": "test_gif_player_gtest.exe",
+                        "icon": "🎞️"
+                    },
+                    {
+                        "source": "test_lottie_player_gtest.cpp",
+                        "name": "Lottie Animation Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "ThorVG",
+                            "png",
+                            "turbojpeg",
+                            "zlib"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp",
+                            "radiant/lottie_player.cpp"
+                        ],
+                        "binary": "test_lottie_player_gtest.exe",
+                        "icon": "🎭"
                     }
                 ],
                 "type": "library"
