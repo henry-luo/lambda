@@ -1276,6 +1276,7 @@ JitImport jit_runtime_imports[] = {
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
+    {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},
     {"js_math_apply", FPTR(js_math_apply)},
     {"js_method_call_apply", FPTR(js_method_call_apply)},
@@ -1538,6 +1539,7 @@ JitImport jit_runtime_imports[] = {
     {"js_func_init_property", FPTR(js_func_init_property)},
     {"js_mark_all_non_enumerable", FPTR(js_mark_all_non_enumerable)},
     {"js_new_number_wrapper", FPTR(js_new_number_wrapper)},
+    {"js_new_number_checked", FPTR(js_new_number_checked)},
     {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
     {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},
 
