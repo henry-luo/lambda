@@ -343,6 +343,15 @@ extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
     }
 }
 
+// Const assignment check: throw TypeError when assigning to a const variable
+extern "C" void js_throw_const_assign(const char* name, int name_len) {
+    char buf[256];
+    int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
+    Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+    Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
+    js_throw_value(js_new_error_with_name(tn, msg));
+}
+
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
 // forward declarations for module namespace cache resets

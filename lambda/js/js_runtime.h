@@ -425,6 +425,9 @@ Item js_error_set_cause(Item error, Item options);
 // TDZ (Temporal Dead Zone) check for let/const
 void js_check_tdz(Item value, const char* name, int name_len);
 
+// Const assignment error
+void js_throw_const_assign(const char* name, int name_len);
+
 // =============================================================================
 // Runtime Context
 // =============================================================================

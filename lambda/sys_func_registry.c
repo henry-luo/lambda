@@ -1204,6 +1204,7 @@ JitImport jit_runtime_imports[] = {
     {"js_build_template_object", FPTR(js_build_template_object)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
+    {"js_throw_const_assign", FPTR(js_throw_const_assign)},
 #ifndef NDEBUG
     {"js_assert_same_value", FPTR(js_assert_same_value)},
     {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},

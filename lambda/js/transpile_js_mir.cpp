@@ -96,6 +96,7 @@ struct JsMirVarEntry {
     JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
     Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
     bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
+    bool is_const;           // true if declared with const (prevents reassignment)
     bool tdz_active;         // v20: true if still in temporal dead zone (before declaration)
     MIR_reg_t hoisted_data_reg;  // P4h: hoisted items/data pointer for loop optimization (0 = not active)
     MIR_reg_t hoisted_len_reg;   // P4h: hoisted length register for loop optimization (0 = not active)
@@ -558,13 +559,20 @@ static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.type_id = type_id;
     entry.var.typed_array_type = -1;  // P9: not a typed array by default
 
-    // v15: In generators, preserve env slot info from hoisted variables
-    if (mt->in_generator) {
+    // Preserve metadata from TDZ-hoisted entries
+    {
         JsMirVarEntry* existing = jm_find_var(mt, name);
-        if (existing && existing->from_env) {
-            entry.var.from_env = true;
-            entry.var.env_slot = existing->env_slot;
-            entry.var.env_reg = existing->env_reg;
+        if (existing) {
+            // v15: In generators, preserve env slot info from hoisted variables
+            if (mt->in_generator && existing->from_env) {
+                entry.var.from_env = true;
+                entry.var.env_slot = existing->env_slot;
+                entry.var.env_reg = existing->env_reg;
+            }
+            // Preserve const flag from TDZ init
+            if (existing->is_const) {
+                entry.var.is_const = true;
+            }
         }
     }
 
@@ -1674,6 +1682,7 @@ static void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
         JsMirVarEntry* ve = jm_find_var(mt, e->name);
         if (ve) {
             ve->is_let_const = true;
+            ve->is_const = (e->var_kind == 2);  // JS_VAR_CONST
             ve->tdz_active = true;
         }
     }
@@ -6543,6 +6552,14 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
             JsMirVarEntry* var = jm_find_var(mt, vname);
+            // const variable: throw TypeError
+            if (var && var->is_const) {
+                jm_call_void_2(mt, "js_throw_const_assign",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                jm_emit_exc_propagate_check(mt);
+                return jm_emit_undefined(mt);
+            }
             if (var && var->type_id == LMD_TYPE_INT && !var->from_env) {
                 // native int: postfix returns old value, prefix returns new
                 MIR_reg_t old_val = 0;
@@ -6633,6 +6650,14 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 2) {
+                    // const variable at module level: throw TypeError
+                    jm_call_void_2(mt, "js_throw_const_assign",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                    jm_emit_exc_propagate_check(mt);
+                    return jm_emit_undefined(mt);
+                }
                 if (mc && mc->const_type == MCONST_MODVAR) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
@@ -6712,6 +6737,14 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
             JsMirVarEntry* var = jm_find_var(mt, vname);
+            // const variable: throw TypeError
+            if (var && var->is_const) {
+                jm_call_void_2(mt, "js_throw_const_assign",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                jm_emit_exc_propagate_check(mt);
+                return jm_emit_undefined(mt);
+            }
             if (var && var->type_id == LMD_TYPE_INT && !var->from_env) {
                 MIR_reg_t old_val = 0;
                 if (!un->prefix) {
@@ -6800,6 +6833,14 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 2) {
+                    // const variable at module level: throw TypeError
+                    jm_call_void_2(mt, "js_throw_const_assign",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                    jm_emit_exc_propagate_check(mt);
+                    return jm_emit_undefined(mt);
+                }
                 if (mc && mc->const_type == MCONST_MODVAR) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
@@ -7270,6 +7311,14 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 if (mc && mc->const_type == MCONST_MODVAR) {
+                    // const module var: throw TypeError on assignment
+                    if (mc->var_kind == 2) {
+                        jm_call_void_2(mt, "js_throw_const_assign",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+                        jm_emit_exc_propagate_check(mt);
+                        return jm_emit_undefined(mt);
+                    }
                     // P5: For typed INT module variables, use inline native arithmetic
                     // for compound assignments instead of calling js_add/js_subtract/etc.
                     // This eliminates one function call per iteration in tight loops.
@@ -7350,6 +7399,15 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             }
             log_error("js-mir: assignment to undefined var '%s'", vname);
             return jm_emit_null(mt);
+        }
+
+        // const variable: throw TypeError on assignment
+        if (var->is_const) {
+            jm_call_void_2(mt, "js_throw_const_assign",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)id->name->len));
+            jm_emit_exc_propagate_check(mt);
+            return jm_emit_undefined(mt);
         }
 
         // --- Native-typed variable fast path ---
@@ -14496,6 +14554,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, native_val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, LMD_TYPE_INT);
+                        if (var->kind == JS_VAR_CONST) { JsMirVarEntry* cv = jm_find_var(mt, vname); if (cv) cv->is_const = true; }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
                     } else if (init_type == LMD_TYPE_FLOAT) {
                         // native double variable
@@ -14506,6 +14565,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, native_val)));
                         jm_set_var(mt, vname, reg, MIR_T_D, LMD_TYPE_FLOAT);
+                        if (var->kind == JS_VAR_CONST) { JsMirVarEntry* cv = jm_find_var(mt, vname); if (cv) cv->is_const = true; }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
                     } else {
                         // boxed (string, object, array, any, etc.)
@@ -14518,6 +14578,7 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, reg),
                             MIR_new_reg_op(mt->ctx, val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
+                        if (var->kind == JS_VAR_CONST) { JsMirVarEntry* cv = jm_find_var(mt, vname); if (cv) cv->is_const = true; }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
 
                         // v18: function name inference for anonymous function expressions
@@ -17953,6 +18014,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_new_reg_op(mt->ctx, ve->reg),
                         MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
                     ve->is_let_const = true;
+                    ve->is_const = (lce->var_kind == 2);
                     ve->tdz_active = true;
                 }
             }
@@ -19357,13 +19419,13 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_new_reg_op(mt->ctx, ve->reg),
                         MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
                     ve->is_let_const = true;
+                    ve->is_const = (lce->var_kind == 2);
                     ve->tdz_active = true;
                 }
             }
             hashmap_free(let_consts);
         }
 
-        // Allocate shared scope env if this function has child closures that capture its vars.
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
         if (fc->has_scope_env && fc->scope_env_count > 0) {
