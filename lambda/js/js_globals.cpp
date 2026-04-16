@@ -3403,6 +3403,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                         lookup_type = LMD_TYPE_FUNC;
                     else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)
                         lookup_type = LMD_TYPE_INT;
+                    else if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0)
+                        lookup_type = LMD_TYPE_BOOL;
 
                     Item builtin = ItemNull;
                     if (lookup_type != (TypeId)0) {
@@ -5806,7 +5808,7 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
     else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
     else if (cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) lookup_type = LMD_TYPE_MAP;
-    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_MAP;
+    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_BOOL;
     // Skip "constructor" — handled separately
     if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
     Item builtin = js_lookup_builtin_method(lookup_type, name, len);

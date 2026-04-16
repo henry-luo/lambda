@@ -840,6 +840,22 @@ extern "C" Item js_to_number(Item value) {
             *nan_ptr = NAN;
             return (Item){.item = d2it(nan_ptr)};
         }
+        // ES spec: only "Infinity" (exact case) is valid; strtod accepts case-insensitive
+        if (trimmed_len >= 3 && (buf[0] == 'i' || buf[0] == 'I')) {
+            int off = 0;
+            if (strncmp(buf, "Infinity", 8) != 0) {
+                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *nan_ptr = NAN;
+                return (Item){.item = d2it(nan_ptr)};
+            }
+        }
+        if (trimmed_len >= 4 && (buf[0] == '+' || buf[0] == '-') && (buf[1] == 'i' || buf[1] == 'I')) {
+            if (strncmp(buf + 1, "Infinity", 8) != 0) {
+                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *nan_ptr = NAN;
+                return (Item){.item = d2it(nan_ptr)};
+            }
+        }
         char* endptr;
         double num = strtod(buf, &endptr);
         // Check that ALL trimmed characters were consumed
@@ -1894,6 +1910,12 @@ extern "C" Item js_less_than(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
+    // Symbol cannot be compared
+    if (js_is_symbol(left) || js_is_symbol(right)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return (Item){.item = b2it(false)};
+    }
+
     // ToPrimitive for objects/arrays (ES spec §7.2.14 Abstract Relational Comparison)
     if (left_type == LMD_TYPE_MAP) {
         bool own_pv = false;
@@ -2418,8 +2440,9 @@ enum JsBuiltinId {
     JS_BUILTIN_STRING_ITER_NEXT, // String iterator .next()
     // Error.prototype.toString (generic)
     JS_BUILTIN_ERR_TO_STRING,
-    // Boolean.prototype.toString
+    // Boolean.prototype.toString / valueOf
     JS_BUILTIN_BOOL_TO_STRING,
+    JS_BUILTIN_BOOL_VALUE_OF,
     // Date.prototype methods (v45: make Date methods visible as properties)
     JS_BUILTIN_DATE_GET_TIME,
     JS_BUILTIN_DATE_GET_FULL_YEAR,
@@ -5634,6 +5657,9 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
     // Boolean.prototype.toString → returns "true"/"false"
     if (len == 8 && strncmp(name, "toString", 8) == 0 && type == LMD_TYPE_BOOL)
         return js_get_or_create_builtin(JS_BUILTIN_BOOL_TO_STRING, "toString", 0);
+    // Boolean.prototype.valueOf → type-checked
+    if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type == LMD_TYPE_BOOL)
+        return js_get_or_create_builtin(JS_BUILTIN_BOOL_VALUE_OF, "valueOf", 0);
     if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type != LMD_TYPE_FUNC)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
     if (len == 13 && strncmp(name, "isPrototypeOf", 13) == 0)
@@ -7264,6 +7290,29 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
         }
         return js_to_string(this_val);
+    }
+    case JS_BUILTIN_BOOL_VALUE_OF: {
+        // Boolean.prototype.valueOf: throw TypeError if not boolean
+        TypeId bt = get_type_id(this_val);
+        if (bt == LMD_TYPE_BOOL) return this_val;
+        if (bt == LMD_TYPE_MAP) {
+            bool cn_found = false;
+            Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn);
+                if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                    bool pv_own = false;
+                    Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
+                    if (pv_own) return pv;
+                    return (Item){.item = b2it(false)};
+                }
+            }
+        }
+        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("Boolean.prototype.valueOf requires that 'this' be a Boolean"))};
+        Item error = js_new_error_with_name(type_name, msg);
+        js_throw_value(error);
+        return ItemNull;
     }
     // Number static methods
     case JS_BUILTIN_NUMBER_IS_INTEGER:
