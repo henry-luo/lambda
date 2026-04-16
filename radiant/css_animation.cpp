@@ -695,15 +695,42 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
     return head;
 }
 
+// Lazily ensure InlineProp exists on the span (needed for opacity/color animation
+// when the element has no static opacity/color declaration)
+static InlineProp* ensure_inline_prop(ViewSpan* span) {
+    if (!span->in_line) {
+        DomElement* el = (DomElement*)span;
+        if (el->doc && el->doc->view_tree && el->doc->view_tree->pool) {
+            span->in_line = (InlineProp*)pool_calloc(el->doc->view_tree->pool, sizeof(InlineProp));
+            if (span->in_line) span->in_line->opacity = 1.0f;
+        }
+    }
+    return span->in_line;
+}
+
+// Lazily ensure BoundaryProp + BackgroundProp exist (needed for background-color
+// animation when the element has no static background declaration)
+static BackgroundProp* ensure_background_prop(ViewSpan* span) {
+    DomElement* el = (DomElement*)span;
+    Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
+    if (!pool) return NULL;
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
+    }
+    if (span->bound && !span->bound->background) {
+        span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
+    }
+    return span->bound ? span->bound->background : NULL;
+}
+
 // Apply an interpolated property value to a DomElement
 static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
     ViewSpan* span = (ViewSpan*)element;
 
     switch (prop->property_id) {
         case CSS_PROPERTY_OPACITY: {
-            if (span->in_line) {
-                span->in_line->opacity = prop->value.f;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->opacity = prop->value.f;
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
@@ -724,15 +751,13 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             break;
         }
         case CSS_PROPERTY_BACKGROUND_COLOR: {
-            if (span->bound && span->bound->background) {
-                span->bound->background->color = prop->value.color;
-            }
+            BackgroundProp* bg = ensure_background_prop(span);
+            if (bg) bg->color = prop->value.color;
             break;
         }
         case CSS_PROPERTY_COLOR: {
-            if (span->in_line) {
-                span->in_line->color = prop->value.color;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->color = prop->value.color;
             break;
         }
         default:
