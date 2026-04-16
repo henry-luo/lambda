@@ -18233,6 +18233,13 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // Emit any state labels that were not emitted during body transpilation.
+        // This prevents MIR_link crashes from dangling label references when
+        // jm_count_yields over-counts the number of actual yield resume points.
+        for (int si = mt->gen_yield_index + 1; si <= yield_count; si++) {
+            jm_emit_label(mt, mt->gen_state_labels[si]);
+        }
+
         // Implicit return at end of generator → done
         jm_emit_label(mt, mt->gen_done_label);
         {
@@ -18634,6 +18641,14 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Pop try context
             if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+
+            // Emit any state labels that were not emitted during body transpilation.
+            // This happens when jm_count_awaits over-counts (e.g. "await using" counts
+            // an await that the transpiler doesn't actually emit a resume point for).
+            // Without this, MIR_link crashes on dangling label references.
+            for (int si = mt->gen_yield_index + 1; si <= await_count; si++) {
+                jm_emit_label(mt, mt->gen_state_labels[si]);
+            }
 
             // Done label: implicit return → [undefined, -1] (fulfilled)
             jm_emit_label(mt, mt->gen_done_label);
@@ -19416,6 +19431,24 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     jm_emit_label(mt, mt->func_except_label);
                     MIR_reg_t exc_ret = jm_emit_null(mt);
                     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
+                }
+                // Emit async catch/end labels for arrow-body async functions.
+                // The try context emits bt→async_catch_label during expression
+                // transpilation, so the label must exist in the function body.
+                if (fn->is_async && async_catch_label) {
+                    if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                    jm_emit_label(mt, async_catch_label);
+                    {
+                        MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                        MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
+                    }
+                    if (async_end_label) {
+                        jm_emit_label(mt, async_end_label);
+                    }
+                    mt->in_async = saved_in_async;
+                    goto finish_boxed;
                 }
                 if (fn->is_async && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
                 mt->in_async = saved_in_async;
