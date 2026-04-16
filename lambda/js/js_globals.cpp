@@ -849,12 +849,15 @@ extern "C" Item js_process_chdir(Item dir_item) {
 
 // process.exit([code])
 static int js_process_exit_code_value = 0;
+extern "C" void js_process_emit_exit(int code); // forward declaration
 
 extern "C" Item js_process_exit(Item code_item) {
     int code = js_process_exit_code_value; // default to exitCode
     TypeId type = get_type_id(code_item);
     if (type == LMD_TYPE_INT) code = (int)it2i(code_item);
     else if (type == LMD_TYPE_FLOAT) code = (int)it2d(code_item);
+    // Fire 'exit' listeners before terminating (Node.js compatibility)
+    js_process_emit_exit(code);
     exit(code);
     return make_js_undefined(); // unreachable
 }
@@ -1059,6 +1062,7 @@ static Item process_exit_listeners[MAX_PROCESS_LISTENERS] = {};
 static int process_exit_listener_count = 0;
 static Item process_uncaught_listeners[MAX_PROCESS_LISTENERS] = {};
 static int process_uncaught_listener_count = 0;
+static bool js_process_exiting = false;
 
 extern "C" Item js_process_on(Item event_name, Item listener) {
     if (get_type_id(event_name) != LMD_TYPE_STRING) return js_process_object;
@@ -1078,6 +1082,9 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
 }
 
 extern "C" void js_process_emit_exit(int code) {
+    // Guard against double-firing (process.exit() fires then transpiler cleanup fires)
+    if (js_process_exiting) return;
+    js_process_exiting = true;
     extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
     Item code_item = (Item){.item = i2it((int64_t)code)};
     for (int i = 0; i < process_exit_listener_count; i++) {
@@ -1088,6 +1095,7 @@ extern "C" void js_process_emit_exit(int code) {
 extern "C" void js_process_reset_listeners(void) {
     process_exit_listener_count = 0;
     process_uncaught_listener_count = 0;
+    js_process_exiting = false;
 }
 
 extern "C" Item js_get_process_object_value(void) {
@@ -7540,6 +7548,12 @@ extern "C" Item js_get_global_this() {
 
         // Node.js: 'global' is an alias for globalThis
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("global", 6))}, js_global_this_obj);
+
+        // Node.js: Buffer is a global
+        extern Item js_get_buffer_namespace(void);
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("Buffer", 6))},
+            js_get_buffer_namespace());
 
         // AbortController stub constructor
         js_property_set(js_global_this_obj,
