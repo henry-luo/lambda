@@ -8,6 +8,7 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
+#include "tile_pool.h"
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -64,6 +65,42 @@ static double g_render_overflow_clip_time = 0; // overflow clip mask save+apply 
 static int64_t g_render_overflow_clip_count = 0;
 static double g_render_font_metrics_time = 0;  // font_get_rendering_ascender time
 static int64_t g_render_font_metrics_count = 0;
+
+// Phase 2: Static render pool (persists across frames; lazily initialised)
+static RenderPool* g_render_pool = nullptr;
+static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
+static int g_render_pool_threads = 0;  // set before pthread_once call
+
+static void init_render_pool_once() {
+    g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER);
+    render_pool_init(g_render_pool, g_render_pool_threads);
+}
+
+// Shut down the render pool before ThorVG engine is terminated.
+// Must be called before rdt_engine_term() so worker ThorVG canvases
+// are destroyed while the engine is still alive.
+void render_pool_shutdown() {
+    if (g_render_pool) {
+        render_pool_destroy(g_render_pool);
+        mem_free(g_render_pool);
+        g_render_pool = nullptr;
+    }
+}
+
+// Get desired render thread count: RADIANT_RENDER_THREADS env var, or 0 = auto.
+// Set to 1 to disable tiling and use single-threaded dl_replay.
+static int get_render_thread_count() {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    const char* env = getenv("RADIANT_RENDER_THREADS");
+    if (env) {
+        cached = atoi(env);
+        if (cached < 0) cached = 0;
+    } else {
+        cached = 0;  // auto
+    }
+    return cached;
+}
 
 void reset_render_stats() {
     g_render_glyph_count = 0;
@@ -3312,18 +3349,63 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 
-    // Phase 1: Replay the display list to produce pixels on the surface
+    // Phase 2: Replay display list — tile-based parallel or single-threaded
     rdcon.dl = nullptr;  // prevent re-recording during replay
     auto t_replay_start = high_resolution_clock::now();
-    dl_replay(&display_list, &rdcon.vec, rdcon.ui_context->surface,
-              &rdcon.block.clip, &rdcon.scratch, rdcon.scale);
-    auto t_replay_end = high_resolution_clock::now();
-    log_info("[TIMING] dl_replay: %.1fms (%d items)",
-             duration<double, std::milli>(t_replay_end - t_replay_start).count(),
-             dl_item_count(&display_list));
-    fprintf(stderr, "[RENDER_PROF] dl_replay: %.1fms  items: %d\n",
-            duration<double, std::milli>(t_replay_end - t_replay_start).count(),
-            dl_item_count(&display_list));
+
+    int render_threads = get_render_thread_count();
+    int item_count = dl_item_count(&display_list);
+
+    if (render_threads != 1 && item_count > 0) {
+        // --- Tile-based parallel rasterization ---
+        ImageSurface* surface = rdcon.ui_context->surface;
+        TileGrid grid;
+        tile_grid_init(&grid, surface->width, surface->height, rdcon.scale);
+        tile_grid_clear(&grid, canvas_bg);
+
+        // Lazily initialise the global render pool (thread-safe)
+        g_render_pool_threads = render_threads;
+        pthread_once(&g_render_pool_once, init_render_pool_once);
+
+        // Build job array — one job per tile
+        TileJob* jobs = (TileJob*)mem_alloc(grid.total * sizeof(TileJob), MEM_CAT_RENDER);
+        for (int i = 0; i < grid.total; i++) {
+            jobs[i].tile = &grid.tiles[i];
+            jobs[i].display_list = &display_list;
+            jobs[i].scale = rdcon.scale;
+            jobs[i].bg_color = canvas_bg;
+        }
+
+        // Dispatch and wait
+        render_pool_dispatch(g_render_pool, jobs, grid.total);
+
+        // Composite tiles onto the final surface
+        tile_grid_composite(&grid, surface);
+
+        auto t_replay_end = high_resolution_clock::now();
+        int total_tiles = grid.total;
+        log_info("[TIMING] dl_replay_tiled: %.1fms (%d items, %d tiles, %d threads)",
+                 duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+                 item_count, total_tiles, g_render_pool->thread_count);
+        fprintf(stderr, "[RENDER_PROF] dl_replay_tiled: %.1fms  items: %d  tiles: %d  threads: %d\n",
+                duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+                item_count, total_tiles, g_render_pool->thread_count);
+
+        mem_free(jobs);
+        tile_grid_destroy(&grid);
+    } else {
+        // --- Single-threaded replay (fallback) ---
+        dl_replay(&display_list, &rdcon.vec, rdcon.ui_context->surface,
+                  &rdcon.block.clip, &rdcon.scratch, rdcon.scale);
+
+        auto t_replay_end = high_resolution_clock::now();
+        log_info("[TIMING] dl_replay: %.1fms (%d items)",
+                 duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+                 item_count);
+        fprintf(stderr, "[RENDER_PROF] dl_replay: %.1fms  items: %d\n",
+                duration<double, std::milli>(t_replay_end - t_replay_start).count(),
+                item_count);
+    }
 
     auto t_sync = high_resolution_clock::now();
     log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());

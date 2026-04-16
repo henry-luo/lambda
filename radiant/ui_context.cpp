@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
+#include "render.hpp"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -183,12 +184,17 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
+    render_pool_shutdown();  // destroy worker threads before ThorVG engine
     rdt_engine_term();
     image_surface_destroy(uicon->surface);
-    if (uicon->mouse_state.sys_cursor) {
-        glfwDestroyCursor(uicon->mouse_state.sys_cursor);
-    }
 
-    glfwDestroyWindow(uicon->window);
-    glfwTerminate();
+    // Only tear down GLFW if a window was created (i.e., non-headless mode).
+    // Calling glfwTerminate() without a prior glfwInit() is undefined behavior.
+    if (uicon->window) {
+        if (uicon->mouse_state.sys_cursor) {
+            glfwDestroyCursor(uicon->mouse_state.sys_cursor);
+        }
+        glfwDestroyWindow(uicon->window);
+        glfwTerminate();
+    }
 }

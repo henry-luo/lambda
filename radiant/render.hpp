@@ -46,6 +46,9 @@ typedef struct {
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 
+// Shut down the render pool (must be called before rdt_engine_term)
+void render_pool_shutdown();
+
 // Tile-based PNG rendering for large pages that would OOM with a single surface.
 // Only used for PNG output.  total_width/total_height are in physical pixels.
 void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree, const char* output_file,
