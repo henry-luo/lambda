@@ -5945,11 +5945,11 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             arg = call_node->argument;
             TypeId arg_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
             if (arg_tid == LMD_TYPE_ARRAY) {
-                MIR_reg_t a1 = transpile_expr(mt, arg);
+                MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (arg_tid == LMD_TYPE_ARRAY || arg_tid == LMD_TYPE_ARRAY_NUM) {
-                MIR_reg_t a1 = transpile_expr(mt, arg);
+                MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_a", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (arg_tid == LMD_TYPE_STRING || arg_tid == LMD_TYPE_SYMBOL) {
@@ -5957,7 +5957,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 return emit_call_1(mt, "fn_len_s", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             if (arg_tid == LMD_TYPE_ELEMENT) {
-                MIR_reg_t a1 = transpile_expr(mt, arg);
+                MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_e", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
             // Fallback: use generic fn_len(Item) for unknown types (handled below)
@@ -10005,6 +10005,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_new_reg_op(mt->ctx, self_ptr_reg)));
 
         // make '~' (current item / self) refer to self inside method body
+        mt->in_pipe = true;
         mt->pipe_item_reg = self_item_reg;
 
         // Load each field of the object type as a local variable
@@ -10153,6 +10154,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Prevents the flag from leaking from one function's body into the next.
     bool saved_block_returned = mt->block_returned;
     mt->block_returned = false;
+
+    // Save pipe state so method body can use ~ for self without leaking
+    bool saved_in_pipe = mt->in_pipe;
+    MIR_reg_t saved_pipe_item_reg = mt->pipe_item_reg;
 
     // For methods: load object fields from _self into local scope
     TypeObject* saved_method_owner = mt->method_owner;
@@ -10341,6 +10346,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->block_returned = saved_block_returned;
     mt->method_owner = saved_method_owner;
     mt->self_reg = saved_self_reg;
+    mt->in_pipe = saved_in_pipe;
+    mt->pipe_item_reg = saved_pipe_item_reg;
     mt->tco_func = saved_tco_func;
     mt->tco_label = saved_tco_label;
     mt->tco_count_reg = saved_tco_count_reg;

@@ -818,6 +818,10 @@ Item fn_math_cumprod(Item item) {
 Item fn_argmin(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
+    if (len <= 0) {
+        log_error("argmin: empty collection");
+        return ItemError;
+    }
 
     int64_t min_idx = 0;
     double min_val = item_to_double(vector_get(item, 0));
@@ -837,6 +841,10 @@ Item fn_argmin(Item item) {
 Item fn_argmax(Item item) {
     GUARD_ERROR1(item);
     int64_t len = vector_length(item);
+    if (len <= 0) {
+        log_error("argmax: empty collection");
+        return ItemError;
+    }
 
     int64_t max_idx = 0;
     double max_val = item_to_double(vector_get(item, 0));
