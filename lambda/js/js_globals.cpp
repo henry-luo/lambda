@@ -2425,7 +2425,7 @@ extern "C" Item js_instanceof(Item left, Item right) {
         }
     }
 
-    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (get_type_id(left) != LMD_TYPE_MAP && get_type_id(left) != LMD_TYPE_ARRAY && get_type_id(left) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
 
     // If right is a function, use ES spec OrdinaryHasInstance:
     // Walk left's __proto__ chain comparing against right.prototype
@@ -2436,17 +2436,15 @@ extern "C" Item js_instanceof(Item left, Item right) {
         Item func_proto = js_property_get(right, proto_key);
         if (func_proto.item != ItemNull.item && get_type_id(func_proto) == LMD_TYPE_MAP) {
             // Walk left's __proto__ chain looking for func_proto (identity check)
-            Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-            Item obj = left;
+            // Use js_get_prototype_of for each step (handles arrays, functions, builtins)
+            Item obj = js_get_prototype_of(left);
             int depth = 0;
-            while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-                Item obj_proto = map_get(obj.map, proto_key_item);
-                if (obj_proto.item != 0 && get_type_id(obj_proto) == LMD_TYPE_MAP) {
-                    if (obj_proto.map == func_proto.map) {
-                        return (Item){.item = b2it(true)};
-                    }
+            while (obj.item != 0 && obj.item != ItemNull.item && depth < 32) {
+                TypeId ot = get_type_id(obj);
+                if (ot == LMD_TYPE_MAP && obj.map == func_proto.map) {
+                    return (Item){.item = b2it(true)};
                 }
-                obj = obj_proto;
+                obj = js_get_prototype_of(obj);
                 depth++;
             }
         }
@@ -2500,9 +2498,9 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
         return (Item){.item = b2it(lt == LMD_TYPE_ARRAY)};
     }
-    // v20: Object check — any object (MAP) is instanceof Object (includes user-defined instances)
+    // v20: Object check — any object type is instanceof Object
     if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
-        return (Item){.item = b2it(lt == LMD_TYPE_MAP)};
+        return (Item){.item = b2it(lt == LMD_TYPE_MAP || lt == LMD_TYPE_ARRAY || lt == LMD_TYPE_FUNC)};
     }
     // v20: Function check — any function is instanceof Function
     if (rn->len == 8 && strncmp(rn->chars, "Function", 8) == 0) {
