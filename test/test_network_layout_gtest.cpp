@@ -355,7 +355,8 @@ TEST_F(NetworkLayoutTest, LayoutMultipleHttpPages) {
 }
 
 /**
- * Test that HTTP 404 errors are handled gracefully
+ * Test that HTTP 404 responses are handled gracefully
+ * Like a browser, lambda layout should still render the 404 error page.
  */
 TEST_F(NetworkLayoutTest, LayoutHttpNotFound) {
     std::cout << "\n🚫 Testing: lambda layout with non-existent HTTP URL\n";
@@ -372,16 +373,14 @@ TEST_F(NetworkLayoutTest, LayoutHttpNotFound) {
         std::cout << "Output: " << output.substr(0, 500) << std::endl;
     }
 
-    // should fail gracefully (non-zero exit but no crash)
-    EXPECT_NE(exitCode, 0)
-        << "Layout command should fail for non-existent URL";
+    // A 404 response still returns valid HTML (the server's error page),
+    // so layout should succeed — just like how a browser renders 404 pages.
+    EXPECT_EQ(exitCode, 0)
+        << "Layout should succeed for 404 pages (renders the error page like a browser)";
 
-    // check that it reports failure properly
-    EXPECT_TRUE(output.find("failed") != std::string::npos ||
-                output.find("Failed") != std::string::npos ||
-                output.find("Error") != std::string::npos ||
-                output.find("0 success") != std::string::npos)
-        << "Should report failure in output";
+    EXPECT_TRUE(output.find("1 success") != std::string::npos ||
+                output.find("Completed layout command") != std::string::npos)
+        << "Should complete layout of the 404 error page";
 }
 
 /**

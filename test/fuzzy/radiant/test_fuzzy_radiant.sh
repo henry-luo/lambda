@@ -5,7 +5,7 @@
 # Generates adversarial HTML/CSS, runs layout, and captures crashes/timeouts.
 #
 # Usage:
-#   ./test/fuzzy-radiant/test_fuzzy_radiant.sh [OPTIONS]
+#   ./test/fuzzy/radiant/test_fuzzy_radiant.sh [OPTIONS]
 #
 # Options:
 #   --duration=SECONDS     Total fuzzing duration (default: 300)
@@ -23,7 +23,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 LAMBDA_EXE="$PROJECT_ROOT/lambda.exe"
 GENERATOR="$SCRIPT_DIR/generators/html_gen.py"
 MUTATOR="$SCRIPT_DIR/generators/html_mutator.py"

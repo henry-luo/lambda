@@ -267,11 +267,9 @@ void font_context_destroy(FontContext* ctx) {
     }
 #endif
 
-    // destroy glyph arena
-    if (ctx->glyph_arena) {
-        arena_destroy(ctx->glyph_arena);
-        ctx->glyph_arena = NULL;
-    }
+    // skip glyph arena destroy — pool_destroy will free all allocations
+    // via rpmalloc_heap_free_all. Individual arena_destroy would double-free.
+    ctx->glyph_arena = NULL;
 
     // save references before freeing ctx
     Pool*  pool      = ctx->pool;
@@ -283,7 +281,9 @@ void font_context_destroy(FontContext* ctx) {
     pool_free(pool, ctx);
 
     // destroy owned allocators last
-    if (owns_arena && arena) arena_destroy(arena);
+    // When pool is also owned, skip arena_destroy — pool_destroy will free
+    // everything via rpmalloc_heap_free_all. Individual frees would double-free.
+    if (owns_arena && arena && !owns_pool) arena_destroy(arena);
     if (owns_pool  && pool)  pool_destroy(pool);
 }
 

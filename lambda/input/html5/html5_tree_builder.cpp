@@ -793,6 +793,13 @@ static void html5_process_in_head_mode(Html5Parser* parser, Html5Token* token) {
             log_error("html5: unexpected <head> in head mode");
             return;
         }
+
+        // per WHATWG §13.2.6.4.4: <template> in head mode
+        // insert element, switch to in-template mode (simplified: just insert and ignore content)
+        if (strcmp(tag, "template") == 0) {
+            html5_insert_html_element(parser, token);
+            return;
+        }
     }
 
     if (token->type == HTML5_TOKEN_END_TAG) {

@@ -882,7 +882,7 @@ test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@node test/test_run.js --target=lambda --category=baseline --parallel
+	@node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -1045,7 +1045,8 @@ test-input-baseline: build-test ensure-yaml-submodule
 	if [ $$total_failed -gt 0 ]; then \
 		echo "   ❌ Failed:   $$total_failed"; \
 	fi; \
-	echo "=============================================================="
+	echo "=============================================================="; \
+	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 test-radiant-baseline: build-test
 	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
@@ -1501,14 +1502,14 @@ test-fuzzy-extended: build
 # Quick radiant fuzz (2 minutes)
 fuzz-radiant-quick: build
 	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=120
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=120
 
 # Full radiant fuzz (default 5 minutes, override with duration=N)
 fuzz-radiant: build
 	@echo "Running Radiant layout fuzzy tests..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
 
 test-integration:
 	@echo "Running integration tests..."
