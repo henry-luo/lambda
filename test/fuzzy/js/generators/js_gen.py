@@ -249,6 +249,290 @@ def gen_promise():
         lambda: 'new Promise((resolve, reject) => { resolve(1); });',
     )
 
+def gen_gc_pressure():
+    """Generate code that creates lots of short-lived objects to stress GC."""
+    v = fresh_ident('_gc')
+    kind = random.randint(0, 7)
+    if kind == 0:
+        n = random.randint(100, 5000)
+        return f'for (var {v} = 0; {v} < {n}; {v}++) {{ var _tmp = {{a: {v}, b: [{v}], c: "s" + {v}}}; }}'
+    elif kind == 1:
+        n = random.randint(50, 500)
+        return f'var _arr = []; for (var {v} = 0; {v} < {n}; {v}++) {{ _arr.push({{k: {v}, v: String({v})}}); }} _arr.length;'
+    elif kind == 2:
+        n = random.randint(50, 300)
+        return f'var _m = new Map(); for (var {v} = 0; {v} < {n}; {v}++) {{ _m.set("k" + {v}, [{v}]); }} _m.size;'
+    elif kind == 3:
+        n = random.randint(50, 300)
+        return f'var _closures = []; for (var {v} = 0; {v} < {n}; {v}++) {{ _closures.push((function(x) {{ return function() {{ return x; }}; }})({v})); }} _closures[0]();'
+    elif kind == 4:
+        n = random.randint(100, 2000)
+        return f'var _s = ""; for (var {v} = 0; {v} < {n}; {v}++) {{ _s = _s + String.fromCharCode(65 + ({v} % 26)); }} _s.length;'
+    elif kind == 5:
+        # rapid creation and abandonment
+        n = random.randint(100, 1000)
+        return f'for (var {v} = 0; {v} < {n}; {v}++) {{ var _t = [{v}, {v}+1, {v}+2].map(x => x*2).filter(x => x > {v}); }}'
+    elif kind == 6:
+        # nested object trees
+        return 'var _tree = {}; var _cur = _tree; for (var _d = 0; _d < 50; _d++) { _cur.child = {val: _d}; _cur = _cur.child; } _tree;'
+    else:
+        # prototype chain allocation
+        n = random.randint(20, 100)
+        return f'function _PC() {{}} for (var {v} = 0; {v} < {n}; {v}++) {{ var _inst = new _PC(); _inst["p" + {v}] = {v}; }}'
+
+def gen_type_confusion():
+    """Generate code that rapidly changes types on the same variable to stress inline caches."""
+    v = fresh_ident('_tc')
+    types = [
+        f'{v} = 42;',
+        f'{v} = 3.14;',
+        f'{v} = "hello";',
+        f'{v} = true;',
+        f'{v} = null;',
+        f'{v} = undefined;',
+        f'{v} = [1, 2, 3];',
+        f'{v} = {{x: 1}};',
+        f'{v} = function() {{ return 1; }};',
+        f'{v} = Symbol("s");',
+        f'{v} = /regex/;',
+        f'{v} = new Map();',
+        f'{v} = new Set();',
+        f'{v} = new Date();',
+    ]
+    random.shuffle(types)
+    uses = [
+        f'{v} + 1;',
+        f'{v} + "str";',
+        f'{v} == null;',
+        f'{v} === undefined;',
+        f'typeof {v};',
+        f'{v} instanceof Object;',
+        f'String({v});',
+        f'Number({v});',
+        f'Boolean({v});',
+        f'JSON.stringify({v});',
+        f'Object.keys({v} || {{}});',
+    ]
+    lines = [f'var {v};']
+    for t in types[:random.randint(5, len(types))]:
+        lines.append(t)
+        lines.append(f'try {{ {random.choice(uses)} }} catch(e) {{}}')
+    return '\n'.join(lines)
+
+def gen_scope_torture():
+    """Generate complex scoping patterns: shadowing, TDZ, closures over mutated vars."""
+    kind = random.randint(0, 7)
+    if kind == 0:
+        # deep shadowing
+        return '''var x = 1;
+(function() {
+  var x = 2;
+  (function() {
+    var x = 3;
+    (function() {
+      var x = 4;
+      (function() { var x = 5; })();
+    })();
+  })();
+})();
+x;'''
+    elif kind == 1:
+        # let in blocks with same name
+        return '''let r = [];
+{ let x = 1; r.push(x); }
+{ let x = 2; r.push(x); }
+{ let x = 3; r.push(x); }
+r;'''
+    elif kind == 2:
+        # closure captures mutable variable
+        return '''var fns = [];
+for (var i = 0; i < 5; i++) { fns.push(function() { return i; }); }
+var fns2 = [];
+for (let j = 0; j < 5; j++) { fns2.push(function() { return j; }); }
+[fns[0](), fns[4](), fns2[0](), fns2[4]()];'''
+    elif kind == 3:
+        # function hoisting vs let TDZ
+        return '''try { x; } catch(e) {}
+let x = 42;
+function hoisted() { return 1; }
+hoisted();'''
+    elif kind == 4:
+        # eval creating variables
+        return '''var _ev = 10;
+try { eval("var _ev = 20;"); } catch(e) {}
+_ev;'''
+    elif kind == 5:
+        # arguments vs parameter names
+        return '''function _f(a, b) {
+  arguments[0] = 99;
+  return [a, b, arguments[0], arguments[1], arguments.length];
+}
+_f(1, 2);'''
+    elif kind == 6:
+        # with-like property lookup (computed)
+        v = fresh_ident('_scope')
+        return f'var {v} = {{a: 1, b: 2, c: 3}}; var keys = Object.keys({v}); for (var _k of keys) {{ {v}[_k] += 10; }} {v};'
+    else:
+        # named function expression scope
+        return '''var _r = (function _named() {
+  try { return typeof _named; } catch(e) { return "error"; }
+})();
+try { typeof _named; } catch(e) {}'''
+
+def gen_property_storm():
+    """Generate code that creates many properties, delete/redefine, polymorphic shapes."""
+    kind = random.randint(0, 5)
+    n = random.randint(50, 200)
+    v = fresh_ident('_ps')
+    if kind == 0:
+        # add many properties
+        return f'var {v} = {{}}; for (var _i = 0; _i < {n}; _i++) {{ {v}["prop" + _i] = _i; }} Object.keys({v}).length;'
+    elif kind == 1:
+        # add then delete
+        return f'var {v} = {{}}; for (var _i = 0; _i < {n}; _i++) {{ {v}["p" + _i] = _i; }} for (var _i = 0; _i < {n}; _i += 2) {{ delete {v}["p" + _i]; }} Object.keys({v}).length;'
+    elif kind == 2:
+        # defineProperty with various descriptors
+        return f'''var {v} = {{}};
+Object.defineProperty({v}, "ro", {{value: 1, writable: false}});
+Object.defineProperty({v}, "hidden", {{value: 2, enumerable: false}});
+Object.defineProperty({v}, "locked", {{value: 3, configurable: false}});
+try {{ {v}.ro = 99; }} catch(e) {{}}
+try {{ delete {v}.locked; }} catch(e) {{}}
+Object.getOwnPropertyNames({v});'''
+    elif kind == 3:
+        # getter/setter that modify other properties
+        return f'''var {v} = {{
+  _count: 0,
+  get count() {{ return this._count; }},
+  set count(v) {{ this._count = v; this.last = v; }},
+  history: []
+}};
+for (var _i = 0; _i < 20; _i++) {{ {v}.count = _i; {v}.history.push({v}.count); }}
+{v}.history.length;'''
+    elif kind == 4:
+        # megamorphic: many different shapes at same call site
+        lines = ['function _readX(o) { return o.x; }']
+        for i in range(20):
+            props = ', '.join(f'p{j}: {j}' for j in range(i + 1))
+            lines.append(f'try {{ _readX({{x: {i}, {props}}}); }} catch(e) {{}}')
+        return '\n'.join(lines)
+    else:
+        # prototype property shadowing
+        return f'''function _Base() {{ this.x = 1; }}
+_Base.prototype.x = 0;
+_Base.prototype.y = 100;
+var {v} = new _Base();
+{v}.x;
+{v}.y;
+delete {v}.x;
+{v}.x;
+{v}.y = 200;
+_Base.prototype.y;'''
+
+def gen_reentrant():
+    """Generate code with re-entrant patterns: toString/valueOf during operations."""
+    kind = random.randint(0, 5)
+    if kind == 0:
+        return '''var _calls = 0;
+var _tricky = { valueOf() { _calls++; return _calls; } };
+_tricky + _tricky + _tricky;
+_calls;'''
+    elif kind == 1:
+        return '''var _log = [];
+var _a = { toString() { _log.push("a"); return "A"; } };
+var _b = { toString() { _log.push("b"); return "B"; } };
+_a + _b;
+_log;'''
+    elif kind == 2:
+        # valueOf that throws
+        return '''var _bad = { valueOf() { throw new Error("nope"); } };
+try { _bad + 1; } catch(e) { e.message; }
+try { _bad < 2; } catch(e) { e.message; }
+try { +_bad; } catch(e) { e.message; }'''
+    elif kind == 3:
+        # toPrimitive
+        return '''var _obj = {
+  [Symbol.toPrimitive](hint) {
+    if (hint === "number") return 42;
+    if (hint === "string") return "hello";
+    return true;
+  }
+};
++_obj;
+`${_obj}`;
+_obj + "";'''
+    elif kind == 4:
+        # comparator that mutates during sort
+        return '''var _arr = [5, 3, 8, 1, 9, 2, 7];
+try {
+  _arr.sort(function(a, b) {
+    if (_arr.length < 10) _arr.push(0);
+    return a - b;
+  });
+} catch(e) {}
+_arr.length;'''
+    else:
+        # getter that modifies object shape
+        return '''var _obj = {
+  _n: 0,
+  get val() {
+    this._n++;
+    this["dynamic" + this._n] = this._n;
+    return this._n;
+  }
+};
+_obj.val; _obj.val; _obj.val;
+Object.keys(_obj).length;'''
+
+def gen_exception_stress():
+    """Generate code that exercises exception paths heavily."""
+    kind = random.randint(0, 5)
+    if kind == 0:
+        # rapid throw/catch
+        return '''var _count = 0;
+for (var _i = 0; _i < 200; _i++) {
+  try { throw _i; } catch(e) { _count += e; }
+}
+_count;'''
+    elif kind == 1:
+        # finally overwrites return
+        return '''function _f() {
+  try { return 1; } finally { return 2; }
+}
+_f();'''
+    elif kind == 2:
+        # nested try with various throw types
+        return '''try {
+  try {
+    try { throw null; }
+    catch(e) { throw {msg: "inner", prev: e}; }
+  }
+  catch(e) { throw [e, "outer"]; }
+}
+catch(e) { e; }'''
+    elif kind == 3:
+        # exception during iteration
+        return '''var _arr = [1, 2, 3, 4, 5];
+var _r = [];
+try {
+  _arr.forEach(function(x) {
+    if (x === 3) throw "stop";
+    _r.push(x * 2);
+  });
+} catch(e) {}
+_r;'''
+    elif kind == 4:
+        # error in constructor
+        return '''function _Bad() { throw new Error("construct fail"); }
+try { new _Bad(); } catch(e) { e.message; }
+try { new _Bad(); } catch(e) { e.message; }'''
+    else:
+        # exception in property access chain
+        return '''var _chain = {a: {b: {c: null}}};
+try { _chain.a.b.c.d.e; } catch(e) {}
+try { _chain.a.b.c(); } catch(e) {}
+try { _chain.x.y; } catch(e) {}'''
+
 def gen_edge_case():
     return one_of(
         # typeof on undeclared variable (should not crash)
@@ -436,12 +720,51 @@ def gen_mode_advanced():
         lines.append(gen_promise())
     return '\n'.join(lines)
 
+def gen_mode_gc():
+    """GC pressure: allocate many short-lived objects, strings, closures."""
+    lines = []
+    for _ in range(random.randint(4, 12)):
+        lines.append(gen_gc_pressure())
+    return '\n'.join(lines)
+
+def gen_mode_typeconfuse():
+    """Type confusion: rapidly change types on variables to stress inline caches."""
+    lines = []
+    for _ in range(random.randint(3, 8)):
+        lines.append(gen_type_confusion())
+    return '\n'.join(lines)
+
+def gen_mode_scope():
+    """Scope torture: shadowing, TDZ, hoisting, closures over mutated vars."""
+    lines = []
+    for _ in range(random.randint(3, 8)):
+        lines.append(gen_scope_torture())
+    return '\n'.join(lines)
+
+def gen_mode_propstorm():
+    """Property storm: add/delete/redefine properties, megamorphic shapes."""
+    lines = []
+    for _ in range(random.randint(3, 8)):
+        lines.append(gen_property_storm())
+    return '\n'.join(lines)
+
+def gen_mode_reentrant():
+    """Re-entrancy: toString/valueOf/toPrimitive during operations, mutating sort."""
+    lines = []
+    for _ in range(random.randint(4, 10)):
+        lines.append(one_of(
+            gen_reentrant,
+            gen_exception_stress,
+        ))
+    return '\n'.join(lines)
+
 def gen_mode_mixed():
     """Mix of everything."""
     generators = [gen_mode_expr, gen_mode_func, gen_mode_class,
                   gen_mode_control, gen_mode_destruct, gen_mode_edge,
-                  gen_mode_advanced]
-    parts = [random.choice(generators)() for _ in range(random.randint(2, 4))]
+                  gen_mode_advanced, gen_mode_gc, gen_mode_typeconfuse,
+                  gen_mode_scope, gen_mode_propstorm, gen_mode_reentrant]
+    parts = [random.choice(generators)() for _ in range(random.randint(2, 5))]
     return '\n\n'.join(parts)
 
 MODE_MAP = {
@@ -452,6 +775,11 @@ MODE_MAP = {
     'destruct': gen_mode_destruct,
     'edge': gen_mode_edge,
     'advanced': gen_mode_advanced,
+    'gc': gen_mode_gc,
+    'typeconfuse': gen_mode_typeconfuse,
+    'scope': gen_mode_scope,
+    'propstorm': gen_mode_propstorm,
+    'reentrant': gen_mode_reentrant,
     'mixed': gen_mode_mixed,
 }
 

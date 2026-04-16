@@ -220,6 +220,12 @@ void font_context_destroy(FontContext* ctx) {
 
     log_info("font_context_destroy: tearing down");
 
+    // Mark context as destroying. This tells font_handle_release to skip
+    // individual pool_free calls — pool_destroy will free all pool memory
+    // in bulk via rpmalloc_heap_free_all. Individual pool_free calls during
+    // teardown can corrupt rpmalloc's span linked lists under memory pressure.
+    ctx->destroying = true;
+
     // clear @font-face descriptors (handles are released via face_cache cleanup)
     font_face_clear(ctx);
 
@@ -247,7 +253,16 @@ void font_context_destroy(FontContext* ctx) {
         ctx->loaded_glyph_cache = NULL;
     }
 
+    // free codepoint fallback cache (handles released via cp_fallback_free callback)
+    // Must come before file_data_cache so handles can clean up file data refs.
+    if (ctx->codepoint_fallback_cache) {
+        hashmap_free(ctx->codepoint_fallback_cache);
+        ctx->codepoint_fallback_cache = NULL;
+    }
+
     // free font file data cache (entries are malloc-allocated, freed via hashmap free callback)
+    // NOTE: must come AFTER all handle-releasing caches (face_cache, codepoint_fallback_cache)
+    // so font_handle_release can still access file_data_cache to decrement ref counts.
     if (ctx->file_data_cache) {
         hashmap_free(ctx->file_data_cache);
         ctx->file_data_cache = NULL;
@@ -277,8 +292,8 @@ void font_context_destroy(FontContext* ctx) {
     bool   owns_pool = ctx->owns_pool;
     bool   owns_arena = ctx->owns_arena;
 
-    // free the context struct itself
-    pool_free(pool, ctx);
+    // Skip pool_free(ctx) — pool_destroy will free all pool allocations in bulk.
+    // Individual pool_free calls during teardown risk rpmalloc span corruption.
 
     // destroy owned allocators last
     // When pool is also owned, skip arena_destroy — pool_destroy will free
@@ -483,6 +498,13 @@ void font_handle_release(FontHandle* handle) {
     if (!handle) return;
     handle->ref_count--;
     if (handle->ref_count <= 0) {
+        // When the owning FontContext is being destroyed, skip all pool_free
+        // calls. pool_destroy → rpmalloc_heap_free_all will free all pool
+        // memory in one bulk operation. Individual pool_free calls during
+        // teardown can corrupt rpmalloc span linked lists under memory
+        // pressure, causing SIGSEGV in heap_free_all.
+        bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
+
         // destroy the FreeType face (only if we own it)
 #ifndef __APPLE__
         if (handle->ft_face && !handle->borrowed_face) {
@@ -490,17 +512,17 @@ void font_handle_release(FontHandle* handle) {
             handle->ft_face = NULL;
         }
 #endif
-        // destroy FontTables
-        if (handle->tables && handle->ctx) {
+        // destroy FontTables (pool-allocated — skip during bulk destroy)
+        if (handle->tables && handle->ctx && !bulk_destroy) {
             font_tables_close(handle->tables, handle->ctx->pool);
             handle->tables = NULL;
         }
-        // free advance cache
+        // free advance cache (malloc-allocated hashmap)
         if (handle->advance_cache) {
             hashmap_free(handle->advance_cache);
             handle->advance_cache = NULL;
         }
-        // free kern cache
+        // free kern cache (malloc-allocated hashmap)
         if (handle->kern_cache) {
             hashmap_free(handle->kern_cache);
             handle->kern_cache = NULL;
@@ -546,8 +568,8 @@ void font_handle_release(FontHandle* handle) {
             }
         }
 
-        // free the handle struct via pool
-        if (handle->ctx) {
+        // free the handle struct via pool (skip during bulk destroy)
+        if (handle->ctx && !bulk_destroy) {
             pool_free(handle->ctx->pool, handle);
         }
     }
