@@ -1,0 +1,15 @@
+'Crash 1: argmin/argmax empty array'
+error
+error
+'Crash 2: for-in on error value'
+[]
+'Crash 3: ~ in type method'
+true
+true
+'Crash 4: len on null from query'
+<item>
+"a"
+<item>
+"b"
+0
+0

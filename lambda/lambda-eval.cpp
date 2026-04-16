@@ -2860,7 +2860,8 @@ int64_t fn_len(Item item) {
 }
 
 // Native len variants — type-specialized, avoid Item type switch overhead
-// Used when compile-time type is known.
+// Used when compile-time type is known. The transpiler must unbox Items to raw
+// pointers before calling these (emit_unbox_container strips tag bits).
 
 extern "C" int64_t fn_len_l(List* list) {
     if (!list) return 0;
