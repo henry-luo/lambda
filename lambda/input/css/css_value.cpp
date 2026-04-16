@@ -465,6 +465,26 @@ static const CssEnumInfo css_value_definitions[] = {
     {"message-box", 11, CSS_VALUE_MESSAGE_BOX, CSS_VALUE_GROUP_SYSTEM_FONT},
     {"small-caption", 13, CSS_VALUE_SMALL_CAPTION, CSS_VALUE_GROUP_SYSTEM_FONT},
     {"status-bar", 10, CSS_VALUE_STATUS_BAR, CSS_VALUE_GROUP_SYSTEM_FONT},
+    // Animation timing function keywords
+    {"ease", 4, CSS_VALUE_EASE, CSS_VALUE_GROUP_ANIMATION},
+    {"ease-in", 7, CSS_VALUE_EASE_IN, CSS_VALUE_GROUP_ANIMATION},
+    {"ease-out", 8, CSS_VALUE_EASE_OUT, CSS_VALUE_GROUP_ANIMATION},
+    {"ease-in-out", 11, CSS_VALUE_EASE_IN_OUT, CSS_VALUE_GROUP_ANIMATION},
+    {"linear", 6, CSS_VALUE_LINEAR, CSS_VALUE_GROUP_ANIMATION},
+    {"step-start", 10, CSS_VALUE_STEP_START, CSS_VALUE_GROUP_ANIMATION},
+    {"step-end", 8, CSS_VALUE_STEP_END, CSS_VALUE_GROUP_ANIMATION},
+    // Animation direction keywords
+    {"reverse", 7, CSS_VALUE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
+    {"alternate", 9, CSS_VALUE_ALTERNATE, CSS_VALUE_GROUP_ANIMATION},
+    {"alternate-reverse", 17, CSS_VALUE_ALTERNATE_REVERSE, CSS_VALUE_GROUP_ANIMATION},
+    // Animation fill-mode keywords
+    {"forwards", 8, CSS_VALUE_FORWARDS, CSS_VALUE_GROUP_ANIMATION},
+    {"backwards", 9, CSS_VALUE_BACKWARDS, CSS_VALUE_GROUP_ANIMATION},
+    // Animation play-state keywords
+    {"running", 7, CSS_VALUE_RUNNING, CSS_VALUE_GROUP_ANIMATION},
+    {"paused", 6, CSS_VALUE_PAUSED, CSS_VALUE_GROUP_ANIMATION},
+    // Animation iteration-count keyword
+    {"infinite", 8, CSS_VALUE_INFINITE, CSS_VALUE_GROUP_ANIMATION},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

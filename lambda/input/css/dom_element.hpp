@@ -113,6 +113,9 @@ struct DomDocument {
     // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
     int js_mutation_count;
 
+    // CSS @keyframes registry (parsed from stylesheets on first animation use)
+    void* keyframe_registry;        // KeyframeRegistry* (void* to avoid header dep)
+
     // Retained JS compilation state for interactive event handler dispatch
     void* js_mir_ctx;               // MIR_context_t — keeps compiled JS code pages alive
     void* js_preamble_state;        // JsPreambleState* — full state for cleanup
@@ -139,6 +142,7 @@ struct DomDocument {
                     skip_style_reset(false),
                     incremental_layout(false),
                     js_mutation_count(0),
+                    keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
                     js_runtime_name_pool(nullptr), js_runtime_pool(nullptr),

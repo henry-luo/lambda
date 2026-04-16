@@ -44,7 +44,8 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     }
     if (prev_entry) {
         prev_entry->next = shape_entry;
-        shape_entry->byte_offset = prev_entry->byte_offset + type_info[prev_entry->type->type_id].byte_size;
+        int prev_size = prev_entry->type ? type_info[prev_entry->type->type_id].byte_size : (int)sizeof(Item);
+        shape_entry->byte_offset = prev_entry->byte_offset + prev_size;
     }
     else { shape_entry->byte_offset = 0; }
     return shape_entry;

@@ -161,10 +161,11 @@ typedef struct Item {
         if (this->_type_id) {
             return this->_type_id;
         }
+        // container types store TypeId at address pointed to by item
         if (this->item) {
             return *((TypeId*)this->item);
         }
-        return LMD_TYPE_NULL; // fallback for null item
+        return LMD_TYPE_NULL;
     }
 
     inline ConstItem to_const() const;

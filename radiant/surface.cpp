@@ -1,6 +1,9 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
 #include "clip_shape.h"
+#include "gif_player.h"
+#include "lottie_player.h"
+#include "state_store.hpp"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
@@ -223,6 +226,51 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
         if (downloaded_data) mem_free(downloaded_data);
     }
+    // Detect Lottie JSON animation (by extension for local, by content for HTTP)
+    else if ((!is_http && lottie_detect_by_path(file_path)) ||
+             (is_http && downloaded_data && lottie_detect_by_content(downloaded_data, downloaded_size))) {
+        // Create a placeholder surface — pixels will be filled by the LottiePlayer
+        surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+        // Try to get natural dimensions from the Lottie via ThorVG picture
+        // For now, use a default render size; the layout will resize as needed
+        surface->width = 300;   // default Lottie render width
+        surface->height = 300;  // default Lottie render height
+        surface->format = IMAGE_FORMAT_SVG;  // treat as vector-like for rendering
+
+        // Register with animation scheduler if available
+        if (uicon->document && uicon->document->state) {
+            RadiantState* rs = (RadiantState*)uicon->document->state;
+            if (rs && rs->animation_scheduler) {
+                AnimationInstance* inst = NULL;
+                if (is_http && downloaded_data) {
+                    inst = lottie_player_create_from_data(rs->animation_scheduler, surface,
+                                (const char*)downloaded_data, downloaded_size,
+                                surface->width, surface->height,
+                                rs->animation_scheduler->current_time, uicon->document->pool);
+                } else {
+                    inst = lottie_player_create_from_file(rs->animation_scheduler, surface,
+                                file_path, surface->width, surface->height,
+                                rs->animation_scheduler->current_time, uicon->document->pool);
+                }
+                if (inst) {
+                    LottiePlayer* lp = (LottiePlayer*)inst->state;
+                    if (lp) {
+                        surface->width = lp->width;
+                        surface->height = lp->height;
+                    }
+                    log_info("lottie animated: registered with scheduler from %s", file_path);
+                } else {
+                    // Not a valid Lottie — fall through to raster path is not possible here
+                    // Free and return NULL
+                    log_debug("lottie detect: failed to load as Lottie: %s", file_path);
+                    mem_free(surface);
+                    surface = NULL;
+                }
+            }
+        }
+        if (downloaded_data) mem_free(downloaded_data);
+        if (!surface) return NULL;
+    }
     else {
         int width, height;
         if (is_http && downloaded_data) {
@@ -282,6 +330,26 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
     }
     surface->url = abs_url;
+
+    // Detect animated GIF and register with animation scheduler
+    if (surface->format == IMAGE_FORMAT_GIF && uicon->document && uicon->document->state) {
+        GifFrames* gif_frames = NULL;
+        if (surface->source_path) {
+            gif_frames = gif_detect_animated(surface->source_path);
+        } else if (surface->source_data && surface->source_data_len > 0) {
+            gif_frames = gif_detect_animated_from_memory(surface->source_data, surface->source_data_len);
+        }
+        if (gif_frames) {
+            RadiantState* rs = (RadiantState*)uicon->document->state;
+            if (rs && rs->animation_scheduler) {
+                gif_animation_create(rs->animation_scheduler, surface, gif_frames,
+                                      rs->animation_scheduler->current_time, uicon->document->pool);
+                log_info("gif animated: registered %d-frame GIF with scheduler", gif_frames->frame_count);
+            } else {
+                image_gif_free(gif_frames);
+            }
+        }
+    }
 
     ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
     hashmap_set(uicon->image_cache, &new_entry);

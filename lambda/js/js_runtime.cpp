@@ -12466,6 +12466,13 @@ extern "C" Item js_method_call_apply(Item obj, Item method_name, Item args_array
     if (obj_type == LMD_TYPE_INT || obj_type == LMD_TYPE_FLOAT) {
         return js_number_method(obj, method_name, args, argc);
     }
+    if (obj_type == LMD_TYPE_FUNC) {
+        Item fn = js_property_access(obj, method_name);
+        if (get_type_id(fn) == LMD_TYPE_FUNC) {
+            return js_call_function(fn, obj, args, argc);
+        }
+        return ItemNull;
+    }
     return js_map_method(obj, method_name, args, argc);
 }
 

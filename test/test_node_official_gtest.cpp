@@ -170,34 +170,6 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"test-zlib-brotli.js",                        "hangs: requires fixtures module + brotli compression"},
     {"test-os-process-priority.js",                "hangs: requires os.constants.priority (not implemented)"},
     {"test-buffer-alloc.js",                       "timeout: 1192-line test, JIT compilation exceeds 30s"},
-
-    // --- Runtime crashes: JIT code generation bugs in lambda.exe ---
-    // These crash during JIT-compiled code execution (bad Item values,
-    // corrupted pointers). Real bugs to fix in the engine.
-    {"test-buffer-generic-methods.js",             "crash: JIT runtime SIGSEGV"},
-    {"test-child-process-exec-timeout-kill.js",    "crash: JIT runtime SIGSEGV"},
-    {"test-child-process-spawn-controller.js",     "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-async-sign-verify.js",           "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-keygen-raw.js",                  "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-publicDecrypt-fails-first-time.js", "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-rsa-dsa.js",                     "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-sign-verify.js",                 "crash: JIT runtime SIGSEGV"},
-    {"test-crypto-x509.js",                        "crash: JIT runtime SIGSEGV"},
-    {"test-fs-copyfile.js",                        "crash: JIT runtime SIGSEGV"},
-    {"test-fs-promises-watch-iterator.js",         "crash: JIT runtime SIGSEGV"},
-    {"test-fs-stat-bigint.js",                     "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-function.js",           "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-glob.js",               "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-invalid.js",            "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-mixed.js",              "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-recursive-glob-subdirectories.js", "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-recursive-glob.js",     "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-recursive-mixed.js",    "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-recursive-regexp.js",   "crash: JIT runtime SIGSEGV"},
-    {"test-fs-watch-ignore-regexp.js",             "crash: JIT runtime SIGSEGV"},
-    {"test-fs-write.js",                           "crash: JIT runtime SIGSEGV"},
-    {"test-os.js",                                 "crash: JIT runtime SIGSEGV"},
-    {"test-util-inspect.js",                       "crash: JIT runtime SIGSEGV"},
 };
 
 // =============================================================================

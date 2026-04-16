@@ -667,3 +667,239 @@ int image_get_dimensions_from_memory(const unsigned char* data, size_t length, i
         default: return 0;
     }
 }
+
+// ============================================================================
+// Multi-frame GIF support (giflib-based)
+// ============================================================================
+
+// Composite a single GIF frame onto a canvas, respecting frame position and transparency.
+// canvas must be width*height*4 bytes (RGBA).
+static void gif_composite_frame(uint32_t* canvas, int canvas_w, int canvas_h,
+                                 GifFileType* gif, int frame_idx) {
+    SavedImage* frame = &gif->SavedImages[frame_idx];
+    GifImageDesc* desc = &frame->ImageDesc;
+    ColorMapObject* cmap = desc->ColorMap ? desc->ColorMap : gif->SColorMap;
+    if (!cmap) return;
+
+    // Extract transparency from Graphics Control Block
+    GraphicsControlBlock gcb;
+    int transparent_color = -1;
+    if (DGifSavedExtensionToGCB(gif, frame_idx, &gcb) == GIF_OK) {
+        transparent_color = gcb.TransparentColor;
+    }
+
+    GifByteType* raster = frame->RasterBits;
+    int fw = desc->Width, fh = desc->Height;
+    int left = desc->Left, top = desc->Top;
+
+    for (int y = 0; y < fh; y++) {
+        int dy = top + y;
+        if (dy < 0 || dy >= canvas_h) continue;
+        for (int x = 0; x < fw; x++) {
+            int dx = left + x;
+            if (dx < 0 || dx >= canvas_w) continue;
+            int ci = raster[y * fw + x];
+            if (ci == transparent_color) continue;
+            if (ci >= cmap->ColorCount) continue;
+            GifColorType* c = &cmap->Colors[ci];
+            uint32_t pixel = ((uint32_t)c->Red) | ((uint32_t)c->Green << 8) |
+                             ((uint32_t)c->Blue << 16) | (0xFFu << 24);
+            canvas[dy * canvas_w + dx] = pixel;
+        }
+    }
+}
+
+// Internal: decode all frames from an already-slurped GifFileType.
+// Returns NULL if < 2 frames. Caller must free with image_gif_free().
+static GifFrames* gif_decode_all_frames(GifFileType* gif) {
+    if (!gif || gif->ImageCount < 2) return NULL;
+
+    int w = gif->SWidth;
+    int h = gif->SHeight;
+    int n = gif->ImageCount;
+
+    GifFrames* result = (GifFrames*)mem_calloc(1, sizeof(GifFrames), MEM_CAT_IMAGE);
+    result->width = w;
+    result->height = h;
+    result->frame_count = n;
+    result->loop_count = 0;  // default: infinite
+
+    // Check for NETSCAPE 2.0 loop extension
+    for (int i = 0; i < gif->ExtensionBlockCount; i++) {
+        ExtensionBlock* ext = &gif->ExtensionBlocks[i];
+        if (ext->Function == APPLICATION_EXT_FUNC_CODE && ext->ByteCount >= 11) {
+            if (memcmp(ext->Bytes, "NETSCAPE2.0", 11) == 0 && (i + 1) < gif->ExtensionBlockCount) {
+                ExtensionBlock* sub = &gif->ExtensionBlocks[i + 1];
+                if (sub->ByteCount >= 3 && sub->Bytes[0] == 1) {
+                    result->loop_count = sub->Bytes[1] | (sub->Bytes[2] << 8);
+                }
+            }
+        }
+    }
+
+    result->frames = (GifFrameData*)mem_calloc(n, sizeof(GifFrameData), MEM_CAT_IMAGE);
+
+    // Background color for disposal
+    uint32_t bg_pixel = 0;  // transparent black
+    if (gif->SColorMap && gif->SBackGroundColor < gif->SColorMap->ColorCount) {
+        GifColorType* bgc = &gif->SColorMap->Colors[gif->SBackGroundColor];
+        bg_pixel = ((uint32_t)bgc->Red) | ((uint32_t)bgc->Green << 8) |
+                   ((uint32_t)bgc->Blue << 16) | (0xFFu << 24);
+    }
+
+    // Canvas for progressive compositing
+    size_t canvas_bytes = (size_t)w * h * sizeof(uint32_t);
+    uint32_t* canvas = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+    uint32_t* prev_canvas = NULL;  // for disposal method 3 (restore previous)
+
+    for (int i = 0; i < n; i++) {
+        // Get graphics control block for this frame
+        GraphicsControlBlock gcb;
+        int disposal = DISPOSAL_UNSPECIFIED;
+        int delay_ms = 100;  // default 100ms (GIF spec: 10cs = 100ms)
+        if (DGifSavedExtensionToGCB(gif, i, &gcb) == GIF_OK) {
+            disposal = gcb.DisposalMode;
+            delay_ms = gcb.DelayTime * 10;  // convert centiseconds to ms
+            if (delay_ms <= 0) delay_ms = 100;  // browsers use 100ms for 0-delay
+        }
+
+        // Save canvas before compositing for disposal method 3
+        if (disposal == DISPOSE_PREVIOUS) {
+            if (!prev_canvas) {
+                prev_canvas = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+            }
+            memcpy(prev_canvas, canvas, canvas_bytes);
+        }
+
+        // Composite this frame onto canvas
+        gif_composite_frame(canvas, w, h, gif, i);
+
+        // Snapshot the composited canvas as this frame's pixels
+        result->frames[i].pixels = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+        memcpy(result->frames[i].pixels, canvas, canvas_bytes);
+        result->frames[i].delay_ms = delay_ms;
+        result->frames[i].disposal = disposal;
+
+        // Apply disposal for next frame
+        switch (disposal) {
+            case DISPOSE_BACKGROUND: {
+                // Clear the frame area to background
+                SavedImage* frame = &gif->SavedImages[i];
+                GifImageDesc* desc = &frame->ImageDesc;
+                for (int y = desc->Top; y < desc->Top + desc->Height && y < h; y++) {
+                    for (int x = desc->Left; x < desc->Left + desc->Width && x < w; x++) {
+                        canvas[y * w + x] = bg_pixel;
+                    }
+                }
+                break;
+            }
+            case DISPOSE_PREVIOUS:
+                // Restore canvas to state before this frame
+                if (prev_canvas) {
+                    memcpy(canvas, prev_canvas, canvas_bytes);
+                }
+                break;
+            default:
+                // DISPOSAL_UNSPECIFIED / DISPOSE_DO_NOT: leave canvas as-is
+                break;
+        }
+    }
+
+    mem_free(canvas);
+    if (prev_canvas) mem_free(prev_canvas);
+
+    return result;
+}
+
+// Memory read context for giflib InputFunc callback
+typedef struct GifMemoryReader {
+    const unsigned char* data;
+    size_t size;
+    size_t pos;
+} GifMemoryReader;
+
+static int gif_memory_read_func(GifFileType* gif, GifByteType* buf, int size) {
+    GifMemoryReader* reader = (GifMemoryReader*)gif->UserData;
+    size_t avail = reader->size - reader->pos;
+    size_t to_read = (size_t)size;
+    if (to_read > avail) to_read = avail;
+    if (to_read > 0) {
+        memcpy(buf, reader->data + reader->pos, to_read);
+        reader->pos += to_read;
+    }
+    return (int)to_read;
+}
+
+GifFrames* image_gif_load(const char* filename) {
+    int error_code;
+    GifFileType* gif = DGifOpenFileName(filename, &error_code);
+    if (!gif) {
+        log_error("gif multi-frame: failed to open %s (error %d)", filename, error_code);
+        return NULL;
+    }
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        log_error("gif multi-frame: failed to slurp %s (error %d)", filename, gif->Error);
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+    GifFrames* result = gif_decode_all_frames(gif);
+    DGifCloseFile(gif, &error_code);
+    return result;
+}
+
+GifFrames* image_gif_load_from_memory(const unsigned char* data, size_t length) {
+    if (!data || length == 0) return NULL;
+
+    GifMemoryReader reader = { data, length, 0 };
+    int error_code;
+    GifFileType* gif = DGifOpen(&reader, gif_memory_read_func, &error_code);
+    if (!gif) {
+        log_error("gif multi-frame: failed to open from memory (error %d)", error_code);
+        return NULL;
+    }
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        log_error("gif multi-frame: failed to slurp from memory (error %d)", gif->Error);
+        DGifCloseFile(gif, &error_code);
+        return NULL;
+    }
+    GifFrames* result = gif_decode_all_frames(gif);
+    DGifCloseFile(gif, &error_code);
+    return result;
+}
+
+void image_gif_free(GifFrames* gif) {
+    if (!gif) return;
+    for (int i = 0; i < gif->frame_count; i++) {
+        if (gif->frames[i].pixels) mem_free(gif->frames[i].pixels);
+    }
+    mem_free(gif->frames);
+    mem_free(gif);
+}
+
+int image_gif_frame_count(const char* filename) {
+    int error_code;
+    GifFileType* gif = DGifOpenFileName(filename, &error_code);
+    if (!gif) return 0;
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        DGifCloseFile(gif, &error_code);
+        return 0;
+    }
+    int count = gif->ImageCount;
+    DGifCloseFile(gif, &error_code);
+    return count;
+}
+
+int image_gif_frame_count_from_memory(const unsigned char* data, size_t length) {
+    if (!data || length == 0) return 0;
+    GifMemoryReader reader = { data, length, 0 };
+    int error_code;
+    GifFileType* gif = DGifOpen(&reader, gif_memory_read_func, &error_code);
+    if (!gif) return 0;
+    if (DGifSlurp(gif) == GIF_ERROR) {
+        DGifCloseFile(gif, &error_code);
+        return 0;
+    }
+    int count = gif->ImageCount;
+    DGifCloseFile(gif, &error_code);
+    return count;
+}

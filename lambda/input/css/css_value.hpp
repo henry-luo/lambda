@@ -63,6 +63,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_TEXT_BOX_EDGE,       // auto, text, cap, ex, ideographic, alphabetic
     CSS_VALUE_GROUP_SPECIAL_TYPE,        // _length, _percentage, _number, _integer, _angle
     CSS_VALUE_GROUP_SYSTEM_FONT,         // caption, icon, menu, message-box, small-caption, status-bar
+    CSS_VALUE_GROUP_ANIMATION,           // animation timing, direction, fill-mode, play-state keywords
     CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
     CSS_VALUE_GROUP_RADINT,              // Radiant specific values
 } CssEnumGroup;
@@ -523,6 +524,26 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_MESSAGE_BOX,
     CSS_VALUE_SMALL_CAPTION,
     CSS_VALUE_STATUS_BAR,
+    // Animation timing function keywords
+    CSS_VALUE_EASE,
+    CSS_VALUE_EASE_IN,
+    CSS_VALUE_EASE_OUT,
+    CSS_VALUE_EASE_IN_OUT,
+    CSS_VALUE_LINEAR,
+    CSS_VALUE_STEP_START,
+    CSS_VALUE_STEP_END,
+    // Animation direction keywords
+    CSS_VALUE_REVERSE,
+    CSS_VALUE_ALTERNATE,
+    CSS_VALUE_ALTERNATE_REVERSE,
+    // Animation fill-mode keywords (none and both already exist)
+    CSS_VALUE_FORWARDS,
+    CSS_VALUE_BACKWARDS,
+    // Animation play-state keywords
+    CSS_VALUE_RUNNING,
+    CSS_VALUE_PAUSED,
+    // Animation iteration-count keyword
+    CSS_VALUE_INFINITE,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY
