@@ -5824,7 +5824,26 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
     if (tid != LMD_TYPE_MAP) return target;
     for (int i = 0; i < count; i++) {
         Item source = sources[i];
-        if (get_type_id(source) != LMD_TYPE_MAP) continue;
+        TypeId stid = get_type_id(source);
+        // skip null/undefined sources
+        if (stid == LMD_TYPE_NULL || stid == LMD_TYPE_UNDEFINED) continue;
+        // string source: enumerate characters as own properties
+        if (stid == LMD_TYPE_STRING) {
+            String* ss = it2s(source);
+            if (ss) {
+                int slen = (int)ss->len;
+                for (int ci = 0; ci < slen; ci++) {
+                    char idx_buf[16];
+                    snprintf(idx_buf, sizeof(idx_buf), "%d", ci);
+                    Item key = (Item){.item = s2it(heap_create_name(idx_buf))};
+                    char ch_buf[2] = {ss->chars[ci], '\0'};
+                    Item val = (Item){.item = s2it(heap_create_name(ch_buf, 1))};
+                    js_property_set(target, key, val);
+                }
+            }
+            continue;
+        }
+        if (stid != LMD_TYPE_MAP) continue;
         Map* m = source.map;
         if (!m || !m->type) continue;
         TypeMap* tm = (TypeMap*)m->type;
