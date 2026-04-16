@@ -359,16 +359,29 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
         // apply easing function
         float eased_t = timing_function_eval(&anim->timing, raw_t);
 
+        // save previous bounds before tick updates them (needed to clear
+        // the old visual position when transforms move the element)
+        float prev_bounds[4] = {anim->bounds[0], anim->bounds[1],
+                                anim->bounds[2], anim->bounds[3]};
+
         // call the tick callback to apply the animated value
         if (anim->tick) {
             anim->tick(anim, eased_t);
         }
 
-        // mark dirty region for this animation's bounds
-        if (dirty_tracker && (anim->bounds[2] > 0.0f || anim->bounds[3] > 0.0f)) {
-            dirty_mark_rect(dirty_tracker,
-                            anim->bounds[0], anim->bounds[1],
-                            anim->bounds[2], anim->bounds[3]);
+        // mark dirty region for both old and new bounds (the old position
+        // must be repainted to clear the previous frame's content)
+        if (dirty_tracker) {
+            if (prev_bounds[2] > 0.0f || prev_bounds[3] > 0.0f) {
+                dirty_mark_rect(dirty_tracker,
+                                prev_bounds[0], prev_bounds[1],
+                                prev_bounds[2], prev_bounds[3]);
+            }
+            if (anim->bounds[2] > 0.0f || anim->bounds[3] > 0.0f) {
+                dirty_mark_rect(dirty_tracker,
+                                anim->bounds[0], anim->bounds[1],
+                                anim->bounds[2], anim->bounds[3]);
+            }
         }
 
         if (anim->play_state == ANIM_PLAY_FINISHED) {

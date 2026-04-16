@@ -193,12 +193,17 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
     Rect paint_rect = compute_adjusted_rect(rect, clip_box, s, border, padding);
 
-    // Narrow the active clip to the paint area (intersect with existing viewport clip)
+    // Narrow the active clip to the paint area (intersect with existing viewport clip).
+    // Skip clip tightening when a CSS transform is active — the transform displaces
+    // rendered content beyond the static layout box, so tightening to the untransformed
+    // paint area would clip the transformed content (e.g. translateX causes half-circles).
     Bound orig_clip = rdcon->block.clip;
-    rdcon->block.clip.left   = max(orig_clip.left,   paint_rect.x);
-    rdcon->block.clip.top    = max(orig_clip.top,    paint_rect.y);
-    rdcon->block.clip.right  = min(orig_clip.right,  paint_rect.x + paint_rect.width);
-    rdcon->block.clip.bottom = min(orig_clip.bottom, paint_rect.y + paint_rect.height);
+    if (!rdcon->has_transform) {
+        rdcon->block.clip.left   = max(orig_clip.left,   paint_rect.x);
+        rdcon->block.clip.top    = max(orig_clip.top,    paint_rect.y);
+        rdcon->block.clip.right  = min(orig_clip.right,  paint_rect.x + paint_rect.width);
+        rdcon->block.clip.bottom = min(orig_clip.bottom, paint_rect.y + paint_rect.height);
+    }
 
     // Render base color first (if any), clipped to paint area
     if (bg->color.a > 0) {

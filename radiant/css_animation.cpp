@@ -225,6 +225,8 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
 
     TransformFunction* tf = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
     if (!tf) return NULL;
+    tf->translate_x_percent = NAN;
+    tf->translate_y_percent = NAN;
 
     if (name_len == 10 && strncmp(name_start, "translateX", 10) == 0) {
         tf->type = TRANSFORM_TRANSLATEX;
@@ -638,6 +640,8 @@ static TransformFunction* interpolate_transform_func(TransformFunction* a, Trans
     if (!a && !b) return NULL;
 
     TransformFunction* result = (TransformFunction*)pool_calloc(pool, sizeof(TransformFunction));
+    result->translate_x_percent = NAN;
+    result->translate_y_percent = NAN;
 
     if (a && b && a->type == b->type) {
         result->type = a->type;
@@ -695,15 +699,42 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
     return head;
 }
 
+// Lazily ensure InlineProp exists on the span (needed for opacity/color animation
+// when the element has no static opacity/color declaration)
+static InlineProp* ensure_inline_prop(ViewSpan* span) {
+    if (!span->in_line) {
+        DomElement* el = (DomElement*)span;
+        if (el->doc && el->doc->view_tree && el->doc->view_tree->pool) {
+            span->in_line = (InlineProp*)pool_calloc(el->doc->view_tree->pool, sizeof(InlineProp));
+            if (span->in_line) span->in_line->opacity = 1.0f;
+        }
+    }
+    return span->in_line;
+}
+
+// Lazily ensure BoundaryProp + BackgroundProp exist (needed for background-color
+// animation when the element has no static background declaration)
+static BackgroundProp* ensure_background_prop(ViewSpan* span) {
+    DomElement* el = (DomElement*)span;
+    Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
+    if (!pool) return NULL;
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
+    }
+    if (span->bound && !span->bound->background) {
+        span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
+    }
+    return span->bound ? span->bound->background : NULL;
+}
+
 // Apply an interpolated property value to a DomElement
 static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
     ViewSpan* span = (ViewSpan*)element;
 
     switch (prop->property_id) {
         case CSS_PROPERTY_OPACITY: {
-            if (span->in_line) {
-                span->in_line->opacity = prop->value.f;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->opacity = prop->value.f;
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
@@ -724,15 +755,13 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             break;
         }
         case CSS_PROPERTY_BACKGROUND_COLOR: {
-            if (span->bound && span->bound->background) {
-                span->bound->background->color = prop->value.color;
-            }
+            BackgroundProp* bg = ensure_background_prop(span);
+            if (bg) bg->color = prop->value.color;
             break;
         }
         case CSS_PROPERTY_COLOR: {
-            if (span->in_line) {
-                span->in_line->color = prop->value.color;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->color = prop->value.color;
             break;
         }
         default:
@@ -813,6 +842,49 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             apply_animated_value(state->element, prop_a);
         }
     }
+
+    // update bounds from element's current layout position (may have been
+    // zero at creation time because css_animation_create runs before layout)
+    // use absolute coordinates (walk parent chain) for correct dirty-region marking
+    View* span = (View*)anim->target;
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* p = span->parent_view();
+    while (p) { abs_x += p->x; abs_y += p->y; p = p->parent_view(); }
+    anim->bounds[0] = abs_x;
+    anim->bounds[1] = abs_y;
+    anim->bounds[2] = span->width;
+    anim->bounds[3] = span->height;
+
+    // expand bounds to cover transform displacement (translateX/Y moves visual
+    // position beyond the static layout box, so dirty region must include both)
+    ViewSpan* vs = (ViewSpan*)anim->target;
+    if (vs->transform && vs->transform->functions) {
+        TransformFunction* tf = vs->transform->functions;
+        while (tf) {
+            if (tf->type == TRANSFORM_TRANSLATE || tf->type == TRANSFORM_TRANSLATEX ||
+                tf->type == TRANSFORM_TRANSLATEY) {
+                float tx = tf->params.translate.x;
+                float ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent))
+                    tx = tf->translate_x_percent * span->width / 100.0f;
+                if (!std::isnan(tf->translate_y_percent))
+                    ty = tf->translate_y_percent * span->height / 100.0f;
+                if (tx > 0) anim->bounds[2] += tx;
+                else { anim->bounds[0] += tx; anim->bounds[2] -= tx; }
+                if (ty > 0) anim->bounds[3] += ty;
+                else { anim->bounds[1] += ty; anim->bounds[3] -= ty; }
+            } else if (tf->type == TRANSFORM_SCALE || tf->type == TRANSFORM_SCALEX ||
+                       tf->type == TRANSFORM_SCALEY || tf->type == TRANSFORM_ROTATE) {
+                // scale/rotate can expand bounds — use generous margin
+                float margin = span->width > span->height ? span->width : span->height;
+                anim->bounds[0] -= margin * 0.5f;
+                anim->bounds[1] -= margin * 0.5f;
+                anim->bounds[2] += margin;
+                anim->bounds[3] += margin;
+            }
+            tf = tf->next;
+        }
+    }
 }
 
 void css_animation_finish(AnimationInstance* anim) {
@@ -858,10 +930,13 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     inst->tick = css_animation_tick;
     inst->on_finish = css_animation_finish;
 
-    // set bounds from element's layout
-    ViewSpan* span = (ViewSpan*)element;
-    inst->bounds[0] = span->x;
-    inst->bounds[1] = span->y;
+    // set bounds from element's layout (absolute coordinates for dirty-region marking)
+    View* span = (View*)element;
+    float abs_x = span->x, abs_y = span->y;
+    ViewElement* pe = span->parent_view();
+    while (pe) { abs_x += pe->x; abs_y += pe->y; pe = pe->parent_view(); }
+    inst->bounds[0] = abs_x;
+    inst->bounds[1] = abs_y;
     inst->bounds[2] = span->width;
     inst->bounds[3] = span->height;
 
@@ -1005,8 +1080,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (dur_node) {
         StyleNode* sn = (StyleNode*)dur_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.duration = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.duration = val;
         }
     }
 
@@ -1015,8 +1092,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (delay_node) {
         StyleNode* sn = (StyleNode*)delay_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.delay = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.delay = val;
         }
     }
 

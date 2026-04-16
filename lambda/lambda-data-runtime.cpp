@@ -1257,6 +1257,7 @@ ArrayList* item_keys(Item data) {
 // Get total iteration length for unified for-loop
 int64_t iter_len(Item data, void* keys_ptr, int key_filter) {
     TypeId type_id = get_type_id(data);
+    if (type_id == LMD_TYPE_ERROR || type_id == LMD_TYPE_NULL) return 0;
     ArrayList* keys = (ArrayList*)keys_ptr;
     int64_t key_count = keys ? (int64_t)keys->length : 0;
 

@@ -1,0 +1,41 @@
+{
+  "name": "Phase 7a - Resize mutation",
+  "html": "test/ui/test_phase7a_resize_mutation.html",
+  "viewport": {"width": 1024, "height": 768},
+  "description": "Resize viewport and verify layout reflows correctly",
+  "events": [
+    {"type": "log", "message": "=== Phase 7a: Resize Mutation ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial layout at 1024x768"},
+    {"type": "assert_visible", "target": {"selector": "#header"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#footer"}, "visible": true},
+    {"type": "assert_style", "target": {"selector": "#container"}, "property": "background-color", "equals": "rgb(240, 240, 240)"},
+
+    {"type": "log", "message": "Step 2: Resize to 600x400"},
+    {"type": "resize", "width": 600, "height": 400},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify header still visible after resize"},
+    {"type": "assert_visible", "target": {"selector": "#header"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#header"}, "contains": "Resize Test"},
+
+    {"type": "log", "message": "Step 4: Resize to very narrow 320x480"},
+    {"type": "resize", "width": 320, "height": 480},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 5: Verify layout survived narrow resize"},
+    {"type": "assert_visible", "target": {"selector": "#header"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#footer"}, "contains": "Footer"},
+
+    {"type": "log", "message": "Step 6: Resize back to original 1024x768"},
+    {"type": "resize", "width": 1024, "height": 768},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 7: Verify restored layout"},
+    {"type": "assert_visible", "target": {"selector": "#header"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#footer"}, "visible": true},
+
+    {"type": "log", "message": "=== Phase 7a complete ==="}
+  ]
+}

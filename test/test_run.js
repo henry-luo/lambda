@@ -18,6 +18,7 @@ let excludeSuite = '';
 let targetCategory = '';
 let rawOutput = false;
 let parallelExecution = true;
+let inputResultsFile = '';
 
 for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -27,6 +28,8 @@ for (let i = 0; i < args.length; i++) {
     else if (arg === '--exclude-target')    excludeSuite = args[++i];
     else if (arg.startsWith('--category=')) targetCategory = arg.split('=')[1];
     else if (arg === '--category')          targetCategory = args[++i];
+    else if (arg.startsWith('--input-results=')) inputResultsFile = arg.split('=').slice(1).join('=');
+    else if (arg === '--input-results')     inputResultsFile = args[++i];
     else if (arg === '--raw')              rawOutput = true;
     else if (arg === '--sequential')       parallelExecution = false;
     else if (arg === '--parallel')         parallelExecution = true;
@@ -561,12 +564,18 @@ function displayResults(config, results) {
     let totalTests = 0, totalPassed = 0, totalFailed = 0;
     const allFailedTests = [];
 
-    console.log('');
-    console.log('==============================================================');
-    console.log('🏁 TEST RESULTS BREAKDOWN');
-    console.log('==============================================================');
-    console.log('📊 Test Results:');
+    // Load input baseline results if available
+    let inputResults = null;
+    if (inputResultsFile) {
+        try {
+            inputResults = JSON.parse(fs.readFileSync(inputResultsFile, 'utf8'));
+        } catch (e) {
+            // ignore if file not found
+        }
+    }
 
+    // Collect suite results first (need totals for JSON and report)
+    const suiteResults = [];
     for (const suiteKey of allSuites) {
         const suite = suiteMap.get(suiteKey);
         let suitePassed = 0, suiteFailed = 0, suiteTotal = 0;
@@ -582,31 +591,8 @@ function displayResults(config, results) {
         totalPassed += suitePassed;
         totalFailed += suiteFailed;
 
-        const suiteStatus = suiteFailed === 0 ? '✅ PASS' : '❌ FAIL';
-        console.log(`   ${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests)`);
-
-        for (const t of suite.tests) {
-            console.log(`     └─ ${t.icon} ${t.result.status} (${t.result.passed}/${t.result.total} tests) ${t.displayName} (${t.baseName}.exe)`);
-        }
+        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal });
     }
-
-    console.log('');
-    console.log('📊 Overall Results:');
-    console.log(`   Total Tests: ${totalTests}`);
-    console.log(`   ✅ Passed:   ${totalPassed}`);
-    if (totalFailed > 0) {
-        console.log(`   ❌ Failed:   ${totalFailed}`);
-    }
-
-    if (allFailedTests.length > 0) {
-        console.log('');
-        console.log('🔍 Failed Tests:');
-        for (const name of allFailedTests) {
-            console.log(`   ❌ ${name}`);
-        }
-    }
-
-    console.log('==============================================================');
 
     // Save summary JSON
     const summary = {
@@ -629,10 +615,79 @@ function displayResults(config, results) {
     const summaryFile = path.join(TEST_OUTPUT_DIR, 'test_summary.json');
     fs.writeFileSync(summaryFile, JSON.stringify(summary, null, 4));
 
+    // Print report
     console.log('');
     console.log(`📁 Results saved to: ${TEST_OUTPUT_DIR}`);
     console.log('   - Individual JSON results: *_results.json');
     console.log('   - Two-level summary: test_summary.json');
+    console.log('==============================================================');
+    console.log('🏁 TEST RESULTS BREAKDOWN');
+    console.log('==============================================================');
+    console.log('📊 Test Results:');
+
+    // Print input baseline results first
+    if (inputResults) {
+        const ip = inputResults.total_passed;
+        const if_ = inputResults.total_failed;
+        const it = ip + if_;
+        const inputStatus = if_ === 0 ? '✅ PASS' : '❌ FAIL';
+        console.log(`   📥 Input Parser Tests ${inputStatus} (${ip}/${it} tests)`);
+        for (let i = 0; i < inputResults.suites.length; i++) {
+            const s = inputResults.suites[i];
+            const st = s.passed + s.failed;
+            const ss = s.failed === 0 ? '✅ PASS' : '❌ FAIL';
+            const prefix = i < inputResults.suites.length - 1 ? '├─' : '└─';
+            console.log(`     ${prefix} 📄 ${ss} (${s.passed}/${st} tests) ${s.name}`);
+        }
+    }
+
+    // Print lambda/runtime suite results
+    for (const { suite, suitePassed, suiteFailed, suiteTotal } of suiteResults) {
+        const suiteStatus = suiteFailed === 0 ? '✅ PASS' : '❌ FAIL';
+        console.log(`   ${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests)`);
+
+        for (const t of suite.tests) {
+            console.log(`     └─ ${t.icon} ${t.result.status} (${t.result.passed}/${t.result.total} tests) ${t.displayName} (${t.baseName}.exe)`);
+        }
+    }
+
+    console.log('==============================================================');
+
+    // Combined results including input parsers
+    if (inputResults) {
+        const ip = inputResults.total_passed;
+        const if_ = inputResults.total_failed;
+        const it = ip + if_;
+        const combinedTotal = totalTests + it;
+        const combinedPassed = totalPassed + ip;
+        const combinedFailed = totalFailed + if_;
+        console.log('📊 Combined Baseline Results (Lambda + Input):');
+        console.log(`   Input Parsers:  ${ip}/${it}`);
+        console.log(`   Lambda Runtime: ${totalPassed}/${totalTests}`);
+        console.log('   ────────────────────────');
+        console.log(`   Total Tests: ${combinedTotal}`);
+        console.log(`   ✅ Passed:   ${combinedPassed}`);
+        if (combinedFailed > 0) {
+            console.log(`   ❌ Failed:   ${combinedFailed}`);
+        }
+    } else {
+        console.log('📊 Overall Results:');
+        console.log(`   Total Tests: ${totalTests}`);
+        console.log(`   ✅ Passed:   ${totalPassed}`);
+        if (totalFailed > 0) {
+            console.log(`   ❌ Failed:   ${totalFailed}`);
+        }
+    }
+
+    if (allFailedTests.length > 0) {
+        console.log('');
+        console.log('🔍 Failed Tests:');
+        for (const name of allFailedTests) {
+            console.log(`   ❌ ${name}`);
+        }
+    }
+
+    console.log('==============================================================');
 
     return { totalFailed };
 }

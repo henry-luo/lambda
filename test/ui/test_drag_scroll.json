@@ -22,7 +22,7 @@
     {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "--- Verify scroll position changed ---"},
-    {"type": "assert_scroll", "y": 100, "tolerance": 200},
+    {"type": "assert_scroll", "y": 1000, "tolerance": 600},
 
     {"type": "log", "message": "--- Drag select with raw coordinates (top area before scroll) ---"},
     {"type": "mouse_drag",

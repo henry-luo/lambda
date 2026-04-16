@@ -11571,6 +11571,31 @@ extern "C" Item js_throw_type_error(const char* message) {
     return ItemNull;
 }
 
+// Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE)
+extern "C" Item js_throw_type_error_code(const char* code, const char* message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    // set .code property
+    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
+    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
+    js_property_set(error, code_key, code_val);
+    js_throw_value(error);
+    return ItemNull;
+}
+
+extern "C" Item js_throw_range_error_code(const char* code, const char* message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("RangeError"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    // set .code property
+    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
+    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
+    js_property_set(error, code_key, code_val);
+    js_throw_value(error);
+    return ItemNull;
+}
+
 // v20: Helper: throw SyntaxError (for early errors detected during transpilation)
 extern "C" void js_throw_syntax_error(Item message) {
     Item type_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};

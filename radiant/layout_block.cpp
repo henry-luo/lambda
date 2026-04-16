@@ -5991,6 +5991,26 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     update_line_for_bfc_floats(lycon, inline_block_height);
                     effective_left = lycon->line.has_float_intrusion ?
                         lycon->line.effective_left : lycon->line.left;
+                    effective_right = lycon->line.has_float_intrusion ?
+                        lycon->line.effective_right : lycon->line.right;
+                    // CSS 2.1 §9.5: If the block still doesn't fit on the new line
+                    // due to float intrusion, push below the floats
+                    if (lycon->line.has_float_intrusion &&
+                        effective_left + block->width > effective_right) {
+                        BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                        if (bfc) {
+                            float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
+                            float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y, inline_block_height);
+                            float local_new_y = new_y - lycon->block.bfc_offset_y;
+                            if (local_new_y > lycon->block.advance_y) {
+                                lycon->block.advance_y = local_new_y;
+                                line_reset(lycon);
+                                update_line_for_bfc_floats(lycon, inline_block_height);
+                            }
+                            effective_left = lycon->line.has_float_intrusion ?
+                                lycon->line.effective_left : lycon->line.left;
+                        }
+                    }
                     block->x = effective_left;
                     // line_break→line_reset clears start_view; set it to
                     // this inline-block so text-align applies to the new line.

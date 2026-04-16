@@ -560,6 +560,10 @@ void render(GLFWwindow* window) {
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
         }
+        // new surface is blank — force full repaint (not selective)
+        if (ui_context.document && ui_context.document->state) {
+            ui_context.document->state->is_dirty = true;
+        }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
@@ -582,6 +586,7 @@ void render(GLFWwindow* window) {
          (ui_context.document->state->needs_repaint &&
           dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
+        ui_context.document->state->is_dirty = false;
         ui_context.document->state->needs_repaint = false;
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
         dirty_clear(&ui_context.document->state->dirty_tracker);

@@ -387,7 +387,7 @@ define run_make_with_error_summary
 	echo ""; \
 	echo "📋 Build Summary:"; \
 	echo "================"; \
-	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
+	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | grep -v -E "warning:|Warning:|WARNING:" | wc -l | tr -d ' '`; \
 	WARNING_COUNT=`grep -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
 	echo "Errors: $$ERROR_COUNT"; \
 	echo "Warnings: $$WARNING_COUNT"; \
@@ -395,7 +395,7 @@ define run_make_with_error_summary
 	if [ "$$ERROR_COUNT" -gt 0 ] 2>/dev/null; then \
 		echo "🔴 ERRORS FOUND:"; \
 		echo "================"; \
-		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
+		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | grep -v -E "warning:|Warning:|WARNING:" | while IFS=: read -r line_num content; do \
 			file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:[0-9]+:" | head -1); \
 			if [ -z "$$file_info" ]; then \
 				file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:" | head -1); \
@@ -443,7 +443,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall ensure-yaml-submodule \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-raw-alloc docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
@@ -878,11 +878,11 @@ test-all-baseline: build-test
 	@echo "Running BASELINE test suites only..."
 	@node test/test_run.js --category=baseline --parallel
 
-test-lambda-baseline: build-test
+test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	@node test/test_run.js --target=lambda --category=baseline --parallel
+	@node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -928,7 +928,13 @@ node-official-update-baseline: build-test
 	@echo "Running Node.js official test suite and updating baseline..."
 	@./test/test_node_official_gtest.exe --update-baseline
 
-test-input-baseline: build-test
+ensure-yaml-submodule:
+	@if [ ! -f test/yaml/README.md ]; then \
+		echo "Initializing test/yaml submodule..."; \
+		git submodule update --init test/yaml; \
+	fi
+
+test-input-baseline: build-test ensure-yaml-submodule
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "=============================================================="
@@ -1039,7 +1045,8 @@ test-input-baseline: build-test
 	if [ $$total_failed -gt 0 ]; then \
 		echo "   ❌ Failed:   $$total_failed"; \
 	fi; \
-	echo "=============================================================="
+	echo "=============================================================="; \
+	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 test-radiant-baseline: build-test
 	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
@@ -1478,15 +1485,15 @@ test-benchmark:
 # Run fuzzy tests (quick mode: 5 minutes)
 test-fuzzy: build
 	@echo "Running fuzzy tests (quick mode: 5 minutes)..."
-	@chmod +x test/fuzzy/test_fuzzy.sh
-	@./test/fuzzy/test_fuzzy.sh --duration=300
+	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
+	@./test/fuzzy/lambda/test_fuzzy.sh --duration=300
 	@echo "✅ Fuzzy tests completed"
 
 # Run extended fuzzy tests (1 hour)
 test-fuzzy-extended: build
 	@echo "Running extended fuzzy tests (1 hour)..."
-	@chmod +x test/fuzzy/test_fuzzy.sh
-	@./test/fuzzy/test_fuzzy.sh --duration=3600
+	@chmod +x test/fuzzy/lambda/test_fuzzy.sh
+	@./test/fuzzy/lambda/test_fuzzy.sh --duration=3600
 	@echo "✅ Extended fuzzy tests completed"
 
 # Radiant Layout Engine Fuzzy Testing
@@ -1495,14 +1502,29 @@ test-fuzzy-extended: build
 # Quick radiant fuzz (2 minutes)
 fuzz-radiant-quick: build
 	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=120
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=120
 
 # Full radiant fuzz (default 5 minutes, override with duration=N)
 fuzz-radiant: build
 	@echo "Running Radiant layout fuzzy tests..."
-	@chmod +x test/fuzzy-radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy-radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+
+# Lambda JS Engine Fuzzy Testing
+# Generates and mutates JavaScript programs to test JS engine robustness
+
+# Quick JS fuzz (2 minutes)
+fuzz-js-quick: build
+	@echo "Running JS engine fuzzy tests (quick: 2 minutes)..."
+	@chmod +x test/fuzzy/js/test_fuzzy_js.sh
+	@./test/fuzzy/js/test_fuzzy_js.sh --duration=120
+
+# Full JS fuzz (default 5 minutes, override with duration=N)
+fuzz-js: build
+	@echo "Running JS engine fuzzy tests..."
+	@chmod +x test/fuzzy/js/test_fuzzy_js.sh
+	@./test/fuzzy/js/test_fuzzy_js.sh --duration=$(or $(duration),300)
 
 test-integration:
 	@echo "Running integration tests..."

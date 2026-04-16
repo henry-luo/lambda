@@ -2347,7 +2347,7 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
     DomNodeType node_type;
     if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
-    } else if (strcmp(tag_name, "!--") == 0) {
+    } else if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0) {
         node_type = DOM_NODE_COMMENT;
     } else {
         log_error("dom_comment_create: not a comment or DOCTYPE: %s", tag_name);

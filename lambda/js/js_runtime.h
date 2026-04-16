@@ -376,6 +376,10 @@ Item js_throw_type_error(const char* message);
 void js_throw_syntax_error(Item message);
 void js_throw_reference_error(Item message);
 
+/** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
+Item js_throw_type_error_code(const char* code, const char* message);
+Item js_throw_range_error_code(const char* code, const char* message);
+
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
 void js_require_object_coercible(Item value);
 

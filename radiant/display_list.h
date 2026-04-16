@@ -11,6 +11,7 @@
 #include "../lib/scratch_arena.h"
 #include "../lib/font/font.h"
 #include "view.hpp"          // Bound, ImageSurface
+#include "state_store.hpp"   // DirtyTracker
 
 #ifdef __cplusplus
 extern "C" {
@@ -302,9 +303,13 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
 // Replay the entire display list to the given vector context.
 // surface is needed for direct-pixel operations (glyph, blit, opacity, etc.).
 // clip is the current clip bounds.  scratch is used for transient allocations.
+// dirty_tracker: if non-NULL, clips all rendering to dirty regions only
+//   (for selective/incremental repaint — prevents parent backgrounds from
+//    overwriting preserved content outside dirty areas).
 void dl_replay(DisplayList* dl, RdtVector* vec,
                ImageSurface* surface, Bound* clip,
-               ScratchArena* scratch, float scale);
+               ScratchArena* scratch, float scale,
+               DirtyTracker* dirty_tracker);
 
 // ---------------------------------------------------------------------------
 // Debug / stats

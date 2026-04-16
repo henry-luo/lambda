@@ -19,6 +19,8 @@
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
+#include "../lib/image.h"
+#include "animation.h"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
@@ -1064,6 +1066,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ItemReader st = reader.get("tolerance"); ev->scroll_tolerance = (float)(st.isFloat() ? st.asFloat() : st.asInt());
         }
         if (ev->scroll_tolerance <= 0) ev->scroll_tolerance = 1.0f;
+        ev->negate_scroll = reader.get("negate").asBool();
     }
     else if (strcmp(type_str, "assert_rect") == 0) {
         ev->type = SIM_EVENT_ASSERT_RECT;
@@ -1087,6 +1090,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
         const char* contains = reader.get("contains").cstring();
         if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        ev->style_animated = reader.get("animated").asBool();
+        if (ev->style_animated) {
+            ItemReader tol = reader.get("tolerance");
+            ev->style_tolerance = tol.isFloat() ? (float)tol.asFloat() : (float)tol.asInt();
+        }
     }
     else if (strcmp(type_str, "assert_position") == 0) {
         ev->type = SIM_EVENT_ASSERT_POSITION;
@@ -1203,6 +1211,43 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         // file is optional, defaults to ./view_tree.txt
     }
+    else if (strcmp(type_str, "assert_snapshot") == 0) {
+        ev->type = SIM_EVENT_ASSERT_SNAPSHOT;
+        const char* ref = reader.get("reference").cstring();
+        if (ref) ev->snapshot_reference = mem_strdup(ref, MEM_CAT_LAYOUT);
+        else {
+            log_error("event_sim: assert_snapshot requires 'reference' field");
+            mem_free(ev);
+            return NULL;
+        }
+        {
+            ItemReader th = reader.get("threshold");
+            ev->snapshot_threshold = th.isFloat() ? (float)th.asFloat() : (float)th.asInt();
+        }
+        if (ev->snapshot_threshold <= 0) ev->snapshot_threshold = 1.0f;
+        const char* diff = reader.get("save_diff").cstring();
+        if (diff) ev->snapshot_diff_path = mem_strdup(diff, MEM_CAT_LAYOUT);
+        const char* actual = reader.get("save_actual").cstring();
+        if (actual) ev->snapshot_actual_path = mem_strdup(actual, MEM_CAT_LAYOUT);
+    }
+    else if (strcmp(type_str, "scroll_to") == 0) {
+        ev->type = SIM_EVENT_SCROLL_TO;
+        parse_target(reader, ev);
+        {
+            ItemReader sy = reader.get("y"); ev->expected_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+            ItemReader sx = reader.get("x"); ev->expected_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+        }
+    }
+    else if (strcmp(type_str, "advance_time") == 0) {
+        ev->type = SIM_EVENT_ADVANCE_TIME;
+        ev->wait_ms = reader.get("ms").asInt32();
+        ev->advance_steps = reader.get("steps").asInt32();
+        if (ev->wait_ms <= 0) {
+            log_error("event_sim: advance_time requires positive 'ms' field");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else {
         log_error("event_sim: unknown event type '%s'", type_str);
         mem_free(ev);
@@ -1210,7 +1255,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
 
     // Parse optional auto-waiting fields for assertion events
-    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_COUNT) {
+    if ((ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_SNAPSHOT)) {
         ev->assert_timeout = reader.get("timeout").asInt32();
         ev->assert_interval = reader.get("interval").asInt32();
         if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
@@ -1514,6 +1559,142 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
     return true;
 }
 
+// ===== Phase 7: assert_snapshot pixel comparison =====
+
+// Helper: force render the current surface
+static void force_render_surface(UiContext* uicon) {
+    extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+    if (uicon->document && uicon->document->view_tree) {
+        RadiantState* state = (RadiantState*)uicon->document->state;
+        if (state) state->is_dirty = true;
+        render_html_doc(uicon, uicon->document->view_tree, nullptr);
+        if (state) {
+            state->is_dirty = false;
+            state->needs_repaint = false;
+            dirty_clear(&state->dirty_tracker);
+        }
+    }
+}
+
+// YIQ-based perceptual color distance (same algorithm as pixelmatch)
+static float pixel_yiq_distance(uint32_t rgba1, uint32_t rgba2) {
+    float r1 = (rgba1 & 0xFF) / 255.0f;
+    float g1 = ((rgba1 >> 8) & 0xFF) / 255.0f;
+    float b1 = ((rgba1 >> 16) & 0xFF) / 255.0f;
+    float r2 = (rgba2 & 0xFF) / 255.0f;
+    float g2 = ((rgba2 >> 8) & 0xFF) / 255.0f;
+    float b2 = ((rgba2 >> 16) & 0xFF) / 255.0f;
+
+    float y  = r1*0.29889531f + g1*0.58662247f + b1*0.11448223f;
+    float i  = r1*0.59597799f - g1*0.27417610f - b1*0.32180189f;
+    float q  = r1*0.21147017f - g1*0.52261711f + b1*0.31114694f;
+    float y2 = r2*0.29889531f + g2*0.58662247f + b2*0.11448223f;
+    float i2 = r2*0.59597799f - g2*0.27417610f - b2*0.32180189f;
+    float q2 = r2*0.21147017f - g2*0.52261711f + b2*0.31114694f;
+
+    float dy = y - y2, di = i - i2, dq = q - q2;
+    return 0.5053f*dy*dy + 0.299f*di*di + 0.1957f*dq*dq;
+}
+
+static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    const char* ref_path = ev->snapshot_reference;
+    float threshold_pct = ev->snapshot_threshold > 0 ? ev->snapshot_threshold : 1.0f;
+
+    // Step 1: Ensure surface is rendered
+    force_render_surface(uicon);
+
+    ImageSurface* actual = uicon->surface;
+    if (!actual || !actual->pixels) {
+        log_error("event_sim: assert_snapshot FAIL - no rendered surface");
+        ctx->fail_count++;
+        return;
+    }
+
+    // Step 2: Optionally save actual PNG for debugging
+    if (ev->snapshot_actual_path) {
+        extern void save_surface_to_png(ImageSurface* surface, const char* filename);
+        save_surface_to_png(actual, ev->snapshot_actual_path);
+    }
+
+    // Step 3: Load reference PNG
+    int ref_w, ref_h, ref_channels;
+    unsigned char* ref_pixels = image_load(ref_path, &ref_w, &ref_h,
+                                            &ref_channels, 4);
+    if (!ref_pixels) {
+        log_error("event_sim: assert_snapshot FAIL - failed to load reference: %s", ref_path);
+        ctx->fail_count++;
+        return;
+    }
+
+    // Step 4: Dimension check
+    if (ref_w != actual->width || ref_h != actual->height) {
+        log_error("event_sim: assert_snapshot FAIL - size mismatch: actual %dx%d vs ref %dx%d",
+                 actual->width, actual->height, ref_w, ref_h);
+        image_free(ref_pixels);
+        ctx->fail_count++;
+        return;
+    }
+
+    // Step 5: Pixel comparison
+    int total = ref_w * ref_h;
+    int mismatched = 0;
+    const float YIQ_THRESHOLD_SQ = 0.1f * 0.1f; // matches pixelmatch threshold=0.1
+
+    uint32_t* actual_px = (uint32_t*)actual->pixels;
+    uint32_t* ref_px = (uint32_t*)ref_pixels;
+    int actual_stride = actual->pitch / 4; // INT_CAST_OK: pixel stride
+
+    // Allocate diff buffer only when save_diff is requested
+    uint32_t* diff_px = nullptr;
+    if (ev->snapshot_diff_path) {
+        diff_px = (uint32_t*)mem_calloc(total, sizeof(uint32_t), MEM_CAT_RENDER);
+    }
+
+    for (int y = 0; y < ref_h; y++) {
+        for (int x = 0; x < ref_w; x++) {
+            uint32_t a = actual_px[y * actual_stride + x];
+            uint32_t r = ref_px[y * ref_w + x];
+            if (a != r) {
+                float dist = pixel_yiq_distance(a, r);
+                if (dist > YIQ_THRESHOLD_SQ) {
+                    mismatched++;
+                    if (diff_px) diff_px[y * ref_w + x] = 0xFF0000FF; // red ABGR
+                } else {
+                    if (diff_px) diff_px[y * ref_w + x] = a;
+                }
+            } else {
+                if (diff_px) diff_px[y * ref_w + x] = a;
+            }
+        }
+    }
+
+    float mismatch_pct = (float)mismatched / (float)total * 100.0f;
+
+    // Step 6: Save diff image on mismatch
+    if (diff_px && ev->snapshot_diff_path && mismatched > 0) {
+        extern void save_surface_to_png(ImageSurface* surface, const char* filename);
+        ImageSurface diff_surf = {};
+        diff_surf.width = ref_w;
+        diff_surf.height = ref_h;
+        diff_surf.pitch = ref_w * 4;
+        diff_surf.pixels = diff_px;
+        save_surface_to_png(&diff_surf, ev->snapshot_diff_path);
+    }
+    if (diff_px) mem_free(diff_px);
+    image_free(ref_pixels);
+
+    // Step 7: Pass/fail
+    if (mismatch_pct <= threshold_pct) {
+        log_info("event_sim: assert_snapshot PASS - %.2f%% mismatch (threshold %.1f%%) ref=%s",
+                 mismatch_pct, threshold_pct, ref_path);
+        ctx->pass_count++;
+    } else {
+        log_error("event_sim: assert_snapshot FAIL - %.2f%% mismatch > threshold %.1f%% ref=%s",
+                 mismatch_pct, threshold_pct, ref_path);
+        ctx->fail_count++;
+    }
+}
+
 // Process a single simulated event
 static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     switch (ev->type) {
@@ -1683,6 +1864,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_SCROLL:
             log_info("event_sim: scroll at (%d, %d) offset=(%.2f, %.2f)", ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
             sim_scroll(uicon, ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
+            // Re-render after scroll to update surface pixels
+            force_render_surface(uicon);
             break;
 
         // ===== High-level actions =====
@@ -1948,6 +2131,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (uicon->document) {
                 reflow_html_doc(uicon->document);
             }
+            // Re-render after resize to update surface pixels
+            force_render_surface(uicon);
             break;
         }
 
@@ -2162,23 +2347,32 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_SCROLL: {
             DomDocument* doc = uicon->document;
-            if (!doc || !doc->state) {
-                log_error("event_sim: assert_scroll - no document state");
+            if (!doc || !doc->view_tree || !doc->view_tree->root) {
+                log_error("event_sim: assert_scroll - no document or view tree");
                 ctx->fail_count++;
                 break;
             }
-            float actual_x = doc->state->scroll_x;
-            float actual_y = doc->state->scroll_y;
+            // Read scroll position from root block's scroller (the actual scroll source)
+            float actual_x = 0, actual_y = 0;
+            ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+            if (root_block && root_block->scroller && root_block->scroller->pane) {
+                actual_x = root_block->scroller->pane->h_scroll_position;
+                actual_y = root_block->scroller->pane->v_scroll_position;
+            }
             float tol = ev->scroll_tolerance;
             bool pass_x = (ev->expected_scroll_x == 0 && !ev->expected_scroll_y) ||
                           (actual_x >= ev->expected_scroll_x - tol && actual_x <= ev->expected_scroll_x + tol);
             bool pass_y = (actual_y >= ev->expected_scroll_y - tol && actual_y <= ev->expected_scroll_y + tol);
-            if (!pass_x || !pass_y) {
-                log_error("event_sim: assert_scroll FAIL - expected (%.1f, %.1f) +/-%.1f, got (%.1f, %.1f)",
+            bool result = pass_x && pass_y;
+            if (ev->negate_scroll) result = !result;
+            if (!result) {
+                log_error("event_sim: assert_scroll FAIL - expected%s (%.1f, %.1f) +/-%.1f, got (%.1f, %.1f)",
+                         ev->negate_scroll ? " NOT" : "",
                          ev->expected_scroll_x, ev->expected_scroll_y, tol, actual_x, actual_y);
                 ctx->fail_count++;
             } else {
-                log_info("event_sim: assert_scroll PASS (%.1f, %.1f)", actual_x, actual_y);
+                log_info("event_sim: assert_scroll PASS (%.1f, %.1f)%s", actual_x, actual_y,
+                         ev->negate_scroll ? " [negated]" : "");
                 ctx->pass_count++;
             }
             break;
@@ -2246,7 +2440,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             const char* actual = val_buf->str ? val_buf->str : "";
             bool passed = true;
             if (ev->assert_equals) {
-                if (strcmp(actual, ev->assert_equals) != 0) {
+                if (ev->style_animated) {
+                    // Animated tolerance comparison: parse both as float
+                    float actual_f = (float)atof(actual);
+                    float expected_f = (float)atof(ev->assert_equals);
+                    float tol = ev->style_tolerance > 0 ? ev->style_tolerance : 0.05f;
+                    if (actual_f < expected_f - tol || actual_f > expected_f + tol) {
+                        log_error("event_sim: assert_style FAIL (animated) - %s: expected ~%.4g, got %.4g (tol=%.4g)",
+                                 ev->style_property, expected_f, actual_f, tol);
+                        passed = false;
+                    }
+                } else if (strcmp(actual, ev->assert_equals) != 0) {
                     log_error("event_sim: assert_style FAIL - %s: expected '%s', got '%s'",
                              ev->style_property, ev->assert_equals, actual);
                     passed = false;
@@ -2502,6 +2706,71 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_ASSERT_SNAPSHOT: {
+            assert_snapshot_impl(ctx, uicon, ev);
+            break;
+        }
+
+        // ===== Phase 7: Page Mutations =====
+
+        case SIM_EVENT_SCROLL_TO: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->view_tree || !doc->view_tree->root) {
+                log_error("event_sim: scroll_to - no document or view tree");
+                break;
+            }
+            float target_x = ev->expected_scroll_x;
+            float target_y = ev->expected_scroll_y;
+            // If a target selector is given, scroll to that element's position
+            if (ev->target_selector) {
+                View* target_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
+                if (target_elem) {
+                    float ax, ay, aw, ah;
+                    get_element_rect_abs(target_elem, &ax, &ay, &aw, &ah);
+                    target_x = ax;
+                    target_y = ay;
+                }
+            }
+            log_info("event_sim: scroll_to (%.1f, %.1f)", target_x, target_y);
+            // Set scroll position on root block's scroller (the actual scroll mechanism)
+            ViewBlock* root_block = (ViewBlock*)doc->view_tree->root;
+            if (root_block && root_block->scroller && root_block->scroller->pane) {
+                ScrollPane* pane = root_block->scroller->pane;
+                pane->h_scroll_position = target_x < 0 ? 0 : (target_x > pane->h_max_scroll ? pane->h_max_scroll : target_x);
+                pane->v_scroll_position = target_y < 0 ? 0 : (target_y > pane->v_max_scroll ? pane->v_max_scroll : target_y);
+            }
+            if (doc->state) doc->state->needs_repaint = true;
+            force_render_surface(uicon);
+            break;
+        }
+
+        case SIM_EVENT_ADVANCE_TIME: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: advance_time - no document state");
+                break;
+            }
+            RadiantState* state = (RadiantState*)doc->state;
+            AnimationScheduler* sched = state->animation_scheduler;
+            if (!sched) {
+                log_error("event_sim: advance_time - no animation scheduler");
+                break;
+            }
+            float ms = (float)ev->wait_ms;  // advance_time stores ms in wait_ms
+            int steps = ev->advance_steps > 0 ? ev->advance_steps : (int)(ms / 16.0f);
+            if (steps < 1) steps = 1;
+            float step_ms = ms / (float)steps;
+            double base_time = sched->current_time;
+            log_info("event_sim: advance_time %.1fms in %d steps (%.2fms each)", ms, steps, step_ms);
+            for (int i = 1; i <= steps; i++) {
+                double now = base_time + (step_ms * i) / 1000.0;
+                animation_scheduler_tick(sched, now, &state->dirty_tracker);
+            }
+            // Re-render after advancing animation
+            force_render_surface(uicon);
+            break;
+        }
+
         // ===== Navigation =====
 
         case SIM_EVENT_NAVIGATE: {
@@ -2634,7 +2903,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 // Auto-waiting wrapper: retries assertion events until they pass or timeout expires
 static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     // Non-assertion events execute directly
-    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_COUNT) {
+    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_SNAPSHOT) {
         process_sim_event(ctx, ev, uicon, window);
         return;
     }

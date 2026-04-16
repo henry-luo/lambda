@@ -51,6 +51,7 @@ extern "C" void js_reset_module_vars();
 extern "C" Item* js_alloc_module_vars(void);
 extern "C" Item* js_get_active_module_vars(void);
 extern "C" void js_set_active_module_vars(Item* vars);
+extern "C" void js_process_emit_exit(int code);
 
 // Global MIR error handler override for batch mode.
 // If non-NULL, installed after each jit_init() to prevent exit(1) on MIR errors.
@@ -24990,6 +24991,13 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
     log_debug("js-mir: event loop drained");
+
+    // Fire process 'exit' event listeners (Node.js compatibility).
+    // Must happen while JIT code is still mapped (before MIR_finish).
+    {
+        int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : 0;
+        js_process_emit_exit(exit_code);
+    }
 
     // Preamble mode: snapshot module_consts so tests can inherit harness definitions
     if (g_jm_preamble_out && mt->module_consts) {

@@ -104,6 +104,10 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
+    SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
+    // Mutation helpers
+    SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
+    SIM_EVENT_ADVANCE_TIME,      // advance animation scheduler clock deterministically
     // Navigation
     SIM_EVENT_NAVIGATE,        // load a new HTML document
     SIM_EVENT_NAVIGATE_BACK,   // go back to previous document
@@ -182,6 +186,18 @@ struct SimEvent {
     int assert_count_expected;   // exact expected count (-1 = not set)
     int assert_count_min;        // minimum expected count (-1 = not set)
     int assert_count_max;        // maximum expected count (-1 = not set)
+    // Phase 7: assert_snapshot fields
+    char* snapshot_reference;    // path to reference PNG
+    float snapshot_threshold;    // max mismatch %, default 1.0
+    char* snapshot_diff_path;    // optional: save diff image on failure
+    char* snapshot_actual_path;  // optional: save actual image for debugging
+    // Phase 7: advance_time fields
+    int advance_steps;           // number of tick steps (0 = auto from ms/16)
+    // Phase 7: assert_style animated flag
+    bool style_animated;         // read from live ViewSpan instead of CSS cascade
+    float style_tolerance;       // tolerance for animated float comparison (default 0.05)
+    // Phase 7: assert_scroll negate flag
+    bool negate_scroll;          // invert assertion (pass when NOT at expected position)
 };
 
 // Event simulation context

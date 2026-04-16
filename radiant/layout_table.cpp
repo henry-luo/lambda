@@ -4085,12 +4085,18 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         if (colgroup) {
             colgroup->display = display;
             lycon->view = (View*)colgroup;
+            // CSS 2.1 §17.3: Save font context before resolving column-group styles.
+            // Column groups only influence border, background, width, visibility on cells.
+            // Inherited text properties (word-spacing, letter-spacing, etc.) must not
+            // leak to sibling rows/cells through the shared layout context.
+            FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
             // Recurse to mark child column elements
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)colgroup);
             }
+            lycon->font = saved_font;
         }
     }
     else if (tag == HTM_TAG_COL || display.inner == CSS_VALUE_TABLE_COLUMN) {
@@ -4100,7 +4106,10 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         if (col) {
             col->display = display;
             lycon->view = (View*)col;
+            // CSS 2.1 §17.3: Save font context — same rationale as column-group above
+            FontBox saved_font = lycon->font;
             dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
+            lycon->font = saved_font;
         }
     }
 
