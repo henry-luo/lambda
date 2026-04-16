@@ -5780,6 +5780,30 @@ extern "C" void js_donotevaluate(void) {
     js_throw_value(js_new_error_with_name(err_name, err_msg));
 }
 
+// isConstructor(fn) — test262 harness helper
+// Checks if fn is a constructor by examining function flags
+extern "C" Item js_is_constructor(Item fn) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    // per harness spec: throw Test262Error for non-function arguments
+    TypeId tid = get_type_id(fn);
+    if (tid != LMD_TYPE_FUNC) {
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name("isConstructor: argument must be a function"))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    JsFunctionLayout* jfn = (JsFunctionLayout*)fn.function;
+    // Not constructable: builtins, arrow functions, generators
+    if (jfn->builtin_id > 0 || jfn->builtin_id == -2 ||
+        (jfn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_GENERATOR_G))) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
 #endif // !NDEBUG
 
 // =============================================================================
