@@ -6316,7 +6316,13 @@ extern "C" Item js_number_is_safe_integer(Item value) {
 // =============================================================================
 
 extern "C" Item js_array_from(Item iterable) {
+    extern Item js_throw_type_error(const char* msg);
     TypeId tid = get_type_id(iterable);
+    // spec: TypeError if items is null or undefined
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return js_array_new(0);
+    }
     if (tid == LMD_TYPE_ARRAY) {
         // shallow copy
         Array* src = iterable.array;
@@ -6407,7 +6413,16 @@ extern "C" Item js_array_from(Item iterable) {
 
 // Array.from(iterable, mapFn) — with optional mapper function
 extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
+    extern Item js_throw_type_error(const char* msg);
+    extern int js_check_exception(void);
+    // spec: if mapFn is not undefined and not callable, throw TypeError
+    TypeId mft = get_type_id(mapFn);
+    if (mft != LMD_TYPE_FUNC && mft != LMD_TYPE_NULL && mapFn.item != ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Array.from: mapFn is not a function");
+        return js_array_new(0);
+    }
     Item arr = js_array_from(iterable);
+    if (js_check_exception()) return js_array_new(0);
     // Apply mapper if provided and is a function
     if (get_type_id(mapFn) == LMD_TYPE_FUNC) {
         int64_t len = js_array_length(arr);
