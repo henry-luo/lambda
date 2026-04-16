@@ -695,15 +695,42 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
     return head;
 }
 
+// Lazily ensure InlineProp exists on the span (needed for opacity/color animation
+// when the element has no static opacity/color declaration)
+static InlineProp* ensure_inline_prop(ViewSpan* span) {
+    if (!span->in_line) {
+        DomElement* el = (DomElement*)span;
+        if (el->doc && el->doc->view_tree && el->doc->view_tree->pool) {
+            span->in_line = (InlineProp*)pool_calloc(el->doc->view_tree->pool, sizeof(InlineProp));
+            if (span->in_line) span->in_line->opacity = 1.0f;
+        }
+    }
+    return span->in_line;
+}
+
+// Lazily ensure BoundaryProp + BackgroundProp exist (needed for background-color
+// animation when the element has no static background declaration)
+static BackgroundProp* ensure_background_prop(ViewSpan* span) {
+    DomElement* el = (DomElement*)span;
+    Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
+    if (!pool) return NULL;
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
+    }
+    if (span->bound && !span->bound->background) {
+        span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
+    }
+    return span->bound ? span->bound->background : NULL;
+}
+
 // Apply an interpolated property value to a DomElement
 static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
     ViewSpan* span = (ViewSpan*)element;
 
     switch (prop->property_id) {
         case CSS_PROPERTY_OPACITY: {
-            if (span->in_line) {
-                span->in_line->opacity = prop->value.f;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->opacity = prop->value.f;
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
@@ -724,15 +751,13 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             break;
         }
         case CSS_PROPERTY_BACKGROUND_COLOR: {
-            if (span->bound && span->bound->background) {
-                span->bound->background->color = prop->value.color;
-            }
+            BackgroundProp* bg = ensure_background_prop(span);
+            if (bg) bg->color = prop->value.color;
             break;
         }
         case CSS_PROPERTY_COLOR: {
-            if (span->in_line) {
-                span->in_line->color = prop->value.color;
-            }
+            InlineProp* il = ensure_inline_prop(span);
+            if (il) il->color = prop->value.color;
             break;
         }
         default:
@@ -813,6 +838,14 @@ void css_animation_tick(AnimationInstance* anim, float t) {
             apply_animated_value(state->element, prop_a);
         }
     }
+
+    // update bounds from element's current layout position (may have been
+    // zero at creation time because css_animation_create runs before layout)
+    ViewSpan* span = (ViewSpan*)anim->target;
+    anim->bounds[0] = span->x;
+    anim->bounds[1] = span->y;
+    anim->bounds[2] = span->width;
+    anim->bounds[3] = span->height;
 }
 
 void css_animation_finish(AnimationInstance* anim) {
@@ -1005,8 +1038,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (dur_node) {
         StyleNode* sn = (StyleNode*)dur_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.duration = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.duration = val;
         }
     }
 
@@ -1015,8 +1050,10 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     if (delay_node) {
         StyleNode* sn = (StyleNode*)delay_node->declaration;
         CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        if (d && d->value && d->value->type == CSS_VALUE_TYPE_TIME) {
-            anim_prop.delay = (float)d->value->data.length.value;
+        if (d && d->value && d->value->type == CSS_VALUE_TYPE_LENGTH) {
+            float val = (float)d->value->data.length.value;
+            if (d->value->data.length.unit == CSS_UNIT_MS) val /= 1000.0f;
+            anim_prop.delay = val;
         }
     }
 

@@ -4,16 +4,17 @@
 
 These rules MUST be followed. Violations are considered errors.
 
-1. **NEVER write files to `/tmp`**. Use `./temp/` dir for ALL temporary files.
-2. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
-3. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
-4. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
-5. **NEVER modify `log.conf`**.
-6. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
-7. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
-8. C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
-9. **NEVER use debug build for performance testing**. Use release build (`make release`).
-10. **In `radiant/` layout code, NEVER use `int` for position/dimension variables** (x, y, width, height, padding, margin, border, gap, offset, size). All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, enum for log, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make check-int-cast` to verify.
+1. **NEVER hard code or work around**. Fix code only when have found the root cause. It's ok to leave existing code as failed.
+2. **NEVER write files to `/tmp`**. Use `./temp/` dir for ALL temporary files.
+3. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
+4. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
+5. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
+6. **NEVER modify `log.conf`**.
+7. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
+8. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
+9. Follow C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
+10. **NEVER use debug build for performance testing**. Use release build (`make release`).
+11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables** (e.g. x, y, width, height, padding, margin, border). All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, enum for log, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make check-int-cast` to verify.
 
 | DON'T | DO |
 |-------|-----|
@@ -24,7 +25,6 @@ These rules MUST be followed. Violations are considered errors.
 | Edit `parser.c` manually | Edit `grammar.js` then `make generate-grammar` |
 | Edit `premake5.mac.lua` manually | Edit `build_lambda_config.json` then `make` |
 | `int width = (int)block->width` | `float width = block->width` |
-| `span->x = (int)content_left` | `span->x = content_left` |
 
 ## Project Overview
 

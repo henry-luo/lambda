@@ -3281,7 +3281,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     // Phase 12.4: selective clear — only clear dirty regions when available
     bool selective = false;
     RadiantState* state = uicon->document ? (RadiantState*)uicon->document->state : nullptr;
-    if (state && !state->dirty_tracker.full_repaint && dirty_has_regions(&state->dirty_tracker)) {
+    bool force_full = state && state->is_dirty;
+    if (!force_full && state && !state->dirty_tracker.full_repaint && dirty_has_regions(&state->dirty_tracker)) {
         // Clear only dirty regions to background color
         DirtyRect* dr = state->dirty_tracker.dirty_list;
         float scale = rdcon.scale;
@@ -3356,7 +3357,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     int render_threads = get_render_thread_count();
     int item_count = dl_item_count(&display_list);
 
-    if (render_threads != 1 && item_count > 0) {
+    if (!selective && render_threads != 1 && item_count > 0) {
         // --- Tile-based parallel rasterization ---
         ImageSurface* surface = rdcon.ui_context->surface;
         TileGrid grid;
