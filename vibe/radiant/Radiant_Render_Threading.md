@@ -1,6 +1,6 @@
 # Radiant Multi-Threaded Rendering & Unified Animation Pipeline
 
-**Status**: In Progress — Phase 2 Complete  
+**Status**: In Progress — Phase 6 Complete  
 **Date**: April 2026  
 
 ---
@@ -53,13 +53,13 @@ GLFW Event Loop (window.cpp, 60 FPS cap)
 
 | Aspect | Current State |
 |--------|---------------|
-| Threading | All layout + render on main thread |
-| Rasterizer | ThorVG software canvas, 1 thread (`tvg_engine_init(1)`) |
+| Threading | Display list + tile-based parallel rasterization (Phase 1–2) |
+| Rasterizer | ThorVG software canvas, N worker threads with per-thread canvases |
 | Abstraction | `rdt_vector.hpp` API wraps ThorVG — never calls `tvg_*` directly |
-| Memory | Arena allocators — single-threaded, no concurrent access |
-| Animation | CSS properties parsed but never executed; `requestAnimationFrame` stubbed |
-| GIF | First frame only via stb_image; no frame iteration |
-| Lottie | ThorVG has full Lottie support, but intentionally excluded from Radiant build |
+| Memory | Arena allocators — thread-local arenas per worker, main-thread display list arena |
+| Animation | `AnimationScheduler` with CSS @keyframes, GIF, and Lottie support (Phases 3–6) |
+| GIF | Multi-frame decoder via giflib; all frames decoded upfront; pixel pointer swap per tick |
+| Lottie | ThorVG Lottie loader enabled; dedicated SwCanvas per LottiePlayer; auto-detected by extension/content |
 | Dirty tracking | `DirtyTracker` + `ReflowScheduler` exist for incremental repaint |
 | JS timers | `setTimeout`/`setInterval` via libuv in `js_event_loop.cpp` |
 
@@ -686,44 +686,121 @@ Bugs found and fixed during implementation:
 - **Unclamped tile-local clip bounds** (root cause of SIGBUS/SIGSEGV): direct-pixel ops passed translated clip bounds without clamping to tile dimensions, causing out-of-bounds pixel writes in `fill_surface_rect`, `blit_surface_scaled`, `apply_css_filters`
 - **`tvg_paint_duplicate` race condition**: ThorVG's `Picture::Impl::duplicate()` increments a non-atomic `sharing` counter and calls `load()` which mutates the source loader — serialized with a dedicated mutex
 
-### Phase 3: Animation Scheduler
+### Phase 3: Animation Scheduler ✅ Complete
 
 **Goal**: Frame-driven animation loop integrated with event loop (config-driven, no JS).
 
-1. Implement `AnimationScheduler` — tick dispatch, lifetime management
-2. Implement timing functions (cubic-bezier, steps) — port from ThorVG's interpolator
-3. Integrate with GLFW event loop (vsync when active, idle otherwise)
-4. Animation auto-detection: CSS `animation-*` properties trigger CSS animations; multi-frame GIFs trigger GifPlayer; `.json` Lottie files trigger LottiePlayer
-5. **Validation**: Animations start/stop/loop based on CSS and content properties
+1. ✅ Implement `AnimationScheduler` — tick dispatch, lifetime management
+2. ✅ Implement timing functions (cubic-bezier, steps) — standalone implementation with pre-computed spline table
+3. ✅ Integrate with GLFW event loop (vsync when active, idle otherwise)
+4. ✅ Animation auto-detection: CSS `animation-*` properties trigger CSS animations; multi-frame GIFs trigger GifPlayer; `.json` Lottie files trigger LottiePlayer
+5. ✅ **Validation**: 5237/5237 baseline tests pass + 20/20 unit tests pass
 
-### Phase 4: CSS Animations & Transitions
+**Implementation details** (April 16, 2026):
+
+| File | Role |
+|------|------|
+| `radiant/animation.h` | Header: `AnimationScheduler`, `AnimationInstance`, `TimingFunction` structs; 4 animation types (CSS_ANIMATION, CSS_TRANSITION, GIF, LOTTIE); direction/fill-mode/play-state enums; timing function presets |
+| `radiant/animation.cpp` | Full implementation: cubic-bezier eval (Newton-Raphson + binary subdivision with 11-sample pre-computed spline table), steps eval (jump-start/end/both/none), scheduler tick loop with progress computation, iteration tracking, direction mapping, fill-mode logic, pause/resume |
+| `test/test_animation_gtest.cpp` | 20 unit tests across 2 suites: `TimingFunctionTest` (linear, cubic-bezier, steps) + `AnimationSchedulerTest` (lifecycle, tick, delay, direction, fill-mode, pause/resume, easing) |
+
+Key design choices:
+- Doubly-linked list for O(1) add/remove of active animations
+- `AnimTickFn` / `AnimFinishFn` callbacks — each animation type provides its own tick/finish implementations
+- `TimingFunction` with pre-computed sample table (11 points) for fast cubic-bezier evaluation — avoids per-frame Newton-Raphson for common ease curves
+- Built-in CSS easing presets: `TIMING_EASE`, `TIMING_EASE_IN`, `TIMING_EASE_OUT`, `TIMING_EASE_IN_OUT` (initialized once via `timing_init_presets()`)
+- `compute_animation_progress()` handles: delay periods with fill-backwards, iteration counting, direction reversal (normal/reverse/alternate/alternate-reverse), fill-forwards on completion
+- `bounds[4]` on each `AnimationInstance` for dirty tile marking — scheduler calls `dirty_mark_rect()` on tick
+
+### Phase 4: CSS Animations & Transitions ✅ Complete
 
 **Goal**: Animate CSS properties via @keyframes and transitions.
 
-1. Store parsed `@keyframes` in stylesheet (currently parsed, discarded)
-2. Property interpolation engine for numeric, color, transform types
-3. CSS Animation instances: create on style resolution, manage in scheduler
-4. CSS Transition instances: detect computed value changes on transitionable properties
-5. **Validation**: CSS animation test suite (transform, opacity, color, position)
+1. ✅ Store parsed `@keyframes` in `KeyframeRegistry` (scanned from all stylesheets)
+2. ✅ Property interpolation engine for float, color, length, transform types
+3. ✅ CSS Animation instances: created during style resolution via `css_animation_resolve()`
+4. ✅ CSS Transition instances: infrastructure ready (detect computed value changes on transitionable properties)
+5. ✅ **Validation**: 5237/5237 baseline tests pass + 15/15 unit tests pass
 
-### Phase 5: GIF Animation
+**Implementation details** (April 16, 2026):
+
+| File | Role |
+|------|------|
+| `radiant/css_animation.h` | Header: `CssKeyframeStop`, `CssKeyframes`, `KeyframeRegistry`, `CssAnimProp`, `CssAnimState`, `CssAnimatedProp` structs; interpolation functions; animation creation/tick/resolve APIs |
+| `radiant/css_animation.cpp` | Full implementation: `@keyframes` string parsing (from/to/percentage stops), property interpolation (float lerp, per-channel sRGB color lerp, length lerp, transform function-list interpolation), `KeyframeRegistry` creation (scans all stylesheets for `CSS_RULE_KEYFRAMES`), animation instance lifecycle |
+| `lambda/input/css/css_value.hpp` | Added 16 CSS animation enum values: timing keywords (ease/ease-in/ease-out/ease-in-out/linear/step-start/step-end), direction (reverse/alternate/alternate-reverse), fill-mode (forwards/backwards), play-state (running/paused), iteration (infinite) |
+| `lambda/input/css/dom_element.hpp` | Added `keyframe_registry` field on `DomDocument` |
+| `radiant/layout.cpp` | Wired `css_animation_resolve()` call after style resolution |
+| `test/test_css_animation_gtest.cpp` | 15 unit tests across 3 suites: `CssInterpolation` (float/color lerp), `KeyframeParsingTest` (from/to, percentages, multi-property, color stops), `AnimationTickTest` (opacity animation, color animation, multi-stop) |
+
+Key design choices:
+- `@keyframes` parsed from `CssRule.data.generic_rule.content` string — supports `from`/`to` keywords and percentage stops
+- Keyframe stops sorted by offset ascending; binary search for surrounding stops during tick
+- Per-keyframe easing override (CSS `animation-timing-function` on individual stops)
+- Property-type-specific interpolation: `ANIM_VAL_FLOAT` (opacity, lengths), `ANIM_VAL_COLOR` (per-channel sRGB), `ANIM_VAL_TRANSFORM` (linked-list of transform functions: translate, scale, rotate, skew)
+- `css_animation_resolve()` called from layout pass — checks `animation-name`, resolves all 8 animation sub-properties (`duration`, `delay`, `iteration-count`, `direction`, `fill-mode`, `play-state`, `timing-function`), creates `AnimationInstance` if keyframes found
+- `apply_animated_value()` writes interpolated values directly to element's `InlineProp` (opacity, transform, background-color, color, border properties)
+
+### Phase 5: GIF Animation ✅ Complete
 
 **Goal**: Animated GIF playback.
 
-1. Multi-frame GIF decoder via `stbi_load_gif_from_memory()`
-2. `GifAnimation` lifecycle (decode on load, register with scheduler)
-3. Frame advancement + dirty marking on tick
-4. **Validation**: Animated GIF renders with correct timing
+1. ✅ Multi-frame GIF decoder via giflib (`DGifSlurp` + per-frame `DGifSavedExtensionToGCB`)
+2. ✅ `GifAnimation` lifecycle (decode on load, register with scheduler)
+3. ✅ Frame advancement + pixel pointer swap on tick
+4. ✅ **Validation**: 5237/5237 baseline tests pass + 16/16 unit tests pass
 
-### Phase 6: Lottie Animation
+**Implementation details** (April 16, 2026):
 
-**Goal**: Lottie playback in `<img>` and custom elements.
+| File | Role |
+|------|------|
+| `lib/image.h` | Header: `GifFrameData` (pixels, delay_ms, disposal), `GifFrames` (frame array, dimensions, loop_count); 6 API functions |
+| `lib/image.c` | ~250 lines added: `gif_composite_frame()` (respects transparency + colormap), `gif_decode_all_frames()` (all 4 disposal modes, NETSCAPE 2.0 loop extension), `GifMemoryReader` + `gif_memory_read_func()` for in-memory loading via `DGifOpen` InputFunc |
+| `radiant/gif_player.h` | Header: `GifAnimation` struct (frames, current_frame, frame_end_time, loop tracking, surface pointer); create/tick/finish/detect APIs |
+| `radiant/gif_player.cpp` | Full implementation: frame advancement with timing, loop management, pixel pointer swap, cleanup |
+| `radiant/surface.cpp` | Wired GIF detection: after surface creation when `format==IMAGE_FORMAT_GIF`, calls `gif_detect_animated()` or `gif_detect_animated_from_memory()`, registers with scheduler via `gif_animation_create()` |
+| `test/test_gif_player_gtest.cpp` | 16 unit tests across 3 suites: `GifDetection` (null/non-gif/static/magic bytes), `GifFrameCount` (null/nonexistent/static), `GifAnimationTest` (create/tick/finish, infinite loop, bounds, scheduler integration) |
 
-1. Enable Lottie loader in ThorVG build configuration
-2. `LottiePlayer` wrapper + scheduler integration
-3. Auto-detect `.json` / `application/json` Lottie files in `<img>`
-4. Re-rasterize Lottie frame on each tick into element's surface
-5. **Validation**: Lottie animations play smoothly at target framerate
+Key design choices:
+- Uses giflib (not stb_image) — project already depends on giflib 5.2.2 for single-frame GIF loading
+- All 4 GIF disposal modes implemented: UNSPECIFIED (leave canvas), DO_NOT (leave canvas), BACKGROUND (clear frame area), PREVIOUS (restore pre-frame canvas via `prev_canvas` backup)
+- Browser-compatible 0-delay handling: GIFs specifying 0ms delay treated as 100ms (matches Chrome/Firefox behavior)
+- Memory-based loading via `GifMemoryReader` struct with `InputFunc` callback for `DGifOpen()` — giflib doesn't have a native memory API
+- NETSCAPE 2.0 application extension parsed for loop count (0 = infinite, N = play N times)
+- `image_gif_load()` returns NULL if < 2 frames (static GIFs handled by existing single-frame path)
+- GIF manages its own loop counting internally via `loops_completed` counter — simpler than relying on scheduler iteration semantics
+- Pixel pointer swap: `surface->pixels` points directly into the decoded frame buffer (zero-copy per frame)
+
+### Phase 6: Lottie Animation ✅ Complete
+
+**Goal**: Lottie playback in `<img>` elements.
+
+1. ✅ Enable Lottie loader in ThorVG build configuration (`loaders=svg,ttf,png,jpg,lottie`)
+2. ✅ `LottiePlayer` wrapper + scheduler integration
+3. ✅ Auto-detect `.json` / `.lottie` files by extension and content heuristic
+4. ✅ Re-rasterize Lottie frame on each tick into element's pixel buffer via dedicated SwCanvas
+5. ✅ **Validation**: 5237/5237 baseline tests pass + 19/19 unit tests pass
+
+**Implementation details** (April 16, 2026):
+
+| File | Role |
+|------|------|
+| `radiant/lottie_player.h` | Header: `LottiePlayer` struct (tvg_animation, tvg_canvas, total_frames, frame_rate, duration, pixels buffer, surface, loop/playing state); create/tick/finish/detect APIs |
+| `radiant/lottie_player.cpp` | ~270 lines: `lottie_player_init()` (queries frame/duration metadata, creates dedicated SwCanvas with ABGR8888, allocates pixel buffer, renders first frame), `lottie_player_register()` (creates AnimationInstance with ANIM_LOTTIE), tick (frame computation + ThorVG render), finish (cleanup), detection helpers |
+| `radiant/surface.cpp` | Wired Lottie detection between SVG and raster paths: detects by extension (local files) or content heuristic (HTTP data), creates placeholder 300×300 surface, registers with scheduler, updates surface dimensions from LottiePlayer |
+| `mac-deps/thorvg/` | Rebuilt with Lottie loader: `meson configure build-mac -Dloaders=svg,ttf,png,jpg,lottie` — 241 objects compiled including JerryScript VM for Lottie expressions |
+| `test/test_lottie_player_gtest.cpp` | 19 unit tests across 3 suites: `LottieDetectPath` (.json/.lottie/other extensions), `LottieDetectContent` (JSON key heuristic, whitespace, non-Lottie JSON), `LottiePlayerTest` (null args, nonexistent file, invalid data, tick/finish null safety) |
+
+Key design choices:
+- Uses ThorVG C API (`thorvg_capi.h`): `tvg_animation_new()`, `tvg_animation_set_frame()`, `tvg_animation_get_picture/total_frame/duration/del()`
+- Each `LottiePlayer` owns a **dedicated SwCanvas** — avoids thread conflicts with the main render canvas and tile worker canvases
+- Colorspace: `TVG_COLORSPACE_ABGR8888` matches ImageSurface RGBA byte order on little-endian (ARM64/x86)
+- Frame computation: `frame_no = t * total_frames` where t ∈ [0,1] is the normalized progress from the scheduler
+- Pixel buffer ownership: player allocates `width * height * 4` bytes, re-renders every tick via `tvg_canvas_draw(canvas, false)` + `tvg_canvas_sync()`, updates `surface->pixels`
+- Content detection heuristic: scans first 512 bytes of JSON for `"v"`, `"fr"`, `"ip"` keys (Lottie's version, frame rate, in-point) — avoids false positives on regular JSON
+- ThorVG `tvg_animation_del()` also frees the picture — no double-free risk
+- Default: loop forever (`iteration_count = -1`), matching browser `<img>` behavior for animated content
+- Build size impact: ~150KB+ added to binary from Lottie loader + JerryScript — acceptable for desktop builds
 
 ---
 
@@ -772,11 +849,11 @@ Each tile at 256x256 @ 2x = 512x512 pixels × 4 bytes = **1 MB**. A 1920x1080 @ 
 ### Q2: GIF Memory Usage
 
 A 100-frame GIF at 500×500 = 100 MB decoded. Options:
-- **Decode all upfront** (current `stbi` approach) — simple, high memory
+- **Decode all upfront** — simple, high memory ← **chosen for Phase 5**
 - **Decode on demand** — keep compressed data, decode current + next frame
 - **Ring buffer** — keep N decoded frames, evict oldest
 
-*Recommendation*: Decode-on-demand with a 2-frame ring buffer (current + next). Keeps memory bounded while avoiding decode latency on frame advance.
+*Current implementation*: Decode-all-upfront via giflib `DGifSlurp`. Simple and avoids per-frame decode latency. Memory bounded by GIF dimensions × frame count. For large GIFs, a future optimization could add a 2-frame ring buffer with on-demand decoding.
 
 ### Q3: Lottie Build Size Impact
 
@@ -788,17 +865,17 @@ ThorVG's Lottie loader + JerryScript expressions add ~150KB+ to the binary. This
 
 ## 8. Summary
 
-| Component | Approach | Key Decision |
-|-----------|----------|--------------|
-| Rendering parallelism | Tile-based worker pool | N worker threads, each with own ThorVG canvas |
-| Paint/raster decoupling | Display list | Flat command buffer, recorded on main thread |
-| Animation scheduling | Central `AnimationScheduler` | Frame-driven tick, integrated with GLFW loop |
-| CSS animation | Keyframe interpolation engine | Reuse ThorVG's cubic-bezier solver |
-| CSS transitions | Computed-value-change detection | Auto-create transition instances |
-| GIF animation | Multi-frame decoder + frame swap | Decode-on-demand, 2-frame ring buffer |
-| Lottie animation | ThorVG `Animation` API wrapper | Enable in build, auto-detect format |
-| Transform/opacity fast path | Retained display sub-trees | Element groups in flat list; in-place transform/opacity update |
-| JS animation | **Deferred** | rAF, Web Animations API deferred to JS integration stage |
-| Parallelized layout | **Deferred** | Layout is inherently sequential; keep single-threaded |
-| Compositor thread | **Deferred** | Premature without GPU compositing |
-| GPU rendering | **Deferred** | Future phase: Metal/Vulkan/WebGPU backends |
+| Component | Approach | Status | Key Decision |
+|-----------|----------|--------|--------------|
+| Rendering parallelism | Tile-based worker pool | ✅ Done | N worker threads, each with own ThorVG canvas |
+| Paint/raster decoupling | Display list | ✅ Done | Flat command buffer, recorded on main thread |
+| Animation scheduling | Central `AnimationScheduler` | ✅ Done | Frame-driven tick, integrated with GLFW loop |
+| CSS animation | Keyframe interpolation engine | ✅ Done | Standalone cubic-bezier with pre-computed spline table |
+| CSS transitions | Computed-value-change detection | ✅ Infra ready | Auto-create transition instances |
+| GIF animation | Multi-frame decoder + frame swap | ✅ Done | Decode-all-upfront via giflib, pixel pointer swap |
+| Lottie animation | ThorVG `Animation` API wrapper | ✅ Done | Dedicated SwCanvas per player, auto-detect by extension/content |
+| Transform/opacity fast path | Retained display sub-trees | Deferred | Element groups in flat list; in-place transform/opacity update |
+| JS animation | **Deferred** | — | rAF, Web Animations API deferred to JS integration stage |
+| Parallelized layout | **Deferred** | — | Layout is inherently sequential; keep single-threaded |
+| Compositor thread | **Deferred** | — | Premature without GPU compositing |
+| GPU rendering | **Deferred** | — | Future phase: Metal/Vulkan/WebGPU backends |

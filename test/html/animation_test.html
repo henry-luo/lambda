@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Radiant Animation Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f0f2f5;
+            color: #1a1a2e;
+            padding: 32px;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #333;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 6px;
+        }
+
+        .section {
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .card {
+            flex: 1 1 200px;
+            max-width: 280px;
+            text-align: center;
+        }
+
+        .card-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 10px;
+            font-family: monospace;
+        }
+
+        .demo-box {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            margin: 0 auto;
+        }
+
+        .demo-area {
+            background: #f8f9fa;
+            border: 1px dashed #ddd;
+            border-radius: 8px;
+            height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* ============================================================
+           1. CSS @keyframes — Opacity
+           ============================================================ */
+
+        @keyframes fadeInOut {
+            from { opacity: 0; }
+            50%  { opacity: 1; }
+            to   { opacity: 0; }
+        }
+
+        .anim-fade {
+            background: #3b82f6;
+            animation-name: fadeInOut;
+            animation-duration: 2s;
+            animation-iteration-count: infinite;
+            animation-timing-function: ease-in-out;
+        }
+
+        /* ============================================================
+           2. CSS @keyframes — Color
+           ============================================================ */
+
+        @keyframes colorShift {
+            0%   { background-color: #ef4444; }
+            33%  { background-color: #22c55e; }
+            66%  { background-color: #3b82f6; }
+            100% { background-color: #ef4444; }
+        }
+
+        .anim-color {
+            animation-name: colorShift;
+            animation-duration: 3s;
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+        }
+
+        /* ============================================================
+           3. CSS @keyframes — Transform: Rotate
+           ============================================================ */
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+
+        .anim-rotate {
+            background: #8b5cf6;
+            animation-name: spin;
+            animation-duration: 2s;
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+        }
+
+        /* ============================================================
+           4. CSS @keyframes — Transform: Scale
+           ============================================================ */
+
+        @keyframes pulse {
+            0%   { transform: scale(1); }
+            50%  { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+
+        .anim-scale {
+            background: #f59e0b;
+            animation-name: pulse;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-timing-function: ease-in-out;
+        }
+
+        /* ============================================================
+           5. CSS @keyframes — Transform: Translate
+           ============================================================ */
+
+        @keyframes slideX {
+            0%   { transform: translateX(-40px); }
+            50%  { transform: translateX(40px); }
+            100% { transform: translateX(-40px); }
+        }
+
+        .anim-translate {
+            background: #ec4899;
+            animation-name: slideX;
+            animation-duration: 2s;
+            animation-iteration-count: infinite;
+            animation-timing-function: ease-in-out;
+        }
+
+        /* ============================================================
+           6. CSS @keyframes — Combined Transform
+           ============================================================ */
+
+        @keyframes combo {
+            0%   { transform: rotate(0deg) scale(1); opacity: 1; }
+            50%  { transform: rotate(180deg) scale(0.6); opacity: 0.5; }
+            100% { transform: rotate(360deg) scale(1); opacity: 1; }
+        }
+
+        .anim-combo {
+            background: #14b8a6;
+            animation-name: combo;
+            animation-duration: 3s;
+            animation-iteration-count: infinite;
+            animation-timing-function: ease-in-out;
+        }
+
+        /* ============================================================
+           7. Timing Functions
+           ============================================================ */
+
+        @keyframes moveRight {
+            from { transform: translateX(0); }
+            to   { transform: translateX(160px); }
+        }
+
+        .timing-track {
+            background: #f8f9fa;
+            border: 1px dashed #ddd;
+            border-radius: 8px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .timing-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            animation-name: moveRight;
+            animation-duration: 2s;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
+        }
+
+        .timing-label {
+            position: absolute;
+            right: 12px;
+            font-size: 11px;
+            font-family: monospace;
+            color: #999;
+        }
+
+        .ease-linear    { background: #ef4444; animation-timing-function: linear; }
+        .ease-ease      { background: #f59e0b; animation-timing-function: ease; }
+        .ease-in        { background: #22c55e; animation-timing-function: ease-in; }
+        .ease-out       { background: #3b82f6; animation-timing-function: ease-out; }
+        .ease-in-out    { background: #8b5cf6; animation-timing-function: ease-in-out; }
+
+        /* ============================================================
+           8. Direction & Fill Mode
+           ============================================================ */
+
+        @keyframes grow {
+            from { transform: scale(0.5); background-color: #93c5fd; }
+            to   { transform: scale(1.2); background-color: #1d4ed8; }
+        }
+
+        .anim-normal {
+            animation-name: grow;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-direction: normal;
+            animation-timing-function: ease-in-out;
+        }
+
+        .anim-reverse {
+            animation-name: grow;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-direction: reverse;
+            animation-timing-function: ease-in-out;
+        }
+
+        .anim-alternate {
+            animation-name: grow;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
+            animation-timing-function: ease-in-out;
+        }
+
+        .anim-alt-reverse {
+            animation-name: grow;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-direction: alternate-reverse;
+            animation-timing-function: ease-in-out;
+        }
+
+        /* ============================================================
+           9. Delay
+           ============================================================ */
+
+        @keyframes appear {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .anim-delay-0 {
+            animation-name: appear;
+            animation-duration: 0.8s;
+            animation-delay: 0s;
+            animation-fill-mode: forwards;
+            animation-timing-function: ease-out;
+            opacity: 0;
+        }
+
+        .anim-delay-1 {
+            animation-name: appear;
+            animation-duration: 0.8s;
+            animation-delay: 0.3s;
+            animation-fill-mode: forwards;
+            animation-timing-function: ease-out;
+            opacity: 0;
+        }
+
+        .anim-delay-2 {
+            animation-name: appear;
+            animation-duration: 0.8s;
+            animation-delay: 0.6s;
+            animation-fill-mode: forwards;
+            animation-timing-function: ease-out;
+            opacity: 0;
+        }
+
+        .anim-delay-3 {
+            animation-name: appear;
+            animation-duration: 0.8s;
+            animation-delay: 0.9s;
+            animation-fill-mode: forwards;
+            animation-timing-function: ease-out;
+            opacity: 0;
+        }
+
+        /* ============================================================
+           10. Loading Spinner (practical example)
+           ============================================================ */
+
+        @keyframes spinnerRotate {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #e5e7eb;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation-name: spinnerRotate;
+            animation-duration: 0.8s;
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+            margin: 0 auto;
+        }
+
+        /* ============================================================
+           11. Bounce (practical example)
+           ============================================================ */
+
+        @keyframes bounce {
+            0%   { transform: translateY(0); }
+            20%  { transform: translateY(-30px); }
+            40%  { transform: translateY(0); }
+            60%  { transform: translateY(-15px); }
+            80%  { transform: translateY(0); }
+            100% { transform: translateY(0); }
+        }
+
+        .anim-bounce {
+            width: 40px;
+            height: 40px;
+            background: #ef4444;
+            border-radius: 50%;
+            animation-name: bounce;
+            animation-duration: 1.5s;
+            animation-iteration-count: infinite;
+            animation-timing-function: ease;
+        }
+
+        /* ============================================================
+           12. Multi-property (background-color + opacity + transform)
+           ============================================================ */
+
+        @keyframes multiProp {
+            0%   { background-color: #fbbf24; opacity: 1; transform: scale(1) rotate(0deg); }
+            25%  { background-color: #f87171; opacity: 0.7; transform: scale(1.1) rotate(90deg); }
+            50%  { background-color: #a78bfa; opacity: 0.5; transform: scale(0.8) rotate(180deg); }
+            75%  { background-color: #34d399; opacity: 0.7; transform: scale(1.1) rotate(270deg); }
+            100% { background-color: #fbbf24; opacity: 1; transform: scale(1) rotate(360deg); }
+        }
+
+        .anim-multi {
+            animation-name: multiProp;
+            animation-duration: 4s;
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Radiant Animation Test</h1>
+    <p class="subtitle">CSS @keyframes &bull; Timing Functions &bull; Direction &bull; Fill Mode &bull; GIF &bull; Lottie</p>
+
+    <!-- ================================================================
+         SECTION 1: Basic @keyframes Animations
+         ================================================================ -->
+    <div class="section">
+        <h2>1. CSS @keyframes — Basic Properties</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-fade"></div>
+                </div>
+                <div class="card-label">opacity (fadeInOut)</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-color"></div>
+                </div>
+                <div class="card-label">background-color</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-rotate"></div>
+                </div>
+                <div class="card-label">transform: rotate</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-scale"></div>
+                </div>
+                <div class="card-label">transform: scale</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-translate"></div>
+                </div>
+                <div class="card-label">transform: translateX</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-combo"></div>
+                </div>
+                <div class="card-label">rotate + scale + opacity</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 2: Timing Functions
+         ================================================================ -->
+    <div class="section">
+        <h2>2. Timing Functions</h2>
+        <div class="timing-track">
+            <div class="timing-dot ease-linear"></div>
+            <span class="timing-label">linear</span>
+        </div>
+        <div class="timing-track">
+            <div class="timing-dot ease-ease"></div>
+            <span class="timing-label">ease</span>
+        </div>
+        <div class="timing-track">
+            <div class="timing-dot ease-in"></div>
+            <span class="timing-label">ease-in</span>
+        </div>
+        <div class="timing-track">
+            <div class="timing-dot ease-out"></div>
+            <span class="timing-label">ease-out</span>
+        </div>
+        <div class="timing-track">
+            <div class="timing-dot ease-in-out"></div>
+            <span class="timing-label">ease-in-out</span>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 3: Direction
+         ================================================================ -->
+    <div class="section">
+        <h2>3. Animation Direction</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-normal"></div>
+                </div>
+                <div class="card-label">normal</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-reverse"></div>
+                </div>
+                <div class="card-label">reverse</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-alternate"></div>
+                </div>
+                <div class="card-label">alternate</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-alt-reverse"></div>
+                </div>
+                <div class="card-label">alternate-reverse</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 4: Delay + Fill Mode
+         ================================================================ -->
+    <div class="section">
+        <h2>4. Staggered Delay + fill-mode: forwards</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-delay-0" style="background:#3b82f6;"></div>
+                </div>
+                <div class="card-label">delay: 0s</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-delay-1" style="background:#8b5cf6;"></div>
+                </div>
+                <div class="card-label">delay: 0.3s</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-delay-2" style="background:#ec4899;"></div>
+                </div>
+                <div class="card-label">delay: 0.6s</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-delay-3" style="background:#f59e0b;"></div>
+                </div>
+                <div class="card-label">delay: 0.9s</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 5: Multi-Property + Practical Examples
+         ================================================================ -->
+    <div class="section">
+        <h2>5. Multi-Property &amp; Practical Examples</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <div class="demo-box anim-multi"></div>
+                </div>
+                <div class="card-label">color + opacity + transform</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="spinner"></div>
+                </div>
+                <div class="card-label">loading spinner</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <div class="anim-bounce"></div>
+                </div>
+                <div class="card-label">bounce (5 stops)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 6: Animated GIF
+         ================================================================ -->
+    <div class="section">
+        <h2>6. Animated GIF</h2>
+        <p style="color:#666; font-size:13px; margin-bottom:16px;">
+            Multi-frame GIF decoded via giflib. All disposal modes supported. Pixel pointer swapped per frame.
+        </p>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/2/2c/Rotating_earth_%28large%29.gif"
+                         width="100" height="100" alt="Animated GIF: rotating earth">
+                </div>
+                <div class="card-label">animated GIF (network)</div>
+            </div>
+            <div class="card">
+                <div class="demo-area" style="background:#1a1a2e;">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/d7/Sol_de_Mayo_animated.gif"
+                         width="100" height="100" alt="Animated GIF: sun">
+                </div>
+                <div class="card-label">animated GIF (network)</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         SECTION 7: Lottie Animation
+         ================================================================ -->
+    <div class="section">
+        <h2>7. Lottie Animation</h2>
+        <p style="color:#666; font-size:13px; margin-bottom:16px;">
+            Lottie JSON rendered via ThorVG Animation API. Dedicated SwCanvas per player. Auto-detected by .json extension.
+        </p>
+        <div class="grid">
+            <div class="card">
+                <div class="demo-area">
+                    <img src="https://assets2.lottiefiles.com/packages/lf20_UJNc2t.json"
+                         width="120" height="120" alt="Lottie: checkmark">
+                </div>
+                <div class="card-label">lottie (network .json)</div>
+            </div>
+            <div class="card">
+                <div class="demo-area">
+                    <img src="https://assets10.lottiefiles.com/packages/lf20_jcikwtux.json"
+                         width="120" height="120" alt="Lottie: loading">
+                </div>
+                <div class="card-label">lottie (network .json)</div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
