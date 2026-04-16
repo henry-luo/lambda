@@ -157,6 +157,7 @@ extern "C" {
     // String utility functions from lib/string.h
     #include "../lib/string.h"
     // create_string function is declared in lib/string.h
+    void js_process_emit_exit(int code);
 }
 
 // System includes for environment and string functions

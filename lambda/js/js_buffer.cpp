@@ -58,8 +58,15 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
     TypeId tid = get_type_id(size_item);
     if (tid == LMD_TYPE_INT) size = it2i(size_item);
     else if (tid == LMD_TYPE_FLOAT) size = (int64_t)it2d(size_item);
-    if (size < 0) size = 0;
-    if (size > 1048576) size = 1048576; // 1MB limit for safety
+    else {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"size\" argument must be of type number.");
+    }
+    if (size < 0 || size > 2147483647) {
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            "The value of \"size\" is out of range.");
+    }
+    if (size > 1048576) size = 1048576; // practical limit
 
     Item buf = create_buffer((int)size);
     // alloc zero-fills by default via typed_array_new
@@ -236,7 +243,9 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
         return buf;
     }
 
-    return create_buffer(0);
+    // unsupported type — throw TypeError
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        "The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object.");
 }
 
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
@@ -317,7 +326,14 @@ extern "C" Item js_buffer_byteLength(Item str_item) {
         buffer_data(str_item, &blen);
         return (Item){.item = i2it(blen)};
     }
-    return (Item){.item = i2it(0)};
+    // check for ArrayBuffer
+    TypeId tid = get_type_id(str_item);
+    if (tid == LMD_TYPE_MAP) {
+        // might be an ArrayBuffer-like object
+        return (Item){.item = i2it(0)};
+    }
+    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+        "The \"string\" argument must be of type string or an instance of Buffer or ArrayBuffer.");
 }
 
 // ─── buf.toString(encoding?, start?, end?) ──────────────────────────────────
@@ -430,6 +446,10 @@ extern "C" Item js_buffer_copy(Item src_buf, Item dst_buf, Item target_start_ite
 
 // ─── buf.equals(otherBuffer) ────────────────────────────────────────────────
 extern "C" Item js_buffer_equals(Item a, Item b) {
+    if (!js_is_typed_array(b)) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"otherBuffer\" argument must be an instance of Buffer or Uint8Array.");
+    }
     int alen = 0, blen = 0;
     uint8_t* adata = buffer_data(a, &alen);
     uint8_t* bdata = buffer_data(b, &blen);
@@ -440,6 +460,14 @@ extern "C" Item js_buffer_equals(Item a, Item b) {
 
 // ─── buf.compare(otherBuffer) ───────────────────────────────────────────────
 extern "C" Item js_buffer_compare(Item a, Item b) {
+    if (!js_is_typed_array(a)) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"buf1\" argument must be an instance of Buffer or Uint8Array.");
+    }
+    if (!js_is_typed_array(b)) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"buf2\" argument must be an instance of Buffer or Uint8Array.");
+    }
     int alen = 0, blen = 0;
     uint8_t* adata = buffer_data(a, &alen);
     uint8_t* bdata = buffer_data(b, &blen);
@@ -519,7 +547,14 @@ extern "C" Item js_buffer_allocUnsafe(Item size_item) {
     TypeId tid = get_type_id(size_item);
     if (tid == LMD_TYPE_INT) size = it2i(size_item);
     else if (tid == LMD_TYPE_FLOAT) size = (int64_t)it2d(size_item);
-    if (size < 0) size = 0;
+    else {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"size\" argument must be of type number.");
+    }
+    if (size < 0 || size > 2147483647) {
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+            "The value of \"size\" is out of range.");
+    }
     if (size > 1048576) size = 1048576;
     return create_buffer((int)size); // no zero-fill guarantee
 }
