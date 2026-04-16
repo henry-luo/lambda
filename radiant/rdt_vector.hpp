@@ -71,6 +71,7 @@ void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int s
 // set a Y-pixel offset for tiled rendering (0 = normal full-page mode)
 // all subsequent draw calls are translated upward by offset_y physical pixels
 void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y);
+void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x);
 
 // ---------------------------------------------------------------------------
 // Path construction
@@ -86,6 +87,9 @@ void     rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
                            float rx, float ry);
 void     rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry);
 void     rdt_path_free(RdtPath* p);
+
+// Deep-copy a path (entries array is duplicated).
+RdtPath* rdt_path_clone(const RdtPath* src);
 
 // ---------------------------------------------------------------------------
 // Fill
@@ -167,6 +171,8 @@ bool        rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
 void        rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                              uint8_t opacity, const RdtMatrix* transform);
+void        rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
+                                 uint8_t opacity, const RdtMatrix* transform);
 void        rdt_picture_free(RdtPicture* pic);
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,38 @@
+# Node.js Official Test Baseline (auto-updated)
+# Commit: 153f45d63
+# Source: ref/node/test/parallel/
+# Total passing: 15 / 988  (skipped: 0)
+#
+# Feature modules enabled:
+#   assert
+#   buffer
+#   child_process
+#   crypto
+#   dns
+#   events
+#   fs
+#   os
+#   path
+#   process
+#   querystring
+#   stream
+#   string_decoder
+#   url
+#   util
+#   zlib
+#
+test-buffer-failed-alloc-typed-arrays.js
+test-crypto-ecdh-setpublickey-deprecation.js
+test-crypto-op-during-process-exit.js
+test-dns-lookup-promises.js
+test-fs-mkdir.js
+test-fs-promises-file-handle-sync.js
+test-process-domain-segfault.js
+test-process-env-windows-error-reset.js
+test-process-exit.js
+test-process-getactivehandles.js
+test-process-getactiveresources-track-active-handles.js
+test-stream-iter-pull-async.js
+test-stream-push-order.js
+test-util-primordial-monkeypatching.js
+test-zlib-no-stream.js

@@ -1,4 +1,5 @@
 #include "state_store.hpp"
+#include "animation.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 // str.h included via view.hpp
@@ -167,6 +168,9 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     render_map_init();
     state->render_map = render_map_get_map();
 
+    // Initialize animation scheduler
+    state->animation_scheduler = animation_scheduler_create(pool);
+
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }
@@ -209,6 +213,12 @@ void radiant_state_destroy(RadiantState* state) {
     if (state->visited_links) {
         visited_links_destroy(state->visited_links);
         state->visited_links = NULL;
+    }
+
+    // Destroy animation scheduler
+    if (state->animation_scheduler) {
+        animation_scheduler_destroy(state->animation_scheduler);
+        state->animation_scheduler = NULL;
     }
 
     log_debug("radiant_state_destroy: destroyed state store");

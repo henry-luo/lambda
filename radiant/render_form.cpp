@@ -26,7 +26,7 @@ static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255)
 // Helper to draw a filled rectangle
 static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
-    fill_surface_rect(rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
+    rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
                       rdcon->clip_shapes, rdcon->clip_shape_depth);
 }
 
@@ -34,7 +34,7 @@ static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, 
 static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
-    rdt_fill_path(&rdcon->vec, p, color, RDT_FILL_WINDING, NULL);
+    rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
     rdt_path_free(p);
 }
 
@@ -42,7 +42,7 @@ static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, 
 static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
-    rdt_stroke_path(&rdcon->vec, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+    rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
     rdt_path_free(p);
 }
 
@@ -266,7 +266,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
 
             // Draw caret via RdtVector
             Color caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
-            rdt_fill_rect(&rdcon->vec, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
+            rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
 
@@ -306,7 +306,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         rdt_path_line_to(p, cx3, cy3);
 
         Color check_color = form->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
-        rdt_stroke_path(&rdcon->vec, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+        rc_stroke_path(rdcon, p, check_color, 2.0f * s, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
         rdt_path_free(p);
     }
 
@@ -853,7 +853,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
                                 // draw selection rectangle (semi-transparent blue)
                                 // draw selection highlight via RdtVector
                                 Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
-                                rdt_fill_rect(&rdcon->vec, x0, hl_y, x1 - x0, line_height, sel_color);
+                                rc_fill_rect(rdcon, x0, hl_y, x1 - x0, line_height, sel_color);
                             }
                         }
 
@@ -901,7 +901,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 
             // draw textarea caret via RdtVector
             Color ta_caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
-            rdt_fill_rect(&rdcon->vec, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
+            rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
 

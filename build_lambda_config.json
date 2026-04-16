@@ -1756,6 +1756,23 @@
                         ],
                         "binary": "test_serve_phase2_gtest.exe",
                         "icon": "🌐"
+                    },
+                    {
+                        "source": "test_animation_gtest.cpp",
+                        "name": "Animation Scheduler Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp"
+                        ],
+                        "binary": "test_animation_gtest.exe",
+                        "icon": "🎬"
                     }
                 ],
                 "type": "library"
@@ -3057,6 +3074,19 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📋"
+                    },
+                    {
+                        "source": "test/test_node_official_gtest.cpp",
+                        "name": "Node.js Official Test Suite",
+                        "category": "extended",
+                        "disabled": false,
+                        "dependencies": [],
+                        "binary": "test_node_official_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🟢"
                     }
                 ],
                 "type": "jube",

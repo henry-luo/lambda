@@ -13,6 +13,7 @@
 #include "font_face.h"
 #include "state_store.hpp"
 #include "event_sim.hpp"
+#include "animation.h"
 #include "browsing_session.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
@@ -983,6 +984,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
                 caret_toggle_blink(state);
                 do_redraw = 1;  // trigger repaint for caret blink
             }
+        }
+
+        // Tick active animations
+        if (state && state->animation_scheduler && state->animation_scheduler->has_active_animations) {
+            bool still_active = animation_scheduler_tick(state->animation_scheduler,
+                                                         currentTime, &state->dirty_tracker);
+            state->needs_repaint = true;
+            do_redraw = 1;
         }
 
         // only redraw if we need to

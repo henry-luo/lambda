@@ -8,6 +8,9 @@
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 
+// Forward declarations
+struct AnimationScheduler;
+
 /**
  * Radiant State Store - Centralized UI state management
  *
@@ -244,6 +247,9 @@ typedef struct RadiantState {
     
     // Reflow scheduling
     ReflowScheduler reflow_scheduler;
+
+    // Animation scheduling
+    AnimationScheduler* animation_scheduler;
 } RadiantState;
 
 

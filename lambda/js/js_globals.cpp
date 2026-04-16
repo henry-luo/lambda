@@ -17,6 +17,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include "../../lib/file.h"
+#include "../../lib/mem.h"
 #include <cstring>
 #include "../../lib/mem.h"
 #include <cstdio>
@@ -827,7 +828,7 @@ extern "C" Item js_process_cwd(void) {
     char* cwd = file_getcwd();
     if (!cwd) return (Item){.item = s2it(heap_create_name(""))};
     Item result = (Item){.item = s2it(heap_create_name(cwd, strlen(cwd)))};
-    free(cwd);
+    mem_free(cwd);
     return result;
 }
 
