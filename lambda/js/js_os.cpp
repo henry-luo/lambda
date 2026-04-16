@@ -371,7 +371,9 @@ extern "C" Item js_os_uptime(void) {
     struct sysinfo si;
     if (sysinfo(&si) == 0) uptime = si.uptime;
 #endif
-    return (Item){.item = d2it(uptime)};
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = uptime;
+    return (Item){.item = d2it(fp)};
 }
 
 // os.endianness()

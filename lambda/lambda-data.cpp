@@ -739,11 +739,11 @@ void list_push_spread(List *list, Item item) {
                 break;
             case ELEM_INT64:
                 for (int64_t i = 0; i < arr->length; i++)
-                    list_push(list, {.item = l2it(arr->items[i])});
+                    list_push(list, {.item = l2it(&arr->items[i])});
                 break;
             case ELEM_FLOAT:
                 for (int64_t i = 0; i < arr->length; i++)
-                    list_push(list, {.item = d2it(arr->items[i])});
+                    list_push(list, {.item = d2it(&arr->float_items[i])});
                 break;
             default: break;
             }

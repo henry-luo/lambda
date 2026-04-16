@@ -3592,9 +3592,11 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 JsClassEntry* ce = jm_find_class(mt, init_id->name->chars, (int)init_id->name->len);
                 if (ce && !ce->alias_name) {
                     ce->alias_name = var_id->name;
-                    log_debug("js-mir: class '%.*s' aliased via variable as '%.*s'",
-                        (int)ce->name->len, ce->name->chars,
-                        (int)var_id->name->len, var_id->name->chars);
+                    if (ce->name) {
+                        log_debug("js-mir: class '%.*s' aliased via variable as '%.*s'",
+                            (int)ce->name->len, ce->name->chars,
+                            (int)var_id->name->len, var_id->name->chars);
+                    }
                 }
             }
         }
@@ -7129,6 +7131,38 @@ static void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_no
 // Handle object destructuring pattern: extract properties by key from src
 static void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR_reg_t src) {
     JsObjectPatternNode* pattern = (JsObjectPatternNode*)pattern_node;
+
+    // Pre-initialize all destructured target variables to undefined.
+    // This prevents uninitialized variable usage if the exception check below
+    // skips the property gets (e.g., due to a stale pending exception).
+    {
+        MIR_reg_t pre_undef = jm_emit_undefined(mt);
+        JsAstNode* p = pattern->properties;
+        while (p) {
+            JsAstNode* target = NULL;
+            if (p->node_type == JS_AST_NODE_PROPERTY) {
+                JsPropertyNode* pp = (JsPropertyNode*)p;
+                target = pp->value ? pp->value : pp->key;
+            } else if (p->node_type == JS_AST_NODE_REST_ELEMENT ||
+                       p->node_type == JS_AST_NODE_REST_PROPERTY ||
+                       p->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                JsSpreadElementNode* sp = (JsSpreadElementNode*)p;
+                target = sp->argument;
+            }
+            // Unwrap assignment pattern: const { x = default } = obj
+            if (target && target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)target;
+                target = ap->left;
+            }
+            if (target && target->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                jm_bind_destructure_var(mt, vname, pre_undef);
+            }
+            p = p->next;
+        }
+    }
 
     // Throw TypeError if src is null or undefined (RequireObjectCoercible)
     jm_call_void_1(mt, "js_require_object_coercible",
@@ -21377,13 +21411,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (ce->superclass == ce) {
                     ce->superclass = NULL;
                     ce->has_self_extends = true;
-                    log_debug("js-mir: class '%.*s' has self-referential extends (TDZ)",
-                        (int)ce->name->len, ce->name->chars);
+                    if (ce->name) {
+                        log_debug("js-mir: class '%.*s' has self-referential extends (TDZ)",
+                            (int)ce->name->len, ce->name->chars);
+                    }
                 }
                 if (ce->superclass) {
-                    log_debug("js-mir: class '%.*s' extends '%.*s'",
-                        (int)ce->name->len, ce->name->chars,
-                        (int)ce->superclass->name->len, ce->superclass->name->chars);
+                    if (ce->name && ce->superclass->name) {
+                        log_debug("js-mir: class '%.*s' extends '%.*s'",
+                            (int)ce->name->len, ce->name->chars,
+                            (int)ce->superclass->name->len, ce->superclass->name->chars);
+                    }
                 }
             }
         }
