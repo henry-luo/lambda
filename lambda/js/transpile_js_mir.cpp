@@ -48,6 +48,9 @@ extern void heap_init();
 
 // External from js_runtime.cpp
 extern "C" void js_reset_module_vars();
+extern "C" Item* js_alloc_module_vars(void);
+extern "C" Item* js_get_active_module_vars(void);
+extern "C" void js_set_active_module_vars(Item* vars);
 
 // Global MIR error handler override for batch mode.
 // If non-NULL, installed after each jit_init() to prevent exit(1) on MIR errors.
@@ -9243,7 +9246,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "assert", 6) == 0) {
+                // only intercept for test262 global `assert` — skip if `assert` is a local binding
+                // (e.g. `const assert = require('assert')` in Node.js tests)
+                NameEntry* assert_entry = js_scope_lookup(mt->tp, obj->name);
+                if (!assert_entry) assert_entry = obj->entry;
+                bool is_local_assert = (assert_entry && assert_entry->node);
                 const char* native_fn = NULL;
+                if (!is_local_assert) {
                 if (prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "sameValue", 9) == 0)
                     native_fn = "js_assert_same_value";
                 else if (prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "notSameValue", 12) == 0)
@@ -9254,6 +9263,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     native_fn = "js_assert_deep_equal";
                 else if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "throws", 6) == 0)
                     native_fn = "js_assert_throws";
+                }
                 if (native_fn) {
                     JsAstNode* a1 = call->arguments;
                     JsAstNode* a2 = a1 ? a1->next : NULL;
@@ -14695,10 +14705,54 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 // v20: array destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_array_destructure(mt, d->id, src);
+                // writeback destructured bindings to module vars
+                if ((mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
+                    struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                    jm_collect_pattern_names(d->id, pat_names);
+                    size_t piter = 0; void* pitem;
+                    while (hashmap_iter(pat_names, &piter, &pitem)) {
+                        JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
+                        JsModuleConstEntry mlookup;
+                        snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
+                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
+                        if (mc && mc->const_type == MCONST_MODVAR) {
+                            JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                            if (ve) {
+                                jm_call_void_2(mt, "js_set_module_var",
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ve->reg));
+                            }
+                        }
+                    }
+                    hashmap_free(pat_names);
+                }
             } else if (d->id && d->id->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                 // v20: object destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_object_destructure(mt, d->id, src);
+                // writeback destructured bindings to module vars
+                if ((mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
+                    struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                    jm_collect_pattern_names(d->id, pat_names);
+                    size_t piter = 0; void* pitem;
+                    while (hashmap_iter(pat_names, &piter, &pitem)) {
+                        JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
+                        JsModuleConstEntry mlookup;
+                        snprintf(mlookup.name, sizeof(mlookup.name), "%s", ne->name);
+                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mlookup);
+                        if (mc && mc->const_type == MCONST_MODVAR) {
+                            JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                            if (ve) {
+                                jm_call_void_2(mt, "js_set_module_var",
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ve->reg));
+                            }
+                        }
+                    }
+                    hashmap_free(pat_names);
+                }
             }
         }
         decl = decl->next;
@@ -15467,6 +15521,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 3 && strncmp(ctor_name, "URL", 3) == 0) is_builtin = true;
     // Date constructor
     else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) is_builtin = true;
+    // Proxy constructor (pass-through)
+    else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) is_builtin = true;
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -15748,6 +15804,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new WritableStream([underlyingSink [, queuingStrategy]])
     if (ctor_len == 14 && strncmp(ctor_name, "WritableStream", 14) == 0) {
         return jm_call_0(mt, "js_writable_stream_new", MIR_T_I64);
+    }
+
+    // new Proxy(target, handler) — pass-through: return target as-is
+    if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) {
+        if (first_arg) return first_arg;
+        return jm_emit_null(mt);
     }
 
     // User-defined class instantiation: new ClassName(args)
@@ -19738,10 +19800,12 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
 
         // skip known built-in module names (prefer engine built-ins over npm polyfills)
         static const char* builtin_names[] = {
-            "fs", "child_process", "path", "os", "url", "util",
+            "fs", "child_process", "path", "path/posix", "path/win32",
+            "os", "url", "util",
             "process", "querystring", "events", "buffer",
             "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
-            "string_decoder", "assert", "timers", "console", NULL
+            "string_decoder", "assert", "assert/strict",
+            "timers", "console", "worker_threads", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {
@@ -20987,6 +21051,31 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 log_debug("js-mir: module var '%s' index=%d modvar_type=%d",
                                     mce.name, (int)mce.int_val, mce.modvar_type);
                             }
+                        } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                                               vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                            // destructured binding: collect all names from the pattern
+                            struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                                jm_name_hash, jm_name_cmp, NULL, NULL);
+                            jm_collect_pattern_names(vd->id, pat_names);
+                            size_t piter = 0; void* pitem;
+                            while (hashmap_iter(pat_names, &piter, &pitem)) {
+                                JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
+                                JsModuleConstEntry lookup;
+                                snprintf(lookup.name, sizeof(lookup.name), "%s", ne->name);
+                                if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                                    JsModuleConstEntry mce;
+                                    memset(&mce, 0, sizeof(mce));
+                                    snprintf(mce.name, sizeof(mce.name), "%s", ne->name);
+                                    mce.const_type = MCONST_MODVAR;
+                                    mce.int_val = mt->module_var_count++;
+                                    mce.var_kind = (int)v->kind;
+                                    mce.modvar_type = 0;
+                                    hashmap_set(mt->module_consts, &mce);
+                                    log_debug("js-mir: module var (destructured) '%s' index=%d",
+                                        mce.name, (int)mce.int_val);
+                                }
+                            }
+                            hashmap_free(pat_names);
                         }
                     }
                     d = d->next;
@@ -23456,8 +23545,10 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
             typedef Item (*js_main_func_t)(Context*);
             js_main_func_t js_main = (js_main_func_t)nodes[idx].js_main_func;
 
-            js_reset_module_vars();
+            Item* prev_mv = js_get_active_module_vars();
+            js_set_active_module_vars(js_alloc_module_vars());
             Item namespace_obj = js_main((Context*)context);
+            js_set_active_module_vars(prev_mv);
 
             // register in module cache
             String* spec_str = heap_create_name(nodes[idx].path, strlen(nodes[idx].path));
@@ -23591,8 +23682,12 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     }
 
     // Execute module — js_main returns the namespace object in module mode
-    js_reset_module_vars();
+    // Allocate per-module variable storage and switch to it
+    Item* prev_module_vars = js_get_active_module_vars();
+    Item* module_vars = js_alloc_module_vars();
+    js_set_active_module_vars(module_vars);
     Item namespace_obj = js_main((Context*)context);
+    js_set_active_module_vars(prev_module_vars);
 
     // Register the module with its resolved path as key
     String* spec_str = heap_create_name(filename, strlen(filename));
@@ -24431,7 +24526,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     // execute
     log_debug("js-mir-ast: executing JIT compiled code");
-    js_reset_module_vars();
+    js_set_active_module_vars(js_alloc_module_vars());
     Item result = js_main((Context*)context);
     log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
@@ -24497,6 +24592,38 @@ static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from 
 
 static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
+
+    // Inject __filename and __dirname for Node.js CommonJS compatibility.
+    // Only for file-based scripts (not eval/REPL), and only if the source
+    // doesn't already declare them (e.g., CJS-wrapped require'd modules).
+    char* injected_source = NULL;
+    if (filename && filename[0] != '<' &&
+        !strstr(js_source, "var __filename")) {
+        // resolve to absolute path
+        char abs_path[2048];
+        if (filename[0] == '/') {
+            snprintf(abs_path, sizeof(abs_path), "%s", filename);
+        } else {
+            char cwd[1024];
+            if (getcwd(cwd, sizeof(cwd))) {
+                snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd, filename);
+            } else {
+                snprintf(abs_path, sizeof(abs_path), "%s", filename);
+            }
+        }
+        const char* last_slash = strrchr(abs_path, '/');
+        int dir_len = last_slash ? (int)(last_slash - abs_path) : 1;
+        const char* dir_str = last_slash ? abs_path : ".";
+
+        size_t src_len = strlen(js_source);
+        size_t prefix_size = strlen(abs_path) + dir_len + 80;
+        injected_source = (char*)mem_alloc(prefix_size + src_len + 1, MEM_CAT_JS_RUNTIME);
+        int off = snprintf(injected_source, prefix_size,
+            "var __filename = \"%s\";\nvar __dirname = \"%.*s\";\n",
+            abs_path, dir_len, dir_str);
+        memcpy(injected_source + off, js_source, src_len + 1);
+        js_source = injected_source;
+    }
 
     // Check env var for interpreter mode (once, as fallback for CLI --mir-interp)
     static bool interp_checked = false;
@@ -24735,8 +24862,8 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // Execute
     log_debug("js-mir: executing JIT compiled code");
     if (!g_jm_preamble_in) {
-        // Normal/preamble mode: reset all module vars before execution
-        js_reset_module_vars();
+        // Normal/preamble mode: allocate per-module vars for this top-level module
+        js_set_active_module_vars(js_alloc_module_vars());
     }
 
     // Save module_consts as eval preamble BEFORE execution so that
@@ -24858,6 +24985,8 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         jm_cleanup_deferred_mir();
     }
     js_transpiler_destroy(tp);
+
+    if (injected_source) mem_free(injected_source);
 
     log_debug("js-mir: transpilation completed");
     return final_result;
@@ -25027,6 +25156,16 @@ extern "C" Item js_require(Item specifier) {
 
     // Read the source file
     char* source = read_text_file(path_buf);
+    if (!source) {
+        // Node.js directory resolution: try path/index.js
+        size_t plen = strlen(path_buf);
+        // Strip .js extension if present, then try /index.js
+        if (plen >= 3 && strcmp(path_buf + plen - 3, ".js") == 0) {
+            path_buf[plen - 3] = '\0';
+        }
+        strncat(path_buf, "/index.js", sizeof(path_buf) - strlen(path_buf) - 1);
+        source = read_text_file(path_buf);
+    }
     if (!source) {
         log_error("require: cannot read module '%s'", path_buf);
         return ItemNull;

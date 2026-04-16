@@ -1472,6 +1472,12 @@ extern "C" Item js_get_buffer_namespace(void) {
     js_property_set(buffer_namespace, make_string_item("Buffer"), buffer_namespace);
     js_property_set(buffer_namespace, make_string_item("default"), buffer_namespace);
 
+    // Node.js: buffer module also exports atob/btoa
+    extern Item js_atob(Item);
+    extern Item js_btoa(Item);
+    buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
+    buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
+
     return buffer_namespace;
 }
 

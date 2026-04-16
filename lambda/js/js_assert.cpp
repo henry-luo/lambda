@@ -234,30 +234,145 @@ extern "C" Item js_assert_fail(Item message) {
     return throw_assertion_error("Failed");
 }
 
-// assert.throws(fn[, error[, message]]) — simplified: check fn throws
-extern "C" Item js_assert_module_throws(Item fn, Item error_cls, Item message) {
+// assert.throws(fn[, error[, message]]) — Node.js compatible
+// error can be: Error class, RegExp, object with properties, or validation function
+extern "C" Item js_assert_module_throws(Item fn, Item error_expected, Item message) {
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         return throw_assertion_error("assert.throws: first argument must be a function");
     }
 
-    // simplified: call fn, check for exception via try-catch in the transpiler
-    // since we can't reliably catch in C, just call and assume it throws
-    // if it returns normally, that means no throw → fail
     extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-    // note: if fn throws, the exception propagates up and this assertion passes
-    // if fn doesn't throw, we reach here and fail
-    js_call_function(fn, ItemNull, NULL, 0);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_instanceof(Item left, Item right);
+    extern Item js_regex_test(Item regex, Item str);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_strict_equal(Item left, Item right);
 
-    // if we get here, fn didn't throw
-    if (get_type_id(message) == LMD_TYPE_STRING) {
-        String* s = it2s(message);
-        char buf[512];
-        int len = (int)s->len < 500 ? (int)s->len : 500;
-        memcpy(buf, s->chars, len);
-        buf[len] = '\0';
-        return throw_assertion_error(buf);
+    // call fn — if it throws, exception will be pending
+    js_call_function(fn, make_js_undefined(), NULL, 0);
+
+    if (!js_check_exception()) {
+        // fn didn't throw — that's a failure
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* s = it2s(message);
+            char buf[512];
+            int len = (int)s->len < 500 ? (int)s->len : 500;
+            memcpy(buf, s->chars, len);
+            buf[len] = '\0';
+            return throw_assertion_error(buf);
+        }
+        return throw_assertion_error("Missing expected exception");
     }
-    return throw_assertion_error("Missing expected exception");
+
+    // fn threw — get the thrown value
+    Item thrown = js_clear_exception();
+
+    // if no expected argument, any throw is a pass
+    TypeId exp_type = get_type_id(error_expected);
+    if (exp_type == LMD_TYPE_UNDEFINED || exp_type == LMD_TYPE_NULL) {
+        return make_js_undefined();
+    }
+
+    // validate thrown against expected
+    if (exp_type == LMD_TYPE_FUNC) {
+        // Error class: check instanceof
+        Item result = js_instanceof(thrown, error_expected);
+        if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) {
+            return make_js_undefined();
+        }
+        // maybe it's a validation function — call it with thrown
+        Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
+        if (js_check_exception()) {
+            // validation function threw — re-throw
+            return make_js_undefined();
+        }
+        if (assert_is_truthy(validate_result)) {
+            return make_js_undefined();
+        }
+        // failed validation — re-throw the original
+        extern void js_throw_value(Item error);
+        js_throw_value(thrown);
+        return make_js_undefined();
+    }
+
+    // RegExp: test thrown.message against regex
+    if (exp_type == LMD_TYPE_MAP) {
+        // check if it's a RegExp (has __class_name__ = "RegExp")
+        bool has_regex = false;
+        Item cn_key = assert_make_string("__class_name__");
+        Item cn_val = js_property_get(error_expected, cn_key);
+        if (get_type_id(cn_val) == LMD_TYPE_STRING) {
+            String* cns = it2s(cn_val);
+            if (cns && cns->len == 6 && strncmp(cns->chars, "RegExp", 6) == 0)
+                has_regex = true;
+        }
+
+        if (has_regex) {
+            // RegExp: test against thrown.message or String(thrown)
+            extern Item js_to_string_val(Item value);
+            Item msg_key = assert_make_string("message");
+            Item thrown_msg = js_property_get(thrown, msg_key);
+            if (get_type_id(thrown_msg) == LMD_TYPE_UNDEFINED) {
+                thrown_msg = js_to_string_val(thrown);
+            }
+            Item test_result = js_regex_test(error_expected, thrown_msg);
+            if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) {
+                return make_js_undefined();
+            }
+            // regex didn't match — throw assertion error
+            return throw_assertion_error("The input did not match the regular expression");
+        }
+
+        // Object pattern: validate each property of expected against thrown
+        // e.g. { message: "hello", code: "ERR_ASSERTION" }
+        extern Item js_object_keys(Item obj);
+        Item keys = js_object_keys(error_expected);
+        if (get_type_id(keys) == LMD_TYPE_ARRAY) {
+            for (int64_t i = 0; i < keys.array->length; i++) {
+                Item key = list_get(keys.list, (int)i);
+                Item expected_val = js_property_get(error_expected, key);
+                Item actual_val = js_property_get(thrown, key);
+
+                // check if expected_val is a RegExp (for stack: /pattern/)
+                TypeId ev_type = get_type_id(expected_val);
+                if (ev_type == LMD_TYPE_MAP) {
+                    Item ev_cn = js_property_get(expected_val, cn_key);
+                    if (get_type_id(ev_cn) == LMD_TYPE_STRING) {
+                        String* ev_cns = it2s(ev_cn);
+                        if (ev_cns && ev_cns->len == 6 && strncmp(ev_cns->chars, "RegExp", 6) == 0) {
+                            // regex match
+                            extern Item js_to_string_val(Item value);
+                            Item actual_str = (get_type_id(actual_val) == LMD_TYPE_STRING) ? actual_val : js_to_string_val(actual_val);
+                            Item test_result = js_regex_test(expected_val, actual_str);
+                            if (get_type_id(test_result) != LMD_TYPE_BOOL || !it2b(test_result)) {
+                                char buf[256];
+                                String* ks = it2s(key);
+                                snprintf(buf, sizeof(buf), "Expected property '%.*s' to match regex",
+                                         ks ? (int)ks->len : 1, ks ? ks->chars : "?");
+                                return throw_assertion_error(buf);
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                // strict equality check
+                Item eq = js_strict_equal(expected_val, actual_val);
+                if (get_type_id(eq) != LMD_TYPE_BOOL || !it2b(eq)) {
+                    char buf[256];
+                    String* ks = it2s(key);
+                    snprintf(buf, sizeof(buf), "Expected property '%.*s' to be strictly equal",
+                             ks ? (int)ks->len : 1, ks ? ks->chars : "?");
+                    return throw_assertion_error(buf);
+                }
+            }
+            return make_js_undefined();
+        }
+    }
+
+    // unknown expected type — just pass if something was thrown
+    return make_js_undefined();
 }
 
 // assert.doesNotThrow(fn[, error[, message]]) — simplified
@@ -367,4 +482,74 @@ extern "C" Item js_get_assert_namespace(void) {
 
 extern "C" void js_assert_reset(void) {
     assert_namespace = (Item){0};
+}
+
+// =============================================================================
+// node:test module — basic test runner
+// =============================================================================
+
+static Item node_test_namespace = {0};
+
+// test(name, fn) / test(name, options, fn) — run fn synchronously
+extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern void js_throw_value(Item error);
+
+    Item callback = make_js_undefined();
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        callback = fn;
+    } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
+        callback = options_or_fn;
+    }
+
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return make_js_undefined();
+    }
+
+    // create a minimal test context (t) with t.skip(), t.todo(), t.assert, etc.
+    Item t = js_new_object();
+    // t.skip — no-op that marks test as skipped
+    // (stubbed for compatibility)
+
+    js_call_function(callback, make_js_undefined(), &t, 1);
+
+    // if test threw, re-throw (let the test runner handle it)
+    if (js_check_exception()) {
+        Item err = js_clear_exception();
+        js_throw_value(err);
+    }
+
+    return make_js_undefined();
+}
+
+// describe(name, fn) — grouping, just run fn
+extern "C" Item js_node_test_describe(Item name, Item options_or_fn, Item fn) {
+    return js_node_test_run(name, options_or_fn, fn);
+}
+
+extern "C" Item js_get_node_test_namespace(void) {
+    if (node_test_namespace.item != 0) return node_test_namespace;
+
+    node_test_namespace = js_new_object();
+
+    Item test_fn = js_new_function((void*)js_node_test_run, 3);
+    // test is both the default export and a named export
+    js_property_set(node_test_namespace, assert_make_string("test"), test_fn);
+    js_property_set(node_test_namespace, assert_make_string("default"), node_test_namespace);
+
+    Item describe_fn = js_new_function((void*)js_node_test_describe, 3);
+    js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
+    js_property_set(node_test_namespace, assert_make_string("it"), test_fn);
+    js_property_set(node_test_namespace, assert_make_string("before"), js_new_function((void*)js_node_test_run, 3));
+    js_property_set(node_test_namespace, assert_make_string("after"), js_new_function((void*)js_node_test_run, 3));
+    js_property_set(node_test_namespace, assert_make_string("beforeEach"), js_new_function((void*)js_node_test_run, 3));
+    js_property_set(node_test_namespace, assert_make_string("afterEach"), js_new_function((void*)js_node_test_run, 3));
+
+    return node_test_namespace;
+}
+
+extern "C" void js_node_test_reset(void) {
+    node_test_namespace = (Item){0};
 }
