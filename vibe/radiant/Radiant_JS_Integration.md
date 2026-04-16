@@ -114,92 +114,97 @@ static char* extract_script_source(Element* script_elem) {
 }
 ```
 
-### 1.6 `onload` Handler Extraction
+### 1.6 `onload` Handler Processing (Updated 2026-04-15, `19dec6f5`)
 
-63 of the 304 tests use `<body onload="functionName()">`. The `onload` attribute value is an inline JS expression that must execute after all `<script>` blocks have been processed. Extraction:
+63 of the 304 tests use `<body onload="...">`. The `onload` attribute value is collected during the recursive `Element*` tree walk in `collect_scripts_recursive()` and appended **after** all `<script>` block sources, so that function definitions are available when the handler executes.
 
-```c
-static char* extract_onload_handler(DomElement* body_elem) {
-    const char* onload = dom_element_get_attribute(body_elem, "onload");
-    return onload ? mem_strdup(onload, MEM_CAT_LAYOUT) : nullptr;
-}
+**`onload` preprocessing — `setTimeout` string extraction**:
+
+The MIR transpiler has no `eval()`, so the common test pattern `setTimeout('code()', delay)` cannot be executed as-is — the string argument would never be evaluated at runtime. The `collect_scripts_recursive()` function detects this pattern and extracts the string content as direct code:
+
+| `onload` attribute | Emitted JS code | Rationale |
+|---|---|---|
+| `setTimeout('run()', 0)` | `run()` | String extracted — MIR can't `eval()` strings |
+| `setTimeout(test, 0)` | `setTimeout(test, 0)` | Passed through — preamble stub calls `fn()` directly |
+| `doTest()` | `doTest()` | No `setTimeout` — emitted as-is |
+
+The `setTimeout` preamble stub handles function-reference arguments at runtime:
+```js
+function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }
 ```
 
-Execution order:
-1. Execute all `<script>` blocks (defines functions like `doTest()`, `test()`)
-2. Execute the `onload` handler string (calls those functions: `doTest()`, `test()`)
+This works because inline `<script>` function declarations are emitted at global scope (no `try/catch` wrapping), so function references resolve correctly.
 
-### 1.7 Script Execution Flow
+**Inline scripts — no `try/catch` wrapping**:
+
+Inline `<script>` sources are appended directly to the combined buffer without `try/catch` wrapping. This ensures function declarations remain at global scope and are visible to later scripts and the `onload` handler. External scripts (`<script src="...">`) are still wrapped in `try/catch` to isolate library feature-detection exceptions (e.g., jQuery testing browser capabilities).
+
+**Limitation**: This `onload`-specific extraction approach works for the `<body onload="...">` attribute used in the CSS2.1 test suite, but does **not** generalize to arbitrary JS event handlers (`onclick`, `onchange`, `onmouseover`, etc.). Those would require a proper event dispatch system with listener registration, event object creation, and bubbling/capture phases — far beyond what the current best-effort integration provides. General event handler support is out of scope for the layout test pipeline.
+
+### 1.7 Combined Script Execution Architecture (Updated 2026-04-15, `19dec6f5`)
+
+All `<script>` blocks and the `onload` handler are concatenated into a **single JS compilation unit** and executed via one `transpile_js_to_mir()` call. This avoids cross-compilation function persistence issues entirely.
+
+The combined JS source has three sections:
+
+```
+┌─────────────────────────────────────────────────┐
+│ 1. Preamble (browser globals + stubs)           │
+│    var window = {};                             │
+│    function setTimeout(fn, delay) { ... }       │
+│    function setInterval(fn, delay) { ... }      │
+│    var console = { log: function(){}, ... };    │
+│    var localStorage = { ... };                  │
+│    // ~60 lines of browser API stubs            │
+├─────────────────────────────────────────────────┤
+│ 2. Script content (document order)              │
+│    // External scripts: wrapped in try/catch    │
+│    try { <jquery.js content> } catch(_ext) {}   │
+│    // Inline scripts: NO try/catch wrapping     │
+│    function test() { ... }                      │
+│    function run() { ... }                       │
+│    // onload handler: appended last             │
+│    run()                                        │
+├─────────────────────────────────────────────────┤
+│ 3. Postamble                                    │
+│    if (window.onload) { window.onload(); }      │
+└─────────────────────────────────────────────────┘
+```
+
+Implementation in `radiant/script_runner.cpp`:
 
 ```c
-void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool) {
+void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url) {
+    StrBuf* script_buf = strbuf_new_cap(4096);
+    StrBuf* onload_buf = strbuf_new_cap(256);
+
+    // Walk Element* tree: collect <script> sources + body onload
+    collect_scripts_recursive(html_root, script_buf, onload_buf, base_url);
+
+    // Append onload handler after all script definitions
+    if (onload_buf->length > 0) {
+        strbuf_append_str(script_buf, onload_buf->str);
+    }
+
+    // Prepend preamble, append postamble, execute as single MIR compilation unit
+    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 2048);
+    strbuf_append_str(wrapped_buf, /* preamble: browser stubs */);
+    strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
+    strbuf_append_str(wrapped_buf, "\nif (window.onload) { window.onload(); }\n");
+
     Runtime runtime = {};
     runtime.dom_doc = (void*)dom_doc;
-
-    // Phase 1: Execute all <script> blocks in document order
-    ArrayList script_elements;
-    arraylist_init(&script_elements, 16);
-    collect_script_elements(html_root, &script_elements);
-
-    for (int i = 0; i < script_elements.size; i++) {
-        Element* script_elem = (Element*)arraylist_get(&script_elements, i);
-        char* source = extract_script_source(script_elem);
-        if (source && source[0]) {
-            transpile_js_to_c(&runtime, source, "<inline-script>");
-        }
-        mem_free(source);
-    }
-
-    // Phase 2: Execute body onload handler (if any)
-    DomElement* body = dom_find_body_element(dom_doc);
-    if (body) {
-        char* onload_src = extract_onload_handler(body);
-        if (onload_src && onload_src[0]) {
-            // Wrap in function call if it's a simple expression
-            transpile_js_to_c(&runtime, onload_src, "<body-onload>");
-        }
-        mem_free(onload_src);
-    }
-
-    arraylist_destroy(&script_elements);
+    transpile_js_to_mir(&runtime, wrapped_buf->str, "<document-scripts>");
 }
 ```
 
-### 1.8 Shared JS Context Across Scripts
+Signal-level guards protect against crashes and infinite loops:
+- **SIGALRM** (5s timeout): prevents infinite loops in JIT code
+- **SIGSEGV/SIGBUS**: catches crashes in compiled code via `sigsetjmp`/`siglongjmp`
 
-Many CSS2.1 tests define a function in a `<script>` block and call it from `onload`. This requires that the JS runtime state (function definitions, globals) **persists across multiple `transpile_js_to_c()` calls**. The current JS transpiler's GC integration (v3 Phase 3b) already supports this via shared `EvalContext` heap. However, function definitions need to be retained between compilations.
+### 1.8 Shared JS Context
 
-**Approach**: Concatenate all script sources + onload handler into a single JS compilation unit:
-
-```c
-void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool) {
-    // Collect all script sources
-    StrBuf* combined = strbuf_new();
-    collect_script_elements_recursive(html_root, combined);
-
-    // Append onload handler
-    DomElement* body = dom_find_body_element(dom_doc);
-    if (body) {
-        const char* onload = dom_element_get_attribute(body, "onload");
-        if (onload && onload[0]) {
-            strbuf_append_str(combined, "\n");
-            strbuf_append_str(combined, onload);
-            strbuf_append_str(combined, "\n");
-        }
-    }
-
-    // Single JIT compilation pass
-    if (combined->length > 0) {
-        Runtime runtime = {};
-        runtime.dom_doc = (void*)dom_doc;
-        transpile_js_to_c(&runtime, combined->str, "<document-scripts>");
-    }
-
-    strbuf_free(combined);
-}
-```
-
-This avoids the cross-compilation persistence problem entirely. All function definitions and their call from `onload` are compiled together.
+All script sources and the `onload` handler are concatenated into a single compilation unit (see §1.7), avoiding cross-compilation function persistence issues entirely. Function definitions from any `<script>` block are visible to subsequent scripts and to the `onload` handler because they share the same MIR module scope.
 
 ---
 

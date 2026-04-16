@@ -29,12 +29,15 @@
 #include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/file.h"
+#include "../lib/hashmap.h"
 
 #include <cstring>
 #include <cctype>
 #include <signal.h>
 #include <setjmp.h>
 #include <unistd.h>
+
+extern __thread EvalContext* context;
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 static sigjmp_buf js_exec_jmpbuf;
@@ -250,31 +253,39 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
     if (is_body_element(elem)) {
         const char* onload = extract_element_attribute(elem, "onload", nullptr);
         if (onload && onload[0]) {
-            // Handle setTimeout('code', delay) in body onload — extract inner code
-            // Pattern: setTimeout('code()', delay) or setTimeout("code()", delay)
+            // Preprocess the onload handler before emitting as JS code.
+            // The MIR transpiler cannot eval() strings, so the common pattern
+            // setTimeout('code()', delay) must be transformed: we extract the
+            // string content and emit it as direct code. The function-reference
+            // form setTimeout(fn, delay) needs no transformation — the preamble's
+            // setTimeout stub calls fn() directly, and inline script function
+            // declarations are at global scope (no try/catch wrapping).
+            // Also handle setInterval the same way (background-position-201).
             const char* st = strstr(onload, "setTimeout(");
-            if (st && (st == onload || *(st-1) == ' ' || *(st-1) == ';')) {
-                const char* p = st + 11; // skip "setTimeout("
-                char quote = *p;
-                if (quote == '\'' || quote == '"') {
-                    p++; // skip opening quote
+            if (!st) st = strstr(onload, "setInterval(");
+            if (st) {
+                int skip_len = (st[3] == 'T' || st[3] == 't') ? 11 : 12; // "setTimeout(" vs "setInterval("
+                const char* p = st + skip_len;
+                if (*p == '\'' || *p == '"') {
+                    // String form: setTimeout('code()', delay) — extract inner code
+                    char quote = *p++;
                     const char* code_start = p;
-                    // find closing quote
                     while (*p && *p != quote) p++;
                     if (*p == quote) {
-                        int code_len = (int)(p - code_start);
-                        strbuf_append_str_n(onload_buf, code_start, code_len);
+                        strbuf_append_str_n(onload_buf, code_start, (int)(p - code_start));
                         strbuf_append_str(onload_buf, "\n");
                     } else {
+                        // Malformed — emit as-is and let the transpiler handle it
                         strbuf_append_str(onload_buf, onload);
                         strbuf_append_str(onload_buf, "\n");
                     }
                 } else {
-                    // function form — pass through as-is, preamble handles it
+                    // Function reference or expression — emit as-is
                     strbuf_append_str(onload_buf, onload);
                     strbuf_append_str(onload_buf, "\n");
                 }
             } else {
+                // No setTimeout/setInterval — emit the handler code directly
                 strbuf_append_str(onload_buf, onload);
                 strbuf_append_str(onload_buf, "\n");
             }
@@ -313,10 +324,13 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             }
             return;
         }
-        // extract inline script source — wrap in try/catch for error isolation
-        strbuf_append_str(script_buf, "try {\n");
+        // Inline scripts are emitted without try/catch wrapping so that
+        // function declarations remain at global scope. This allows cross-script
+        // function references (e.g. setTimeout(myFunc, 0) in onload) to resolve
+        // correctly in the MIR transpiler. Signal-level guards (SIGALRM, SIGSEGV,
+        // SIGBUS) still protect against crashes and infinite loops.
         extract_script_text(elem, script_buf);
-        strbuf_append_str(script_buf, "\n} catch(_inline_err) {}\n");
+        strbuf_append_str(script_buf, "\n");
         return;  // don't recurse into script children
     }
 
@@ -476,9 +490,14 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     alarm(JS_EXEC_TIMEOUT_SECONDS);
 
     Item result;
+    JsPreambleState* preamble = nullptr;
     int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
     if (jmp_val == 0) {
-        result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
+        // Use preamble mode to retain MIR context for event handler invocation.
+        // This keeps compiled JS functions alive so onclick/onmouseover etc.
+        // can call them after page load without re-compilation.
+        preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
+        result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
         js_exec_guarded = 0;
         alarm(0);  // cancel pending alarm
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
@@ -487,9 +506,11 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     } else if (jmp_val == 2) {
         log_error("execute_document_scripts: JS execution timed out after %ds", JS_EXEC_TIMEOUT_SECONDS);
         result = ItemError;
+        if (preamble) { mem_free(preamble); preamble = nullptr; }
     } else {
         log_error("execute_document_scripts: recovered from crash in JS JIT code");
         result = ItemError;
+        if (preamble) { mem_free(preamble); preamble = nullptr; }
     }
 
     TypeId result_type = get_type_id(result);
@@ -499,21 +520,312 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_info("execute_document_scripts: JS execution completed successfully");
     }
 
-    // properly destroy gc_heap metadata + nursery + Heap to avoid stale refs.
-    // pool stays alive for now (data still needed? drain in per-file cleanup).
-    if (runtime.heap && runtime.heap->gc) {
-        Pool* pool = runtime.heap->gc->pool;
-        runtime.heap->gc->pool = NULL;  // prevent gc_heap_destroy from destroying pool
-        gc_heap_destroy(runtime.heap->gc);
-        mem_free(runtime.heap);
-        s_js_reuse_pool = pool;
-    } else if (runtime.heap) {
-        mem_free(runtime.heap);
-    }
-    if (runtime.nursery) {
-        gc_nursery_destroy(runtime.nursery);
+    // Retain JS state on DomDocument for interactive event handler dispatch.
+    // The MIR context, heap, nursery, and name_pool stay alive so compiled
+    // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
+    // at event time without re-compilation.
+    if (preamble && preamble->mir_ctx) {
+        dom_doc->js_preamble_state = preamble;
+        dom_doc->js_mir_ctx = preamble->mir_ctx;
+        dom_doc->js_runtime_heap = runtime.heap;
+        dom_doc->js_runtime_nursery = runtime.nursery;
+        dom_doc->js_runtime_name_pool = runtime.name_pool;
+        dom_doc->js_runtime_pool = runtime.reuse_pool;
+        log_info("execute_document_scripts: retained MIR context for event handlers");
+        // Do NOT destroy heap/nursery/pool — they're retained on the document
+    } else {
+        // Fallback: no valid preamble — destroy as before
+        if (preamble) { mem_free(preamble); }
+        if (runtime.heap && runtime.heap->gc) {
+            Pool* reuse_pool = runtime.heap->gc->pool;
+            runtime.heap->gc->pool = NULL;
+            gc_heap_destroy(runtime.heap->gc);
+            mem_free(runtime.heap);
+            s_js_reuse_pool = reuse_pool;
+        } else if (runtime.heap) {
+            mem_free(runtime.heap);
+        }
+        if (runtime.nursery) {
+            gc_nursery_destroy(runtime.nursery);
+        }
     }
 
     strbuf_free(script_buf);
     strbuf_free(onload_buf);
+}
+
+// ============================================================================
+// Phase 2: Event handler collection and compilation
+// ============================================================================
+
+// Event handler attribute names (without "on" prefix for event_type)
+static const struct {
+    const char* attr_name;   // HTML attribute: "onclick", "onmouseover", etc.
+    const char* event_type;  // event type: "click", "mouseover", etc.
+} EVENT_HANDLER_ATTRS[] = {
+    {"onclick",      "click"},
+    {"ondblclick",   "dblclick"},
+    {"onmousedown",  "mousedown"},
+    {"onmouseup",    "mouseup"},
+    {"onmouseover",  "mouseover"},
+    {"onmouseout",   "mouseout"},
+    {"onmousemove",  "mousemove"},
+    {"onkeydown",    "keydown"},
+    {"onkeyup",      "keyup"},
+    {"onkeypress",   "keypress"},
+    {"onfocus",      "focus"},
+    {"onblur",       "blur"},
+    {"onchange",     "change"},
+    {"oninput",      "input"},
+    {"onsubmit",     "submit"},
+    {"onreset",      "reset"},
+    {"onscroll",     "scroll"},
+    {nullptr,        nullptr}
+};
+
+// Linked list of compiled event handlers for a single element
+#include "event_handler_registry.h"
+
+// hashmap callbacks for DomElement* keys
+static uint64_t js_handler_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const JsEventHandler* h = (const JsEventHandler*)item;
+    return hashmap_sip(&h->element, sizeof(void*), seed0, seed1);
+}
+
+static int js_handler_compare(const void *a, const void *b, void *udata) {
+    const JsEventHandler* ha = (const JsEventHandler*)a;
+    const JsEventHandler* hb = (const JsEventHandler*)b;
+    return (ha->element == hb->element) ? 0 : 1;
+}
+
+static void collect_handlers_recursive(DomElement* elem, JsEventRegistry* registry,
+                                        StrBuf* compile_buf, int* handler_id, int depth) {
+    if (!elem || depth > 100) return;
+
+    for (int i = 0; EVENT_HANDLER_ATTRS[i].attr_name; i++) {
+        const char* attr_val = dom_element_get_attribute(elem, EVENT_HANDLER_ATTRS[i].attr_name);
+        if (attr_val && attr_val[0]) {
+            // allocate handler entry from registry pool
+            JsEventHandler* handler = (JsEventHandler*)pool_calloc(registry->pool, sizeof(JsEventHandler));
+            handler->element = elem;
+            handler->event_type = EVENT_HANDLER_ATTRS[i].event_type;
+            handler->handler_source = attr_val;
+            handler->compiled_func = nullptr;
+
+            // generate wrapper function: function __evt_handler_N() { <code> }
+            int id = (*handler_id)++;
+            char func_name[64];
+            snprintf(func_name, sizeof(func_name), "__evt_handler_%d", id);
+
+            strbuf_append_str(compile_buf, "function ");
+            strbuf_append_str(compile_buf, func_name);
+            strbuf_append_str(compile_buf, "() { ");
+            strbuf_append_str(compile_buf, attr_val);
+            strbuf_append_str(compile_buf, " }\n");
+
+            // store func_name on pool for later lookup
+            char* stored_name = (char*)pool_alloc(registry->pool, strlen(func_name) + 1);
+            strcpy(stored_name, func_name);
+            handler->handler_source = stored_name; // reuse for func name lookup
+
+            // link into registry: find existing chain or create new
+            JsEventHandler key = {};
+            key.element = elem;
+            JsEventHandler* existing = (JsEventHandler*)hashmap_get(registry->element_map, &key);
+            if (existing) {
+                // append to linked list
+                JsEventHandler* tail = existing;
+                while (tail->next) tail = tail->next;
+                tail->next = handler;
+            } else {
+                hashmap_set(registry->element_map, handler);
+            }
+            registry->count++;
+
+            log_debug("collect_handlers: %s on <%s> → %s()",
+                      EVENT_HANDLER_ATTRS[i].attr_name,
+                      elem->tag_name ? elem->tag_name : "?",
+                      func_name);
+        }
+    }
+
+    // recurse into children
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->node_type == DOM_NODE_ELEMENT) {
+            collect_handlers_recursive((DomElement*)child, registry, compile_buf, handler_id, depth + 1);
+        }
+        child = child->next_sibling;
+    }
+}
+
+extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
+    if (!dom_doc || !dom_doc->root || !dom_doc->js_mir_ctx) {
+        return;
+    }
+
+    // create registry
+    Pool* reg_pool = pool_create_mmap();
+    JsEventRegistry* registry = (JsEventRegistry*)pool_calloc(reg_pool, sizeof(JsEventRegistry));
+    registry->pool = reg_pool;
+    registry->element_map = hashmap_new(sizeof(JsEventHandler), 32, 0, 0,
+                                         js_handler_hash, js_handler_compare, nullptr, nullptr);
+    registry->count = 0;
+
+    // collect all inline event handler attributes
+    StrBuf* compile_buf = strbuf_new_cap(4096);
+    int handler_id = 0;
+    collect_handlers_recursive(dom_doc->root, registry, compile_buf, &handler_id, 0);
+
+    if (registry->count == 0) {
+        log_debug("collect_and_compile_event_handlers: no event handlers found");
+        strbuf_free(compile_buf);
+        hashmap_free(registry->element_map);
+        pool_destroy(reg_pool);
+        return;
+    }
+
+    log_info("collect_and_compile_event_handlers: found %d handlers, compiling", registry->count);
+
+    // Compile handler wrapper functions using the retained MIR preamble context.
+    // The with_preamble call creates a new MIR context that can see preamble-defined
+    // functions (clicked(), toggle(), etc.). We need the thread-local EvalContext
+    // set up with the retained heap so the transpiler reuses it (reusing_context=true),
+    // which causes the new MIR context to be deferred rather than destroyed.
+    JsPreambleState* preamble = (JsPreambleState*)dom_doc->js_preamble_state;
+    Runtime runtime = {};
+    runtime.dom_doc = dom_doc;
+    runtime.heap = (Heap*)dom_doc->js_runtime_heap;
+    runtime.nursery = (gc_nursery_t*)dom_doc->js_runtime_nursery;
+    runtime.name_pool = (NamePool*)dom_doc->js_runtime_name_pool;
+    runtime.reuse_pool = (Pool*)dom_doc->js_runtime_pool;
+
+    // Set up thread-local eval context so transpiler sees reusing_context=true.
+    // This prevents the new MIR context from being destroyed — it gets deferred instead.
+    EvalContext handler_compile_ctx = {};
+    handler_compile_ctx.heap = runtime.heap;
+    handler_compile_ctx.nursery = runtime.nursery;
+    handler_compile_ctx.name_pool = runtime.name_pool;
+    handler_compile_ctx.pool = runtime.heap ? runtime.heap->pool : nullptr;
+    EvalContext* saved_ctx = context;
+    context = &handler_compile_ctx;
+
+    Item compile_result = transpile_js_to_mir_with_preamble(&runtime, compile_buf->str,
+                                                             "<event-handlers>", preamble);
+    strbuf_free(compile_buf);
+
+    // Get the new MIR context before restoring the old eval context.
+    // The handler functions were compiled in this new context.
+    MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
+
+    context = saved_ctx;
+
+    TypeId result_type = get_type_id(compile_result);
+    if (result_type == LMD_TYPE_ERROR) {
+        log_error("collect_and_compile_event_handlers: compilation failed");
+        hashmap_free(registry->element_map);
+        pool_destroy(reg_pool);
+        return;
+    }
+
+    if (!handler_mir_ctx) {
+        log_error("collect_and_compile_event_handlers: no deferred MIR context found");
+        hashmap_free(registry->element_map);
+        pool_destroy(reg_pool);
+        return;
+    }
+
+    // Resolve compiled function pointers via find_func_prefix in the handler MIR context
+    int resolved = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(registry->element_map, &iter, &item)) {
+        JsEventHandler* h = (JsEventHandler*)item;
+        while (h) {
+            // handler_source stores the base function name (e.g., "__evt_handler_0").
+            // The JS transpiler mangles it to "_js___evt_handler_0_<byte_offset>".
+            // Use prefix matching to find the compiled function.
+            char prefix[128];
+            snprintf(prefix, sizeof(prefix), "_js_%s_", h->handler_source);
+            void* fn_ptr = find_func_prefix(handler_mir_ctx, prefix);
+            if (fn_ptr) {
+                h->compiled_func = fn_ptr;
+                resolved++;
+                log_debug("collect_and_compile_event_handlers: resolved %s → %p",
+                          h->handler_source, fn_ptr);
+            } else {
+                log_error("collect_and_compile_event_handlers: failed to resolve %s",
+                          h->handler_source);
+            }
+            h = h->next;
+        }
+    }
+
+    log_info("collect_and_compile_event_handlers: resolved %d/%d handler functions",
+             resolved, registry->count);
+
+    // Update retained state (heap/nursery may have grown during compilation)
+    dom_doc->js_runtime_heap = runtime.heap;
+    dom_doc->js_runtime_nursery = runtime.nursery;
+    dom_doc->js_runtime_name_pool = runtime.name_pool;
+
+    dom_doc->js_event_registry = registry;
+}
+
+// ============================================================================
+// Cleanup
+// ============================================================================
+
+extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
+    if (!dom_doc) return;
+
+    // Destroy event handler registry
+    if (dom_doc->js_event_registry) {
+        JsEventRegistry* registry = (JsEventRegistry*)dom_doc->js_event_registry;
+        if (registry->element_map) {
+            hashmap_free(registry->element_map);
+        }
+        Pool* reg_pool = registry->pool;
+        if (reg_pool) {
+            pool_destroy(reg_pool);
+        }
+        dom_doc->js_event_registry = nullptr;
+    }
+
+    // Destroy retained MIR context via preamble_state_destroy
+    if (dom_doc->js_preamble_state) {
+        JsPreambleState* preamble = (JsPreambleState*)dom_doc->js_preamble_state;
+        preamble_state_destroy(preamble);
+        mem_free(preamble);
+        dom_doc->js_preamble_state = nullptr;
+        dom_doc->js_mir_ctx = nullptr;
+    }
+
+    // Destroy retained heap (GC metadata + nursery)
+    if (dom_doc->js_runtime_heap) {
+        Heap* heap = (Heap*)dom_doc->js_runtime_heap;
+        if (heap->gc) {
+            Pool* js_pool = heap->gc->pool;
+            heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
+            gc_heap_destroy(heap->gc);
+            // pool is destroyed separately below
+        }
+        mem_free(heap);
+        dom_doc->js_runtime_heap = nullptr;
+    }
+
+    if (dom_doc->js_runtime_nursery) {
+        gc_nursery_destroy((gc_nursery_t*)dom_doc->js_runtime_nursery);
+        dom_doc->js_runtime_nursery = nullptr;
+    }
+
+    // Destroy retained mmap pool (native code pages, etc.)
+    if (dom_doc->js_runtime_pool) {
+        pool_destroy((Pool*)dom_doc->js_runtime_pool);
+        dom_doc->js_runtime_pool = nullptr;
+    }
+
+    dom_doc->js_runtime_name_pool = nullptr;
+
+    log_debug("script_runner_cleanup_js_state: cleaned up JS state");
 }

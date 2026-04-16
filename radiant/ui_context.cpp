@@ -8,6 +8,7 @@
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
+#include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
@@ -139,6 +140,11 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
+
+    // Clean up retained JS state (MIR context, event registry, runtime heap)
+    // before destroying the document that owns the pointers.
+    script_runner_cleanup_js_state(doc);
+
     if (doc->view_tree) {
         // Note: view_pool_destroy destroys the pool that contains all view allocations
         // including the ViewTree itself (if it was pool-allocated).

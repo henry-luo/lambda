@@ -27,13 +27,16 @@
         "lambda/validator",
         "lambda/js",
         "lambda/ts",
+        "lambda/npm",
         "lambda/network",
         "radiant",
         "radiant/pdf",
         "radiant/webdriver"
     ],
     "source_files": [
-        "lib/sqlite/sqlite3.c"
+        "lib/sqlite/sqlite3.c",
+        "lambda/serve/serve_utils.cpp",
+        "lambda/serve/tls_handler.cpp"
     ],
     "sqlite_version": "3.45.3",
     "exclude_source_files": [
@@ -1547,6 +1550,28 @@
                         "icon": "🔍"
                     },
                     {
+                        "source": "test_npm_semver_gtest.cpp",
+                        "name": "NPM Semver Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/npm/semver.cpp",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/str.c",
+                            "lib/utf.c",
+                            "lib/log.c"
+                        ],
+                        "binary": "test_npm_semver_gtest.exe",
+                        "icon": "📦"
+                    },
+                    {
                         "source": "test_avl_tree.cpp",
                         "name": "AVL Tree Implementation Tests",
                         "dependencies": [],
@@ -2786,6 +2811,17 @@
                         "icon": "🟨"
                     },
                     {
+                        "source": "test/test_node_gtest.cpp",
+                        "name": "Node.js Module Tests",
+                        "dependencies": [],
+                        "binary": "test_node_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "icon": "📦"
+                    },
+                    {
                         "source": "test/test_wpt_css_syntax_gtest.cpp",
                         "name": "WPT CSS Syntax Tests",
                         "category": "extended",
@@ -3021,6 +3057,19 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📋"
+                    },
+                    {
+                        "source": "test/test_node_official_gtest.cpp",
+                        "name": "Node.js Official Test Suite",
+                        "category": "extended",
+                        "disabled": false,
+                        "dependencies": [],
+                        "binary": "test_node_official_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🟢"
                     }
                 ],
                 "type": "jube",

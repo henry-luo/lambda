@@ -28,6 +28,48 @@
 // Forward Declarations
 // ============================================================================
 
+// ---------------------------------------------------------------------------
+// SVG display-list dispatch helpers (ctx->dl aware)
+// ---------------------------------------------------------------------------
+static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color color,
+                                 RdtFillRule rule, const RdtMatrix* xform) {
+    if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
+    else svg_fill_path(ctx, path, color, rule, xform);
+}
+static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
+                                   RdtStrokeCap cap, RdtStrokeJoin join,
+                                   const float* dash, int dash_count, const RdtMatrix* xform) {
+    if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, xform);
+    else svg_stroke_path(ctx, path, color, width, cap, join, dash, dash_count, xform);
+}
+static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
+                                            float x1, float y1, float x2, float y2,
+                                            const RdtGradientStop* stops, int count,
+                                            RdtFillRule rule, const RdtMatrix* xform) {
+    if (ctx->dl) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
+    else svg_fill_linear_gradient(ctx, path, x1, y1, x2, y2, stops, count, rule, xform);
+}
+static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path,
+                                            float cx, float cy, float r,
+                                            const RdtGradientStop* stops, int count,
+                                            RdtFillRule rule, const RdtMatrix* xform) {
+    if (ctx->dl) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
+    else svg_fill_radial_gradient(ctx, path, cx, cy, r, stops, count, rule, xform);
+}
+static inline void svg_draw_picture(SvgRenderContext* ctx, RdtPicture* pic,
+                                    uint8_t opacity, const RdtMatrix* xform) {
+    if (ctx->dl) dl_draw_picture(ctx->dl, pic, opacity, xform);
+    else svg_draw_picture(ctx, pic, opacity, xform);
+}
+static inline void svg_push_clip(SvgRenderContext* ctx, RdtPath* path, const RdtMatrix* xform) {
+    if (ctx->dl) dl_push_clip(ctx->dl, path, xform);
+    else svg_push_clip(ctx, path, xform);
+}
+static inline void svg_pop_clip(SvgRenderContext* ctx) {
+    if (ctx->dl) dl_pop_clip(ctx->dl);
+    else svg_pop_clip(ctx);
+}
+
 static void render_svg_element(SvgRenderContext* ctx, Element* elem);
 static void render_svg_rect(SvgRenderContext* ctx, Element* elem);
 static void render_svg_circle(SvgRenderContext* ctx, Element* elem);
@@ -638,7 +680,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
             cy = by + def->cy * bh;
             r  = def->r * (bw < bh ? bw : bh);
         }
-        rdt_fill_radial_gradient(ctx->vec, path, cx, cy, r,
+        svg_fill_radial_gradient(ctx, path, cx, cy, r,
                                  stops, def->stop_count, RDT_FILL_WINDING, transform);
     } else {
         float x1, y1, x2, y2;
@@ -648,7 +690,7 @@ static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef*
             x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
             x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
         }
-        rdt_fill_linear_gradient(ctx->vec, path, x1, y1, x2, y2,
+        svg_fill_linear_gradient(ctx, path, x1, y1, x2, y2,
                                  stops, def->stop_count, RDT_FILL_WINDING, transform);
     }
 }
@@ -718,7 +760,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (ctx->opacity < 1.0f) {
             fc.a = (uint8_t)(fc.a * ctx->opacity);
         }
-        rdt_fill_path(ctx->vec, path, fc, RDT_FILL_WINDING, transform);
+        svg_fill_path(ctx, path, fc, RDT_FILL_WINDING, transform);
     }
 
     // --- STROKE ---
@@ -783,7 +825,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
             }
         }
 
-        rdt_stroke_path(ctx->vec, path, sc, stroke_width, cap, join,
+        svg_stroke_path(ctx, path, sc, stroke_width, cap, join,
                         dash_count > 0 ? dashes : nullptr, dash_count, transform);
     }
 }
@@ -860,7 +902,7 @@ static void render_svg_line(SvgRenderContext* ctx, Element* elem) {
     if (!stroke && ctx->stroke_none) {
         // no inherited stroke and no explicit stroke: draw with default black
         Color black = {}; black.a = 255;
-        rdt_stroke_path(ctx->vec, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
+        svg_stroke_path(ctx, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
                         nullptr, 0, &m);
     }
     draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
@@ -1631,7 +1673,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         if (!tvg_text) return;
         RdtPicture* pic = rdt_picture_take_tvg_paint(tvg_text, 0, 0);
         if (pic) {
-            rdt_picture_draw(ctx->vec, pic, 255, &m);
+            svg_draw_picture(ctx, pic, 255, &m);
         }
     };
 
@@ -1787,7 +1829,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     // wrap as RdtPicture and draw
     RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
     if (rdt_pic) {
-        rdt_picture_draw(ctx->vec, rdt_pic, op, &m);
+        svg_draw_picture(ctx, rdt_pic, op, &m);
     }
 
     log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
@@ -2075,7 +2117,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
     // check for clip-path="url(#id)" attribute and push clip if found
     RdtPath* clip_path = resolve_svg_clip_path(ctx, elem);
     if (clip_path) {
-        rdt_push_clip(ctx->vec, clip_path, &ctx->transform);
+        svg_push_clip(ctx, clip_path, &ctx->transform);
     }
 
     if (strcmp(tag, "rect") == 0) {
@@ -2185,7 +2227,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
     }
 
     if (clip_path) {
-        rdt_pop_clip(ctx->vec);
+        svg_pop_clip(ctx);
         rdt_path_free(clip_path);
     }
 }
@@ -2195,7 +2237,8 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 // ============================================================================
 
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
-                       Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform) {
+                       Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
+                       DisplayList* dl) {
     if (!svg_element || !vec) return;
 
     log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
@@ -2206,6 +2249,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.pool = pool;
     ctx.font_ctx = font_ctx;
     ctx.vec = vec;
+    ctx.dl = dl;
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
@@ -2334,17 +2378,18 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     if (has_clip) {
         RdtPath* clip_path = rdt_path_new();
         rdt_path_add_rect(clip_path, clip->left, clip->top, clip_w, clip_h, 0, 0);
-        rdt_push_clip(&rdcon->vec, clip_path, nullptr);
+        rc_push_clip(rdcon, clip_path, nullptr);
         rdt_path_free(clip_path);
     }
 
     // render SVG directly to the framebuffer
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
-                      rdcon->ui_context->document->pool, scale, font_ctx, &base_transform);
+                      rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
+                      rdcon->dl);
 
     if (has_clip) {
-        rdt_pop_clip(&rdcon->vec);
+        rc_pop_clip(rdcon);
     }
 
     log_debug("[SVG] render_inline_svg: rendered to buffer");

@@ -18,6 +18,7 @@ extern "C" {
 struct DomDocument;
 struct DomElement;
 struct CssEngine;
+struct CookieJar;
 
 // Resource types
 typedef enum {
@@ -85,6 +86,9 @@ typedef struct NetworkResourceManager {
     // UI context (for font loading and HiDPI support)
     void* ui_context;  // UiContext* (opaque to avoid header dependency)
     
+    // Cookie jar for HTTP session management (Phase 4)
+    struct CookieJar* cookie_jar;
+    
     void* resources;                // HashMap: URL → NetworkResource*
     void* pending_reflows;          // ArrayList of DomElement*
     void* pending_repaints;         // ArrayList of DomElement*
@@ -125,6 +129,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
 
 void resource_manager_cancel(NetworkResourceManager* mgr, NetworkResource* res);
 void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct DomElement* elmt);
+void resource_manager_cancel_all(NetworkResourceManager* mgr);
 
 // Status queries
 bool resource_manager_is_fully_loaded(const NetworkResourceManager* mgr);

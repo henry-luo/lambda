@@ -1,0 +1,12 @@
+readFileSync: hello fs
+exists true: true
+exists false: false
+appendFileSync: hello fs appended
+stat isFile: true
+stat isDirectory: false
+stat size > 0: true
+readdirSync count: 2
+rename exists c: true
+rename gone a: false
+truncateSync: long
+cleanup done

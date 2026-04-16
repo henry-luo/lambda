@@ -230,6 +230,21 @@ void rdt_path_free(RdtPath* p) {
     mem_free(p);
 }
 
+RdtPath* rdt_path_clone(const RdtPath* src) {
+    if (!src) return nullptr;
+    RdtPath* dst = (RdtPath*)mem_alloc(sizeof(RdtPath), MEM_CAT_RENDER);
+    dst->count = src->count;
+    dst->capacity = src->count;  // tight allocation
+    if (src->count > 0) {
+        size_t sz = src->count * sizeof(RdtPath::Entry);
+        dst->entries = (RdtPath::Entry*)mem_alloc(sz, MEM_CAT_RENDER);
+        memcpy(dst->entries, src->entries, sz);
+    } else {
+        dst->entries = nullptr;
+    }
+    return dst;
+}
+
 // ============================================================================
 // Fill
 // ============================================================================

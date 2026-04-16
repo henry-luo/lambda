@@ -1072,6 +1072,65 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 }
 
 /**
+ * Recursively collect <style> inline CSS from DomElement* tree (post-JS mutations).
+ * Unlike collect_inline_styles_to_list() which walks Element* (pre-JS), this walks
+ * the DomElement tree which reflects JS DOM mutations (createElement, appendChild,
+ * textContent writes, disabled attribute changes).
+ *
+ * Handles:
+ * - Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
+ * - <style disabled> elements — skipped (e.g. table-anonymous-objects-015)
+ * - Media query filtering
+ */
+void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
+                                     CssStylesheet*** stylesheets, int* count, int depth = 0) {
+    if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (depth > MAX_CSS_TREE_DEPTH) return;
+
+    // Check if this is a <style> element
+    if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+        // Check disabled attribute — skip disabled stylesheets
+        if (dom_element_has_attribute(elem, "disabled")) {
+            log_debug("[CSS] Skipping <style> element with disabled attribute");
+        } else {
+            // Check media attribute
+            const char* media = dom_element_get_attribute(elem, "media");
+            if (media && !css_evaluate_media_query(engine, media)) {
+                log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
+            } else {
+                // Extract text content from DomText children
+                DomNode* child = elem->first_child;
+                while (child) {
+                    if (child->node_type == DOM_NODE_TEXT) {
+                        DomText* text_node = (DomText*)child;
+                        if (text_node->text && text_node->length > 0) {
+                            CssStylesheet* stylesheet = css_parse_stylesheet(engine, text_node->text, "<inline-style>");
+                            if (stylesheet && stylesheet->rule_count > 0) {
+                                log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
+                                *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                                              (*count + 1) * sizeof(CssStylesheet*));
+                                (*stylesheets)[*count] = stylesheet;
+                                (*count)++;
+                            }
+                        }
+                    }
+                    child = child->next_sibling;
+                }
+            }
+        }
+    }
+
+    // Recursively process children
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->node_type == DOM_NODE_ELEMENT) {
+            collect_inline_styles_from_dom((DomElement*)child, engine, pool, stylesheets, count, depth + 1);
+        }
+        child = child->next_sibling;
+    }
+}
+
+/**
  * Recursively collect <style> inline CSS from HTML
  * Parses and adds to engine's stylesheet list
  */
@@ -1784,6 +1843,217 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
 }
 
 /**
+ * Check if content starts with a UTF-8 BOM (EF BB BF).
+ */
+static bool has_utf8_bom(const char* html, size_t len) {
+    return len >= 3 &&
+           (unsigned char)html[0] == 0xEF &&
+           (unsigned char)html[1] == 0xBB &&
+           (unsigned char)html[2] == 0xBF;
+}
+
+/**
+ * Quick heuristic: check if content with high bytes appears to be valid UTF-8.
+ * Scans up to 4096 bytes. If we find multi-byte UTF-8 sequences and no invalid
+ * sequences, the content is likely UTF-8 regardless of what the meta tag says.
+ * Returns true if content appears to be valid UTF-8 (has multi-byte sequences).
+ * Returns false if content is all-ASCII (ambiguous) or has invalid UTF-8 sequences.
+ */
+static bool content_looks_utf8(const char* html, size_t len) {
+    size_t scan_len = len < 4096 ? len : 4096;
+    int multi_byte_count = 0;
+    for (size_t i = 0; i < scan_len; ) {
+        unsigned char c = (unsigned char)html[i];
+        if (c < 0x80) { i++; continue; }
+        // check for valid UTF-8 multi-byte sequence
+        int seq_len = 0;
+        if ((c & 0xE0) == 0xC0) seq_len = 2;
+        else if ((c & 0xF0) == 0xE0) seq_len = 3;
+        else if ((c & 0xF8) == 0xF0) seq_len = 4;
+        else return false; // invalid UTF-8 lead byte
+        if (i + seq_len > scan_len) break; // truncated at scan boundary, don't fail
+        for (int j = 1; j < seq_len; j++) {
+            if (((unsigned char)html[i + j] & 0xC0) != 0x80) return false; // invalid continuation
+        }
+        multi_byte_count++;
+        i += seq_len;
+    }
+    return multi_byte_count > 0;
+}
+
+/**
+ * Detect charset from HTML content by scanning for <meta charset="..."> or
+ * <meta http-equiv="Content-Type" content="...; charset=..."> within the first 1024 bytes.
+ * Returns the charset name (e.g., "iso-8859-1") or nullptr if UTF-8 or not specified.
+ * Per HTML spec, UTF-8 BOM takes precedence over meta charset declarations.
+ * Also skips conversion if content is already valid UTF-8 (e.g., file saved as UTF-8
+ * but with a legacy meta charset tag).
+ */
+static const char* detect_html_charset(const char* html, size_t len) {
+    if (!html || len == 0) return nullptr;
+
+    // Per HTML spec: BOM takes precedence over all other charset declarations
+    if (has_utf8_bom(html, len)) return nullptr;
+
+    // only scan the first 1024 bytes (charset must appear early per HTML spec)
+    size_t scan_len = len < 1024 ? len : 1024;
+    char buf[1025];
+    memcpy(buf, html, scan_len);
+    buf[scan_len] = '\0';
+
+    // look for <meta charset="...">
+    const char* p = buf;
+    while ((p = strstr(p, "charset")) != nullptr) {
+        p += 7; // skip "charset"
+        // skip optional whitespace and '='
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '=') continue;
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        // skip optional quote
+        char quote = 0;
+        if (*p == '"' || *p == '\'') { quote = *p; p++; }
+
+        // extract charset value
+        const char* start = p;
+        while (*p && *p != '"' && *p != '\'' && *p != ';' && *p != '>' && *p != ' ') p++;
+        size_t vlen = p - start;
+        if (vlen == 0 || vlen > 30) continue;
+
+        // copy to static buffer (lowercase)
+        static char charset_buf[32];
+        for (size_t i = 0; i < vlen; i++) {
+            charset_buf[i] = (start[i] >= 'A' && start[i] <= 'Z') ? start[i] + 32 : start[i];
+        }
+        charset_buf[vlen] = '\0';
+
+        // skip if already UTF-8
+        if (strcmp(charset_buf, "utf-8") == 0 || strcmp(charset_buf, "utf8") == 0) {
+            return nullptr;
+        }
+
+        log_info("[charset] Detected non-UTF-8 charset: %s", charset_buf);
+
+        // Safety check: if the content already contains valid UTF-8 multi-byte
+        // sequences, the meta charset is likely stale/wrong (file was re-saved as
+        // UTF-8 without updating the meta tag). Converting would double-encode.
+        if (content_looks_utf8(html, len)) {
+            log_info("[charset] Content already appears to be valid UTF-8, ignoring meta charset '%s'", charset_buf);
+            return nullptr;
+        }
+
+        return charset_buf;
+    }
+
+    return nullptr;
+}
+
+/**
+ * Convert HTML content from ISO-8859-1 or Windows-1252 to UTF-8.
+ * These two encodings cover the vast majority of non-UTF-8 web pages.
+ * Each byte 0x80-0xFF maps to a 2-byte or 3-byte UTF-8 sequence.
+ * Returns a newly allocated UTF-8 string or nullptr on failure.
+ * Caller must free the returned string with mem_free().
+ */
+static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
+    if (!content) return nullptr;
+
+    // Windows-1252 to Unicode mapping for 0x80-0x9F (differs from Latin-1)
+    // Latin-1 maps these as C1 control characters; Win-1252 maps them to useful glyphs
+    static const uint16_t win1252_map[32] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+    };
+
+    // worst case: each byte becomes 3 UTF-8 bytes
+    size_t out_size = content_len * 3 + 1;
+    char* out_buf = (char*)mem_alloc(out_size, MEM_CAT_LAYOUT);
+    if (!out_buf) return nullptr;
+
+    char* out = out_buf;
+    for (size_t i = 0; i < content_len; i++) {
+        unsigned char c = (unsigned char)content[i];
+        if (c < 0x80) {
+            *out++ = (char)c;
+        } else {
+            uint16_t cp;
+            if (c >= 0x80 && c <= 0x9F) {
+                cp = win1252_map[c - 0x80];
+            } else {
+                cp = c;  // Latin-1: codepoint == byte value for 0xA0-0xFF
+            }
+            // encode as UTF-8
+            if (cp < 0x80) {
+                *out++ = (char)cp;
+            } else if (cp < 0x800) {
+                *out++ = (char)(0xC0 | (cp >> 6));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            } else {
+                *out++ = (char)(0xE0 | (cp >> 12));
+                *out++ = (char)(0x80 | ((cp >> 6) & 0x3F));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    }
+    *out = '\0';
+    size_t converted_len = out - out_buf;
+    log_info("[charset] Converted %zu bytes Latin-1/Win-1252 to %zu bytes UTF-8", content_len, converted_len);
+    return out_buf;
+}
+
+/**
+ * Convert HTML content from a non-UTF-8 charset to UTF-8.
+ * Currently supports ISO-8859-1 and Windows-1252 (covers ~95% of non-UTF-8 pages).
+ * Returns a newly allocated UTF-8 string or nullptr if charset is unsupported.
+ * Caller must free the returned string with mem_free().
+ */
+static char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset) {
+    if (!content || !from_charset) return nullptr;
+
+    // ISO-8859-1 and Windows-1252 use the same converter
+    if (strcmp(from_charset, "iso-8859-1") == 0 ||
+        strcmp(from_charset, "latin1") == 0 ||
+        strcmp(from_charset, "latin-1") == 0 ||
+        strcmp(from_charset, "windows-1252") == 0 ||
+        strcmp(from_charset, "cp1252") == 0) {
+        return convert_latin1_to_utf8(content, content_len);
+    }
+
+    log_warn("[charset] Unsupported charset '%s', proceeding with raw content", from_charset);
+    return nullptr;
+}
+
+/**
+ * Generate an HTML error page for network/loading errors.
+ * Returns a heap-allocated HTML string that the caller must free with mem_free().
+ * @param url The URL that failed to load
+ * @param error_title Short error title (e.g., "Network Error", "404 Not Found")
+ * @param error_detail Detailed error message
+ */
+static char* generate_error_page_html(const char* url, const char* error_title, const char* error_detail) {
+    char buf[4096];
+    snprintf(buf, sizeof(buf),
+        "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+        "<title>%s</title>"
+        "<style>"
+        "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; "
+        "max-width: 600px; margin: 80px auto; padding: 20px; color: #333; }"
+        "h1 { color: #c00; font-size: 24px; }"
+        "p { line-height: 1.6; }"
+        ".url { word-break: break-all; color: #666; font-size: 14px; "
+        "background: #f5f5f5; padding: 8px 12px; border-radius: 4px; }"
+        "</style></head><body>"
+        "<h1>%s</h1>"
+        "<p>%s</p>"
+        "<p class=\"url\">%s</p>"
+        "</body></html>",
+        error_title, error_title, error_detail, url ? url : "");
+    return mem_strdup(buf, MEM_CAT_LAYOUT);
+}
+
+/**
  * Load HTML document with Lambda CSS system
  * Parses HTML, applies CSS cascade, builds DOM tree, returns DomDocument for layout
  *
@@ -1822,7 +2092,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         html_content = download_http_content(url_str, &content_size, nullptr);
         if (!html_content) {
             log_error("Failed to download HTML from URL: %s", url_str);
-            return nullptr;
+            // generate error page instead of returning nullptr
+            html_content = generate_error_page_html(url_str,
+                "Page Could Not Be Loaded",
+                "The requested page could not be loaded. The server may be unreachable, "
+                "the URL may be incorrect, or there may be a network connectivity issue.");
+            if (!html_content) return nullptr;
         }
         html_content_owned = true;
     } else {
@@ -1833,6 +2108,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             return nullptr;
         }
         html_content_owned = true;
+    }
+
+    // Detect non-UTF-8 charset and convert if needed
+    if (html_content && html_content_owned) {
+        size_t html_len = strlen(html_content);
+        const char* charset = detect_html_charset(html_content, html_len);
+        if (charset) {
+            char* utf8_content = convert_charset_to_utf8(html_content, html_len, charset);
+            if (utf8_content) {
+                mem_free(html_content);
+                html_content = utf8_content;
+            }
+            // if conversion fails, proceed with original content (best effort)
+        }
     }
 
     auto t_read = high_resolution_clock::now();
@@ -2042,7 +2331,39 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     if (dom_doc->js_mutation_count > 0) {
         log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
                  dom_doc->js_mutation_count);
+
+        // Re-collect inline stylesheets from the DomElement* tree to pick up:
+        // 1. Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
+        // 2. <style disabled> elements that should be skipped (e.g. table-anonymous-objects-015)
+        // This replaces the pre-script collection which walked the Element* tree.
+        int rescan_count = 0;
+        CssStylesheet** rescan_sheets = nullptr;
+        collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_sheets, &rescan_count);
+        if (rescan_count != inline_stylesheet_count) {
+            log_info("[CSS] Re-scan found %d inline stylesheets (was %d before JS)",
+                     rescan_count, inline_stylesheet_count);
+        }
+        inline_stylesheets = rescan_sheets;
+        inline_stylesheet_count = rescan_count;
+
+        // Update DomDocument stylesheet cache for getComputedStyle
+        int new_total = rescan_count + (external_stylesheet ? 1 : 0);
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+        dom_doc->stylesheet_capacity = new_total;
+        if (external_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+        }
+        for (int i = 0; i < rescan_count; i++) {
+            if (rescan_sheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = rescan_sheets[i];
+            }
+        }
     }
+
+    // Step 2e: Collect and compile inline event handlers (onclick, onmouseover, etc.)
+    // Must happen after execute_document_scripts so function definitions are available.
+    collect_and_compile_event_handlers(dom_doc);
 
     // Step 6: Apply CSS cascade (external + <style> elements)
     SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -4924,6 +5245,10 @@ static bool layout_single_file(
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
 
     if (doc) {
+        // Clean up retained JS state (MIR context, event registry, runtime heap)
+        // before destroying the document that owns the pointers.
+        script_runner_cleanup_js_state(doc);
+
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);
             mem_free(doc->view_tree);

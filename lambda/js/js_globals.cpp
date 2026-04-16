@@ -16,11 +16,23 @@
 #include "../format/format.h"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
+#include "../../lib/file.h"
+#include "../../lib/mem.h"
 #include <cstring>
 #include "../../lib/mem.h"
 #include <cstdio>
 #include <cmath>
 #include <time.h>
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#include <psapi.h>
+#define getpid _getpid
+#else
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#endif
 
 // forward declaration for JSON parser
 extern Item parse_json_to_item(Input* input, const char* json_string);
@@ -34,6 +46,8 @@ static bool js_is_symbol_item(Item item);
 
 #ifdef __APPLE__
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/task_info.h>
 #endif
 
 static inline Item make_js_undefined() {
@@ -94,6 +108,37 @@ extern "C" Item js_process_stdout_write(Item str_item) {
         }
     }
     return (Item){.item = ITEM_TRUE};
+}
+
+// process.stderr.write(string) — writes to stderr (fd 2)
+extern "C" Item js_process_stderr_write(Item str_item) {
+    TypeId type = get_type_id(str_item);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(str_item);
+        if (s && s->len > 0) {
+            fwrite(s->chars, 1, s->len, stderr);
+            fflush(stderr);
+        }
+    } else {
+        Item str = js_to_string(str_item);
+        String* s = it2s(str);
+        if (s && s->len > 0) {
+            fwrite(s->chars, 1, s->len, stderr);
+            fflush(stderr);
+        }
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+// process.stdin.read() — read a line from stdin
+extern "C" Item js_process_stdin_read(void) {
+    char buf[4096];
+    if (fgets(buf, sizeof(buf), stdin) == NULL) {
+        return ItemNull;
+    }
+    int len = (int)strlen(buf);
+    String* s = heap_create_name(buf, (size_t)len);
+    return (Item){.item = s2it(s)};
 }
 
 extern "C" Item js_process_hrtime_bigint(void) {
@@ -778,15 +823,452 @@ extern "C" Item js_get_process_argv(void) {
 // process object (lazy-initialized for `var p = process` standalone usage)
 static Item js_process_object = {.item = ITEM_NULL};
 
+// process.cwd()
+extern "C" Item js_process_cwd(void) {
+    char* cwd = file_getcwd();
+    if (!cwd) return (Item){.item = s2it(heap_create_name(""))};
+    Item result = (Item){.item = s2it(heap_create_name(cwd, strlen(cwd)))};
+    mem_free(cwd);
+    return result;
+}
+
+// process.chdir(directory)
+extern "C" Item js_process_chdir(Item dir_item) {
+    if (get_type_id(dir_item) != LMD_TYPE_STRING) return make_js_undefined();
+    String* s = it2s(dir_item);
+    char buf[2048];
+    int len = (int)s->len;
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    memcpy(buf, s->chars, len);
+    buf[len] = '\0';
+    if (chdir(buf) != 0) {
+        log_error("process: chdir failed for '%s'", buf);
+    }
+    return make_js_undefined();
+}
+
+// process.exit([code])
+static int js_process_exit_code_value = 0;
+
+extern "C" Item js_process_exit(Item code_item) {
+    int code = js_process_exit_code_value; // default to exitCode
+    TypeId type = get_type_id(code_item);
+    if (type == LMD_TYPE_INT) code = (int)it2i(code_item);
+    else if (type == LMD_TYPE_FLOAT) code = (int)it2d(code_item);
+    exit(code);
+    return make_js_undefined(); // unreachable
+}
+
+// process.exitCode getter/setter
+extern "C" Item js_process_get_exitCode(void) {
+    return (Item){.item = i2it(js_process_exit_code_value)};
+}
+
+extern "C" Item js_process_set_exitCode(Item code_item) {
+    TypeId type = get_type_id(code_item);
+    if (type == LMD_TYPE_INT) js_process_exit_code_value = (int)it2i(code_item);
+    else if (type == LMD_TYPE_FLOAT) js_process_exit_code_value = (int)it2d(code_item);
+    return make_js_undefined();
+}
+
+// process.uptime()
+extern "C" Item js_process_uptime(void) {
+    static double start_time = 0;
+    if (start_time == 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        start_time = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *fp = now - start_time;
+    return (Item){.item = d2it(fp)};
+}
+
+// build process.env as a map of environment variables
+static Item build_process_env(void) {
+    Item env = js_new_object();
+    extern char** environ;
+    if (environ) {
+        for (char** e = environ; *e; e++) {
+            char* eq = strchr(*e, '=');
+            if (eq) {
+                Item key = (Item){.item = s2it(heap_create_name(*e, (size_t)(eq - *e)))};
+                Item val = (Item){.item = s2it(heap_create_name(eq + 1, strlen(eq + 1)))};
+                js_property_set(env, key, val);
+            }
+        }
+    }
+    return env;
+}
+
+// build process.stdout object with write() method
+static Item build_process_stdout(void) {
+    Item stdout_obj = js_new_object();
+    Item write_fn = js_new_function((void*)js_process_stdout_write, 1);
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(1)});
+    js_property_set(stdout_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(1))});
+    return stdout_obj;
+}
+
+// build process.stderr object with write() method
+static Item build_process_stderr(void) {
+    Item stderr_obj = js_new_object();
+    Item write_fn = js_new_function((void*)js_process_stderr_write, 1);
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("write", 5))}, write_fn);
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(2)});
+    js_property_set(stderr_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(2))});
+    return stderr_obj;
+}
+
+// build process.stdin object with read() method and basic Readable-like interface
+static Item build_process_stdin(void) {
+    Item stdin_obj = js_new_object();
+    Item read_fn = js_new_function((void*)js_process_stdin_read, 0);
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("read", 4))}, read_fn);
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("fd", 2))}, (Item){.item = i2it(0)});
+    js_property_set(stdin_obj, (Item){.item = s2it(heap_create_name("isTTY", 5))},
+        (Item){.item = b2it(isatty(0))});
+    // setEncoding — stub that just records encoding
+    // resume/pause — stubs for stream interface
+    return stdin_obj;
+}
+
+// process.nextTick(callback, ...args) — queue callback before microtasks
+extern "C" Item js_process_nextTick(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // schedule as microtask (matches Node.js semantics closely enough)
+    extern void js_microtask_enqueue(Item func);
+    js_microtask_enqueue(callback);
+    return make_js_undefined();
+}
+
+// process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
+extern "C" Item js_process_memoryUsage(void) {
+    Item result = js_new_object();
+    // approximate memory info
+#ifdef __APPLE__
+    struct task_basic_info info;
+    mach_msg_type_number_t size = TASK_BASIC_INFO_COUNT;
+    kern_return_t kr = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&info, &size);
+    int64_t rss = (kr == KERN_SUCCESS) ? (int64_t)info.resident_size : 0;
+#elif defined(__linux__)
+    int64_t rss = 0;
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        long pages = 0;
+        if (fscanf(f, "%*ld %ld", &pages) == 1)
+            rss = (int64_t)pages * sysconf(_SC_PAGESIZE);
+        fclose(f);
+    }
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    int64_t rss = 0;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        rss = (int64_t)pmc.WorkingSetSize;
+#else
+    int64_t rss = 0;
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("rss", 3))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapTotal", 9))},
+                    (Item){.item = i2it(rss)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("heapUsed", 8))},
+                    (Item){.item = i2it(rss / 2)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("external", 8))},
+                    (Item){.item = i2it(0)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("arrayBuffers", 12))},
+                    (Item){.item = i2it(0)});
+    return result;
+}
+
+// process.cpuUsage() — returns {user, system} in microseconds
+extern "C" Item js_process_cpuUsage(void) {
+    Item result = js_new_object();
+#ifndef _WIN32
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    int64_t user_us = (int64_t)usage.ru_utime.tv_sec * 1000000 + (int64_t)usage.ru_utime.tv_usec;
+    int64_t sys_us = (int64_t)usage.ru_stime.tv_sec * 1000000 + (int64_t)usage.ru_stime.tv_usec;
+#else
+    int64_t user_us = 0, sys_us = 0;
+    FILETIME create, exit_t, kernel, user_ft;
+    if (GetProcessTimes(GetCurrentProcess(), &create, &exit_t, &kernel, &user_ft)) {
+        ULARGE_INTEGER u, k;
+        u.LowPart = user_ft.dwLowDateTime; u.HighPart = user_ft.dwHighDateTime;
+        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
+        user_us = (int64_t)(u.QuadPart / 10); // 100ns → us
+        sys_us = (int64_t)(k.QuadPart / 10);
+    }
+#endif
+    js_property_set(result, (Item){.item = s2it(heap_create_name("user", 4))},
+                    (Item){.item = i2it(user_us)});
+    js_property_set(result, (Item){.item = s2it(heap_create_name("system", 6))},
+                    (Item){.item = i2it(sys_us)});
+    return result;
+}
+
+// process.umask([mask]) — get/set file mode creation mask
+extern "C" Item js_process_umask(Item mask_item) {
+#ifndef _WIN32
+    TypeId tid = get_type_id(mask_item);
+    if (tid == LMD_TYPE_INT) {
+        mode_t old = umask((mode_t)it2i(mask_item));
+        return (Item){.item = i2it((int64_t)old)};
+    }
+    // get current and restore
+    mode_t current = umask(0);
+    umask(current);
+    return (Item){.item = i2it((int64_t)current)};
+#else
+    return (Item){.item = i2it(0)};
+#endif
+}
+
+// build process.versions object
+static Item build_process_versions(void) {
+    Item versions = js_new_object();
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("node", 4))},
+                    (Item){.item = s2it(heap_create_name("20.0.0", 6))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("lambda", 6))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("v8", 2))},
+                    (Item){.item = s2it(heap_create_name("0.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("uv", 2))},
+                    (Item){.item = s2it(heap_create_name("1.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
+                    (Item){.item = s2it(heap_create_name("115", 3))});
+    return versions;
+}
+
+static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
+    Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+    Item fn = js_new_function(func_ptr, param_count);
+    js_property_set(ns, key, fn);
+}
+
+// ─── process.on(event, listener) ────────────────────────────────────────────
+// simple event emitter for process: supports 'exit', 'uncaughtException', 'beforeExit'
+#define MAX_PROCESS_LISTENERS 32
+static Item process_exit_listeners[MAX_PROCESS_LISTENERS] = {};
+static int process_exit_listener_count = 0;
+static Item process_uncaught_listeners[MAX_PROCESS_LISTENERS] = {};
+static int process_uncaught_listener_count = 0;
+
+extern "C" Item js_process_on(Item event_name, Item listener) {
+    if (get_type_id(event_name) != LMD_TYPE_STRING) return js_process_object;
+    if (get_type_id(listener) != LMD_TYPE_FUNC) return js_process_object;
+    String* ev = it2s(event_name);
+    if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+        if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
+            process_exit_listeners[process_exit_listener_count++] = listener;
+        }
+    } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+        if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
+            process_uncaught_listeners[process_uncaught_listener_count++] = listener;
+        }
+    }
+    // return process for chaining
+    return js_process_object;
+}
+
+extern "C" void js_process_emit_exit(int code) {
+    extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+    Item code_item = (Item){.item = i2it((int64_t)code)};
+    for (int i = 0; i < process_exit_listener_count; i++) {
+        js_call_function(process_exit_listeners[i], js_process_object, &code_item, 1);
+    }
+}
+
+extern "C" void js_process_reset_listeners(void) {
+    process_exit_listener_count = 0;
+    process_uncaught_listener_count = 0;
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
         heap_register_gc_root(&js_process_object.item);
-        // Set argv
+
+        // argv
         Item argv_key = (Item){.item = s2it(heap_create_name("argv", 4))};
         js_property_set(js_process_object, argv_key, js_get_process_argv());
+
+        // pid, ppid
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("pid", 3))},
+            (Item){.item = i2it((int64_t)getpid())});
+#ifndef _WIN32
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("ppid", 4))},
+            (Item){.item = i2it((int64_t)getppid())});
+#endif
+
+        // platform, arch, version
+#ifdef __APPLE__
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("darwin", 6))});
+#elif defined(__linux__)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("linux", 5))});
+#elif defined(_WIN32)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("platform", 8))},
+            (Item){.item = s2it(heap_create_name("win32", 5))});
+#endif
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("arch", 4))},
+            (Item){.item = s2it(heap_create_name("arm64", 5))});
+#elif defined(__x86_64__) || defined(_M_X64)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("arch", 4))},
+            (Item){.item = s2it(heap_create_name("x64", 3))});
+#endif
+
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("version", 7))},
+            (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
+
+        // methods: cwd, chdir, exit, uptime, hrtime.bigint
+        js_process_set_method(js_process_object, "cwd", (void*)js_process_cwd, 0);
+        js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
+        js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
+        js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
+        js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, 1);
+        js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
+        js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
+        js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
+        js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
+
+        // versions object
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("versions", 8))}, build_process_versions());
+
+        // title
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("title", 5))},
+            (Item){.item = s2it(heap_create_name("lambda", 6))});
+
+        // hrtime object with bigint() method
+        Item hrtime_obj = js_new_object();
+        js_process_set_method(hrtime_obj, "bigint", (void*)js_process_hrtime_bigint, 0);
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("hrtime", 6))}, hrtime_obj);
+
+        // env
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("env", 3))}, build_process_env());
+
+        // stdout, stderr, stdin
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stdout", 6))}, build_process_stdout());
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stderr", 6))}, build_process_stderr());
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("stdin", 5))}, build_process_stdin());
+
+        // exitCode — default 0
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("exitCode", 8))},
+            (Item){.item = i2it(0)});
     }
     return js_process_object;
+}
+
+// =============================================================================
+// setImmediate / clearImmediate
+// =============================================================================
+
+// setImmediate(callback) — schedule callback as a microtask (next tick)
+extern "C" Item js_setImmediate(Item callback) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    // use setTimeout with 0 delay for setImmediate semantics
+    extern Item js_setTimeout(Item cb, Item delay);
+    return js_setTimeout(callback, (Item){.item = i2it(0)});
+}
+
+// clearImmediate(id) — cancel a setImmediate
+extern "C" void js_clearImmediate(Item id) {
+    extern void js_clearTimeout(Item id);
+    js_clearTimeout(id);
+}
+
+// =============================================================================
+// structuredClone(value) — deep clone
+// =============================================================================
+
+static Item structured_clone_impl(Item value, int depth) {
+    if (depth > 100) return value; // prevent infinite recursion
+    TypeId tid = get_type_id(value);
+
+    // primitives: return as-is
+    if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+        tid == LMD_TYPE_BOOL || tid == LMD_TYPE_INT ||
+        tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_STRING) {
+        return value;
+    }
+
+    // arrays: deep clone each element
+    if (tid == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(value);
+        Item result = js_array_new((int)len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = js_array_get_int(value, i);
+            js_array_push(result, structured_clone_impl(elem, depth + 1));
+        }
+        return result;
+    }
+
+    // typed array: copy buffer
+    extern bool js_is_typed_array(Item item);
+    if (js_is_typed_array(value)) {
+        Map* m = value.map;
+        JsTypedArray* ta = (JsTypedArray*)m->data;
+        if (ta && ta->data && ta->byte_length > 0) {
+            extern Item js_typed_array_new(int element_type, int length);
+            Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
+            Map* cm = clone.map;
+            JsTypedArray* cta = (JsTypedArray*)cm->data;
+            if (cta && cta->data) {
+                memcpy(cta->data, ta->data, ta->byte_length);
+            }
+            return clone;
+        }
+        return value;
+    }
+
+    // maps/objects: clone properties
+    if (tid == LMD_TYPE_MAP) {
+        Item result = js_new_object();
+        Item keys = js_object_keys(value);
+        int64_t len = js_array_length(keys);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(keys, i);
+            Item val = js_property_get(value, key);
+            js_property_set(result, key, structured_clone_impl(val, depth + 1));
+        }
+        return result;
+    }
+
+    // functions can't be cloned
+    if (tid == LMD_TYPE_FUNC) {
+        return value;
+    }
+
+    return value;
+}
+
+extern "C" Item js_structuredClone(Item value) {
+    return structured_clone_impl(value, 0);
 }
 
 // =============================================================================
@@ -2072,6 +2554,10 @@ extern "C" Item js_object_create(Item proto) {
 // includes __class_name__, __get_*, __set_*, and function-valued entries from
 // the source instance, chained to the original __proto__ for instanceof support.
 
+// Forward declarations for %TypedArray% intrinsic (defined later in file)
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
+extern "C" Item js_get_typed_array_base();
+
 extern "C" Item js_get_prototype_of(Item object) {
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
@@ -2115,6 +2601,10 @@ extern "C" Item js_get_prototype_of(Item object) {
                 (n->len == 14 && strncmp(n->chars, "AggregateError", 14) == 0);
             if (is_native_error) {
                 return js_get_constructor((Item){.item = s2it(heap_create_name("Error", 5))});
+            }
+            // TypedArray constructors → [[Prototype]] = %TypedArray%
+            if (js_is_typed_array_ctor_name(n->chars, (int)n->len)) {
+                return js_get_typed_array_base();
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -2391,7 +2881,16 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
 
     // Convert name to string for comparison
-    Item name_str_item = js_to_string(name);
+    // v41: Symbol keys must be converted to __sym_N internal format, not human-readable string
+    Item name_str_item;
+    if (get_type_id(name) == LMD_TYPE_INT && it2i(name) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(name) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        name_str_item = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    } else {
+        name_str_item = js_to_string(name);
+    }
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
 
@@ -2452,7 +2951,29 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            // ES spec: All built-in constructor .prototype are non-writable
+            JsFuncProps* efn = (JsFuncProps*)obj.function;
+            bool is_builtin_ctor = false;
+            if (efn->name) {
+                const char* en = efn->name->chars;
+                int el = (int)efn->name->len;
+                is_builtin_ctor = (el == 5 && strncmp(en, "Error", 5) == 0) ||
+                    (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
+                    (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
+                    (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
+                    (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
+                    (el == 8 && strncmp(en, "URIError", 8) == 0) ||
+                    (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+                    (el == 3 && strncmp(en, "Map", 3) == 0) ||
+                    (el == 3 && strncmp(en, "Set", 3) == 0) ||
+                    (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
+                    (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+                    (el == 7 && strncmp(en, "Promise", 7) == 0) ||
+                    (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+                    (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+                    js_is_typed_array_ctor_name(en, el);
+            }
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
             return desc;
@@ -5039,7 +5560,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v18: handle function objects — prototype, name, length, and custom properties
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
-        Item k = js_to_string(key);
+        Item k;
+        // v41: Symbol keys → __sym_N format
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else {
+            k = js_to_string(key);
+        }
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
@@ -5614,8 +6144,8 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 // Forward declaration: check if an Item is a JS Symbol (encoded as negative int)
 static bool js_is_symbol_item(Item item);
 
-static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char* gap,
-                               int depth, Item holder, Item key,
+static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
+                               const char* gap, int depth, Item holder, Item key,
                                void** visited, int visited_count);
 static void js_stringify_escape_string(StrBuf* sb, const char* s, int len);
 
@@ -5653,22 +6183,15 @@ static void js_stringify_indent(StrBuf* sb, const char* gap, int depth) {
     }
 }
 
-static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char* gap,
-                               int depth, Item holder, Item key,
+// returns true if the value was serialized, false if it's undefined/function/symbol
+// (the caller handles the "skip" vs "null" difference for arrays vs objects)
+static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
+                               const char* gap, int depth, Item holder, Item key,
                                void** visited, int visited_count) {
-    // Apply replacer function if provided
-    if (get_type_id(replacer) == LMD_TYPE_FUNC || get_type_id(replacer) == LMD_TYPE_MAP) {
-        // check if it's a callable function
-        TypeId rt = get_type_id(replacer);
-        if (rt == LMD_TYPE_FUNC) {
-            Item args[2] = {key, value};
-            value = js_call_function(replacer, holder, args, 2);
-        }
-    }
-
-    // Handle toJSON method
+    // ES spec SerializeJSONProperty steps:
+    // Step 2: toJSON first
     TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_MAP) {
+    if (vtype == LMD_TYPE_MAP || vtype == LMD_TYPE_ARRAY) {
         Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
         Item toJSON_fn = js_property_access(value, toJSON_name);
         if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
@@ -5678,7 +6201,14 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         }
     }
 
-    // Unwrap Boolean/Number/String wrapper objects
+    // Step 3: Apply replacer function
+    if (get_type_id(replacer) == LMD_TYPE_FUNC) {
+        Item args[2] = {key, value};
+        value = js_call_function(replacer, holder, args, 2);
+        vtype = get_type_id(value);
+    }
+
+    // Step 4: Unwrap Boolean/Number/String wrapper objects
     if (vtype == LMD_TYPE_MAP) {
         bool cn_own = false;
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
@@ -5701,22 +6231,21 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         }
     }
 
-    // undefined, function, symbol → write "null" (in arrays, these become null)
+    // Step 5-8: undefined, function, symbol → return false (not serialized)
     if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
         || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
-        strbuf_append_str_n(sb, "null", 4);
-        return;
+        return false;
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
-        return;
+        return true;
     }
 
     // Boolean
     if (vtype == LMD_TYPE_BOOL) {
         if (it2b(value)) strbuf_append_str_n(sb, "true", 4);
         else strbuf_append_str_n(sb, "false", 5);
-        return;
+        return true;
     }
 
     // Number
@@ -5725,31 +6254,31 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         int64_t n = it2i(value);
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
         strbuf_append_str_n(sb, buf, len);
-        return;
+        return true;
     }
     if (vtype == LMD_TYPE_FLOAT) {
         double d = it2d(value);
         if (d != d || d == (1.0/0.0) || d == (-1.0/0.0)) {
             strbuf_append_str_n(sb, "null", 4); // NaN, Infinity → null
-            return;
+            return true;
         }
         // Negative zero → "0"
         if (d == 0.0) {
             strbuf_append_str_n(sb, "0", 1);
-            return;
+            return true;
         }
         char buf[64];
         int len = snprintf(buf, sizeof(buf), "%.17g", d);
         strbuf_append_str_n(sb, buf, len);
-        return;
+        return true;
     }
 
     // String
     if (vtype == LMD_TYPE_STRING) {
         String* s = it2s(value);
-        if (!s) { strbuf_append_str_n(sb, "null", 4); return; }
+        if (!s) { strbuf_append_str_n(sb, "null", 4); return true; }
         js_stringify_escape_string(sb, s->chars, (int)s->len);
-        return;
+        return true;
     }
 
     // Circular reference detection for arrays and objects
@@ -5760,12 +6289,12 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
                 Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
                 Item msg = (Item){.item = s2it(heap_create_name("Converting circular structure to JSON"))};
                 js_throw_value(js_new_error_with_name(tn, msg));
-                return;
+                return true;
             }
         }
         if (depth >= JSON_STRINGIFY_MAX_DEPTH) {
             strbuf_append_str_n(sb, "null", 4);
-            return;
+            return true;
         }
         // Push onto visited stack
         if (visited_count < JSON_STRINGIFY_MAX_DEPTH) {
@@ -5779,50 +6308,32 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
         int64_t len = js_array_length(value);
         if (len == 0) {
             strbuf_append_str_n(sb, "[]", 2);
-            return;
+            return true;
         }
         strbuf_append_char(sb, '[');
         for (int64_t i = 0; i < len; i++) {
             if (i > 0) strbuf_append_char(sb, ',');
             js_stringify_indent(sb, gap, depth + 1);
-            if (!gap || !gap[0]) {
-                // no extra space in compact mode
-            }
             Item idx_key = js_to_string((Item){.item = i2it((int)i)});
             Item elem = js_array_get(value, (Item){.item = i2it((int)i)});
-            // Check if after replacer, the value would be undefined/function
-            TypeId et = get_type_id(elem);
-            if (et == LMD_TYPE_UNDEFINED || et == LMD_TYPE_FUNC) {
-                // Still call replacer to see what it returns
-                if (get_type_id(replacer) == LMD_TYPE_FUNC) {
-                    Item args[2] = {idx_key, elem};
-                    Item replaced = js_call_function(replacer, value, args, 2);
-                    TypeId rrt = get_type_id(replaced);
-                    if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC) {
-                        strbuf_append_str_n(sb, "null", 4);
-                    } else {
-                        js_stringify_value(sb, elem, ItemNull, gap, depth + 1, value, idx_key, visited, visited_count);
-                    }
-                } else {
-                    strbuf_append_str_n(sb, "null", 4);
-                }
-            } else {
-                js_stringify_value(sb, elem, replacer, gap, depth + 1, value, idx_key, visited, visited_count);
+            // serialize element; if undefined/function/symbol, write "null" in array context
+            bool wrote = js_stringify_value(sb, elem, replacer, replacer_array, gap, depth + 1,
+                                            value, idx_key, visited, visited_count);
+            if (!wrote) {
+                strbuf_append_str_n(sb, "null", 4);
             }
         }
         js_stringify_indent(sb, gap, depth);
         strbuf_append_char(sb, ']');
-        return;
+        return true;
     }
 
     // Map (object)
     if (vtype == LMD_TYPE_MAP) {
         Item keys;
-        bool use_replacer_array = false;
-        // Check if replacer is an array (property whitelist)
-        if (get_type_id(replacer) == LMD_TYPE_ARRAY) {
-            keys = replacer;
-            use_replacer_array = true;
+        // Use replacer_array (PropertyList) if provided, otherwise own keys
+        if (get_type_id(replacer_array) == LMD_TYPE_ARRAY) {
+            keys = replacer_array;
         } else {
             keys = js_object_keys(value);
         }
@@ -5835,28 +6346,15 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
             Item k_str = js_to_string(k);
             Item v = js_property_access(value, k_str);
 
-            // v20: Apply replacer function BEFORE deciding to include key
-            Item replacer_for_recurse = use_replacer_array ? ItemNull : replacer;
-            if (get_type_id(replacer_for_recurse) == LMD_TYPE_FUNC) {
-                Item args[2] = {k_str, v};
-                v = js_call_function(replacer_for_recurse, value, args, 2);
+            // Use a temporary buffer to serialize the value
+            StrBuf* tmp = strbuf_new();
+            bool wrote = js_stringify_value(tmp, v, replacer, replacer_array, gap, depth + 1,
+                                            value, k_str, visited, visited_count);
+            if (!wrote) {
+                // undefined/function/symbol → skip this key in objects
+                strbuf_free(tmp);
+                continue;
             }
-
-            // Handle toJSON on the value
-            TypeId vt2 = get_type_id(v);
-            if (vt2 == LMD_TYPE_MAP) {
-                Item toJSON_name = (Item){.item = s2it(heap_create_name("toJSON", 6))};
-                Item toJSON_fn = js_property_access(v, toJSON_name);
-                if (get_type_id(toJSON_fn) == LMD_TYPE_FUNC) {
-                    Item tj_args[1] = {k_str};
-                    v = js_call_function(toJSON_fn, v, tj_args, 1);
-                }
-            }
-
-            // Skip undefined, functions, and symbols (they're omitted from objects)
-            TypeId vt = get_type_id(v);
-            if (vt == LMD_TYPE_UNDEFINED || vt == LMD_TYPE_FUNC || js_is_symbol_item(v)
-                || v.item == ITEM_JS_UNDEFINED) continue;
 
             if (!first) strbuf_append_char(sb, ',');
             first = false;
@@ -5866,12 +6364,12 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
             else strbuf_append_str_n(sb, "\"\"", 2);
             strbuf_append_char(sb, ':');
             if (gap && gap[0]) strbuf_append_char(sb, ' ');
-            // Don't apply replacer again in recursive call since we already did
-            js_stringify_value(sb, v, ItemNull, gap, depth + 1, value, k_str, visited, visited_count);
+            strbuf_append_str_n(sb, tmp->str, (int)tmp->length);
+            strbuf_free(tmp);
         }
         if (!first) js_stringify_indent(sb, gap, depth);
         strbuf_append_char(sb, '}');
-        return;
+        return true;
     }
 
     // Fallback: try toString
@@ -5879,6 +6377,7 @@ static void js_stringify_value(StrBuf* sb, Item value, Item replacer, const char
     String* ss = it2s(sval);
     if (ss) js_stringify_escape_string(sb, ss->chars, (int)ss->len);
     else strbuf_append_str_n(sb, "null", 4);
+    return true;
 }
 
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
@@ -5925,32 +6424,72 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
         }
     }
 
-    // Check if value would produce undefined (bare undefined/function/symbol at top level)
-    TypeId vtype = get_type_id(value);
-    if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
-        || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
-        // At top level, replacer can still transform
-        if (get_type_id(replacer) == LMD_TYPE_FUNC) {
-            Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
-            Item wrapper = js_new_object();
-            js_property_set(wrapper, empty_key, value);
-            Item args[2] = {empty_key, value};
-            Item replaced = js_call_function(replacer, wrapper, args, 2);
-            TypeId rrt = get_type_id(replaced);
-            if (rrt == LMD_TYPE_UNDEFINED || rrt == LMD_TYPE_FUNC
-                || js_is_symbol_item(replaced) || replaced.item == ITEM_JS_UNDEFINED)
-                return make_js_undefined();
-            value = replaced;
-        } else {
-            return make_js_undefined(); // JSON.stringify(undefined/function/symbol) returns undefined
+    // Build PropertyList from replacer array (with deduplication)
+    Item replacer_func = ItemNull;
+    Item replacer_array = ItemNull;
+
+    if (get_type_id(replacer) == LMD_TYPE_FUNC) {
+        replacer_func = replacer;
+    } else if (get_type_id(replacer) == LMD_TYPE_ARRAY) {
+        // ES spec step 4.b-f: Build PropertyList with deduplication
+        int64_t rlen = js_array_length(replacer);
+        Item prop_list = js_array_new(0);
+        for (int64_t i = 0; i < rlen; i++) {
+            Item v = js_array_get(replacer, (Item){.item = i2it((int)i)});
+            TypeId vt = get_type_id(v);
+            Item item = ItemNull;
+            if (vt == LMD_TYPE_STRING) {
+                item = v;
+            } else if (vt == LMD_TYPE_INT || vt == LMD_TYPE_INT64 || vt == LMD_TYPE_FLOAT) {
+                item = js_to_string(v);
+            } else if (vt == LMD_TYPE_MAP) {
+                // Check for String or Number wrapper objects
+                bool cn_own = false;
+                Item cn = js_map_get_fast_ext(v.map, "__class_name__", 14, &cn_own);
+                if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+                    String* cn_str = it2s(cn);
+                    if ((cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) ||
+                        (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)) {
+                        item = js_to_string(v);
+                    }
+                }
+            }
+            // Skip undefined/null entries and duplicates
+            if (item.item == ItemNull.item) continue;
+            // Check for duplicate
+            bool dup = false;
+            int64_t plen = js_array_length(prop_list);
+            String* item_str = it2s(item);
+            for (int64_t j = 0; j < plen; j++) {
+                Item existing = js_array_get(prop_list, (Item){.item = i2it((int)j)});
+                String* ex_str = it2s(existing);
+                if (item_str && ex_str && item_str->len == ex_str->len &&
+                    strncmp(item_str->chars, ex_str->chars, item_str->len) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                js_array_push(prop_list, item);
+            }
         }
+        replacer_array = prop_list;
     }
 
+    // Create wrapper object per spec step 9-10
     StrBuf* sb = strbuf_new();
     Item empty_key = (Item){.item = s2it(heap_create_name("", 0))};
     Item holder = js_new_object();
+    js_property_set(holder, empty_key, value);
     void* visited_stack[JSON_STRINGIFY_MAX_DEPTH];
-    js_stringify_value(sb, value, replacer, gap, 0, holder, empty_key, visited_stack, 0);
+
+    // Call SerializeJSONProperty — it handles toJSON, replacer, unwrap, and undefined check
+    bool wrote = js_stringify_value(sb, value, replacer_func, replacer_array, gap, 0,
+                                    holder, empty_key, visited_stack, 0);
+    if (!wrote) {
+        strbuf_free(sb);
+        return make_js_undefined();
+    }
 
     String* result = heap_strcpy(sb->str, (int)sb->length);
     strbuf_free(sb);
@@ -6037,6 +6576,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // Convert Symbol keys to __sym_N string format so marker checks work
+    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
@@ -6792,6 +7338,7 @@ struct JsCtor {
 // Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
 // Clearing the prototype field forces lazy re-creation of a fresh prototype
 // on next access, while keeping the constructor struct itself alive (pool-allocated).
+static void js_typed_array_base_reset(); // forward declaration
 extern "C" void js_reset_constructor_prototypes() {
     if (!js_ctor_cache_init) return;
     for (int i = 0; i < JS_CTOR_MAX; i++) {
@@ -6806,6 +7353,92 @@ extern "C" void js_reset_constructor_prototypes() {
     // The old globalThis holds constructors whose .prototype fields now point to stale
     // (freed or mutated) prototype objects.
     js_global_this_obj = (Item){0};
+    // Reset %TypedArray% intrinsic so it's re-created fresh
+    js_typed_array_base_reset();
+}
+
+// %TypedArray% intrinsic: shared base constructor for all TypedArray types.
+// Object.getPrototypeOf(Int8Array) === %TypedArray%
+// Object.getPrototypeOf(Int8Array.prototype) === %TypedArray%.prototype
+static Item js_typed_array_base = {0};
+static Item js_typed_array_base_proto = {0};
+
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
+    return (len == 9  && strncmp(name, "Int8Array", 9) == 0) ||
+           (len == 10 && strncmp(name, "Uint8Array", 10) == 0) ||
+           (len == 17 && strncmp(name, "Uint8ClampedArray", 17) == 0) ||
+           (len == 10 && strncmp(name, "Int16Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint16Array", 11) == 0) ||
+           (len == 10 && strncmp(name, "Int32Array", 10) == 0) ||
+           (len == 11 && strncmp(name, "Uint32Array", 11) == 0) ||
+           (len == 12 && strncmp(name, "Float32Array", 12) == 0) ||
+           (len == 12 && strncmp(name, "Float64Array", 12) == 0) ||
+           (len == 13 && strncmp(name, "BigInt64Array", 13) == 0) ||
+           (len == 14 && strncmp(name, "BigUint64Array", 14) == 0);
+}
+
+extern "C" Item js_get_typed_array_base_proto(); // forward declaration
+
+extern "C" Item js_get_typed_array_base() {
+    if (js_typed_array_base.item != 0) return js_typed_array_base;
+    // Create the %TypedArray% intrinsic function object
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = (void*)js_ctor_placeholder;
+    fn->param_count = 0;
+    fn->formal_length = -1;
+    fn->builtin_id = -2;
+    fn->name = heap_create_name("TypedArray", 10);
+    js_typed_array_base = (Item){.function = (Function*)fn};
+    heap_register_gc_root(&js_typed_array_base.item);
+    // Eagerly initialize %TypedArray%.prototype so it's available before any
+    // concrete TypedArray prototype chain is set up (e.g., Object.getPrototypeOf(Int8Array).prototype)
+    js_get_typed_array_base_proto();
+    return js_typed_array_base;
+}
+
+// Helper: create a named function stub (bypasses func_ptr cache).
+// For prototype method stubs that just need .name and .length properties.
+static Item js_create_func_stub(const char* name, int name_len, int param_count) {
+    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = param_count;
+    fn->formal_length = -1;
+    fn->builtin_id = 0;
+    fn->name = heap_create_name(name, name_len);
+    return (Item){.function = (Function*)fn};
+}
+
+// Defined in js_runtime.cpp — populates %TypedArray%.prototype with proper Array builtins
+extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor);
+
+extern "C" Item js_get_typed_array_base_proto() {
+    if (js_typed_array_base_proto.item != 0) return js_typed_array_base_proto;
+    js_typed_array_base_proto = js_new_object();
+    heap_register_gc_root(&js_typed_array_base_proto.item);
+    // Set __class_name__ for type identification
+    Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    Item cnv = (Item){.item = s2it(heap_create_name("TypedArray", 10))};
+    js_property_set(js_typed_array_base_proto, cnk, cnv);
+    // Set __is_proto__ marker
+    Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
+    js_property_set(js_typed_array_base_proto, ipk, (Item){.item = b2it(true)});
+    // Connect %TypedArray%.prototype to %TypedArray%
+    Item base = js_get_typed_array_base();
+    JsFunctionLayout* base_fn = (JsFunctionLayout*)base.function;
+    base_fn->prototype = js_typed_array_base_proto;
+    heap_register_gc_root(&base_fn->prototype.item);
+
+    // Populate methods on %TypedArray%.prototype and static methods on %TypedArray%
+    js_populate_typed_array_base_proto(js_typed_array_base_proto, base);
+
+    return js_typed_array_base_proto;
+}
+
+static void js_typed_array_base_reset() {
+    js_typed_array_base = (Item){0};
+    js_typed_array_base_proto = (Item){0};
 }
 
 // Forward declarations for functions in js_runtime.cpp used by constructor population
@@ -6844,9 +7477,17 @@ static void js_populate_number_ctor(Item fn_item) {
     // Fetch via js_property_get which triggers js_lookup_constructor_static
     const char* methods[] = {"isFinite", "isNaN", "isInteger", "isSafeInteger", "parseInt", "parseFloat"};
     int method_lens[] = {8, 5, 9, 13, 8, 10};
+    int method_pcs[] = {1, 1, 1, 1, 2, 1};
     for (int i = 0; i < 6; i++) {
         Item key = (Item){.item = s2it(heap_create_name(methods[i], method_lens[i]))};
-        Item method = js_property_get(fn_item, key);
+        Item method;
+        // ES spec: Number.parseInt === parseInt, Number.parseFloat === parseFloat
+        // Use the same global builtin function objects for identity equality
+        if (i >= 4) { // parseInt (i=4) and parseFloat (i=5)
+            method = js_get_global_builtin_fn(key, (Item){.item = i2it(method_pcs[i])});
+        } else {
+            method = js_property_get(fn_item, key);
+        }
         if (method.item != ItemNull.item && method.item != make_js_undefined().item) {
             js_func_init_property(fn_item, key, method);
             js_mark_non_enumerable(fn_item, key);
@@ -6907,7 +7548,7 @@ extern "C" Item js_get_constructor(Item name_item) {
 
     struct { const char* name; int len; int id; int pc; } ctors[] = {
         {"Object", 6, JS_CTOR_OBJECT, 1},
-        {"Array", 5, JS_CTOR_ARRAY, 0},
+        {"Array", 5, JS_CTOR_ARRAY, 1},
         {"Function", 8, JS_CTOR_FUNCTION, 1},
         {"String", 6, JS_CTOR_STRING, 1},
         {"Number", 6, JS_CTOR_NUMBER, 1},
@@ -6922,7 +7563,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
         {"AggregateError", 14, JS_CTOR_AGGREGATE_ERROR, 2},
         {"RegExp", 6, JS_CTOR_REGEXP, 2},
-        {"Date", 4, JS_CTOR_DATE, 1},
+        {"Date", 4, JS_CTOR_DATE, 7},
         {"Promise", 7, JS_CTOR_PROMISE, 1},
         {"Map", 3, JS_CTOR_MAP, 0},
         {"Set", 3, JS_CTOR_SET, 0},
@@ -6930,15 +7571,15 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
         {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
         {"DataView", 8, JS_CTOR_DATAVIEW, 1},
-        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 1},
-        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 1},
-        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 1},
-        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 1},
-        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 1},
-        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 1},
-        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 1},
-        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 1},
-        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 1},
+        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 3},
+        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 3},
+        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 3},
+        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 3},
+        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 3},
+        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 3},
+        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
+        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
+        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
         {NULL, 0, 0, 0}
     };
 

@@ -1352,6 +1352,7 @@ struct CaretState;
 struct CursorState;
 struct SelectionState;
 struct FocusState;
+struct BrowsingSession;  // Browsing session for web navigation
 
 // StateStore is now an alias for RadiantState
 // Use RadiantState directly for new code
@@ -1374,7 +1375,7 @@ typedef struct {
 #ifndef LAMBDA_HEADLESS
 #include "event.hpp"
 
-typedef struct {
+typedef struct UiContext {
     GLFWwindow *window;    // current window
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
@@ -1399,6 +1400,7 @@ typedef struct {
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     DomDocument* document;  // current document
     MouseState mouse_state; // current mouse state
+    struct BrowsingSession* browsing_session;  // web browsing session with history
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);

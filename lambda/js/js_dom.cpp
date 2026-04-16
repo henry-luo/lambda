@@ -1923,6 +1923,14 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_get_document_object_value();
     }
 
+    // contentDocument / contentWindow — for iframe elements, return the main
+    // document proxy so scripts like `iframe.contentDocument.createElement()`
+    // work without crashing.  Not a real sub-document, but sufficient for
+    // crash-safety tests and simple DOM manipulation.
+    if (strcmp(prop, "contentDocument") == 0 || strcmp(prop, "contentWindow") == 0) {
+        return js_get_document_object_value();
+    }
+
     // firstChild (any node type, not just elements)
     if (strcmp(prop, "firstChild") == 0) {
         DomNode* child = elem->first_child;
@@ -2204,6 +2212,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             parse_class_names(elem, class_str);
             // also update the native element attribute
             dom_element_set_attribute(elem, "class", class_str);
+            js_dom_mutation_notify();
             log_debug("js_dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -2220,6 +2229,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             id_copy[len] = '\0';
             elem->id = id_copy;
             dom_element_set_attribute(elem, "id", id_str);
+            js_dom_mutation_notify();
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -2322,6 +2332,21 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
 
     // generic property set via setAttribute
+    // Handle boolean values for HTML boolean attributes (multiple, disabled,
+    // checked, selected, hidden, etc.): true → setAttribute, false → removeAttribute
+    TypeId val_type = get_type_id(value);
+    if (val_type == LMD_TYPE_BOOL) {
+        // Check low byte for true/false (ITEM_TRUE/ITEM_FALSE macros lack
+        // outer parens, so direct == comparison has operator precedence issues)
+        bool is_true = (value.item & 0xFF) != 0;
+        if (is_true) {
+            dom_element_set_attribute(elem, prop, "");
+        } else {
+            dom_element_remove_attribute(elem, prop);
+        }
+        js_dom_mutation_notify();
+        return value;
+    }
     const char* val_str = fn_to_cstr(value);
     if (val_str) {
         dom_element_set_attribute(elem, prop, val_str);

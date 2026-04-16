@@ -23,6 +23,7 @@
 #include "../../lib/file.h"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
+#include "../npm/npm_resolve_module.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>
@@ -413,6 +414,7 @@ struct JsModuleConstEntry {
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
+    bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -2160,8 +2162,11 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
     // accessed at RUNTIME (after js_transpiler_destroy has freed mt->tp->name_pool).
     // Use context->name_pool (the persistent JS eval-context pool, created in
     // load_js_module and never freed) so the String* pointer remains valid.
-    NamePool* np = (mt->is_module && context && context->name_pool)
-                   ? context->name_pool : mt->tp->name_pool;
+    // Same applies to with-preamble mode (event handler compilation): the handler
+    // functions are invoked long after the transpiler is destroyed.
+    bool use_persistent_pool = (mt->is_module || mt->preamble_entries != nullptr)
+                               && context && context->name_pool;
+    NamePool* np = use_persistent_pool ? context->name_pool : mt->tp->name_pool;
     String* interned = name_pool_create_len(np, str, len);
     // Box directly: the interned String* is already a valid heap pointer
     // Use s2it(interned) as a compile-time constant Item value
@@ -8523,7 +8528,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return jm_emit_double_to_int(mt, fd);
             }
         }
-        // Math.ceil: int→int (identity), float→int via C ceil()
+        // Math.ceil: int→int (identity), float→ceil (preserves -0)
         if (MATH_MATCH("ceil", 4)) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
@@ -8531,7 +8536,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return i;
             } else {
                 MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
-                MIR_reg_t cd = jm_call_1(mt, "ceil", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                MIR_reg_t cd = jm_call_1(mt, "js_math_ceil_d", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
                 if (target_type == LMD_TYPE_FLOAT) return cd;
                 return jm_emit_double_to_int(mt, cd);
             }
@@ -8549,7 +8554,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return jm_emit_double_to_int(mt, rd);
             }
         }
-        // Math.trunc: int→int (identity), float→int via D2I
+        // Math.trunc: int→int (identity), float→trunc (preserves -0 as double)
         if (MATH_MATCH("trunc", 5)) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
@@ -8557,9 +8562,9 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return i;
             } else {
                 MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
-                MIR_reg_t i = jm_emit_double_to_int(mt, d);
-                if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
-                return i;
+                MIR_reg_t rd = jm_call_1(mt, "trunc", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, rd);
+                return rd;
             }
         }
         // Math.sign: returns i32, but we need target type
@@ -8830,6 +8835,32 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_val));
         }
         return jm_emit_null(mt);
+    }
+
+    // require(specifier) — CJS module loading
+    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* callee_id = (JsIdentifierNode*)call->callee;
+        if (callee_id->name && callee_id->name->len == 7 &&
+            memcmp(callee_id->name->chars, "require", 7) == 0 && arg_count == 1) {
+            JsAstNode* arg = call->arguments;
+            if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
+                JsLiteralNode* lit = (JsLiteralNode*)arg;
+                if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                    // resolve the module path at transpile time
+                    char resolved[512];
+                    jm_resolve_module_path(mt->filename ? mt->filename : ".",
+                        lit->value.string_value->chars, (int)lit->value.string_value->len,
+                        resolved, sizeof(resolved));
+                    MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
+                    return jm_call_1(mt, "js_require", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+                }
+            }
+            // dynamic require(expr) — resolve at runtime
+            MIR_reg_t spec = jm_transpile_box_item(mt, call->arguments);
+            return jm_call_1(mt, "js_require", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+        }
     }
 
     // super(args) — call parent constructor with current 'this'
@@ -10884,6 +10915,25 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_clearInterval",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
+            }
+            // setImmediate(callback) — schedule callback for next tick
+            if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
+                MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_setImmediate", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cb));
+            }
+            // clearImmediate(id) — cancel setImmediate
+            if (nl == 14 && strncmp(n, "clearImmediate", 14) == 0) {
+                MIR_reg_t id_val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                jm_call_void_1(mt, "js_clearImmediate",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
+                return jm_emit_null(mt);
+            }
+            // structuredClone(value) — deep clone
+            if (nl == 15 && strncmp(n, "structuredClone", 15) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_structuredClone", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             // v15: fetch(url [, options])
             if (nl == 5 && strncmp(n, "fetch", 5) == 0) {
@@ -13542,6 +13592,22 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
 
+            // Re-initialize try-finally state registers after resume.
+            // These are plain MIR registers (not env-backed), so they don't
+            // survive across yield. Without re-init, stale has_return_reg
+            // values cause premature return from the finally block.
+            for (int td = 0; td < mt->try_ctx_depth; td++) {
+                JsTryContext* tc = &mt->try_ctx_stack[td];
+                if (tc->has_finally) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
+            }
+
             // The yield expression evaluates to the 'input' parameter (sent value)
             return mt->gen_input_reg;
         }
@@ -13626,6 +13692,18 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             MIR_new_mem_op(mt->ctx, MIR_T_I64,
                                 e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
                     }
+                }
+            }
+            // Re-initialize try-finally state registers after async resume
+            for (int td = 0; td < mt->try_ctx_depth; td++) {
+                JsTryContext* tc = &mt->try_ctx_stack[td];
+                if (tc->has_finally) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                        MIR_new_int_op(mt->ctx, 0)));
                 }
             }
             // Resume value comes from gen_input register (the resolved value)
@@ -14294,6 +14372,16 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                 }
                             }
                         }
+                    } else if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                        // let/const without initializer: set to undefined (exits TDZ)
+                        MIR_reg_t undef_reg = jm_new_reg(mt, "undef_init", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, undef_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                        log_debug("modvar: let/const '%s' init to undefined (exit TDZ)", vname);
                     } else {
                         // var redeclaration without init: no-op (don't reset to undefined)
                         log_debug("modvar: skip re-init for '%s' (no initializer)", vname);
@@ -17292,6 +17380,25 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         if (has_finally) {
             jm_emit_label(mt, finally_label);
 
+            // In generators, push a minimal try context so that yield inside
+            // the finally body can re-initialize has_return_reg/return_val_reg
+            // on resume. The main try context was already popped before the
+            // finally block (so throws propagate outward), but the generator
+            // yield save/restore needs to know about these registers.
+            bool pushed_gen_finally_ctx = false;
+            if (mt->in_generator && mt->try_ctx_depth < 16) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = 0;
+                tc->finally_label = 0;
+                tc->end_label = 0;
+                tc->return_val_reg = return_val_reg;
+                tc->has_return_reg = has_return_reg;
+                tc->has_catch = false;
+                tc->has_finally = true;
+                tc->finally_body = NULL;
+                pushed_gen_finally_ctx = true;
+            }
+
             // Eval completion: save completion value before finally body.
             // Per spec, if finally completes normally, the completion value is
             // from the try/catch block, not the finally block.
@@ -17318,6 +17425,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
                     MIR_new_reg_op(mt->ctx, saved_cptn)));
             }
+
+            // Pop the generator finally context (pushed for yield re-init)
+            if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
             // After finally: check if we had a delayed return
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -18123,6 +18233,13 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // Emit any state labels that were not emitted during body transpilation.
+        // This prevents MIR_link crashes from dangling label references when
+        // jm_count_yields over-counts the number of actual yield resume points.
+        for (int si = mt->gen_yield_index + 1; si <= yield_count; si++) {
+            jm_emit_label(mt, mt->gen_state_labels[si]);
+        }
+
         // Implicit return at end of generator → done
         jm_emit_label(mt, mt->gen_done_label);
         {
@@ -18524,6 +18641,14 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Pop try context
             if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+
+            // Emit any state labels that were not emitted during body transpilation.
+            // This happens when jm_count_awaits over-counts (e.g. "await using" counts
+            // an await that the transpiler doesn't actually emit a resume point for).
+            // Without this, MIR_link crashes on dangling label references.
+            for (int si = mt->gen_yield_index + 1; si <= await_count; si++) {
+                jm_emit_label(mt, mt->gen_state_labels[si]);
+            }
 
             // Done label: implicit return → [undefined, -1] (fulfilled)
             jm_emit_label(mt, mt->gen_done_label);
@@ -19307,6 +19432,24 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_reg_t exc_ret = jm_emit_null(mt);
                     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
                 }
+                // Emit async catch/end labels for arrow-body async functions.
+                // The try context emits bt→async_catch_label during expression
+                // transpilation, so the label must exist in the function body.
+                if (fn->is_async && async_catch_label) {
+                    if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                    jm_emit_label(mt, async_catch_label);
+                    {
+                        MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                        MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
+                    }
+                    if (async_end_label) {
+                        jm_emit_label(mt, async_end_label);
+                    }
+                    mt->in_async = saved_in_async;
+                    goto finish_boxed;
+                }
                 if (fn->is_async && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
                 mt->in_async = saved_in_async;
                 goto finish_boxed;
@@ -19473,13 +19616,20 @@ static void jm_defer_mir_cleanup(MIR_context_t ctx) {
     }
 }
 
-static void jm_cleanup_deferred_mir() {
+void jm_cleanup_deferred_mir() {
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
         if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);
         if (module_mir_ast_pools[i]) pool_destroy(module_mir_ast_pools[i]);
     }
     module_mir_context_count = 0;
+}
+
+void* jm_get_last_deferred_mir_ctx() {
+    if (module_mir_context_count > 0) {
+        return module_mir_contexts[module_mir_context_count - 1];
+    }
+    return NULL;
 }
 
 // Finish and remove the most recently deferred MIR context.
@@ -19512,15 +19662,68 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
     } else if (spec_len >= 3 && specifier[0] == '.' && specifier[1] == '.' && specifier[2] == '/') {
         // Parent: ../utils.js
         snprintf(out, out_size, "%.*s%.*s", dir_len, base_file, spec_len, specifier);
+    } else if (spec_len >= 1 && specifier[0] == '/') {
+        // Absolute path
+        snprintf(out, out_size, "%.*s", spec_len, specifier);
     } else {
-        // Absolute or bare — use as-is
+        // Bare specifier — try npm_resolve_module for node_modules lookup
+        char spec_buf[512];
+        snprintf(spec_buf, sizeof(spec_buf), "%.*s", spec_len, specifier);
+
+        // skip node: builtins (handled by js_module_get)
+        bool has_node_prefix = (spec_len >= 5 && strncmp(specifier, "node:", 5) == 0);
+
+        // skip known built-in module names (prefer engine built-ins over npm polyfills)
+        static const char* builtin_names[] = {
+            "fs", "child_process", "path", "os", "url", "util",
+            "process", "querystring", "events", "buffer",
+            "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
+            "string_decoder", "assert", "timers", "console", NULL
+        };
+        bool is_builtin = has_node_prefix;
+        if (!is_builtin) {
+            for (int i = 0; builtin_names[i]; i++) {
+                if (strcmp(spec_buf, builtin_names[i]) == 0) {
+                    is_builtin = true;
+                    break;
+                }
+            }
+        }
+
+        if (!is_builtin) {
+            // get the directory of the importing file
+            char from_dir[512];
+            if (dir_len > 0) {
+                snprintf(from_dir, sizeof(from_dir), "%.*s", dir_len - 1, base_file); // strip trailing /
+            } else {
+                from_dir[0] = '.'; from_dir[1] = '\0';
+            }
+
+            const char* conditions[] = { "lambda", "node", "import", "default" };
+            NpmModuleResolution res = npm_resolve_module(spec_buf, from_dir, conditions, 4);
+            if (res.found && res.resolved_path) {
+                snprintf(out, out_size, "%s", res.resolved_path);
+                npm_module_resolution_free(&res);
+                return; // already fully resolved with extension
+            }
+            npm_module_resolution_free(&res);
+        }
+
+        // fallback: use as-is (will be checked as builtin by js_module_get)
         snprintf(out, out_size, "%.*s", spec_len, specifier);
     }
 
-    // If doesn't end in .js, append .js
+    // If doesn't end in a known JS extension, try adding .js
+    // Recognized extensions: .js, .mjs, .cjs, .json, .ls
     int len = (int)strlen(out);
-    if (len < 3 || strcmp(out + len - 3, ".js") != 0) {
-        if (len + 3 < out_size) {
+    bool has_node_prefix = (len >= 5 && strncmp(out, "node:", 5) == 0);
+    if (!has_node_prefix) {
+        bool has_ext = (len >= 3 && strcmp(out + len - 3, ".js") == 0) ||
+                       (len >= 4 && strcmp(out + len - 4, ".mjs") == 0) ||
+                       (len >= 4 && strcmp(out + len - 4, ".cjs") == 0) ||
+                       (len >= 5 && strcmp(out + len - 5, ".json") == 0) ||
+                       (len >= 3 && strcmp(out + len - 3, ".ls") == 0);
+        if (!has_ext && len + 3 < out_size) {
             strcat(out, ".js");
         }
     }
@@ -20981,6 +21184,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 snprintf(mce.name, sizeof(mce.name), "%s", e->name);
                 mce.const_type = MCONST_MODVAR;
                 mce.int_val = mt->module_var_count++;
+                mce.is_implicit_global = true;
                 hashmap_set(mt->module_consts, &mce);
                 log_info("js-mir: implicit global '%s' → module_var[%d]", mce.name, (int)mce.int_val);
             }
@@ -21894,6 +22098,28 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, tdz_val));
+            }
+        }
+    }
+
+    // Initialize declared var module vars to undefined (not implicit globals,
+    // and not preamble-inherited entries from outer scope e.g. eval)
+    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
+    if (mt->module_consts) {
+        size_t var_iter = 0; void* var_item;
+        while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
+            if (mce->const_type == MCONST_MODVAR &&
+                mce->var_kind == JS_VAR_VAR && !mce->is_implicit_global &&
+                (int)mce->int_val >= preamble_var_limit) {
+                MIR_reg_t undef_val = jm_new_reg(mt, "var_init", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, undef_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
             }
         }
     }
@@ -24533,6 +24759,16 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         g_jm_preamble_out->tp_name_pool = tp->name_pool;
         tp->ast_pool = NULL;  // prevent js_transpiler_destroy from freeing these
         tp->name_pool = NULL;
+    } else if (reusing_context) {
+        // Hot-reload batch mode: defer MIR context destruction.
+        // The heap persists across tests, so function objects on the heap
+        // may still reference code pages in this MIR context. Destroying
+        // the context now would leave dangling func_ptr pointers → SIGBUS.
+        // NOTE: We intentionally do NOT keep transpiler pools alive here
+        // to limit memory growth. If a stale function is called and its
+        // code references freed pool strings, the SIGSEGV/SIGBUS handler
+        // catches it and the batch runner recovers gracefully.
+        jm_defer_mir_cleanup(ctx);
     } else {
         MIR_finish(ctx);
     }
@@ -24541,12 +24777,19 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // each heap allocates ~12MB (data zone + tenured zone + bump block), so
     // leaking one per document causes massive RSS growth in batch mode.
     // caller must call runtime_reset_heap() after inspecting the result.
-    if (!reusing_context && !g_jm_preamble_out) {
+    // In preamble mode, also stash the heap so the caller can retain it
+    // for interactive event handler compilation (needs heap for reusing_context).
+    if (!reusing_context) {
         runtime->heap = js_context.heap;
         runtime->nursery = js_context.nursery;
+        runtime->name_pool = js_context.name_pool;
     }
 
-    jm_cleanup_deferred_mir();
+    // In hot-reload batch mode, skip deferred MIR cleanup — accumulated contexts
+    // must persist until batch end (heap objects may reference their code pages).
+    if (!reusing_context) {
+        jm_cleanup_deferred_mir();
+    }
     js_transpiler_destroy(tp);
 
     log_debug("js-mir: transpilation completed");
@@ -24646,5 +24889,113 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
 
     Item ns = transpile_js_module_to_mir(runtime, source, js_path);
     mem_free(source);
+    return ns;
+}
+
+// ============================================================================
+// CJS require() — runtime function called from JIT code
+// ============================================================================
+
+static bool js_is_cjs_file(const char* path) {
+    size_t len = strlen(path);
+    if (len >= 4 && strcmp(path + len - 4, ".cjs") == 0) return true;
+    if (len >= 4 && strcmp(path + len - 4, ".mjs") == 0) return false;
+    // For .js files loaded via require(), treat as CJS (Node.js behavior)
+    return true;
+}
+
+static char* js_wrap_cjs_source(const char* source, const char* filename) {
+    // Extract __dirname from filename
+    const char* last_slash = strrchr(filename, '/');
+    int dir_len = last_slash ? (int)(last_slash - filename) : 1;
+    const char* dir_str = last_slash ? filename : ".";
+
+    // Wrap:  var __cjs_module__ = {exports: {}};
+    //        var exports = __cjs_module__.exports;
+    //        var module = __cjs_module__;
+    //        var __filename = "..."; var __dirname = "...";
+    //        <original source>
+    //        export default __cjs_module__.exports;
+    const char* prefix_fmt =
+        "var __cjs_module__ = {exports: {}};\n"
+        "var exports = __cjs_module__.exports;\n"
+        "var module = __cjs_module__;\n"
+        "var __filename = \"%s\";\n"
+        "var __dirname = \"%.*s\";\n";
+    const char* suffix = "\nexport default __cjs_module__.exports;\n";
+
+    size_t src_len = strlen(source);
+    size_t prefix_size = strlen(prefix_fmt) + strlen(filename) + dir_len + 64;
+    size_t total = prefix_size + src_len + strlen(suffix) + 1;
+
+    char* wrapped = (char*)mem_alloc(total, MEM_CAT_JS_RUNTIME);
+    int offset = snprintf(wrapped, total, prefix_fmt, filename, dir_len, dir_str);
+    memcpy(wrapped + offset, source, src_len);
+    offset += (int)src_len;
+    strcpy(wrapped + offset, suffix);
+    return wrapped;
+}
+
+extern "C" Item js_require(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) {
+        log_error("require: specifier is not a string");
+        return ItemNull;
+    }
+    String* spec = it2s(specifier);
+    if (!spec || spec->len == 0) return ItemNull;
+
+    // Check if already loaded in module cache
+    Item existing = js_module_get(specifier);
+    if (get_type_id(existing) != LMD_TYPE_NULL) {
+        // For CJS modules, the cached value is the namespace.
+        // Extract the default export (which is module.exports)
+        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
+        Item def_val = js_property_get(existing, def_key);
+        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        return existing;
+    }
+
+    char path_buf[512];
+    snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
+
+    // Read the source file
+    char* source = read_text_file(path_buf);
+    if (!source) {
+        log_error("require: cannot read module '%s'", path_buf);
+        return ItemNull;
+    }
+
+    Runtime* runtime = js_source_runtime;
+    if (!runtime) {
+        log_error("require: no runtime available");
+        mem_free(source);
+        return ItemNull;
+    }
+
+    Item ns;
+    if (js_is_cjs_file(path_buf)) {
+        // Wrap CJS source with module/exports globals
+        char* wrapped = js_wrap_cjs_source(source, path_buf);
+        mem_free(source);
+        ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        mem_free(wrapped);
+    } else {
+        // ESM — transpile as-is
+        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        mem_free(source);
+    }
+
+    if (get_type_id(ns) == LMD_TYPE_NULL) {
+        log_error("require: failed to compile module '%s'", path_buf);
+        return ItemNull;
+    }
+
+    // For CJS, extract the default export (module.exports)
+    if (js_is_cjs_file(path_buf)) {
+        Item def_key = (Item){.item = s2it(heap_create_name("default"))};
+        Item def_val = js_property_get(ns, def_key);
+        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+    }
+
     return ns;
 }

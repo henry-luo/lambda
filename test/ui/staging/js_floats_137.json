@@ -1,0 +1,18 @@
+{
+  "name": "floats-137: onclick stops animation and sets test class",
+  "html": "test/layout/data/css2.1/html4/floats-137.htm",
+  "description": "Page starts with a toggle animation (body.className alternates between 'a' and 'b' every 500ms). Clicking the Examine button calls clearTimeout(timer) and sets body.className='test', freezing the display.",
+  "events": [
+    {"type": "log", "message": "=== floats-137: stop animation on click ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Click the Examine button to stop animation"},
+    {"type": "click", "target": {"selector": "button"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 2: Verify body class is now 'test' (animation stopped)"},
+    {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "class", "equals": "test", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== floats-137 complete ==="}
+  ]
+}

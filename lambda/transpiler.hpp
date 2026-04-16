@@ -129,6 +129,7 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
+void* find_func_prefix(MIR_context_t ctx, const char *prefix);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
 void register_dynamic_import(const char *name, void *addr);
@@ -165,6 +166,7 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
 void preamble_state_destroy(JsPreambleState* state);
+void jm_cleanup_deferred_mir();
 
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).

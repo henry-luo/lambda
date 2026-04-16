@@ -87,6 +87,9 @@ void     rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
 void     rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry);
 void     rdt_path_free(RdtPath* p);
 
+// Deep-copy a path (entries array is duplicated).
+RdtPath* rdt_path_clone(const RdtPath* src);
+
 // ---------------------------------------------------------------------------
 // Fill
 // ---------------------------------------------------------------------------

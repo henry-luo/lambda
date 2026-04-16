@@ -300,6 +300,13 @@ void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
 Item js_reflect_construct(Item target, Item args_array, Item new_target);
+Item js_reflect_apply(Item target, Item this_arg, Item args_array);
+Item js_reflect_define_property(Item obj, Item key, Item desc);
+Item js_reflect_delete_property(Item obj, Item key);
+Item js_reflect_own_keys(Item obj);
+Item js_reflect_prevent_extensions(Item obj);
+Item js_reflect_set(Item obj, Item key, Item value);
+Item js_reflect_set_prototype_of(Item obj, Item proto);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -616,6 +623,9 @@ Item js_setTimeout(Item callback, Item delay);         // returns timer id
 Item js_setInterval(Item callback, Item delay);        // returns timer id
 void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
+Item js_setImmediate(Item callback);                   // schedule for next tick
+void js_clearImmediate(Item id);
+Item js_structuredClone(Item value);                   // deep clone
 
 /**
  * Drain the event loop: process all microtasks, then fire due timers.
@@ -651,6 +661,12 @@ Item js_module_get(Item specifier);
  * Create a module namespace object from an export map.
  */
 Item js_module_namespace_create(Item exports_map);
+
+/**
+ * CJS require() — load and execute a module, return its exports.
+ * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
+ */
+Item js_require(Item specifier);
 
 // Native SHA hash functions (js_crypto.cpp)
 Item js_native_sha256(Item data, Item offset, Item length);

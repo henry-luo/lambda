@@ -1,0 +1,21 @@
+{
+  "name": "outline-no-relayout-001: onclick changes outline-width via script",
+  "html": "test/layout/data/css2.1/html4/outline-no-relayout-001.htm",
+  "description": "Clicking the Change Width button calls changeWidth() which sets #div1 outline-width to 30px. The outline should grow but no other content should reflow.",
+  "events": [
+    {"type": "log", "message": "=== outline-no-relayout-001: change outline-width ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Verify initial outline-width of #div1 is 10px"},
+    {"type": "assert_style", "target": {"selector": "#div1"}, "property": "outline-width", "equals": "10px"},
+
+    {"type": "log", "message": "Step 2: Click the Change Width button"},
+    {"type": "click", "target": {"selector": "button"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify #div1 outline-width changed to 30px"},
+    {"type": "assert_style", "target": {"selector": "#div1"}, "property": "outline-width", "equals": "30px", "assert_timeout": 500},
+
+    {"type": "log", "message": "=== outline-no-relayout-001 complete ==="}
+  ]
+}

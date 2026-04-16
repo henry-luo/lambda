@@ -2,6 +2,8 @@
 // Network download implementation using libcurl
 
 #include "network_downloader.h"
+#include "network_resource_manager.h"
+#include "cookie_jar.h"
 #include "enhanced_file_cache.h"
 #include "../../lib/log.h"
 #include "../../lib/file_utils.h"
@@ -65,9 +67,20 @@ typedef struct {
     size_t size;
 } HttpResponse;
 
+// Maximum single resource size (100 MB) — prevents unbounded memory growth
+#define NETWORK_MAX_RESOURCE_SIZE (100 * 1024 * 1024)
+
 // Callback for curl to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
+    
+    // enforce maximum resource size
+    if (response->size + total_size > NETWORK_MAX_RESOURCE_SIZE) {
+        log_error("network: resource exceeds maximum size (%d MB), aborting download",
+                  NETWORK_MAX_RESOURCE_SIZE / (1024 * 1024));
+        return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
+    }
+    
     char* new_data = (char*)mem_realloc(response->data, response->size + total_size + 1, MEM_CAT_NETWORK);
     
     if (!new_data) {
@@ -81,6 +94,34 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
     response->data[response->size] = '\0';
     
     return total_size;
+}
+
+// Context for header callback (captures Set-Cookie headers for cookie jar)
+typedef struct {
+    CookieJar* jar;
+    const char* request_url;
+} HeaderCallbackCtx;
+
+// Callback for curl to receive response headers — captures Set-Cookie
+static size_t header_callback(char* buffer, size_t size, size_t nitems, void* userdata) {
+    size_t total = size * nitems;
+    HeaderCallbackCtx* ctx = (HeaderCallbackCtx*)userdata;
+    if (!ctx || !ctx->jar) return total;
+
+    // check for "Set-Cookie:" prefix (case-insensitive)
+    if (total > 12 && strncasecmp(buffer, "Set-Cookie:", 11) == 0) {
+        // make null-terminated copy (strip trailing \r\n)
+        size_t len = total;
+        while (len > 0 && (buffer[len - 1] == '\r' || buffer[len - 1] == '\n'))
+            len--;
+        char* header_str = (char*)mem_alloc(len + 1, MEM_CAT_NETWORK);
+        memcpy(header_str, buffer, len);
+        header_str[len] = '\0';
+
+        cookie_jar_store(ctx->jar, ctx->request_url, header_str);
+        mem_free(header_str);
+    }
+    return total;
 }
 
 // Initialize curl (one-time setup)
@@ -171,6 +212,33 @@ bool network_download_resource(NetworkResource* res) {
         curl_easy_setopt(curl, CURLOPT_SHARE, shared_handle);
     }
     
+    // Phase 4: Cookie integration
+    struct curl_slist* custom_headers = NULL;
+    HeaderCallbackCtx header_ctx = {NULL, NULL};
+    CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
+    
+    if (jar) {
+        // inject Cookie header from jar
+        bool is_secure = (strncasecmp(res->url, "https://", 8) == 0);
+        char* cookie_value = cookie_jar_build_request_header(jar, res->url, is_secure);
+        if (cookie_value) {
+            // build "Cookie: name=val; name2=val2" header
+            size_t hdr_len = strlen(cookie_value) + 9;  // "Cookie: " + val + nul
+            char* cookie_hdr = (char*)mem_alloc(hdr_len, MEM_CAT_NETWORK);
+            snprintf(cookie_hdr, hdr_len, "Cookie: %s", cookie_value);
+            custom_headers = curl_slist_append(custom_headers, cookie_hdr);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, custom_headers);
+            mem_free(cookie_hdr);
+            mem_free(cookie_value);
+        }
+
+        // set up header callback to capture Set-Cookie responses
+        header_ctx.jar = jar;
+        header_ctx.request_url = res->url;
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_ctx);
+    }
+    
     // Perform the download
     log_debug("network: downloading %s (timeout: %dms)", res->url, timeout_ms);
     curl_res = curl_easy_perform(curl);
@@ -178,12 +246,45 @@ bool network_download_resource(NetworkResource* res) {
     // Check for curl errors
     if (curl_res != CURLE_OK) {
         const char* error_str = curl_easy_strerror(curl_res);
-        log_error("network: download failed for %s: %s", res->url, error_str);
+        
+        // Provide specific error messages for common failure modes
+        char error_msg[256];
+        switch (curl_res) {
+            case CURLE_SSL_CONNECT_ERROR:
+            case CURLE_SSL_CERTPROBLEM:
+            case CURLE_SSL_CIPHER:
+            case CURLE_PEER_FAILED_VERIFICATION:
+            case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+                snprintf(error_msg, sizeof(error_msg), "SSL certificate error: %s", error_str);
+                log_error("network: SSL/TLS certificate error for %s: %s", res->url, error_str);
+                break;
+            case CURLE_TOO_MANY_REDIRECTS:
+                snprintf(error_msg, sizeof(error_msg), "Redirect loop (max 5 redirects exceeded)");
+                log_error("network: redirect loop detected for %s", res->url);
+                break;
+            case CURLE_OPERATION_TIMEDOUT:
+                snprintf(error_msg, sizeof(error_msg), "Request timed out");
+                log_error("network: request timed out for %s", res->url);
+                break;
+            case CURLE_COULDNT_RESOLVE_HOST:
+                snprintf(error_msg, sizeof(error_msg), "Could not resolve host");
+                log_error("network: could not resolve host for %s", res->url);
+                break;
+            case CURLE_COULDNT_CONNECT:
+                snprintf(error_msg, sizeof(error_msg), "Connection refused");
+                log_error("network: connection refused for %s", res->url);
+                break;
+            default:
+                snprintf(error_msg, sizeof(error_msg), "%s", error_str);
+                log_error("network: download failed for %s: %s", res->url, error_str);
+                break;
+        }
         
         if (res->error_message) mem_free(res->error_message);
-        res->error_message = mem_strdup(error_str, MEM_CAT_NETWORK);
+        res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
         mem_free(response.data);
+        if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -203,6 +304,7 @@ bool network_download_resource(NetworkResource* res) {
         res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
         mem_free(response.data);
+        if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -244,6 +346,7 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     mem_free(response.data);
+    if (custom_headers) curl_slist_free_all(custom_headers);
     curl_easy_cleanup(curl);
     
     return true;

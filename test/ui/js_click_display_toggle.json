@@ -1,0 +1,25 @@
+{
+  "name": "JS onclick: display toggle (show/hide via className)",
+  "html": "test/ui/js_click_display_toggle.html",
+  "description": "Tests onclick handler that toggles display:none via className. Verifies element becomes invisible/visible with correct relayout.",
+  "events": [
+    {"type": "log", "message": "=== js_click_display_toggle: show/hide panel ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify panel is initially visible"},
+    {"type": "assert_visible", "target": {"selector": "#panel"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#indicator"}, "equals": "Panel is visible"},
+
+    {"type": "log", "message": "Step 2: Click toggle — panel should hide"},
+    {"type": "click", "target": {"selector": "#btn-toggle"}},
+    {"type": "assert_attribute", "target": {"selector": "#panel"}, "attribute": "class", "equals": "hidden", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#indicator"}, "equals": "Panel is hidden"},
+
+    {"type": "log", "message": "Step 3: Click toggle again — panel should show"},
+    {"type": "click", "target": {"selector": "#btn-toggle"}},
+    {"type": "assert_attribute", "target": {"selector": "#panel"}, "attribute": "class", "equals": "visible", "assert_timeout": 500},
+    {"type": "assert_text", "target": {"selector": "#indicator"}, "equals": "Panel is visible"},
+
+    {"type": "log", "message": "=== js_click_display_toggle complete ==="}
+  ]
+}

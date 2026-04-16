@@ -1,0 +1,21 @@
+ok true: pass
+ok 1: pass
+equal 1,1: pass
+equal str 1, num 1: pass
+notEqual 1,2: pass
+strictEqual 1,1: pass
+notStrictEqual 1,str1: pass
+deepStrictEqual obj: pass
+deepStrictEqual arr: pass
+notDeepStrictEqual: pass
+deepEqual: pass
+notDeepEqual: pass
+throws: pass
+doesNotThrow: pass
+ifError null: pass
+ifError undefined: pass
+match: pass
+doesNotMatch: pass
+fail: caught
+assert(true): pass
+assert(false): caught

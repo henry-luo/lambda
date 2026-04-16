@@ -12,6 +12,7 @@
 
 #include "view.hpp"
 #include "rdt_vector.hpp"
+#include "display_list.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
 
@@ -48,6 +49,7 @@ struct SvgRenderContext {
     Pool* pool;                  // memory pool
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     RdtVector* vec;              // target vector renderer for direct drawing
+    DisplayList* dl;             // display list for deferred rendering (Phase 1, may be nullptr)
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
     
     // pixel ratio for text sizing - text font sizes need to be divided by this
@@ -114,7 +116,8 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       float viewport_width, float viewport_height,
                       Pool* pool, float pixel_ratio = 1.0f,
                       FontContext* font_ctx = nullptr,
-                      const RdtMatrix* base_transform = nullptr);
+                      const RdtMatrix* base_transform = nullptr,
+                      DisplayList* dl = nullptr);
 
 /**
  * Render inline SVG element in document context

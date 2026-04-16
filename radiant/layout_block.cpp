@@ -3904,21 +3904,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
-    // CSS 2.2 9.5.1: Float positioning relative to preceding content
-    // When a float appears after inline content on the current line, it must be
-    // positioned below the current line. The preceding inline content has already
-    // been committed to the current line and cannot reflow around the float.
-    // Placing the float at the current line's Y would cause overlap.
     bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
 
+    // When a float appears after inline content on the current line (is_line_start=false),
+    // offset its Y by one line height so it doesn't overlap the current line's content.
+    // Ideally, CSS 2.1 §9.5.1 says "the outer top of the floated box is aligned with
+    // the top of the current line box", but our engine commits inline content before
+    // processing floats and can't reflow text around the float. This offset compensates
+    // by placing the float below the current line, which matches more tests in practice.
     if (is_float && !pa_line->is_line_start) {
-        // Float appears after inline content - position below current line
         float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
         block->y = pa_block->advance_y + line_height;
-        log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
-                  block->y, pa_block->advance_y, line_height);
-    } else if (is_float) {
-        log_debug("%s Float positioned at line start: y=%.1f", block->source_loc(), block->y);
+        log_debug("%s Float after inline content: y=%.1f (advance_y=%.1f + line_height=%.1f)",
+                  block->source_loc(), block->y, pa_block->advance_y, line_height);
     }
 
     log_debug("%s block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d", block->source_loc(),
@@ -5994,6 +5992,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     effective_left = lycon->line.has_float_intrusion ?
                         lycon->line.effective_left : lycon->line.left;
                     block->x = effective_left;
+                    // line_break→line_reset clears start_view; set it to
+                    // this inline-block so text-align applies to the new line.
+                    if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —
                     // push below the float to find room
@@ -6152,10 +6153,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // Their height is tracked separately and used in a second pass to
                     // expand the line box if needed.
                     lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
+                    lycon->line.max_top_height = max(lycon->line.max_top_height, block_flow_height);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
                     // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
                     lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
+                    lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, block_flow_height);
                 }
                 else {
                     // For other vertical-align values (sub, super, middle, etc.)
@@ -6874,7 +6877,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         // apply CSS relative/sticky positioning after normal layout
-        if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
+        // CSS 2.1 §9.4.3: For inline-blocks, relative positioning is deferred to
+        // view_vertical_align() because the second-pass vertical alignment overwrites
+        // y. Applying offsets here would be lost when view_vertical_align sets y.
+        if (block->position && block->position->position == CSS_VALUE_RELATIVE
+            && block->view_type != RDT_VIEW_INLINE_BLOCK) {
             log_debug("%s Applying relative positioning", elmt->source_loc());
             layout_relative_positioned(lycon, block);
         } else if (block->position && block->position->position == CSS_VALUE_STICKY) {

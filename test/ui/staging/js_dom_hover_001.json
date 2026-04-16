@@ -1,0 +1,24 @@
+{
+  "name": "dom-hover-001: mouseover removes element via setTimeout",
+  "html": "test/layout/data/css2.1/html4/dom-hover-001.htm",
+  "description": "Hovering #target triggers onmouseover which calls setTimeout(remove, 1000). After 1s, #target is removed via removeChild. The remaining #green div should be green (not red).",
+  "events": [
+    {"type": "log", "message": "=== dom-hover-001: mouseover removes element ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Verify #target exists initially"},
+    {"type": "assert_count", "target": {"selector": "#target"}, "count": 1},
+
+    {"type": "log", "message": "Step 2: Hover over #target to trigger onmouseover"},
+    {"type": "mouse_move", "target": {"selector": "#target"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Wait for setTimeout(remove, 1000) to fire — #target should disappear"},
+    {"type": "assert_count", "target": {"selector": "#target"}, "count": 0, "assert_timeout": 2000},
+
+    {"type": "log", "message": "Step 4: Verify #green div still exists"},
+    {"type": "assert_count", "target": {"selector": "#green"}, "count": 1},
+
+    {"type": "log", "message": "=== dom-hover-001 complete ==="}
+  ]
+}

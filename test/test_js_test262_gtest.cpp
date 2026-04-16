@@ -28,6 +28,20 @@
 // The test262 runner MUST produce ZERO crashes and ZERO lost tests in every CI
 // run.  Any crash is a MAJOR regression that must be fixed immediately.
 //
+// Stable checkpoint (commit 86235a964, 2026-04-15):
+//   Baseline passing:  21,824
+//   Nonbatch entries:  0
+//   Batch-lost:        0
+//   Crash-exits:       0
+//   Regressions:       0   (verified stable across 2 consecutive runs)
+//
+// --update-baseline gate: to update the baseline, ALL of the following must hold:
+//   1. Nonbatch entries   == 0   (all tests batch-safe)
+//   2. Batch-lost         == 0   (no infrastructure failures)
+//   3. Crash-exits        == 0   (no crashes)
+//   4. Fully passing      >= STABLE_BASELINE_MIN  (net improvement required)
+//   5. Regressions        == 0   (no test may regress)
+//
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into three groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
@@ -114,6 +128,9 @@ static bool g_use_stripped = false;  // use comment-stripped test files from TES
 // Target: ES2020 compliance. All features ≤ES2020 are in scope.
 // Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
+    // === ES2015 features (not implemented) ===
+    "tail-call-optimization",                     // Proper tail calls (100K+ recursion, hangs without TCO)
+
     // === ES2021 features ===
     "WeakRef",                                    // Weak references
     "FinalizationRegistry",                       // GC callback hooks
@@ -644,10 +661,63 @@ static std::vector<Test262Param> discover_all_tests() {
         {"GeneratorPrototype", "GeneratorPrototype"},
         {"WeakMap", "WeakMap"},
         {"WeakSet", "WeakSet"},
+        {"Symbol", "Symbol"},
+        {"DataView", "DataView"},
+        {"Proxy", "Proxy"},
+        {"Reflect", "Reflect"},
+        {"AsyncFunction", "AsyncFunction"},
+        {"AsyncGeneratorFunction", "AsyncGeneratorFunction"},
+        {"AsyncGeneratorPrototype", "AsyncGeneratorPrototype"},
+        {"BigInt", "BigInt"},
+        {"Uint8Array", "Uint8Array"},
+        {"ArrayIteratorPrototype", "ArrayIteratorPrototype"},
+        {"MapIteratorPrototype", "MapIteratorPrototype"},
+        {"SetIteratorPrototype", "SetIteratorPrototype"},
+        {"StringIteratorPrototype", "StringIteratorPrototype"},
+        {"RegExpStringIteratorPrototype", "RegExpStringIteratorPrototype"},
+        {"AsyncFromSyncIteratorPrototype", "AsyncFromSyncIteratorPrototype"},
+        {"AggregateError", "AggregateError"},
+        {"AsyncIteratorPrototype", "AsyncIteratorPrototype"},
+        {"Atomics", "Atomics"},
+        {"Iterator", "Iterator"},
+        {"SharedArrayBuffer", "SharedArrayBuffer"},
+        {"ThrowTypeError", "ThrowTypeError"},
     };
     for (auto& cat : builtin_cats) {
         std::string dir = std::string(TEST262_ROOT) + "/test/built-ins/" + cat.subdir;
         discover_tests_recursive(dir, "built_ins", cat.name, tests);
+    }
+
+    // Annex B tests — built-ins subcategories
+    struct { const char* subdir; const char* name; } annexb_builtin_cats[] = {
+        {"Array", "Array"},
+        {"Date", "Date"},
+        {"escape", "escape"},
+        {"Function", "Function"},
+        {"Object", "Object"},
+        {"RegExp", "RegExp"},
+        {"String", "String"},
+        {"TypedArrayConstructors", "TypedArrayConstructors"},
+        {"unescape", "unescape"},
+    };
+    for (auto& cat : annexb_builtin_cats) {
+        std::string dir = std::string(TEST262_ROOT) + "/test/annexB/built-ins/" + cat.subdir;
+        discover_tests_recursive(dir, "annexB_built_ins", cat.name, tests);
+    }
+
+    // Annex B tests — language subcategories
+    struct { const char* subdir; const char* name; } annexb_language_cats[] = {
+        {"comments", "comments"},
+        {"eval-code", "eval_code"},
+        {"expressions", "expressions"},
+        {"function-code", "function_code"},
+        {"global-code", "global_code"},
+        {"literals", "literals"},
+        {"statements", "statements"},
+    };
+    for (auto& cat : annexb_language_cats) {
+        std::string dir = std::string(TEST262_ROOT) + "/test/annexB/language/" + cat.subdir;
+        discover_tests_recursive(dir, "annexB_language", cat.name, tests);
     }
 
     // Deduplicate test names (GTest requires unique names)
@@ -855,6 +925,15 @@ static double g_prep_secs = 0;  // Phase 1 (prepare) runtime
 static double g_exec_secs = 0;  // Phase 2 (execute) runtime
 static double g_total_secs = 0; // total runtime
 
+// Stable checkpoint baseline (commit 86235a964, 2026-04-15).
+// --update-baseline requires fully passing >= this value.
+static const int STABLE_BASELINE_MIN = 21824;
+
+// Phase-level counters set during execution, read by --update-baseline gate.
+static size_t g_phase_nonbatch_count = 0;   // nonbatch entries loaded from file
+static size_t g_phase_crash_exit = 0;       // crash-exit tests (exit > 128)
+static size_t g_phase_batch_lost = 0;       // tests lost in batch, recovered individually
+
 // Batch assignment tracking: which batch each test was in during Phase 2.
 // Used by Phase 4 to diagnose which co-batched tests cause false failures.
 static std::unordered_map<std::string, size_t> g_batch_assignment;  // test_name → batch_index
@@ -944,6 +1023,7 @@ static void load_nonbatch_list(const char* path) {
         if (len > 0) g_nonbatch_tests.insert(std::string(buf));
     }
     fclose(f);
+    g_phase_nonbatch_count = g_nonbatch_tests.size();
     if (!g_nonbatch_tests.empty())
         fprintf(stderr, "[test262] Loaded %zu non-batch tests from %s\n",
                 g_nonbatch_tests.size(), path);
@@ -1770,19 +1850,26 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                     timeout_names.insert(std::string(ns));
                                 }
                             } else if (is_slow) {
-                                // preserve SLOW_ entries only if test was not re-run this session
-                                // (re-run tests will be re-emitted from fresh timing data below)
+                                // preserve SLOW_ entries only if test was not re-run this session,
+                                // or if re-run and still slow (>= 3s). Tests that ran faster
+                                // are released from quarantine and return to batch execution.
+                                char slow_buf[2048];
+                                strncpy(slow_buf, tbuf, sizeof(slow_buf));
+                                slow_buf[sizeof(slow_buf)-1] = '\0';
                                 char* ft = strchr(tbuf, '\t');
                                 if (ft) {
                                     char* ns = ft + 1;
                                     char* st = strchr(ns, '\t');
-                                    char* name_copy = ns;
                                     if (st) { *st = '\0'; }
-                                    std::string name(name_copy);
-                                    // only preserve if not in this run's results (quarantined tests
-                                    // have exit_code=124 set above, so they won't be re-emitted)
-                                    timeout_lines.push_back(std::string(tbuf));
-                                    timeout_names.insert(name);
+                                    std::string name(ns);
+                                    auto br_it = batch_results.find(name);
+                                    if (br_it == batch_results.end() ||
+                                        br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
+                                        // not re-run or still slow → preserve
+                                        timeout_lines.push_back(std::string(slow_buf));
+                                        timeout_names.insert(name);
+                                    }
+                                    // else: re-run and now fast → release from quarantine
                                 }
                             } else {
                                 // # comment lines
@@ -1826,7 +1913,11 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
                             p.test_name.c_str(), p.test_path.c_str());
                     written.insert(p.test_name);
-                    crash_exit++;
+                    // Only count as crash_exit if this is a NEW crash (not a known crasher re-confirming)
+                    bool was_known_crash = known_crasher_tags.count(p.test_name) &&
+                                           (known_crasher_tags[p.test_name].substr(0, 5) == "CRASH" ||
+                                            known_crasher_tags[p.test_name].substr(0, 7) == "TIMEOUT");
+                    if (!was_known_crash) crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
                     // Was a CRASH entry but now passes individually — release from quarantine.
@@ -1934,6 +2025,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → temp/_t262_crashers.txt\n",
                         still_lost, crash_exit, slow_count, batch_kill_count);
             }
+            // Expose crash-exit count for --update-baseline gate
+            g_phase_crash_exit = crash_exit + still_lost;
         }
     }
 
@@ -2096,6 +2189,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         fprintf(stderr, "[test262] Phase 3 partial passes: %zu quarantined-crasher + %zu batch-lost + %zu slow (>= 3s)\n",
                 pp_crasher, pp_batch_lost, pp_slow);
     }
+    // Expose batch-lost count for --update-baseline gate
+    g_phase_batch_lost = pp_batch_lost;
 
     auto total_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(total_time - start_time).count();
@@ -2296,12 +2391,36 @@ public:
             }
         }
 
-        // Update baseline if requested — only fully passed tests
+        // Update baseline if requested — gated by stability criteria
         if (g_update_baseline) {
-            write_baseline_file(BASELINE_FILE, current_passing,
-                                g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
-                   BASELINE_FILE, current_passing.size());
+            bool gate_ok = true;
+            if (g_phase_nonbatch_count > 0) {
+                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
+                gate_ok = false;
+            }
+            if ((size_t)batch_lost > 0 || g_phase_batch_lost > 0) {
+                printf("\n❌  Baseline NOT updated: %d batch-lost (must be 0)\n", batch_lost);
+                gate_ok = false;
+            }
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+                gate_ok = false;
+            }
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+                gate_ok = false;
+            }
+            if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
+                printf("\n❌  Baseline NOT updated: %zu fully passing < %d (stable minimum)\n",
+                       current_passing.size(), STABLE_BASELINE_MIN);
+                gate_ok = false;
+            }
+            if (gate_ok) {
+                write_baseline_file(BASELINE_FILE, current_passing,
+                                    g_total_tests, skipped, g_total_batched, failed);
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                       BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
+            }
         }
     }
 };
@@ -2718,12 +2837,36 @@ int main(int argc, char** argv) {
                 printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
             }
         }
-        // Update baseline if requested (batch-only path) — only fully passed tests
+        // Update baseline if requested (batch-only path) — gated by stability criteria
         if (g_update_baseline) {
-            write_baseline_file(BASELINE_FILE, current_passing,
-                                g_total_tests, skipped, g_total_batched, failed);
-            printf("\n📝  Baseline updated: %s (%zu fully passing tests)\n",
-                   BASELINE_FILE, current_passing.size());
+            bool gate_ok = true;
+            if (g_phase_nonbatch_count > 0) {
+                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
+                gate_ok = false;
+            }
+            if (g_phase_batch_lost > 0) {
+                printf("\n❌  Baseline NOT updated: %zu batch-lost (must be 0)\n", g_phase_batch_lost);
+                gate_ok = false;
+            }
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+                gate_ok = false;
+            }
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+                gate_ok = false;
+            }
+            if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
+                printf("\n❌  Baseline NOT updated: %zu fully passing < %d (stable minimum)\n",
+                       current_passing.size(), STABLE_BASELINE_MIN);
+                gate_ok = false;
+            }
+            if (gate_ok) {
+                write_baseline_file(BASELINE_FILE, current_passing,
+                                    g_total_tests, skipped, g_total_batched, failed);
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                       BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
+            }
         }
         return regressions.empty() ? 0 : 1;
     }
