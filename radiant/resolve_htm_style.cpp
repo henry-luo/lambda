@@ -217,6 +217,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->margin.bottom = block->bound->margin.left = 8;
         block->bound->margin.top_specificity = block->bound->margin.right_specificity =
             block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
+        // Handle HTML bgcolor attribute (e.g., <body bgcolor="#fff">)
+        const char* bgcolor_attr = elmt->get_attribute("bgcolor");
+        if (bgcolor_attr) {
+            Color bg_color = parse_html_color(bgcolor_attr);
+            if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
+            block->bound->background->color = bg_color;
+            log_debug("[HTML] BODY bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
+        }
         // overflow: visible (CSS default - no special overflow handling for body)
         break;
     }
