@@ -10553,7 +10553,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
             }
             if (recv_type == LMD_TYPE_ARRAY) {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
@@ -10653,7 +10653,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // ARRAY path
             jm_emit_label(mt, l_array);
             {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
@@ -10760,13 +10760,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // isNaN(val)
             if (nl == 5 && strncmp(n, "isNaN", 5) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_isNaN", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             // isFinite(val)
             if (nl == 8 && strncmp(n, "isFinite", 8) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 return jm_call_1(mt, "js_isFinite", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -10776,9 +10776,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_unary_plus", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
-            // String(val) — toString
+            // String(val) — toString; String() with no args returns ""
             if (nl == 6 && strncmp(n, "String", 6) == 0) {
-                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                if (!call->arguments) {
+                    return jm_box_string_literal(mt, "", 0);
+                }
+                MIR_reg_t val = jm_transpile_box_item(mt, call->arguments);
                 return jm_call_1(mt, "js_to_string_val", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -15560,10 +15563,10 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
     }
 
-    // new Number(arg) — wrapper object with __primitiveValue__
+    // new Number(arg) — wrapper object with __primitiveValue__ (checks symbol)
     if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) {
         MIR_reg_t arg_val = first_arg ? first_arg : jm_box_int_const(mt, 0);
-        return jm_call_1(mt, "js_new_number_wrapper", MIR_T_I64,
+        return jm_call_1(mt, "js_new_number_checked", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val));
     }
 
@@ -17444,6 +17447,13 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg)));
             }
 
+            // Save and clear any pending exception so finally body starts
+            // with a clean exception state. This lets try/catch inside the
+            // finally correctly catch only exceptions thrown within it,
+            // not the outer pending exception (ES spec §13.15.8 step 7-8).
+            MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+
             if (try_node->finalizer->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 jm_push_scope(mt);
                 jm_init_block_tdz(mt, try_node->finalizer);  // v20 TDZ
@@ -17458,6 +17468,25 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg),
                     MIR_new_reg_op(mt->ctx, saved_cptn)));
+            }
+
+            // Restore saved exception if finally completed normally.
+            // If the finally body threw a new exception, it takes precedence
+            // (per spec). Otherwise, re-throw the saved pending exception.
+            {
+                MIR_reg_t new_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                MIR_label_t skip_restore = jm_new_label(mt);
+                // if new exception pending, skip restore (new takes precedence)
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, skip_restore),
+                    MIR_new_reg_op(mt->ctx, new_exc)));
+                // if saved exception was pending, re-throw it
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, skip_restore),
+                    MIR_new_reg_op(mt->ctx, saved_exc_flag)));
+                jm_call_void_1(mt, "js_throw_value",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_exc_val));
+                jm_emit_label(mt, skip_restore);
             }
 
             // Pop the generator finally context (pushed for yield re-init)

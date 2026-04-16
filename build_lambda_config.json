@@ -1756,6 +1756,23 @@
                         ],
                         "binary": "test_serve_phase2_gtest.exe",
                         "icon": "🌐"
+                    },
+                    {
+                        "source": "test_animation_gtest.cpp",
+                        "name": "Animation Scheduler Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/animation.cpp"
+                        ],
+                        "binary": "test_animation_gtest.exe",
+                        "icon": "🎬"
                     }
                 ],
                 "type": "library"

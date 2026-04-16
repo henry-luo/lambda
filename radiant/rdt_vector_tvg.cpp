@@ -7,6 +7,7 @@
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
 #include <string.h>
+#include <pthread.h>
 
 // ============================================================================
 // Internal types
@@ -18,6 +19,7 @@ struct RdtVectorImpl {
     int width;
     int height;
     int stride;
+    float tile_offset_x;  // physical-pixel X start of current tile (0 = full page)
     float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
 };
 
@@ -90,12 +92,12 @@ static void tvg_push_draw_remove(RdtVectorImpl* impl, Tvg_Paint shape) {
     // reset target to prevent ThorVG from clearing previously-drawn content
     tvg_swcanvas_set_target(impl->canvas, impl->pixels, impl->stride,
                             impl->width, impl->height, TVG_COLORSPACE_ABGR8888);
-    // for tiled rendering: wrap the shape in a scene translated by -tile_offset_y
+    // for tiled rendering: wrap the shape in a scene translated by (-tile_offset_x, -tile_offset_y)
     // so page-absolute coordinates map to tile-relative coordinates
-    if (impl->tile_offset_y != 0.0f) {
+    if (impl->tile_offset_x != 0.0f || impl->tile_offset_y != 0.0f) {
         Tvg_Paint scene = tvg_scene_new();
         tvg_scene_push(scene, shape);
-        tvg_paint_translate(scene, 0.0f, -impl->tile_offset_y);
+        tvg_paint_translate(scene, -impl->tile_offset_x, -impl->tile_offset_y);
         shape = scene;
     }
     tvg_canvas_push(impl->canvas, shape);
@@ -167,6 +169,11 @@ void rdt_vector_set_tile_offset_y(RdtVector* vec, float offset_y) {
     vec->impl->tile_offset_y = offset_y;
 }
 
+void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x) {
+    if (!vec || !vec->impl) return;
+    vec->impl->tile_offset_x = offset_x;
+}
+
 // ============================================================================
 // Path construction
 // ============================================================================
@@ -228,6 +235,21 @@ void rdt_path_free(RdtPath* p) {
     if (!p) return;
     mem_free(p->entries);
     mem_free(p);
+}
+
+RdtPath* rdt_path_clone(const RdtPath* src) {
+    if (!src) return nullptr;
+    RdtPath* dst = (RdtPath*)mem_alloc(sizeof(RdtPath), MEM_CAT_RENDER);
+    dst->count = src->count;
+    dst->capacity = src->count;  // tight allocation
+    if (src->count > 0) {
+        size_t sz = src->count * sizeof(RdtPath::Entry);
+        dst->entries = (RdtPath::Entry*)mem_alloc(sz, MEM_CAT_RENDER);
+        memcpy(dst->entries, src->entries, sz);
+    } else {
+        dst->entries = nullptr;
+    }
+    return dst;
 }
 
 // ============================================================================
@@ -610,6 +632,35 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
     // for repeated draws. For now, one-shot semantics.
     tvg_push_draw_remove_clipped(impl, pic->paint);
     pic->paint = nullptr; // consumed by canvas remove
+}
+
+// Mutex to serialize tvg_paint_duplicate calls (ThorVG Picture::duplicate is not thread-safe:
+// it increments a shared non-atomic counter and may mutate the source loader's state).
+static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
+                          uint8_t opacity, const RdtMatrix* transform) {
+    // Thread-safe version: duplicate the paint so the original stays intact.
+    // Used by tile-based parallel rendering where multiple tiles may draw the same picture.
+    if (!vec || !vec->impl || !pic || !pic->paint) return;
+    RdtVectorImpl* impl = vec->impl;
+
+    pthread_mutex_lock(&g_tvg_dup_mutex);
+    Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
+    pthread_mutex_unlock(&g_tvg_dup_mutex);
+    if (!dup) return;
+
+    if (pic->width > 0 && pic->height > 0) {
+        tvg_picture_set_size(dup, pic->width, pic->height);
+    }
+
+    if (opacity < 255) {
+        tvg_paint_set_opacity(dup, opacity);
+    }
+
+    apply_transform(dup, transform);
+    tvg_push_draw_remove_clipped(impl, dup);
+    // original pic->paint is NOT consumed
 }
 
 void rdt_picture_free(RdtPicture* pic) {
