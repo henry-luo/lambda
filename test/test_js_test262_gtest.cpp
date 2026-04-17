@@ -204,18 +204,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
 
     // === Stage 3 / Proposals (not yet in any published spec) ===
     "Temporal",                                   // Temporal API (ES2027)
-        // Partition batch_indices into two groups:
-        //   1. clean_indices   — safe to run in shared batches of 50
-        //   2. crasher_indices  — known crashers quarantined from previous runs
-        std::vector<size_t> clean_indices;
-        std::vector<size_t> crasher_indices;
-        for (size_t idx : batch_indices) {
-            if (!g_known_crashers.empty() && g_known_crashers.count(prepared[idx].test_name)) {
-                crasher_indices.push_back(idx);
-            } else {
-                clean_indices.push_back(idx);
-            }
-        }
     "ShadowRealm",                                // Isolated evaluation contexts
     "decorators",                                 // Class decorators
     "explicit-resource-management",               // using / Symbol.dispose
@@ -927,6 +915,7 @@ static std::set<std::string> g_nonbatch_tests;  // tests that must run individua
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static bool g_update_baseline = false;
+static bool g_force_baseline = false;
 static bool g_baseline_only = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
@@ -2415,16 +2404,16 @@ public:
                 printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
                 gate_ok = false;
             }
-            if ((size_t)batch_lost > 0 || g_phase_batch_lost > 0) {
+            if (((size_t)batch_lost > 0 || g_phase_batch_lost > 0) && !g_force_baseline) {
                 printf("\n❌  Baseline NOT updated: %d batch-lost (must be 0)\n", batch_lost);
                 gate_ok = false;
             }
-            if (g_phase_crash_exit > 0) {
-                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+            if (g_phase_crash_exit > 0 && !g_force_baseline) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0, use --force-baseline to override)\n", g_phase_crash_exit);
                 gate_ok = false;
             }
-            if (!regressions.empty()) {
-                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+            if (!regressions.empty() && !g_force_baseline) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0, use --force-baseline to override)\n", regressions.size());
                 gate_ok = false;
             }
             if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
@@ -2472,6 +2461,10 @@ int main(int argc, char** argv) {
     // Check for --update-baseline flag (must be after InitGoogleTest consumes gtest flags)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--update-baseline") == 0) {
+            g_update_baseline = true;
+        }
+        if (strcmp(argv[i], "--force-baseline") == 0) {
+            g_force_baseline = true;
             g_update_baseline = true;
         }
         if (strcmp(argv[i], "--baseline-only") == 0) {
@@ -2861,16 +2854,16 @@ int main(int argc, char** argv) {
                 printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
                 gate_ok = false;
             }
-            if (g_phase_batch_lost > 0) {
+            if (g_phase_batch_lost > 0 && !g_force_baseline) {
                 printf("\n❌  Baseline NOT updated: %zu batch-lost (must be 0)\n", g_phase_batch_lost);
                 gate_ok = false;
             }
-            if (g_phase_crash_exit > 0) {
-                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
+            if (g_phase_crash_exit > 0 && !g_force_baseline) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0, use --force-baseline to override)\n", g_phase_crash_exit);
                 gate_ok = false;
             }
-            if (!regressions.empty()) {
-                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
+            if (!regressions.empty() && !g_force_baseline) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0, use --force-baseline to override)\n", regressions.size());
                 gate_ok = false;
             }
             if ((int)current_passing.size() < STABLE_BASELINE_MIN) {

@@ -1347,6 +1347,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},

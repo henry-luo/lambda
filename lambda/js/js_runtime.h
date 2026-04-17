@@ -130,6 +130,7 @@ Item js_new_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
 void js_set_function_name(Item fn_item, Item name_item);
+void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);

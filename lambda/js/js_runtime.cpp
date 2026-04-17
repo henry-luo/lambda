@@ -2334,6 +2334,7 @@ struct JsFunction {
     uint8_t flags;   // v20: bit 0 = is_generator
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
+    String* source_text; // v29: original source text for Function.prototype.toString
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1
@@ -6236,6 +6237,16 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     }
 }
 
+// Set the source text of a JsFunction for Function.prototype.toString
+extern "C" void js_set_function_source(Item fn_item, Item source_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn->func_ptr) {
+        fn->source_text = it2s(source_item);
+    }
+}
+
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
 
 // Invoke a JsFunction with args, handling env if it's a closure
@@ -7054,6 +7065,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_FUNC_TO_STRING: {
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;
+            // User-defined functions with stored source text: return original source
+            if (fn->source_text && fn->source_text->len > 0 && fn->builtin_id == 0
+                && !(fn->bound_this.item || fn->bound_args)) {
+                return (Item){.item = s2it(fn->source_text)};
+            }
+            // Built-in, bound, or no-source functions: NativeFunction format
             StrBuf* sb = strbuf_new();
             if (fn->flags & JS_FUNC_FLAG_GENERATOR)
                 strbuf_append_str_n(sb, "function* ", 10);
