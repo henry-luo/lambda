@@ -181,9 +181,11 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                             if (strstr(public_id, "Strict")) return HTML4_01_STRICT;
                             return HTML4_01_TRANSITIONAL;
                         }
-                        // Unrecognized publicId — assume HTML5
-                        log_debug("Unrecognized publicId, defaulting to HTML5");
-                        return HTML5;
+                        // WHATWG §13.2.6.4.1: Unrecognized publicId → quirks mode
+                        // Legacy doctypes (e.g., -//IETF//DTD HTML 2.0, -//SoftQuad//, etc.)
+                        // do not match any known standards-mode doctype, so they trigger quirks.
+                        log_debug("Unrecognized publicId, using quirks mode: %s", public_id);
+                        return HTML_QUIRKS;
                     }
                 }
             }

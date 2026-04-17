@@ -809,6 +809,7 @@ extern void js_verify_property(Item obj, Item name, Item desc, Item options);
 extern void js_assert_throws(Item expected_ctor, Item func, Item message);
 extern void js_assert_base(Item must_be_true, Item message);
 extern void js_donotevaluate(void);
+extern Item js_is_constructor(Item fn);
 #endif
 
 JitImport jit_runtime_imports[] = {
@@ -1215,6 +1216,7 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_throws", FPTR(js_assert_throws)},
     {"js_assert_base", FPTR(js_assert_base)},
     {"js_donotevaluate", FPTR(js_donotevaluate)},
+    {"js_is_constructor", FPTR(js_is_constructor)},
 #endif
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},

@@ -15,6 +15,7 @@ extern "C" {
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
 void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
+extern bool is_only_whitespace(const char* str);
 
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
@@ -669,7 +670,14 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     log_debug("%s first_child=%p", container->source_loc(), child_node);
     while (child_node) {
         // CRITICAL FIX: Only process element nodes, skip text nodes
+        // CSS Grid §8.1: whitespace-only text in grid containers is not rendered
         if (!child_node->is_element()) {
+            if (child_node->is_text()) {
+                const char* text = (const char*)child_node->text_data();
+                if (!text || is_only_whitespace(text)) {
+                    child_node->view_type = RDT_VIEW_NONE;
+                }
+            }
             child_node = child_node->next_sibling;
             continue;
         }

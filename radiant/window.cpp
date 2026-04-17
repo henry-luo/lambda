@@ -1009,6 +1009,12 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             do_redraw = 1;
         }
 
+        // Video playback: force continuous redraw when any video is playing
+        if (state && state->has_active_video) {
+            state->is_dirty = true;
+            do_redraw = 1;
+        }
+
         // only redraw if we need to
         if (do_redraw) {
             window_refresh_callback(window);

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Playback Test</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; background: #f0f0f0; }
+        h1 { color: #333; }
+        .container { margin: 20px 0; }
+        video { border: 2px solid #999; background: #000; }
+    </style>
+</head>
+<body>
+    <h1>Radiant Video Playback Test</h1>
+
+    <div class="container">
+        <h2>1. Autoplay + Muted + Loop</h2>
+        <video src="../media/test_video.mp4" width="480" height="270" autoplay muted loop></video>
+    </div>
+
+    <div class="container">
+        <h2>2. Static (no autoplay)</h2>
+        <video src="../media/test_video.mp4" width="320" height="180"></video>
+    </div>
+
+    <div class="container">
+        <h2>3. Default size (300x150)</h2>
+        <video src="../media/test_video.mp4" autoplay muted></video>
+    </div>
+</body>
+</html>

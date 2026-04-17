@@ -247,12 +247,15 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
+void render_video_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     bool show_hz_scroll = true, bool show_vt_scroll = true);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
+// post-composite video frame blit (defined in render_video.cpp)
+void render_video_frames(DisplayList* dl, ImageSurface* surface);
 
 // ============================================================================
 // Per-corner rounded rect path helper
@@ -2665,6 +2668,26 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_leave();
 }
 
+// render video element: record a DL_VIDEO_PLACEHOLDER for post-composite blit
+void render_video_content(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->embed || !view->embed->video) return;
+
+    float s = rdcon->scale;
+    float dst_x = rdcon->block.x + view->x * s;
+    float dst_y = rdcon->block.y + view->y * s;
+    float dst_w = view->width * s;
+    float dst_h = view->height * s;
+    CssEnum object_fit = view->embed->object_fit;
+
+    log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f", dst_x, dst_y, dst_w, dst_h);
+
+    if (rdcon->dl) {
+        dl_video_placeholder(rdcon->dl, view->embed->video,
+                             dst_x, dst_y, dst_w, dst_h,
+                             (int)object_fit, &rdcon->block.clip);
+    }
+}
+
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
@@ -2829,6 +2852,11 @@ void render_children(RenderContext* rdcon, View* view) {
                 auto ti2 = std::chrono::high_resolution_clock::now();
                 g_render_image_time += std::chrono::duration<double, std::milli>(ti2 - ti1).count();
                 g_render_image_count++;
+            }
+            else if (block->embed && block->embed->video) {
+                log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
+                render_block_view(rdcon, block);
+                render_video_content(rdcon, block);
             }
             else if (block->embed && block->embed->doc) {
                 render_embed_doc(rdcon, block);
@@ -3417,6 +3445,9 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
                 duration<double, std::milli>(t_replay_end - t_replay_start).count(),
                 item_count);
     }
+
+    // Post-composite: blit video frames onto the final surface
+    render_video_frames(&display_list, rdcon.ui_context->surface);
 
     auto t_sync = high_resolution_clock::now();
     log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());

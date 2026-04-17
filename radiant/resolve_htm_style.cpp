@@ -1,6 +1,9 @@
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "rdt_video.h"
+#include "state_store.hpp"
 #include "../lib/str.h"
+#include "../lib/memtrack.h"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
 
@@ -505,6 +508,103 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->given_width = 300;
         block->blk->given_height = 150;
+        break;
+    case HTM_TAG_AUDIO: {
+        // HTML §4.8.9: <audio> without controls is not rendered
+        // audio-only playback: create RdtVideo (AVPlayer handles audio files natively)
+        const char* src = elmt->get_attribute("src");
+        if (src && *src && lycon->ui_context && lycon->ui_context->document && lycon->ui_context->document->url) {
+            if (!block->embed) { block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); }
+            if (!block->embed->video) {
+                Url* abs_url = parse_url(lycon->ui_context->document->url, src);
+                char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
+                if (abs_url) url_destroy(abs_url);
+
+                if (file_path) {
+                    RdtVideo* video = rdt_video_create(NULL, NULL);
+                    if (video) {
+                        log_debug("audio: opening file: %s", file_path);
+                        rdt_video_open_file(video, file_path);
+                        if (elmt->has_attribute("loop")) rdt_video_set_loop(video, true);
+                        if (elmt->has_attribute("muted")) rdt_video_set_muted(video, true);
+                        block->embed->video = video;
+                        if (elmt->has_attribute("autoplay")) {
+                            rdt_video_play(video);
+                            DomDocument* doc = lycon->ui_context->document;
+                            if (doc->state) doc->state->has_active_video = true;
+                        }
+                    }
+                    mem_free(file_path);
+                } else {
+                    log_error("audio: failed to resolve src path: %s", src);
+                }
+            }
+        }
+        break;
+    }
+    case HTM_TAG_VIDEO: {
+        // replaced element with default 300x150 per HTML spec
+        block->display.inner = RDT_DISPLAY_REPLACED;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        // Parse HTML width/height attributes; default 300x150
+        if (const char* w_attr = elmt->get_attribute("width")) {
+            StrView w_view = strview_init(w_attr, strlen(w_attr));
+            float w = strview_to_int(&w_view);
+            if (w >= 0) { lycon->block.given_width = w; block->blk->given_width = w; }
+            else { lycon->block.given_width = 300; block->blk->given_width = 300; }
+        } else { lycon->block.given_width = 300; block->blk->given_width = 300; }
+        if (const char* h_attr = elmt->get_attribute("height")) {
+            StrView h_view = strview_init(h_attr, strlen(h_attr));
+            float h = strview_to_int(&h_view);
+            if (h >= 0) { lycon->block.given_height = h; block->blk->given_height = h; }
+            else { lycon->block.given_height = 150; block->blk->given_height = 150; }
+        } else { lycon->block.given_height = 150; block->blk->given_height = 150; }
+
+        // initialize video playback if src attribute is present
+        const char* src = elmt->get_attribute("src");
+        if (src && *src && lycon->ui_context && lycon->ui_context->document && lycon->ui_context->document->url) {
+            if (!block->embed) { block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); }
+            if (!block->embed->video) {
+                // resolve relative src path against document URL (same as load_image)
+                Url* abs_url = parse_url(lycon->ui_context->document->url, src);
+                char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
+                if (abs_url) url_destroy(abs_url);
+
+                if (file_path) {
+                    RdtVideo* video = rdt_video_create(NULL, NULL);
+                    if (video) {
+                        log_debug("video: opening file: %s", file_path);
+                        rdt_video_open_file(video, file_path);
+                        if (elmt->has_attribute("loop")) rdt_video_set_loop(video, true);
+                        if (elmt->has_attribute("muted")) rdt_video_set_muted(video, true);
+                        block->embed->video = video;
+                        // autoplay: start playback immediately
+                        if (elmt->has_attribute("autoplay")) {
+                            rdt_video_play(video);
+                            // enable continuous redraw for video playback
+                            DomDocument* doc = lycon->ui_context->document;
+                            if (doc->state) doc->state->has_active_video = true;
+                        }
+                    }
+                    mem_free(file_path);
+                } else {
+                    log_error("video: failed to resolve src path: %s", src);
+                }
+            }
+        }
+        break;
+    }
+    case HTM_TAG_CANVAS:
+        // HTML §4.8.9: <audio> without controls is not rendered (display: none)
+        // With controls, it's a replaced element with browser-specific dimensions
+        if (elmt->has_attribute("controls")) {
+            block->display.inner = RDT_DISPLAY_REPLACED;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            lycon->block.given_width = 300;
+            lycon->block.given_height = 54;
+            block->blk->given_width = 300;
+            block->blk->given_height = 54;
+        }
         break;
     case HTM_TAG_OBJECT:
         // HTML §4.8.7: <object> is replaced only when it has a data attribute.
