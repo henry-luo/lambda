@@ -263,8 +263,18 @@ typedef struct RadiantState {
         void* video;               // RdtVideo* — borrowed pointer
         float dst_x, dst_y, dst_w, dst_h;
         float clip_left, clip_top, clip_right, clip_bottom;
+        bool has_controls;         // whether to draw controls overlay
+        bool has_poster;           // whether poster image exists (for pre-play state)
     } video_placements[MAX_CACHED_VIDEO_PLACEMENTS];
     int video_placement_count;
+
+    // Video controls interaction state
+    struct {
+        void* hover_video;         // RdtVideo* currently hovered (NULL if none)
+        float controls_opacity;    // fade-in/out opacity (0.0–1.0)
+        bool  is_seeking;          // true while seek bar is being dragged
+        float seek_fraction;       // seek position during drag (0.0–1.0)
+    } video_controls;
 } RadiantState;
 
 

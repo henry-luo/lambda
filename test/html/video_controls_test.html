@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Controls — Phase 3 Test</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            background: #121212;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 30px 40px;
+        }
+        h1 { color: #bb86fc; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 30px; }
+        h2 { color: #03dac6; font-size: 16px; margin: 0 0 6px 0; }
+        .test {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+        }
+        .desc {
+            color: #999;
+            font-size: 13px;
+            margin: 0 0 12px 0;
+        }
+        .expect {
+            color: #cf6679;
+            font-size: 12px;
+            margin: 8px 0 0 0;
+            font-style: italic;
+        }
+        video {
+            background: #000;
+            display: block;
+        }
+        .row {
+            display: flex;
+            gap: 20px;
+        }
+        .col { flex: 1; }
+    </style>
+</head>
+<body>
+    <h1>Phase 3 — Controls + Polish</h1>
+    <p class="subtitle">Video controls overlay, poster, preload, error handling, click-to-play</p>
+
+    <!-- Test 1: Controls attribute -->
+    <div class="test">
+        <h2>1. Controls overlay</h2>
+        <p class="desc">Video with <code>controls</code> attribute — should show play/pause, seek bar, time, volume at bottom.</p>
+        <video src="../media/test_video_audio.mp4" width="560" height="240" controls></video>
+        <p class="expect">Expected: 40px dark bar at bottom with play/pause button, current time, seek bar, duration, volume icon + slider.</p>
+    </div>
+
+    <!-- Test 2: Controls + autoplay + loop -->
+    <div class="test">
+        <h2>2. Controls + autoplay + loop</h2>
+        <p class="desc">Autoplaying video with controls — bar should show pause icon and advancing time.</p>
+        <video src="../media/test_video_audio.mp4" width="560" height="240" controls autoplay loop></video>
+        <p class="expect">Expected: Video plays immediately. Pause icon visible. Time advances. Seek bar fills. Loops at end.</p>
+    </div>
+
+    <!-- Test 3: Click to play/pause (no controls) -->
+    <div class="test">
+        <h2>3. Click to play/pause (no controls attr)</h2>
+        <p class="desc">No <code>controls</code> — click video body to toggle play/pause. Large centered play button when paused.</p>
+        <video src="../media/test_video_audio.mp4" width="480" height="200"></video>
+        <p class="expect">Expected: Large play button centered. Click → starts playing (button disappears). Click again → pauses (button reappears).</p>
+    </div>
+
+    <!-- Test 4: Poster attribute -->
+    <div class="test">
+        <h2>4. Poster image</h2>
+        <p class="desc">Video with <code>poster</code> attribute — should show poster before playback.</p>
+        <video src="../media/test_video.mp4" width="480" height="270" controls
+               poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='270'%3E%3Crect fill='%23264653' width='480' height='270'/%3E%3Ctext x='240' y='125' font-family='sans-serif' font-size='28' fill='%23e9c46a' text-anchor='middle'%3EPoster Image%3C/text%3E%3Ctext x='240' y='160' font-family='sans-serif' font-size='16' fill='%23999' text-anchor='middle'%3EClick to play%3C/text%3E%3C/svg%3E"></video>
+        <p class="expect">Expected: Shows teal "Poster Image" graphic. Click → video plays, poster replaced by video frame + controls.</p>
+    </div>
+
+    <!-- Test 5: Preload="none" -->
+    <div class="test">
+        <h2>5. Preload="none"</h2>
+        <p class="desc">Video with <code>preload="none"</code> — should not open/decode until play is triggered.</p>
+        <video src="../media/test_video.mp4" width="480" height="270" controls preload="none"></video>
+        <p class="expect">Expected: Shows idle state (play button). File not opened until user clicks to play.</p>
+    </div>
+
+    <!-- Test 6: Preload="none" + autoplay (autoplay wins) -->
+    <div class="test">
+        <h2>6. Preload="none" + autoplay</h2>
+        <p class="desc">When both set, autoplay should override preload="none".</p>
+        <video src="../media/test_video.mp4" width="320" height="180" controls preload="none" autoplay muted loop></video>
+        <p class="expect">Expected: Video plays immediately despite preload="none". Autoplay takes precedence.</p>
+    </div>
+
+    <!-- Test 7: Error state (missing file) -->
+    <div class="test">
+        <h2>7. Error state — missing file</h2>
+        <p class="desc">Non-existent file — should show error overlay (dark bg + red X).</p>
+        <video src="../media/nonexistent_video.mp4" width="400" height="225" controls></video>
+        <p class="expect">Expected: Dark rectangle with red X drawn. No crash.</p>
+    </div>
+
+    <!-- Test 8: Muted + controls -->
+    <div class="test">
+        <h2>8. Muted + controls</h2>
+        <p class="desc">Muted autoplay with controls — volume slider should reflect muted state.</p>
+        <video src="../media/test_video_audio.mp4" width="480" height="200" controls autoplay muted loop></video>
+        <p class="expect">Expected: Video plays with no audio. Controls visible with volume at full (muted state not yet visually reflected).</p>
+    </div>
+
+    <!-- Test 9: Side by side -->
+    <div class="test">
+        <h2>9. Multiple videos side by side</h2>
+        <p class="desc">Two videos in a row — each should have independent controls.</p>
+        <div class="row">
+            <div class="col">
+                <video src="../media/test_video_audio.mp4" width="340" height="145" controls autoplay muted loop></video>
+            </div>
+            <div class="col">
+                <video src="../media/test_video.mp4" width="340" height="190" controls></video>
+            </div>
+        </div>
+        <p class="expect">Expected: Left video autoplays (muted). Right shows play button. Click each independently.</p>
+    </div>
+
+    <!-- Test 10: Small video (controls should skip if too small) -->
+    <div class="test">
+        <h2>10. Small video (100×60)</h2>
+        <p class="desc">Very small video — controls overlay may be suppressed (min 120×60 threshold).</p>
+        <video src="../media/test_video.mp4" width="100" height="60" controls autoplay muted loop></video>
+        <p class="expect">Expected: Controls not shown (too small). Video still plays. Click toggles play/pause.</p>
+    </div>
+
+</body>
+</html>

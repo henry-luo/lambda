@@ -1145,6 +1145,8 @@ typedef struct EmbedProp {
     GridProp* grid;
     CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
     struct RdtVideo* video;  // video playback context (NULL for non-video elements)
+    ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
+    bool has_controls;       // true if <video controls> attribute present
     // Math layout data (legacy - will be removed when migrating to RDT_VIEW_TEXNODE)
     void* math_box;              // legacy: was MathBox* - deprecated
     Item math_node;              // source Lambda math node

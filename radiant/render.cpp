@@ -255,8 +255,8 @@ void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form contr
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
 // post-composite video frame blit (defined in render_video.cpp)
-void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate);
-void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface);
+void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate, UiContext* uicon);
+void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
 
 // ============================================================================
 // Per-corner rounded rect path helper
@@ -2678,14 +2678,17 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     float dst_y = rdcon->block.y + view->y * s;
     float dst_w = view->width * s;
     float dst_h = view->height * s;
-    CssEnum object_fit = view->embed->object_fit;
+    int object_fit_flags = (int)view->embed->object_fit;
+    // pack has_controls into bit 8
+    if (view->embed->has_controls) object_fit_flags |= 0x100;
 
-    log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f", dst_x, dst_y, dst_w, dst_h);
+    log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f controls=%d",
+              dst_x, dst_y, dst_w, dst_h, view->embed->has_controls);
 
     if (rdcon->dl) {
         dl_video_placeholder(rdcon->dl, view->embed->video,
                              dst_x, dst_y, dst_w, dst_h,
-                             (int)object_fit, &rdcon->block.clip);
+                             object_fit_flags, &rdcon->block.clip);
     }
 }
 
@@ -3449,7 +3452,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Post-composite: blit video frames onto the final surface
     RadiantState* rstate = uicon->document ? uicon->document->state : nullptr;
-    render_video_frames(&display_list, rdcon.ui_context->surface, rstate);
+    render_video_frames(&display_list, rdcon.ui_context->surface, rstate, rdcon.ui_context);
 
     auto t_sync = high_resolution_clock::now();
     log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
