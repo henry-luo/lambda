@@ -1288,11 +1288,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // their FormControlProp may not be allocated yet during early intrinsic sizing.
     uintptr_t replaced_tag = element->tag();
     // HTML §4.8.7: <object> is replaced only when it has a data attribute
+    // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
     bool is_replaced_element = (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) ||
         (replaced_tag == HTM_TAG_IMG || replaced_tag == HTM_TAG_VIDEO ||
          replaced_tag == HTM_TAG_IFRAME || replaced_tag == HTM_TAG_HR ||
          replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS ||
          (replaced_tag == HTM_TAG_OBJECT && element->get_attribute("data")) ||
+         (replaced_tag == HTM_TAG_AUDIO && element->has_attribute("controls")) ||
          replaced_tag == HTM_TAG_EMBED ||
          replaced_tag == HTM_TAG_INPUT || replaced_tag == HTM_TAG_SELECT ||
          replaced_tag == HTM_TAG_TEXTAREA || replaced_tag == HTM_TAG_METER ||
@@ -1372,6 +1374,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         else if (replaced_tag == HTM_TAG_VIDEO || replaced_tag == HTM_TAG_CANVAS) {
             replaced_width = 300;
             log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
+        }
+        else if (replaced_tag == HTM_TAG_AUDIO) {
+            replaced_width = 300;
+            log_debug("  -> replaced AUDIO intrinsic width: 300");
         }
         else if (replaced_tag == HTM_TAG_SVG) {
             float svg_width = 300.0f;  // CSS default
@@ -1787,6 +1793,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (sizes.min_content > 0 || sizes.max_content > 0) {
                 sizes.min_content += pad_left + pad_right + bdr_left + bdr_right;
                 sizes.max_content += pad_left + pad_right + bdr_left + bdr_right;
+
+                // CSS Sizing 3 §5.2: If the table has a definite preferred width
+                // (from CSS width or HTML width attribute), its max-content contribution
+                // is max(specified_width, min_content), not the unconstrained column sum.
+                float specified_width = 0;
+                if (element->specified_style) {
+                    CssDeclaration* wd = style_tree_get_declaration(
+                        element->specified_style, CSS_PROPERTY_WIDTH);
+                    if (wd && wd->value && wd->value->type == CSS_VALUE_TYPE_LENGTH) {
+                        specified_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, wd->value);
+                    }
+                }
+                if (specified_width <= 0 && element->tag() == HTM_TAG_TABLE) {
+                    const char* w_attr = element->get_attribute("width");
+                    if (w_attr) {
+                        size_t wlen = strlen(w_attr);
+                        if (wlen > 0 && w_attr[wlen - 1] != '%') {
+                            StrView wv = strview_init(w_attr, wlen);
+                            specified_width = (float)strview_to_int(&wv);
+                        }
+                    }
+                }
+                if (specified_width > 0) {
+                    // Add padding+border to specified width for the content-box model
+                    float total_specified = specified_width + pad_left + pad_right + bdr_left + bdr_right;
+                    sizes.max_content = max(total_specified, sizes.min_content);
+                    log_debug("  table specified width: %.1f -> max_content capped to %.1f",
+                              specified_width, sizes.max_content);
+                }
 
                 log_debug("measure_element_intrinsic: TABLE %s: min=%.1f, max=%.1f",
                           element->node_name(), sizes.min_content, sizes.max_content);
@@ -3473,9 +3508,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Use min_content (widest word/break unit) to estimate word-boundary waste:
             // text wraps at word boundaries, so each line's effective width is
             // floor(available_width / word_width) * word_width, not the full available_width.
+            // Use epsilon tolerance: text intrinsic width measurement (whole-string shaping)
+            // can differ from character-by-character accumulation by tiny amounts due to
+            // floating-point rounding. Without tolerance, text that fits can appear to overflow.
             int num_lines = 1;
             CssEnum ws_val = get_white_space_value(node);
-            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width) {
+            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width + 0.005f) {
                 float effective_width = width;
                 if (widths.min_content > 0 && widths.min_content <= width) {
                     int units_per_line = (int)(width / widths.min_content); // INT_CAST_OK: integer count
@@ -3631,6 +3669,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150
+        }
+        else if (elem_tag == HTM_TAG_AUDIO) {
+            return 54.0f;  // audio controls default height
         }
         else if (elem_tag == HTM_TAG_SVG) {
             // SVG replaced element: determine intrinsic height from attributes/viewBox

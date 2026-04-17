@@ -742,6 +742,13 @@ DisplayValue resolve_display_value(void* child) {
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
         bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
 
+        // HTML spec §14.3.1: The hidden attribute (UA stylesheet: [hidden] { display: none })
+        // Must check before CSS cascade since it's a presentational hint
+        if (dom_elem && dom_elem->has_attribute("hidden")) {
+            DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+            return none_display;
+        }
+
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
         // when display:none is set by UA defaults for hidden inputs, respect it
@@ -764,13 +771,15 @@ DisplayValue resolve_display_value(void* child) {
         // Determine if this is a replaced element (img, video, iframe, svg, etc.)
         // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
         // HTML §4.8.7: <object> is replaced only when it has a data attribute
+        // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
         bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
                             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
-                            tag_id == HTM_TAG_PROGRESS ||
+                            tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
                             (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
+                            (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
                             tag_id == HTM_TAG_EMBED);
 
         // first, try to get display from CSS
@@ -1057,8 +1066,9 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
-            tag_id == HTM_TAG_PROGRESS ||
+            tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
             (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
+            (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
             tag_id == HTM_TAG_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;

@@ -640,7 +640,7 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
             tag == HTM_TAG_IMG || tag == HTM_TAG_VIDEO || tag == HTM_TAG_CANVAS ||
             tag == HTM_TAG_IFRAME || tag == HTM_TAG_EMBED || tag == HTM_TAG_OBJECT ||
             tag == HTM_TAG_INPUT || tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_SELECT ||
-            tag == HTM_TAG_SVG || tag == HTM_TAG_BR;
+            tag == HTM_TAG_SVG || tag == HTM_TAG_BR || tag == HTM_TAG_AUDIO;
         if (is_replaced) {
             if (suppressed) *suppressed = true;
             return nullptr;

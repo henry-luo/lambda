@@ -2583,7 +2583,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // CSS Text 3 §8: letter-spacing is not applied at end of a line.
         // Subtract the trailing letter-spacing when checking overflow, since the
         // last character's letter-spacing would be trimmed at line break time.
-        if (wrap_lines && rect->x + rect->width - lycon->line.trailing_letter_spacing > line_right) { // line filled up and wrapping enabled
+        // Use a small epsilon to tolerate accumulated floating-point rounding
+        // errors from summing individual character widths (e.g., 0.000004px).
+        if (wrap_lines && rect->x + rect->width - lycon->line.trailing_letter_spacing > line_right + 0.001f) { // line filled up and wrapping enabled
             log_debug("line filled up");
             if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.

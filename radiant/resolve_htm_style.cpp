@@ -506,6 +506,37 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->given_width = 300;
         block->blk->given_height = 150;
         break;
+    case HTM_TAG_VIDEO:
+    case HTM_TAG_CANVAS:
+        // replaced elements with default 300x150 per HTML spec
+        block->display.inner = RDT_DISPLAY_REPLACED;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        // Parse HTML width/height attributes; default 300x150
+        if (const char* w_attr = elmt->get_attribute("width")) {
+            StrView w_view = strview_init(w_attr, strlen(w_attr));
+            float w = strview_to_int(&w_view);
+            if (w >= 0) { lycon->block.given_width = w; block->blk->given_width = w; }
+            else { lycon->block.given_width = 300; block->blk->given_width = 300; }
+        } else { lycon->block.given_width = 300; block->blk->given_width = 300; }
+        if (const char* h_attr = elmt->get_attribute("height")) {
+            StrView h_view = strview_init(h_attr, strlen(h_attr));
+            float h = strview_to_int(&h_view);
+            if (h >= 0) { lycon->block.given_height = h; block->blk->given_height = h; }
+            else { lycon->block.given_height = 150; block->blk->given_height = 150; }
+        } else { lycon->block.given_height = 150; block->blk->given_height = 150; }
+        break;
+    case HTM_TAG_AUDIO:
+        // HTML §4.8.9: <audio> without controls is not rendered (display: none)
+        // With controls, it's a replaced element with browser-specific dimensions
+        if (elmt->has_attribute("controls")) {
+            block->display.inner = RDT_DISPLAY_REPLACED;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            lycon->block.given_width = 300;
+            lycon->block.given_height = 54;
+            block->blk->given_width = 300;
+            block->blk->given_height = 54;
+        }
+        break;
     case HTM_TAG_OBJECT:
         // HTML §4.8.7: <object> is replaced only when it has a data attribute.
         // Without data, it renders its fallback content (children) as normal flow.
