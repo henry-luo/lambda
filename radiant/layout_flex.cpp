@@ -5715,6 +5715,17 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
             // Form controls use intrinsic sizes directly - don't read fi (union aliasing)
             if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
                 float cross = is_horizontal ? item->form->intrinsic_height : item->form->intrinsic_width;
+                // For text-like inputs, recalculate content height from actual font
+                // (CSS may override UA font-size set during resolve_htm_style)
+                if (is_horizontal && item->form->control_type == FORM_CONTROL_TEXT &&
+                    item->font && item->font->font_size > 0 && lycon->ui_context) {
+                    FontBox temp_font;
+                    setup_font(lycon->ui_context, &temp_font, item->font);
+                    if (temp_font.font_handle) {
+                        float line_h = calc_normal_line_height(temp_font.font_handle);
+                        if (line_h > cross) cross = line_h;
+                    }
+                }
                 // Add CSS padding and border for border-box
                 if (item->bound) {
                     if (is_horizontal) {

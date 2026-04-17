@@ -759,8 +759,9 @@ extern "C" Item js_build_arguments_object() {
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (js_pending_args_callee.item != 0) {
-            js_property_set(companion, (Item){.item = s2it(heap_create_name("callee", 6))},
-                            js_pending_args_callee);
+            Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
+            js_property_set(companion, callee_key, js_pending_args_callee);
+            js_mark_non_enumerable(companion, callee_key);
         }
     }
 
@@ -2334,6 +2335,7 @@ struct JsFunction {
     uint8_t flags;   // v20: bit 0 = is_generator
     int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
     Item* module_vars; // Per-module variable array (NULL for built-in functions)
+    String* source_text; // v29: original source text for Function.prototype.toString
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1
@@ -2800,8 +2802,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                int blen = (argc > 0 && args) ? (int)it2i(args[0]) : 0;
-                return js_arraybuffer_new(blen);
+                Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
+                return js_arraybuffer_construct(blen_arg);
             }
 
             // DataView
@@ -3409,13 +3411,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (result.item != ITEM_NULL) return result;
                     }
                     // fallback: check buffer prototype for Uint8Array (Buffer) instances
+                    // use map_get (own-property only) to avoid prototype chain recursion
                     {
                         JsTypedArray* ta = (JsTypedArray*)object.map->data;
                         if (ta && ta->element_type == JS_TYPED_UINT8) {
                             extern Item js_get_buffer_prototype(void);
                             Item buf_proto = js_get_buffer_prototype();
                             if (buf_proto.item != ITEM_NULL) {
-                                Item result = js_property_get(buf_proto, key);
+                                Item result = map_get(buf_proto.map, key);
                                 if (result.item != ITEM_NULL) return result;
                             }
                         }
@@ -3470,8 +3473,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 return (Item){.item = ITEM_NULL};
             }
+            case MAP_KIND_DOC_PROXY: {
+                // check own properties stored on the upgraded map first
+                if (object.map->data_cap > 0) {
+                    Item own_result = map_get(object.map, key);
+                    if (own_result.item != ITEM_NULL) return own_result;
+                }
+                return js_document_proxy_get_property(key);
+            }
             case MAP_KIND_DOM:
-                if (js_is_document_proxy(object)) return js_document_proxy_get_property(key);
                 if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
             case MAP_KIND_CSSOM:
@@ -3825,18 +3835,18 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // Numeric index access
         int idx = (int)js_get_number(key);
-        if (idx >= 0 && idx < object.array->length) {
-            // check for accessor (getter) on companion map
-            if (object.array->extra != 0) {
-                char gk[64];
-                snprintf(gk, sizeof(gk), "__get_%d", idx);
-                Map* props = (Map*)(uintptr_t)object.array->extra;
-                bool gk_found = false;
-                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    return js_call_function(getter, object, NULL, 0);
-                }
+        // check for accessor (getter) on companion map — must check even when idx >= length
+        if (idx >= 0 && object.array->extra != 0) {
+            char gk[64];
+            snprintf(gk, sizeof(gk), "__get_%d", idx);
+            Map* props = (Map*)(uintptr_t)object.array->extra;
+            bool gk_found = false;
+            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, object, NULL, 0);
             }
+        }
+        if (idx >= 0 && idx < object.array->length) {
             // v25: check for deleted sentinel (array hole) — return undefined
             if (object.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
                 return make_js_undefined();
@@ -4577,6 +4587,30 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 }
             }
         }
+        // check for setter accessor on numeric index before array set
+        if (object.array->extra != 0) {
+            int idx = (int)js_get_number(key);
+            if (idx >= 0) {
+                char sk_buf[64];
+                snprintf(sk_buf, sizeof(sk_buf), "__set_%d", idx);
+                Map* props = (Map*)(uintptr_t)object.array->extra;
+                bool sk_found = false;
+                Item setter = js_map_get_fast(props, sk_buf, (int)strlen(sk_buf), &sk_found);
+                if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item args[1] = { value };
+                    js_call_function(setter, object, args, 1);
+                    return value;
+                }
+                // check non-writable for data property with accessor
+                char nw_buf[64];
+                snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", idx);
+                bool nw_found = false;
+                Item nw_val = js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
+                if (nw_found && js_is_truthy(nw_val)) {
+                    return value; // silently ignore assignment to non-writable
+                }
+            }
+        }
         return js_array_set(object, key, value);
     }
 
@@ -4656,8 +4690,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // MapKind fast path: skip exotic checks for plain objects
         if (m->map_kind != MAP_KIND_PLAIN) {
             switch (m->map_kind) {
+            case MAP_KIND_DOC_PROXY:
+                // upgrade map for property storage on first write (like ArrayBuffer)
+                if (m->data_cap == 0 && js_input) {
+                    m->type = (void*)&EmptyMap;
+                    m->data = NULL;
+                    m->data_cap = 0;
+                }
+                break;  // fall through to regular property set
             case MAP_KIND_DOM:
-                if (js_is_document_proxy(object)) return js_document_proxy_set_property(key, value);
                 return js_dom_set_property(object, key, value);
             case MAP_KIND_CSSOM:
                 if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);
@@ -5377,18 +5418,18 @@ extern "C" Item js_array_get(Item array, Item index) {
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         Array* arr = array.array;
-        if (index >= 0 && index < arr->length) {
-            // check for accessor (getter) on companion map
-            if (arr->extra != 0) {
-                char gk[64];
-                snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
-                Map* props = (Map*)(uintptr_t)arr->extra;
-                bool gk_found = false;
-                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    return js_call_function(getter, array, NULL, 0);
-                }
+        // check for accessor (getter) on companion map — must check even when idx >= length
+        if (index >= 0 && arr->extra != 0) {
+            char gk[64];
+            snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
+            Map* props = (Map*)(uintptr_t)arr->extra;
+            bool gk_found = false;
+            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, array, NULL, 0);
             }
+        }
+        if (index >= 0 && index < arr->length) {
             // v25: check for deleted sentinel (array hole) — return undefined
             if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) {
                 return make_js_undefined();
@@ -5415,9 +5456,19 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         return js_property_set(array, (Item){.item = i2it((int)index)}, value);
     }
     Array* arr = array.array;
-    // v27: check __nw_ (non-writable) marker from companion map before writing
-    if (arr->extra != 0 && index >= 0 && index < arr->length) {
+    // check companion map for accessor/non-writable markers — must check even when idx >= length
+    if (arr->extra != 0 && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
+        // check setter accessor
+        char sk[64];
+        snprintf(sk, sizeof(sk), "__set_%lld", (long long)index);
+        bool sk_found = false;
+        Item setter = js_map_get_fast_ext(pm, sk, (int)strlen(sk), &sk_found);
+        if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
+            js_call_function(setter, array, &value, 1);
+            return value;
+        }
+        // check non-writable
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
         bool nw_found = false;
@@ -6233,6 +6284,16 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (fn->func_ptr) { // is JsFunction layout
         fn->name = it2s(name_item);
+    }
+}
+
+// Set the source text of a JsFunction for Function.prototype.toString
+extern "C" void js_set_function_source(Item fn_item, Item source_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    if (get_type_id(source_item) != LMD_TYPE_STRING) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn->func_ptr) {
+        fn->source_text = it2s(source_item);
     }
 }
 
@@ -7054,6 +7115,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_FUNC_TO_STRING: {
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;
+            // User-defined functions with stored source text: return original source
+            if (fn->source_text && fn->source_text->len > 0 && fn->builtin_id == 0
+                && !(fn->bound_this.item || fn->bound_args)) {
+                return (Item){.item = s2it(fn->source_text)};
+            }
+            // Built-in, bound, or no-source functions: NativeFunction format
             StrBuf* sb = strbuf_new();
             if (fn->flags & JS_FUNC_FLAG_GENERATOR)
                 strbuf_append_str_n(sb, "function* ", 10);
@@ -9670,13 +9737,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         String* method = it2s(method_name);
         if (method) {
             // Buffer (Uint8Array) instance methods: dispatch through buffer prototype first
+            // use map_get (own-property only) to avoid walking the prototype chain
+            // back to TypedArray.prototype, which would cause infinite recursion
             {
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 if (ta && ta->element_type == JS_TYPED_UINT8) {
                     extern Item js_get_buffer_prototype(void);
                     Item buf_proto = js_get_buffer_prototype();
                     if (buf_proto.item != ITEM_NULL) {
-                        Item fn = js_property_get(buf_proto, method_name);
+                        Item fn = map_get(buf_proto.map, method_name);
                         if (fn.item != ITEM_NULL && get_type_id(fn) == LMD_TYPE_FUNC) {
                             return js_call_function(fn, obj, args, argc);
                         }
@@ -10327,6 +10396,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     }
                 }
                 // Buffer prototype: Uint8Array (Buffer) instances use buffer toString
+                // use map_get (own-property only) to avoid prototype chain recursion
                 if (js_is_typed_array(obj)) {
                     JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                     if (ta && ta->element_type == JS_TYPED_UINT8) {
@@ -10334,7 +10404,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         Item buf_proto = js_get_buffer_prototype();
                         if (buf_proto.item != ITEM_NULL) {
                             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            Item ts_fn = js_property_get(buf_proto, ts_key);
+                            Item ts_fn = map_get(buf_proto.map, ts_key);
                             if (ts_fn.item != ITEM_NULL && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                                 return js_call_function(ts_fn, obj, args, argc);
                             }

@@ -1348,6 +1348,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
@@ -1428,6 +1429,7 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_set_from", FPTR(js_typed_array_set_from)},
     // ArrayBuffer
     {"js_arraybuffer_new", FPTR(js_arraybuffer_new)},
+    {"js_arraybuffer_construct", FPTR(js_arraybuffer_construct)},
     {"js_is_arraybuffer", FPTR(js_is_arraybuffer)},
     {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
     {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},

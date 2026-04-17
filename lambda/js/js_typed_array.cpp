@@ -79,6 +79,49 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     return (Item){.map = m};
 }
 
+// ArrayBuffer constructor from JS: new ArrayBuffer(length)
+// Performs ToIndex validation per spec: non-negative integer, throws RangeError for invalid.
+// Practical allocation limit: 1 GB (matches typical engine limits).
+extern "C" Item js_arraybuffer_construct(Item length_arg) {
+    // ToIndex: undefined/null → 0
+    TypeId type = get_type_id(length_arg);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
+        return js_arraybuffer_new(0);
+    }
+
+    // Convert to number: handles strings, objects (valueOf/toString), booleans
+    Item num = js_to_number(length_arg);
+    if (js_check_exception()) return ItemNull;
+    type = get_type_id(num);
+
+    // Extract numeric value as double for validation
+    double dval;
+    if (type == LMD_TYPE_FLOAT) {
+        dval = *((double*)((uintptr_t)num.item & 0x00FFFFFFFFFFFFFF));
+    } else {
+        dval = (double)it2i(num);
+    }
+
+    // NaN → 0 (per ToInteger spec)
+    if (std::isnan(dval)) {
+        return js_arraybuffer_new(0);
+    }
+
+    // ToInteger: truncate toward zero (not floor)
+    dval = std::trunc(dval);
+
+    // Validate: must be non-negative and <= 2^53 - 1
+    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
+        return js_throw_range_error("Invalid array buffer length");
+    }
+
+    int64_t ival = (int64_t)dval;
+    if (ival > 1073741824) { // 1 GB practical limit
+        return js_throw_range_error("Array buffer allocation failed");
+    }
+    return js_arraybuffer_new((int)ival);
+}
+
 extern "C" bool js_is_arraybuffer(Item val) {
     TypeId type = get_type_id(val);
     if (type != LMD_TYPE_MAP) return false;

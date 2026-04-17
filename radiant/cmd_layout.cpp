@@ -90,7 +90,7 @@ Element* get_html_root_element(Input* input);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine, int depth = 0);
 void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
-CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
+CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
@@ -1186,7 +1186,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int dep
  * Handles linked stylesheets, <style> elements, and inline style attributes
  * Returns array of collected stylesheets
  */
-CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count) {
+CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
     log_debug("[CSS] Extracting CSS from HTML document...");
@@ -1198,11 +1198,15 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     log_debug("[CSS] Step 1: Collecting linked stylesheets...");
     collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
 
+    int linked_count = *stylesheet_count;
+    if (linked_count_out) *linked_count_out = linked_count;
+
     // Step 2: Collect and parse <style> inline CSS
     log_debug("[CSS] Step 2: Collecting inline <style> elements...");
     collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
-    log_debug("[CSS] Collected %d stylesheet(s) from HTML", *stylesheet_count);
+    log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
+              *stylesheet_count, linked_count, *stylesheet_count - linked_count);
     return stylesheets;
 }
 
@@ -2284,11 +2288,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    // Extract and parse <style> elements
+    // Extract and parse <link rel="stylesheet"> and <style> elements
     int inline_stylesheet_count = 0;
+    int linked_stylesheet_count = 0;
     const char* css_base_path = url_get_href(html_url);
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, css_engine, css_base_path, pool, &inline_stylesheet_count);
+        html_root, css_engine, css_base_path, pool, &inline_stylesheet_count, &linked_stylesheet_count);
 
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
@@ -2345,31 +2350,48 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
                  dom_doc->js_mutation_count);
 
-        // Re-collect inline stylesheets from the DomElement* tree to pick up:
+        // Re-collect inline <style> stylesheets from the DomElement* tree to pick up:
         // 1. Dynamically-added <style> elements (e.g. first-letter-dynamic-001)
         // 2. <style disabled> elements that should be skipped (e.g. table-anonymous-objects-015)
-        // This replaces the pre-script collection which walked the Element* tree.
-        int rescan_count = 0;
-        CssStylesheet** rescan_sheets = nullptr;
-        collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_sheets, &rescan_count);
-        if (rescan_count != inline_stylesheet_count) {
-            log_info("[CSS] Re-scan found %d inline stylesheets (was %d before JS)",
-                     rescan_count, inline_stylesheet_count);
+        // NOTE: Only <style> elements are rescanned. <link> stylesheets from the
+        // initial collection are preserved — they don't change due to JS mutations.
+        int rescan_inline_count = 0;
+        CssStylesheet** rescan_inline_sheets = nullptr;
+        collect_inline_styles_from_dom(dom_root, css_engine, pool, &rescan_inline_sheets, &rescan_inline_count);
+
+        int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
+        if (rescan_inline_count != old_inline_only) {
+            log_info("[CSS] Re-scan found %d inline <style> stylesheets (was %d before JS)",
+                     rescan_inline_count, old_inline_only);
         }
-        inline_stylesheets = rescan_sheets;
-        inline_stylesheet_count = rescan_count;
+
+        // Merge: linked stylesheets (first N entries) + rescanned inline stylesheets
+        int merged_count = linked_stylesheet_count + rescan_inline_count;
+        CssStylesheet** merged_sheets = (CssStylesheet**)pool_alloc(pool, merged_count * sizeof(CssStylesheet*));
+
+        // Copy linked stylesheets from original array (indices 0..linked_stylesheet_count-1)
+        for (int i = 0; i < linked_stylesheet_count; i++) {
+            merged_sheets[i] = inline_stylesheets[i];
+        }
+        // Copy rescanned inline <style> stylesheets
+        for (int i = 0; i < rescan_inline_count; i++) {
+            merged_sheets[linked_stylesheet_count + i] = rescan_inline_sheets[i];
+        }
+
+        inline_stylesheets = merged_sheets;
+        inline_stylesheet_count = merged_count;
 
         // Update DomDocument stylesheet cache for getComputedStyle
-        int new_total = rescan_count + (external_stylesheet ? 1 : 0);
+        int new_total = merged_count + (external_stylesheet ? 1 : 0);
         dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, new_total * sizeof(CssStylesheet*));
         dom_doc->stylesheet_count = 0;
         dom_doc->stylesheet_capacity = new_total;
         if (external_stylesheet) {
             dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
         }
-        for (int i = 0; i < rescan_count; i++) {
-            if (rescan_sheets[i]) {
-                dom_doc->stylesheets[dom_doc->stylesheet_count++] = rescan_sheets[i];
+        for (int i = 0; i < merged_count; i++) {
+            if (merged_sheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = merged_sheets[i];
             }
         }
     }

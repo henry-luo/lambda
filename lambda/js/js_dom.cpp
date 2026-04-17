@@ -37,6 +37,7 @@
 
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
+extern Input* js_input;
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -199,14 +200,14 @@ extern "C" bool js_is_document_proxy(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m->type == (void*)&js_document_proxy_marker;
+    return m->map_kind == MAP_KIND_DOC_PROXY;
 }
 
 extern "C" Item js_get_document_object_value() {
     if (js_document_proxy_item.item != ITEM_NULL) return js_document_proxy_item;
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
-    wrapper->map_kind = MAP_KIND_DOM;
+    wrapper->map_kind = MAP_KIND_DOC_PROXY;
     wrapper->type = (void*)&js_document_proxy_marker;
     wrapper->data = nullptr;
     wrapper->data_cap = 0;
@@ -228,10 +229,13 @@ extern "C" Item js_document_proxy_get_property(Item prop_name) {
 }
 
 // Dispatch property set on the document proxy object.
+// NOTE: Must use map_put directly instead of js_property_set to avoid
+// infinite recursion (js_property_set dispatches back here for MAP_KIND_DOM).
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
+            // Store title as a static value (proxy map lacks TypeMap for map_put)
             js_document_title_value = value;
             return value;
         }
@@ -1800,12 +1804,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
+    const char* prop = fn_to_cstr(prop_name);
     if (!node) {
         log_debug("js_dom_get_property: not a DOM node");
         return ItemNull;
     }
 
-    const char* prop = fn_to_cstr(prop_name);
     if (!prop) return ItemNull;
 
     // Text node properties
