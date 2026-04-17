@@ -278,15 +278,26 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
 }
 
 // =============================================================================
-// execSync(command) — synchronous, returns stdout string
+// execSync(command[, options]) — synchronous, returns Buffer or string
 // =============================================================================
 
-extern "C" Item js_cp_execSync(Item command_item) {
+extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
         log_error("child_process: execSync: invalid command");
         return ItemNull;
+    }
+
+    // Check encoding option
+    bool return_string = false;
+    if (get_type_id(options_item) == LMD_TYPE_MAP) {
+        extern Item js_property_get(Item obj, Item key);
+        Item enc_key = make_string_item("encoding");
+        Item enc_val = js_property_get(options_item, enc_key);
+        if (get_type_id(enc_val) == LMD_TYPE_STRING) {
+            return_string = true; // any encoding specified → return string
+        }
     }
 
     // Use popen for simplicity — synchronous and blocking
@@ -320,16 +331,28 @@ extern "C" Item js_cp_execSync(Item command_item) {
 
     if (result_buf) {
         result_buf[result_len] = '\0';
-        // trim trailing newline
-        while (result_len > 0 && (result_buf[result_len - 1] == '\n' || result_buf[result_len - 1] == '\r')) {
-            result_len--;
+        // trim trailing newline only when returning as string
+        if (return_string) {
+            while (result_len > 0 && (result_buf[result_len - 1] == '\n' || result_buf[result_len - 1] == '\r')) {
+                result_len--;
+            }
+            Item result = make_string_item(result_buf, (int)result_len);
+            mem_free(result_buf);
+            return result;
         }
-        Item result = make_string_item(result_buf, (int)result_len);
+        // return Buffer (Uint8Array) via Buffer.from(string)
+        Item str_result = make_string_item(result_buf, (int)result_len);
+        extern Item js_buffer_from(Item data, Item encoding);
+        Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+        Item buf = js_buffer_from(str_result, undef);
         mem_free(result_buf);
-        return result;
+        return buf;
     }
 
-    return make_string_item("");
+    if (return_string) return make_string_item("");
+    extern Item js_buffer_from(Item data, Item encoding);
+    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+    return js_buffer_from(make_string_item(""), undef);
 }
 
 // =============================================================================
@@ -634,11 +657,11 @@ extern "C" Item js_get_child_process_namespace(void) {
     cp_namespace = js_new_object();
 
     js_cp_set_method(cp_namespace, "exec",       (void*)js_cp_exec, 2);
-    js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 1);
+    js_cp_set_method(cp_namespace, "execSync",   (void*)js_cp_execSync, 2);
     js_cp_set_method(cp_namespace, "spawn",      (void*)js_cp_spawn, 2);
     js_cp_set_method(cp_namespace, "spawnSync",  (void*)js_cp_spawnSync, 2);
     js_cp_set_method(cp_namespace, "execFile",   (void*)js_cp_exec, 2); // alias for now
-    js_cp_set_method(cp_namespace, "execFileSync", (void*)js_cp_execSync, 1);
+    js_cp_set_method(cp_namespace, "execFileSync", (void*)js_cp_execSync, 2);
 
     // set "default" for `import cp from 'child_process'`
     Item default_key = make_string_item("default");

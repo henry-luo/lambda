@@ -1971,7 +1971,9 @@ class PremakeGenerator:
                                 # If it's dynamic, add it to links using the actual lib flag
                                 if lib_info.get('link') == 'dynamic':
                                     lib_path = lib_info.get('lib', '')
-                                    if lib_path.startswith('-l'):
+                                    if lib_path.startswith('-framework '):
+                                        pass  # frameworks handled via linkoptions below
+                                    elif lib_path.startswith('-l'):
                                         # Use the actual flag name (strip -l) to avoid -l<name> mismatch
                                         link_name = lib_path[2:]
                                         self.premake_content.append(f'        "{link_name}",')
@@ -2058,6 +2060,25 @@ class PremakeGenerator:
                 self.premake_content.append('    linkoptions {')
                 for lib_path in external_static_libs:
                     self.premake_content.append(f'        "{lib_path}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+
+            # Add framework linkoptions for dynamic libraries with -framework prefix
+            framework_flags = []
+            for lib_name in libraries:
+                if lib_name in self.external_libraries:
+                    lib_info = self.external_libraries[lib_name]
+                    if lib_info.get('link') == 'dynamic':
+                        lib_path = lib_info.get('lib', '')
+                        if lib_path.startswith('-framework '):
+                            framework_flags.append(lib_path)
+
+            if framework_flags:
+                self.premake_content.append('    linkoptions {')
+                for flag in framework_flags:
+                    self.premake_content.append(f'        "{flag}",')
                 self.premake_content.extend([
                     '    }',
                     '    '

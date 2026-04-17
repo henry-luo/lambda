@@ -26,6 +26,7 @@ extern "C" {
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
@@ -593,6 +594,12 @@ void render(GLFWwindow* window) {
     } else if (ui_context.document && ui_context.document->state) {
         // Clear stale needs_repaint when there are no dirty regions to render
         ui_context.document->state->needs_repaint = false;
+
+        // Video-only dirty path: skip full DL rebuild, just blit new video frames
+        if (ui_context.document->state->has_active_video &&
+            ui_context.document->state->video_placement_count > 0) {
+            render_video_frames_cached(ui_context.document->state, ui_context.surface);
+        }
     }
 
     // repaint to screen
@@ -1011,7 +1018,8 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Video playback: force continuous redraw when any video is playing
         if (state && state->has_active_video) {
-            state->is_dirty = true;
+            // only force full render if nothing else triggered it;
+            // otherwise the video-only blit path in render() handles it
             do_redraw = 1;
         }
 

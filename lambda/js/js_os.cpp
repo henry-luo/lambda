@@ -557,7 +557,7 @@ extern "C" Item js_os_userInfo(void) {
 
 // os.loadavg() — returns [1min, 5min, 15min] load averages
 extern "C" Item js_os_loadavg(void) {
-    Item arr = js_array_new(3);
+    Item arr = js_array_new(0);
 #ifndef _WIN32
     double loadavg[3] = {0, 0, 0};
     getloadavg(loadavg, 3);
@@ -575,6 +575,35 @@ extern "C" Item js_os_loadavg(void) {
     }
 #endif
     return arr;
+}
+
+// os.machine() — returns the machine type (e.g. "arm64", "x86_64")
+extern "C" Item js_os_machine(void) {
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetNativeSystemInfo(&si);
+    switch (si.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64: return make_string_item("x86_64");
+        case PROCESSOR_ARCHITECTURE_ARM64: return make_string_item("aarch64");
+        default: return make_string_item("unknown");
+    }
+#else
+    struct utsname info;
+    if (uname(&info) == 0) return make_string_item(info.machine);
+    return make_string_item("unknown");
+#endif
+}
+
+// os.availableParallelism() — returns number of available CPU cores
+extern "C" Item js_os_availableParallelism(void) {
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (Item){.item = i2it((int64_t)si.dwNumberOfProcessors)};
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (Item){.item = i2it(n > 0 ? (int64_t)n : 1)};
+#endif
 }
 
 // =============================================================================
@@ -610,13 +639,46 @@ extern "C" Item js_get_os_namespace(void) {
     js_os_set_method(os_namespace, "networkInterfaces", (void*)js_os_networkInterfaces, 0);
     js_os_set_method(os_namespace, "userInfo",          (void*)js_os_userInfo, 0);
     js_os_set_method(os_namespace, "loadavg",           (void*)js_os_loadavg, 0);
+    js_os_set_method(os_namespace, "machine",           (void*)js_os_machine, 0);
+    js_os_set_method(os_namespace, "availableParallelism", (void*)js_os_availableParallelism, 0);
 
     // constants
 #ifdef _WIN32
     js_property_set(os_namespace, make_string_item("EOL"), make_string_item("\r\n"));
+    js_property_set(os_namespace, make_string_item("devNull"), make_string_item("\\\\.\\NUL"));
 #else
     js_property_set(os_namespace, make_string_item("EOL"), make_string_item("\n"));
+    js_property_set(os_namespace, make_string_item("devNull"), make_string_item("/dev/null"));
 #endif
+    extern void js_mark_non_writable(Item object, Item name);
+    js_mark_non_writable(os_namespace, make_string_item("EOL"));
+
+    // os.constants with signals and errno subobjects
+    Item constants = js_new_object();
+    Item signals = js_new_object();
+    Item errno_obj = js_new_object();
+
+    // Common POSIX signals
+    js_property_set(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(1)});
+    js_property_set(signals, make_string_item("SIGINT"),  (Item){.item = i2it(2)});
+    js_property_set(signals, make_string_item("SIGQUIT"), (Item){.item = i2it(3)});
+    js_property_set(signals, make_string_item("SIGILL"),  (Item){.item = i2it(4)});
+    js_property_set(signals, make_string_item("SIGTRAP"), (Item){.item = i2it(5)});
+    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(6)});
+    js_property_set(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(8)});
+    js_property_set(signals, make_string_item("SIGKILL"), (Item){.item = i2it(9)});
+    js_property_set(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(11)});
+    js_property_set(signals, make_string_item("SIGPIPE"), (Item){.item = i2it(13)});
+    js_property_set(signals, make_string_item("SIGALRM"), (Item){.item = i2it(14)});
+    js_property_set(signals, make_string_item("SIGTERM"), (Item){.item = i2it(15)});
+    js_property_set(signals, make_string_item("SIGCHLD"), (Item){.item = i2it(17)});
+    js_property_set(signals, make_string_item("SIGCONT"), (Item){.item = i2it(18)});
+    js_property_set(signals, make_string_item("SIGSTOP"), (Item){.item = i2it(19)});
+    js_property_set(signals, make_string_item("SIGTSTP"), (Item){.item = i2it(20)});
+
+    js_property_set(constants, make_string_item("signals"), signals);
+    js_property_set(constants, make_string_item("errno"), errno_obj);
+    js_property_set(os_namespace, make_string_item("constants"), constants);
 
     // default export
     Item default_key = make_string_item("default");

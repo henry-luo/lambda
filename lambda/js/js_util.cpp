@@ -215,39 +215,39 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
 // =============================================================================
 
 extern "C" Item js_util_types_isDate(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = i2it(0)};
+    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
     String* s = it2s(cn);
-    return (Item){.item = i2it(s->len == 4 && memcmp(s->chars, "Date", 4) == 0 ? 1 : 0)};
+    return (Item){.item = b2it(s->len == 4 && memcmp(s->chars, "Date", 4) == 0)};
 }
 
 extern "C" Item js_util_types_isRegExp(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = i2it(0)};
+    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
     String* s = it2s(cn);
-    return (Item){.item = i2it(s->len == 6 && memcmp(s->chars, "RegExp", 6) == 0 ? 1 : 0)};
+    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "RegExp", 6) == 0)};
 }
 
 extern "C" Item js_util_types_isArray(Item value) {
-    return (Item){.item = i2it(get_type_id(value) == LMD_TYPE_ARRAY ? 1 : 0)};
+    return (Item){.item = b2it(get_type_id(value) == LMD_TYPE_ARRAY)};
 }
 
 extern "C" Item js_util_types_isMap(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = i2it(0)};
+    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
     String* s = it2s(cn);
-    return (Item){.item = i2it(s->len == 3 && memcmp(s->chars, "Map", 3) == 0 ? 1 : 0)};
+    return (Item){.item = b2it(s->len == 3 && memcmp(s->chars, "Map", 3) == 0)};
 }
 
 extern "C" Item js_util_types_isSet(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = i2it(0)};
+    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
     String* s = it2s(cn);
-    return (Item){.item = i2it(s->len == 3 && memcmp(s->chars, "Set", 3) == 0 ? 1 : 0)};
+    return (Item){.item = b2it(s->len == 3 && memcmp(s->chars, "Set", 3) == 0)};
 }
 
 // =============================================================================
@@ -294,23 +294,23 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
 extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     // use strict equality for primitives
     Item eq = js_strict_equal(a, b);
-    if (get_type_id(eq) == LMD_TYPE_INT && it2i(eq) == 1) return eq;
+    if (js_is_truthy(eq)) return (Item){.item = b2it(true)};
 
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    if (ta != tb) return (Item){.item = i2it(0)};
+    if (ta != tb) return (Item){.item = b2it(false)};
 
     if (ta == LMD_TYPE_ARRAY) {
         int64_t la = js_array_length(a);
         int64_t lb = js_array_length(b);
-        if (la != lb) return (Item){.item = i2it(0)};
+        if (la != lb) return (Item){.item = b2it(false)};
         for (int64_t i = 0; i < la; i++) {
             Item ea = js_array_get_int(a, i);
             Item eb = js_array_get_int(b, i);
             Item r = js_util_isDeepStrictEqual(ea, eb);
-            if (get_type_id(r) != LMD_TYPE_INT || it2i(r) != 1) return (Item){.item = i2it(0)};
+            if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
         }
-        return (Item){.item = i2it(1)};
+        return (Item){.item = b2it(true)};
     }
 
     if (ta == LMD_TYPE_MAP) {
@@ -318,18 +318,18 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
         Item keys_b = js_object_keys(b);
         int64_t la = js_array_length(keys_a);
         int64_t lb = js_array_length(keys_b);
-        if (la != lb) return (Item){.item = i2it(0)};
+        if (la != lb) return (Item){.item = b2it(false)};
         for (int64_t i = 0; i < la; i++) {
             Item key = js_array_get_int(keys_a, i);
             Item va = js_property_get(a, key);
             Item vb = js_property_get(b, key);
             Item r = js_util_isDeepStrictEqual(va, vb);
-            if (get_type_id(r) != LMD_TYPE_INT || it2i(r) != 1) return (Item){.item = i2it(0)};
+            if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
         }
-        return (Item){.item = i2it(1)};
+        return (Item){.item = b2it(true)};
     }
 
-    return (Item){.item = i2it(0)};
+    return (Item){.item = b2it(false)};
 }
 
 // util.callbackify(fn) — convert async/promise fn to callback style

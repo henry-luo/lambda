@@ -9391,7 +9391,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_b));
             }
             // assert(mustBeTrue [, message])
+            // only intercept for test262 global `assert` — skip if `assert` is a local binding
+            // (e.g. `const assert = require('assert')` in Node.js tests)
             if (id->name->len == 6 && strncmp(id->name->chars, "assert", 6) == 0 && arg_count >= 1 && arg_count <= 2) {
+                NameEntry* assert_entry = js_scope_lookup(mt->tp, id->name);
+                if (!assert_entry) assert_entry = id->entry;
+                bool is_local = (assert_entry && assert_entry->node);
+                if (!is_local) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t cond_reg = jm_transpile_box_item(mt, a1);
@@ -9400,6 +9406,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cond_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
                 return jm_emit_undefined(mt);
+                }
             }
             // $DONOTEVALUATE()
             if (id->name->len == 14 && strncmp(id->name->chars, "$DONOTEVALUATE", 14) == 0) {
@@ -19896,7 +19903,7 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
             "process", "querystring", "events", "buffer",
             "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
             "string_decoder", "assert", "assert/strict",
-            "timers", "console", "worker_threads", NULL
+            "timers", "console", "worker_threads", "cluster", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {
