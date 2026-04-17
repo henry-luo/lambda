@@ -292,12 +292,8 @@ extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
 }
 
 // ─── static events.setMaxListeners(n, ...eventTargets) ──────────────────────
-// Node.js API: first arg is n, remaining are emitters
-static Item js_ee_static_setMaxListeners(Item n, Item emitter) {
-    return js_ee_setMaxListeners(emitter, n);
-}
-
-// ─── static events.getMaxListeners(emitter) ─────────────────────────────────
+// Namespace version uses same (emitter, n) signature as other static methods
+// for consistency with events.on(emitter, event, fn) pattern.
 // (same order, but listed here for clarity)
 
 // ─── emitter.getMaxListeners() ──────────────────────────────────────────────
@@ -400,17 +396,21 @@ static Item ee_prototype = {0};
 extern "C" void js_function_set_prototype(Item fn_item, Item proto);
 
 extern "C" Item js_ee_constructor(void) {
-    // When called via 'new EventEmitter()', js_current_this is the pre-built
-    // object with __proto__ already set. Initialize it and return undefined
-    // so the runtime uses the pre-built object (preserving prototype chain).
+    ensure_keys();
+    // Check if called via 'new EventEmitter()' — the runtime pre-builds an object
+    // with __proto__ set. Detect this by checking if this_val's prototype is ee_prototype.
     Item this_val = js_get_this();
     if (get_type_id(this_val) == LMD_TYPE_MAP) {
-        js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
-        js_property_set(this_val, events_key, js_new_object());
-        js_property_set(this_val, once_key, js_array_new(0));
-        return make_js_undefined();
+        Item proto = js_get_prototype(this_val);
+        if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
+            // Called via 'new' — initialize the pre-built object
+            js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+            js_property_set(this_val, events_key, js_new_object());
+            js_property_set(this_val, once_key, js_array_new(0));
+            return make_js_undefined();
+        }
     }
-    // Fallback: direct call (not via new) — create a new object with prototype
+    // Direct call (not via new) — create a new object with prototype
     Item emitter = js_new_object();
     js_property_set(emitter, make_string_item("__class_name__"), make_string_item("EventEmitter"));
     js_property_set(emitter, events_key, js_new_object());
@@ -439,6 +439,14 @@ static Item js_ee_static_once(Item emitter, Item event_name) {
     }
 
     return promise;
+}
+
+// Combined events.once — 3-arg form adds listener, 2-arg form returns Promise
+static Item js_ee_once_combined(Item emitter, Item event_name, Item listener) {
+    if (get_type_id(listener) == LMD_TYPE_FUNC) {
+        return js_ee_once(emitter, event_name, listener);
+    }
+    return js_ee_static_once(emitter, event_name);
 }
 
 // ─── Namespace ───────────────────────────────────────────────────────────────
@@ -490,7 +498,7 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(events_namespace, "listeners",           (void*)js_ee_listeners, 2);
     ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 3);
     ee_set_method(events_namespace, "eventNames",          (void*)js_ee_eventNames, 1);
-    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_static_setMaxListeners, 2);
+    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_setMaxListeners, 2);
     ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
     ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
     ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
@@ -515,8 +523,8 @@ extern "C" Item js_get_events_namespace(void) {
     // default export is the constructor
     js_property_set(events_namespace, make_string_item("default"), events_namespace);
 
-    // static events.once(emitter, eventName) — returns Promise
-    ee_set_method(events_namespace, "once", (void*)js_ee_static_once, 2);
+    // static events.once — combined: 3 args = listener, 2 args = Promise
+    ee_set_method(events_namespace, "once", (void*)js_ee_once_combined, 3);
 
     return events_namespace;
 }

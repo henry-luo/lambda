@@ -149,6 +149,7 @@ Item js_get_new_target();
 void js_set_new_target(Item target);
 void js_set_direct_new_target(Item target);
 Item js_build_arguments_object(void);
+void js_set_arguments_info(int64_t is_strict);
 
 // Get the native function pointer from a JsFunction Item (handles JsFunction layout)
 void* js_function_get_ptr(Item fn_item);

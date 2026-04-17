@@ -724,9 +724,20 @@ extern "C" void js_set_direct_new_target(Item target) {
 
 // Build the 'arguments' array-like object from the pending call args.
 // Called at the top of JIT-compiled functions that reference 'arguments'.
+
+// v29: Arguments exotic object pending state. Set by transpiler before js_build_arguments_object().
+static int js_pending_args_is_strict = 0;   // strict mode flag
+static Item js_pending_args_callee = {0};    // callee function object — set by js_call_function
+
+extern "C" void js_set_arguments_info(int64_t is_strict) {
+    js_pending_args_is_strict = (int)is_strict;
+}
+
 extern "C" Item js_build_arguments_object() {
     int argc = js_pending_call_argc;
     Item* args = js_pending_call_args;
+    int is_strict = js_pending_args_is_strict;
+
     Item arr = js_array_new(0);
     for (int i = 0; i < argc; i++) {
         js_array_push(arr, args ? args[i] : ItemNull);
@@ -738,6 +749,21 @@ extern "C" Item js_build_arguments_object() {
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
     js_property_set(companion, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
+
+    // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
+    if (is_strict) {
+        // Mark as strict arguments — property_get on companion will check this
+        // and throw TypeError for callee/caller access (ES5 §10.6 step 14)
+        js_property_set(companion, (Item){.item = s2it(heap_create_name("__strict_arguments__", 20))},
+                        (Item){.item = b2it(true)});
+    } else {
+        // Non-strict: callee is the function object (ES5 §10.6 step 13)
+        if (js_pending_args_callee.item != 0) {
+            js_property_set(companion, (Item){.item = s2it(heap_create_name("callee", 6))},
+                            js_pending_args_callee);
+        }
+    }
+
     return arr;
 }
 
@@ -3764,6 +3790,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                     bool pm_found = false;
                     Item pm_val = js_map_get_fast_ext(pm, str_key->chars, (int)str_key->len, &pm_found);
                     if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+                    // v29: strict arguments — throw TypeError on callee/caller access
+                    if (object.array->is_content == 1 &&
+                        ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
+                         (str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0))) {
+                        bool strict_found = false;
+                        js_map_get_fast(pm, "__strict_arguments__", 20, &strict_found);
+                        if (strict_found) {
+                            return js_throw_type_error("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+                        }
+                    }
                 }
                 // v18c: .constructor for arrays → Array constructor
                 if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
@@ -8292,6 +8328,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         Item prev_this = js_current_this;
         Item prev_nt = js_new_target;
         js_current_this = effective_this;
+        // v29: store callee for arguments.callee (used by js_build_arguments_object)
+        js_pending_args_callee = func_item;
         // Check for pending new.target (set by 'new' expression before this call)
         if (js_has_pending_new_target) {
             js_new_target = js_pending_new_target;
@@ -8313,6 +8351,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     Item prev_this = js_current_this;
     Item prev_nt = js_new_target;
     js_current_this = this_val;
+    // v29: store callee for arguments.callee (used by js_build_arguments_object)
+    js_pending_args_callee = func_item;
     // Check for pending new.target (set by 'new' expression before this call)
     if (js_has_pending_new_target) {
         js_new_target = js_pending_new_target;

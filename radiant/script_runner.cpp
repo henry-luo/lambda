@@ -30,6 +30,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lib/hashmap.h"
+#include "../lambda/js/js_event_loop.h"
 
 #include <cstring>
 #include <cctype>
@@ -395,12 +396,11 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
-        "function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }\n"
-        "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); return 0; }\n"
-        "function clearTimeout(id) {}\n"
-        "function clearInterval(id) {}\n"
-        "function requestAnimationFrame(fn) { if (typeof fn === 'function') fn(0); return 0; }\n"
-        "function cancelAnimationFrame(id) {}\n"
+        // Timer stubs: requestAnimationFrame/cancelAnimationFrame use setTimeout/clearTimeout
+        // which the transpiler routes to native js_setTimeout/js_clearTimeout (libuv-backed).
+        // setTimeout/setInterval/clearTimeout/clearInterval are transpiler-intercepted — no JS stub needed.
+        "function requestAnimationFrame(fn) { return setTimeout(fn, 16); }\n"
+        "function cancelAnimationFrame(id) { clearTimeout(id); }\n"
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
         "window.clearTimeout = clearTimeout;\n"
@@ -430,18 +430,19 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.history = history;\n"
         "window.screen = screen;\n"
         "window.location = location;\n"
-        // Stub constructors that should not crash
-        "function XMLHttpRequest() { this.open = function(){}; this.send = function(){}; this.setRequestHeader = function(){}; this.addEventListener = function(){}; this.status = 0; this.readyState = 0; this.response = ''; this.responseText = ''; }\n"
+        // XMLHttpRequest: native constructor via js_xhr_new() — transpiler intercepts `new XMLHttpRequest()`
+        // Minimal stub so `typeof XMLHttpRequest !== 'undefined'` passes (jQuery feature detection).
+        "function XMLHttpRequest() {}\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
-        "window.XMLHttpRequest = XMLHttpRequest;\n"
+        "window.XMLHttpRequest = XMLHttpRequest;\n" // XMLHttpRequest is transpiler-provided
         "window.WebSocket = WebSocket;\n"
         "window.Worker = Worker;\n"
-        // Stub event listener on window
-        "window.addEventListener = function(type, fn, opts) {};\n"
-        "window.removeEventListener = function(type, fn, opts) {};\n"
-        "window.dispatchEvent = function(ev) { return true; };\n"
-        "window.getComputedStyle = function(el, pseudo) { return {}; };\n"
+        // Stub event listener on window — delegate to native DOM event system
+        "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
+        "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
+        "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
+        "window.getComputedStyle = getComputedStyle;\n"
         "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(){};\n"
         "window.scrollBy = function(){};\n"
@@ -450,6 +451,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.outerWidth = 1024;\n"
         "window.outerHeight = 768;\n"
         "window.devicePixelRatio = 1;\n"
+        // Set document.defaultView to window for jQuery/Sizzle compatibility
+        "document.defaultView = window;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
     // Postamble: call window.onload if set by scripts
@@ -469,6 +472,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     runtime.dom_doc = (void*)dom_doc;
     // create fresh mmap pool for this JS execution
     runtime.reuse_pool = pool_create_mmap();
+
+    // Initialize the JS event loop so setTimeout/setInterval timers are queued
+    // rather than silently dropped. The loop is drained after script execution.
+    js_event_loop_init();
 
     // execute the combined JS source via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
@@ -518,6 +525,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
+        // Drain queued timers (setTimeout, setInterval, requestAnimationFrame).
+        // This runs all pending callbacks with a 5s watchdog timeout.
+        js_event_loop_drain();
+        log_info("execute_document_scripts: timer queue drained");
     }
 
     // Retain JS state on DomDocument for interactive event handler dispatch.

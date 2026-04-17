@@ -13,6 +13,7 @@
 #include "../../lib/strbuf.h"
 
 #include <cstring>
+#include <cmath>
 #include <cstdio>
 
 // Helper: make JS undefined
@@ -111,6 +112,11 @@ extern "C" Item js_util_format(Item args_item) {
                         is_nan = true;
                     }
 
+                    // %i truncates to integer (like parseInt)
+                    if (spec == 'i' && !is_nan && val == val) {
+                        val = (val >= 0) ? floor(val) : ceil(val);
+                    }
+
                     if (is_nan) {
                         pos += snprintf(buf + pos, sizeof(buf) - pos, "NaN");
                     } else if (val == 1.0/0.0) {
@@ -124,16 +130,9 @@ extern "C" Item js_util_format(Item args_item) {
                         } else {
                             pos += snprintf(buf + pos, sizeof(buf) - pos, "-0");
                         }
-                    } else if (val == (double)(long long)val && val >= -1e15 && val <= 1e15) {
-                        // integer value: print without decimal
-                        if (spec == 'i') {
-                            pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
-                        } else {
-                            pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
-                        }
                     } else {
-                        // float or very large value: print using %g
-                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%g", val);
+                        // after truncation for %i, val is always integer
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
                     }
                     arg_idx++;
                     break;

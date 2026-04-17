@@ -1201,6 +1201,7 @@ JitImport jit_runtime_imports[] = {
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_build_arguments_object", FPTR(js_build_arguments_object)},
+    {"js_set_arguments_info", FPTR(js_set_arguments_info)},
     {"js_create_arguments", FPTR(js_create_arguments)},
     {"js_build_template_object", FPTR(js_build_template_object)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},

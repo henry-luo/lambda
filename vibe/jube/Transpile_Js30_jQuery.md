@@ -4,7 +4,7 @@
 
 Gap analysis of the Lambda JS runtime (Radiant browser context) against the requirements for 100% jQuery 3.x library support. jQuery is structured into ~12 modules: Core, Selectors (Sizzle), DOM Manipulation, Traversal, CSS, Events, Effects/Animation, AJAX, Deferred/Callbacks, Dimensions, Offset, and Data. The runtime already supports **~75–80%** of what jQuery needs — selectors, DOM manipulation, traversal, CSS, attributes, data, and utilities all work. The remaining gaps are concentrated in 5 areas: **Events, Async Timers, AJAX, Layout Queries, and a few missing DOM/browser APIs**.
 
-**Status:** Proposed
+**Status:** In Progress — Phases A+B+C+D implemented, builds clean
 
 ---
 
@@ -18,12 +18,12 @@ Gap analysis of the Lambda JS runtime (Radiant browser context) against the requ
 | **Traversal** (`.parent()`, `.children()`, `.closest()`, `.next()`) | ✅ Works | `parentNode`, `children`, `nextSibling`, `closest()`, `matches()` |
 | **Attributes / Properties** (`.attr()`, `.prop()`, `.val()`) | ✅ Works | `getAttribute`, `setAttribute`, `hasAttribute` |
 | **Data** (`.data()`, `$.data()`) | ✅ Works | `WeakMap` (jQuery 3.x internal storage) |
-| **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ⚠️ Partial | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ❌ |
+| **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ✅ Works | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ✅ |
 | **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ⚠️ Partial | `getComputedStyle` ✅, `offsetWidth/Height` returns 0 |
 | **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ❌ Blocked | No `getBoundingClientRect`, no scroll properties |
-| **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ❌ Blocked | No `addEventListener`, no event bubbling, no `Event` constructor |
-| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ❌ Blocked | No async timers, no `requestAnimationFrame` with scheduling |
-| **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ❌ Blocked | No working `XMLHttpRequest` |
+| **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ✅ Implemented | `addEventListener` ✅, 3-phase bubbling ✅, `Event` creation ✅ |
+| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ⚠️ Partial | Timers work (libuv-backed), but no real-time frame stepping |
+| **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ✅ Implemented | `XMLHttpRequest` native (synchronous `http_fetch`) |
 | **Deferred / Callbacks** (`$.Deferred`, `$.Callbacks`) | ✅ Works | Pure JS — `Promise`, closures, arrays. No external deps. |
 
 ---
@@ -252,7 +252,7 @@ These are small fixes that unblock specific jQuery code paths.
 
 ## 2. Implementation Phases
 
-### Phase A — Quick Wins (unblock `.css()` and diagnostics)
+### Phase A — Quick Wins (unblock `.css()` and diagnostics) ✅ DONE
 
 **Target:** Fix `document.defaultView`, `elem.ownerDocument`, `window.getComputedStyle` conflict, `console.log` routing, `document.cookie`.
 
@@ -262,37 +262,74 @@ These are small fixes that unblock specific jQuery code paths.
 
 **Effort:** ~25 lines, minimal risk.
 
-### Phase B — DOM Event System
+**Completed items:**
+- `document.defaultView` → returns `window` object (set via preamble, stored on proxy Map)
+- `js_document_proxy_set_property` extended to persist `defaultView`
+- `window.getComputedStyle` → preamble now points to native `getComputedStyle` instead of `{}`
+- `window.addEventListener/removeEventListener/dispatchEvent` → preamble delegates to `document.*` (native)
+- `elem.ownerDocument` → already returns document proxy (verified, no fix needed)
+
+### Phase B — DOM Event System ✅ DONE
 
 **Target:** Full `addEventListener` / `removeEventListener` / `dispatchEvent` with 3-phase propagation.
 
-**New file:** `js_dom_events.cpp`  
-**Files modified:** `js_dom.cpp` (method dispatcher), `script_runner.cpp` (remove stubs)
+**New files:** `js_dom_events.h`, `js_dom_events.cpp` (~500 lines)  
+**Files modified:** `js_dom.cpp` (method dispatcher + batch reset), `script_runner.cpp` (stubs replaced)
 
 **Test:** jQuery `.on('click', handler)` registers listener. `.trigger('click')` fires handler with correct `event.target`, bubbles to parent. `.off('click', handler)` removes it. `$(document).ready(fn)` invokes `fn`.
 
 **Effort:** ~600 lines.
 
-### Phase C — Timer Queue
+**Implementation details:**
+- Listener storage: flat array of `{DomNode* key, NodeListeners}` entries — no struct modifications
+- `addEventListener` supports `{capture, once, passive}` options dict and boolean `useCapture`
+- Duplicate listener detection (same type + callback + capture = skip)
+- `dispatchEvent` implements full 3-phase propagation: capture (root→target), target, bubble (target→root)
+- Event objects created via `js_create_event()` / `js_create_custom_event()` with properties: `type`, `target`, `currentTarget`, `bubbles`, `cancelable`, `defaultPrevented`, `eventPhase`, `isTrusted`, `timeStamp`
+- `preventDefault()`, `stopPropagation()`, `stopImmediatePropagation()` are real callable `JsFunction` items via `js_new_function()` — jQuery can call them directly
+- Wired into `js_dom_element_method` and `js_document_method` dispatchers
+- `js_dom_events_reset()` called from `js_dom_batch_reset()` for document lifecycle cleanup
+- Window event listeners delegate to document (via preamble)
 
-**Target:** Synchronous drain-loop for `setTimeout` / `setInterval` / `requestAnimationFrame`.
+### Phase C — Timer Queue ✅ DONE
+
+**Target:** Wire libuv-backed timer queue into Radiant browser context for `setTimeout` / `setInterval` / `requestAnimationFrame`.
 
 **Files modified:** `script_runner.cpp`
 
 **Test:** jQuery `.delay(100).fadeIn()` chain completes. `setTimeout` callbacks execute in correct order. `clearTimeout` cancels pending callback.
 
-**Effort:** ~150 lines.
+**Effort:** ~20 lines (reused existing libuv infrastructure).
 
-### Phase D — XMLHttpRequest
+**Implementation details:**
+- The transpiler already intercepts `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval` at compile time and routes them to native C functions (`js_setTimeout`, `js_setInterval`, etc.) in `js_event_loop.cpp`
+- These native functions use libuv (`uv_timer_t`) for real timer scheduling with microtask queue support
+- **Added `js_event_loop_init()`** call in `script_runner.cpp` before JS execution — initializes libuv loop, resets timer handles and microtask queue
+- **Added `js_event_loop_drain()`** call after successful JS execution — runs all pending timers with a 5s watchdog timeout, flushes microtasks
+- **Updated preamble stubs**: removed fake synchronous `setTimeout`/`setInterval` stubs (never used — transpiler intercepts); `requestAnimationFrame(fn)` now delegates to `setTimeout(fn, 16)` which hits the native timer path; `cancelAnimationFrame` delegates to `clearTimeout`
+- Window timer aliases (`window.setTimeout`, etc.) point to the transpiler-intercepted functions
 
-**Target:** Functional XHR with synchronous HTTP via existing `http_module.cpp`.
+### Phase D — XMLHttpRequest ✅ DONE
 
-**New file:** `js_xhr.cpp`  
-**Files modified:** `transpile_js_mir.cpp` (XHR constructor recognition), `script_runner.cpp` (remove XHR stub)
+**Target:** Functional XHR with synchronous HTTP via existing `http_fetch()` from `input_http.cpp`.
+
+**New files:** `js_xhr.h`, `js_xhr.cpp` (~370 lines)
+**Files modified:** `transpile_js_mir.cpp` (XHR constructor interception), `script_runner.cpp` (preamble cleanup), `js_dom.cpp` (batch reset)
 
 **Test:** `$.ajax({url: 'test.json', async: false})` returns parsed JSON. `$.get()` / `$.post()` work for local file URLs.
 
-**Effort:** ~400 lines.
+**Effort:** ~370 lines new + ~20 lines modified.
+
+**Implementation details:**
+- **`js_xhr_new()`**: Creates a JS object with readyState/status/response properties + method functions attached via `js_new_function()`. Each XHR has a hidden `__xhr_id` indexing into a flat `XhrState` pool (max 64 instances)
+- **Method dispatch**: Methods (`open`, `send`, `setRequestHeader`, `abort`, `getResponseHeader`, `getAllResponseHeaders`) are C functions that use `js_get_this()` to resolve the XHR ID and operate on C-level state. The transpiler sets `this` via `js_set_this()` before method calls
+- **HTTP backend**: `http_fetch()` from `input_http.cpp` — synchronous libcurl with full method/headers/body/status/response-headers support
+- **State machine**: Proper readyState transitions (0→1→2→3→4) with `onreadystatechange` callbacks at each step
+- **Callback support**: `onreadystatechange`, `onload`, `onerror`, `onabort`, `onloadend`, `onloadstart`, `onprogress`
+- **Response headers**: Copied from `FetchResponse` for `getResponseHeader()` (case-insensitive) and `getAllResponseHeaders()`
+- **Transpiler integration**: `new XMLHttpRequest()` intercepted in `jm_transpile_new_expr()` → `jm_call_0(mt, "js_xhr_new", MIR_T_I64)`
+- **Preamble**: Minimal `function XMLHttpRequest() {}` kept for `typeof` feature detection; actual construction goes through transpiler
+- **Lifecycle**: `js_xhr_reset()` called from `js_dom_batch_reset()` to clean up between document runs
 
 ### Phase E — Layout Queries
 
@@ -308,14 +345,14 @@ These are small fixes that unblock specific jQuery code paths.
 
 ## 3. Estimated Total Effort
 
-| Phase | Description | New Lines | Files |
-|---|---|---|---|
-| A | Quick wins (defaultView, ownerDocument, etc.) | ~25 | 2 |
-| B | DOM Event System | ~600 | 3 (1 new) |
-| C | Timer Queue (sync drain) | ~150 | 1 |
-| D | XMLHttpRequest | ~400 | 3 (1 new) |
-| E | Layout Queries | ~200 | 2 |
-| **Total** | | **~1,375** | |
+| Phase | Description | New Lines | Files | Status |
+|---|---|---|---|---|
+| A | Quick wins (defaultView, ownerDocument, etc.) | ~25 | 2 | ✅ Done |
+| B | DOM Event System | ~500 | 3 (2 new) | ✅ Done |
+| C | Timer Queue (libuv drain) | ~20 | 1 | ✅ Done |
+| D | XMLHttpRequest | ~370 | 4 (2 new) | ✅ Done |
+| E | Layout Queries | ~200 | 2 | Not started |
+| **Total** | | **~1,275** | | **A+B done** |
 
 ---
 
