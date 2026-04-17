@@ -4,7 +4,7 @@
 
 Gap analysis of the Lambda JS runtime (Radiant browser context) against the requirements for 100% jQuery 3.x library support. jQuery is structured into ~12 modules: Core, Selectors (Sizzle), DOM Manipulation, Traversal, CSS, Events, Effects/Animation, AJAX, Deferred/Callbacks, Dimensions, Offset, and Data. The runtime already supports **~75–80%** of what jQuery needs — selectors, DOM manipulation, traversal, CSS, attributes, data, and utilities all work. The remaining gaps are concentrated in 5 areas: **Events, Async Timers, AJAX, Layout Queries, and a few missing DOM/browser APIs**.
 
-**Status:** In Progress — Phases A+B implemented, builds clean
+**Status:** Complete — All phases (A+B+C+D+E) implemented, builds clean
 
 ---
 
@@ -19,11 +19,11 @@ Gap analysis of the Lambda JS runtime (Radiant browser context) against the requ
 | **Attributes / Properties** (`.attr()`, `.prop()`, `.val()`) | ✅ Works | `getAttribute`, `setAttribute`, `hasAttribute` |
 | **Data** (`.data()`, `$.data()`) | ✅ Works | `WeakMap` (jQuery 3.x internal storage) |
 | **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ✅ Works | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ✅ |
-| **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ⚠️ Partial | `getComputedStyle` ✅, `offsetWidth/Height` returns 0 |
-| **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ❌ Blocked | No `getBoundingClientRect`, no scroll properties |
+| **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ✅ Works | `getComputedStyle` ✅, `offsetWidth/Height` ✅ (from layout) |
+| **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ✅ Works | `getBoundingClientRect` ✅, `scrollTop/Left` ✅, `offsetParent` ✅ |
 | **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ✅ Implemented | `addEventListener` ✅, 3-phase bubbling ✅, `Event` creation ✅ |
-| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ❌ Blocked | No async timers, no `requestAnimationFrame` with scheduling |
-| **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ❌ Blocked | No working `XMLHttpRequest` |
+| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ⚠️ Partial | Timers work (libuv-backed), but no real-time frame stepping |
+| **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ✅ Implemented | `XMLHttpRequest` native (synchronous `http_fetch`) |
 | **Deferred / Callbacks** (`$.Deferred`, `$.Callbacks`) | ✅ Works | Pure JS — `Promise`, closures, arrays. No external deps. |
 
 ---
@@ -291,36 +291,67 @@ These are small fixes that unblock specific jQuery code paths.
 - `js_dom_events_reset()` called from `js_dom_batch_reset()` for document lifecycle cleanup
 - Window event listeners delegate to document (via preamble)
 
-### Phase C — Timer Queue
+### Phase C — Timer Queue ✅ DONE
 
-**Target:** Synchronous drain-loop for `setTimeout` / `setInterval` / `requestAnimationFrame`.
+**Target:** Wire libuv-backed timer queue into Radiant browser context for `setTimeout` / `setInterval` / `requestAnimationFrame`.
 
 **Files modified:** `script_runner.cpp`
 
 **Test:** jQuery `.delay(100).fadeIn()` chain completes. `setTimeout` callbacks execute in correct order. `clearTimeout` cancels pending callback.
 
-**Effort:** ~150 lines.
+**Effort:** ~20 lines (reused existing libuv infrastructure).
 
-### Phase D — XMLHttpRequest
+**Implementation details:**
+- The transpiler already intercepts `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval` at compile time and routes them to native C functions (`js_setTimeout`, `js_setInterval`, etc.) in `js_event_loop.cpp`
+- These native functions use libuv (`uv_timer_t`) for real timer scheduling with microtask queue support
+- **Added `js_event_loop_init()`** call in `script_runner.cpp` before JS execution — initializes libuv loop, resets timer handles and microtask queue
+- **Added `js_event_loop_drain()`** call after successful JS execution — runs all pending timers with a 5s watchdog timeout, flushes microtasks
+- **Updated preamble stubs**: removed fake synchronous `setTimeout`/`setInterval` stubs (never used — transpiler intercepts); `requestAnimationFrame(fn)` now delegates to `setTimeout(fn, 16)` which hits the native timer path; `cancelAnimationFrame` delegates to `clearTimeout`
+- Window timer aliases (`window.setTimeout`, etc.) point to the transpiler-intercepted functions
 
-**Target:** Functional XHR with synchronous HTTP via existing `http_module.cpp`.
+### Phase D — XMLHttpRequest ✅ DONE
 
-**New file:** `js_xhr.cpp`  
-**Files modified:** `transpile_js_mir.cpp` (XHR constructor recognition), `script_runner.cpp` (remove XHR stub)
+**Target:** Functional XHR with synchronous HTTP via existing `http_fetch()` from `input_http.cpp`.
+
+**New files:** `js_xhr.h`, `js_xhr.cpp` (~370 lines)
+**Files modified:** `transpile_js_mir.cpp` (XHR constructor interception), `script_runner.cpp` (preamble cleanup), `js_dom.cpp` (batch reset)
 
 **Test:** `$.ajax({url: 'test.json', async: false})` returns parsed JSON. `$.get()` / `$.post()` work for local file URLs.
 
-**Effort:** ~400 lines.
+**Effort:** ~370 lines new + ~20 lines modified.
 
-### Phase E — Layout Queries
+**Implementation details:**
+- **`js_xhr_new()`**: Creates a JS object with readyState/status/response properties + method functions attached via `js_new_function()`. Each XHR has a hidden `__xhr_id` indexing into a flat `XhrState` pool (max 64 instances)
+- **Method dispatch**: Methods (`open`, `send`, `setRequestHeader`, `abort`, `getResponseHeader`, `getAllResponseHeaders`) are C functions that use `js_get_this()` to resolve the XHR ID and operate on C-level state. The transpiler sets `this` via `js_set_this()` before method calls
+- **HTTP backend**: `http_fetch()` from `input_http.cpp` — synchronous libcurl with full method/headers/body/status/response-headers support
+- **State machine**: Proper readyState transitions (0→1→2→3→4) with `onreadystatechange` callbacks at each step
+- **Callback support**: `onreadystatechange`, `onload`, `onerror`, `onabort`, `onloadend`, `onloadstart`, `onprogress`
+- **Response headers**: Copied from `FetchResponse` for `getResponseHeader()` (case-insensitive) and `getAllResponseHeaders()`
+- **Transpiler integration**: `new XMLHttpRequest()` intercepted in `jm_transpile_new_expr()` → `jm_call_0(mt, "js_xhr_new", MIR_T_I64)`
+- **Preamble**: Minimal `function XMLHttpRequest() {}` kept for `typeof` feature detection; actual construction goes through transpiler
+- **Lifecycle**: `js_xhr_reset()` called from `js_dom_batch_reset()` to clean up between document runs
 
-**Target:** `getBoundingClientRect()`, `offsetWidth/Height`, `offsetTop/Left`, `offsetParent`, `clientWidth/Height`.
+### Phase E — Layout Queries ✅ DONE
 
-**Files modified:** `js_dom.cpp`, potentially `radiant/layout.cpp` (expose layout trigger)
+**Target:** `getBoundingClientRect()`, `offsetWidth/Height`, `offsetTop/Left`, `offsetParent`, `clientWidth/Height`, `scrollWidth/Height`, `scrollTop/Left`.
+
+**Files modified:** `js_dom.cpp` (~100 lines), `script_runner.cpp` (window scroll stubs)
 
 **Test:** jQuery `.offset()` returns `{top, left}` matching Radiant layout output. `.width()` returns content width. `.outerWidth(true)` includes margins.
 
-**Effort:** ~200 lines.
+**Effort:** ~100 lines modified.
+
+**Implementation details:**
+- **`offsetWidth`/`offsetHeight`**: Return `elem->width`/`elem->height` (border box dimensions from DomNode)
+- **`clientWidth`/`clientHeight`**: Return border box minus border widths (`elem->bound->border->width.*`)
+- **`offsetTop`/`offsetLeft`**: Return `elem->y`/`elem->x` (relative to parent border box)
+- **`offsetParent`**: Walk parent chain, return first positioned ancestor or `<body>`
+- **`scrollWidth`/`scrollHeight`**: Return `max(elem->content_width, elem->width)` / height equivalent
+- **`scrollTop`/`scrollLeft`**: Return `elem->scroller->pane->v_scroll_position` (or 0 if no scroller)
+- **`getBoundingClientRect()`**: New method in `js_dom_element_method` — walks parent chain summing x/y for absolute position, returns `{x, y, top, left, right, bottom, width, height}` JS object
+- **Window scroll**: Added `window.pageXOffset/pageYOffset/scrollX/scrollY = 0` in preamble
+- Values are 0 during initial script execution (before layout pass) and populated after `layout_html_doc()` for event handlers/animation callbacks — matches browser behaviour
+- Included `radiant/view.hpp` in js_dom.cpp for access to `BoundaryProp`/`BorderProp`/`PositionProp` field definitions
 
 ---
 
@@ -330,10 +361,10 @@ These are small fixes that unblock specific jQuery code paths.
 |---|---|---|---|---|
 | A | Quick wins (defaultView, ownerDocument, etc.) | ~25 | 2 | ✅ Done |
 | B | DOM Event System | ~500 | 3 (2 new) | ✅ Done |
-| C | Timer Queue (sync drain) | ~150 | 1 | Not started |
-| D | XMLHttpRequest | ~400 | 3 (1 new) | Not started |
-| E | Layout Queries | ~200 | 2 | Not started |
-| **Total** | | **~1,275** | | **A+B done** |
+| C | Timer Queue (libuv drain) | ~20 | 1 | ✅ Done |
+| D | XMLHttpRequest | ~370 | 4 (2 new) | ✅ Done |
+| E | Layout Queries | ~100 | 2 | ✅ Done |
+| **Total** | | **~1,015** | | **All done** |
 
 ---
 

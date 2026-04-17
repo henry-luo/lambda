@@ -2,6 +2,7 @@
 #include "state_store.hpp"
 #include "form_control.hpp"
 #include "browsing_session.h"
+#include "rdt_video.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -3126,6 +3127,104 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Handle click on select element to toggle dropdown
                 if (evcon.target) {
                     handle_select_click(&evcon, evcon.target);
+                }
+
+                // Handle click on <video> element — play/pause toggle + seek bar
+                if (evcon.target && state) {
+                    View* v = evcon.target;
+                    // walk up to find a block with embed->video
+                    while (v) {
+                        if (v->view_type == RDT_VIEW_BLOCK) {
+                            ViewBlock* blk = (ViewBlock*)v;
+                            if (blk->embed && blk->embed->video) {
+                                RdtVideo* video = (RdtVideo*)blk->embed->video;
+                                bool has_controls = blk->embed->has_controls;
+
+                                // compute absolute viewport position by walking parent chain
+                                float vid_x = 0, vid_y = 0;
+                                View* walk = (View*)blk;
+                                while (walk) {
+                                    if (walk->view_type == RDT_VIEW_BLOCK) {
+                                        ViewBlock* wb = (ViewBlock*)walk;
+                                        vid_x += wb->x;
+                                        vid_y += wb->y;
+                                        if (wb->scroller && wb->scroller->pane) {
+                                            vid_x -= wb->scroller->pane->h_scroll_position;
+                                            vid_y -= wb->scroller->pane->v_scroll_position;
+                                        }
+                                    }
+                                    walk = (View*)walk->parent;
+                                }
+
+                                float vid_w = blk->width;
+                                float vid_h = blk->height;
+                                float mx = (float)mouse_x;
+                                float my = (float)mouse_y;
+
+                                log_debug("[VIDEO CLICK] mx=%.0f my=%.0f vid=(%0.f,%0.f %0.fx%0.f) controls=%d",
+                                          mx, my, vid_x, vid_y, vid_w, vid_h, has_controls);
+
+                                if (has_controls && my >= vid_y + vid_h - 40.0f) {
+                                    // click in controls bar
+                                    float bar_x = vid_x + 8.0f;  // CONTROLS_PADDING
+                                    float btn_end = bar_x + 24.0f + 8.0f;  // play btn + margin
+
+                                    // volume slider region (from right edge)
+                                    float vol_end = vid_x + vid_w - 8.0f;   // CONTROLS_PADDING from right
+                                    float vol_start = vol_end - 60.0f;      // VOLUME_WIDTH
+                                    float speaker_start = vol_start - 4.0f - 16.0f;  // ICON_MARGIN/2 + icon
+
+                                    if (mx >= vol_start && mx <= vol_end) {
+                                        // volume slider click
+                                        float frac = (mx - vol_start) / 60.0f;
+                                        if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+                                        rdt_video_set_volume(video, frac);
+                                        log_debug("[VIDEO CLICK] volume set to %.0f%%", frac * 100);
+                                    } else if (mx >= speaker_start && mx < vol_start) {
+                                        // speaker icon click — toggle mute
+                                        // TODO: track muted state properly
+                                        log_debug("[VIDEO CLICK] speaker icon clicked (mute toggle)");
+                                    } else if (mx < btn_end) {
+                                        // play/pause button
+                                        RdtVideoState vs = rdt_video_get_state(video);
+                                        if (vs == RDT_VIDEO_STATE_PLAYING) {
+                                            rdt_video_pause(video);
+                                        } else {
+                                            rdt_video_play(video);
+                                        }
+                                        log_debug("[VIDEO CLICK] play/pause toggled");
+                                    } else {
+                                        // estimate seek bar region — seek on click
+                                        // compute seek bar bounds (approximate)
+                                        float seek_start = btn_end + 50.0f;  // after time text
+                                        float seek_end = speaker_start - 8.0f - 50.0f - 8.0f;  // before dur text + volume
+                                        if (mx >= seek_start && mx <= seek_end && seek_end > seek_start) {
+                                            float frac = (mx - seek_start) / (seek_end - seek_start);
+                                            if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+                                            double dur = rdt_video_get_duration(video);
+                                            if (dur > 0) {
+                                                rdt_video_seek(video, dur * frac);
+                                                log_debug("[VIDEO CLICK] seek to %.1f%%", frac * 100);
+                                            }
+                                        }
+                                    }
+                                    evcon.need_repaint = true;
+                                } else {
+                                    // click on video body — toggle play/pause
+                                    RdtVideoState vs = rdt_video_get_state(video);
+                                    if (vs == RDT_VIDEO_STATE_PLAYING) {
+                                        rdt_video_pause(video);
+                                    } else {
+                                        rdt_video_play(video);
+                                    }
+                                    log_debug("[VIDEO CLICK] body click — play/pause toggled");
+                                    evcon.need_repaint = true;
+                                }
+                                break;
+                            }
+                        }
+                        v = (View*)v->parent;
+                    }
                 }
 
                 // Dispatch to Lambda template event handlers

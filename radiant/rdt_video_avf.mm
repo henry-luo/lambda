@@ -332,6 +332,11 @@ void rdt_video_set_muted(RdtVideo* video, bool muted) {
     }
 }
 
+float rdt_video_get_volume(RdtVideo* video) {
+    if (!video) return 1.0f;
+    return video->volume;
+}
+
 RdtVideoState rdt_video_get_state(RdtVideo* video) {
     if (!video) return RDT_VIDEO_STATE_IDLE;
 

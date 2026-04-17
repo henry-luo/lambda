@@ -15684,6 +15684,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) is_builtin = true;
     // Proxy constructor (pass-through)
     else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) is_builtin = true;
+    // XMLHttpRequest constructor (Radiant browser context)
+    else if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) is_builtin = true;
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -15870,6 +15872,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, opts));
         }
         return err;
+    }
+
+    // new XMLHttpRequest() — returns XHR object with open/send/etc methods
+    if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) {
+        return jm_call_0(mt, "js_xhr_new", MIR_T_I64);
     }
 
     // new Date() — returns a Date object with getTime() method

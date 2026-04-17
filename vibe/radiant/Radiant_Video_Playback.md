@@ -692,13 +692,13 @@ fi
 
 ### Phase 3 — Controls + Polish
 
-- [ ] Default `controls` UI overlay: play/pause button, seek bar, time display, volume slider
-- [ ] `poster` attribute — display poster image before playback starts
+- [x] Default `controls` UI overlay: play/pause button, seek bar, time display, volume slider ✅
+- [x] `poster` attribute — display poster image before playback starts ✅
 - [x] `autoplay`, `loop`, `muted` attribute handling ✅
-- [ ] `preload` attribute (none / metadata / auto)
-- [ ] Seek with keyframe snapping + audio/video pipeline flush
-- [ ] Error handling: unsupported codec → display error poster; missing file → error state
-- [ ] Memory / resource cleanup on navigation and window close
+- [x] `preload` attribute (none / metadata / auto) ✅
+- [x] Seek with keyframe snapping + audio/video pipeline flush ✅ (AVFoundation handles flush internally)
+- [x] Error handling: unsupported codec → display error poster; missing file → error state ✅
+- [x] Memory / resource cleanup on navigation and window close ✅
 - [ ] Performance profiling: verify <2ms post-composite blit overhead at 1080p
 
 ### Future — Web Video + Streaming (not in current scope)
