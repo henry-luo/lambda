@@ -480,6 +480,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.outerWidth = 1024;\n"
         "window.outerHeight = 768;\n"
         "window.devicePixelRatio = 1;\n"
+        "window.pageXOffset = 0;\n"
+        "window.pageYOffset = 0;\n"
+        "window.scrollX = 0;\n"
+        "window.scrollY = 0;\n"
         // Set document.defaultView to window for jQuery/Sizzle compatibility
         "document.defaultView = window;\n"
     );
