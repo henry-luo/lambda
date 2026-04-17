@@ -621,8 +621,18 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             }
         }
     }
-    bool has_explicit_width = (item->blk && item->blk->given_width > 0);
-    bool has_explicit_height = (item->blk && item->blk->given_height > 0);
+    // CSS Grid §11.7: Stretch only applies when the item's size is 'auto'.
+    // Intrinsic sizing keywords (fit-content, min-content, max-content) are NOT auto
+    // and should prevent stretch alignment.
+    auto is_intrinsic_keyword = [](CssEnum kw) {
+        return kw == CSS_VALUE_FIT_CONTENT ||
+               kw == CSS_VALUE_MIN_CONTENT ||
+               kw == CSS_VALUE_MAX_CONTENT;
+    };
+    bool has_explicit_width = (item->blk && (item->blk->given_width > 0 ||
+        is_intrinsic_keyword(item->blk->given_width_type)));
+    bool has_explicit_height = (item->blk && (item->blk->given_height > 0 ||
+        is_intrinsic_keyword(item->blk->given_height_type)));
     float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
     float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
 
@@ -830,6 +840,18 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             item->height = actual_height;
             log_debug("align_grid_item: using content_height=%.1f for non-stretch alignment", item->content_height);
         }
+    }
+
+    // CSS Grid §11.7 / CSS Box Alignment §5.3: intrinsic sizing keywords
+    // (fit-content, min-content, max-content) are NOT auto — the item should
+    // NOT be stretched even when align-self resolves to stretch.
+    // Use content_height which was computed during Pass 3 content layout.
+    bool has_intrinsic_height = item->blk &&
+        is_intrinsic_keyword(item->blk->given_height_type);
+    if (!applied_vert_auto && has_intrinsic_height && item->content_height > 0) {
+        actual_height = item->content_height;
+        item->height = actual_height;
+        log_debug("align_grid_item: intrinsic height keyword, using content_height=%.1f", item->content_height);
     }
 
     // Apply vertical alignment offset (skipped when auto margins already consumed free space)

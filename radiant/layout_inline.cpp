@@ -577,6 +577,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // The <br> element's bounding box height is the font content area (cell height),
         // not the CSS line-height. The line-height is used by line_break() to advance
         // the block cursor, but the element's own reported height matches the font metrics.
+        // Browsers report <br> with non-zero height matching the font cell height.
         struct FontHandle* br_fh = lycon->font.font_handle;
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
         br_view->height = br_font_height;
