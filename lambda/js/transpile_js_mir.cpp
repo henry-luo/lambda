@@ -115,6 +115,8 @@ struct JsLoopLabels {
 struct JsCaptureEntry {
     char name[128];      // variable name (with _js_ prefix)
     int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
+    int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
+                          // grandparent env (stored in parent env slot 0). -1 if not transitive.
 };
 
 // Function entry for pre-pass collection
@@ -129,9 +131,10 @@ struct JsFuncCollected {
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
-    char scope_env_names[128][128];   // variable names in scope env
+    char scope_env_names[256][64];   // variable names in scope env (256 slots, 64 chars each)
     bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
     int reuse_env_slot_count;        // v16: slot count when reusing parent env
+    bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type
@@ -1810,6 +1813,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", ref->name);
             fc->captures[fc->capture_count].scope_env_slot = -1;
+            fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);
         }
@@ -1830,6 +1834,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         if (fc->capture_count < 32) {
             snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
             fc->captures[fc->capture_count].scope_env_slot = -1;
+            fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->capture_count++;
             log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
         }
@@ -1840,6 +1845,7 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     if (fn->is_arrow && jm_name_set_has(refs, "_js_this") && fc->capture_count < 32) {
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_this");
         fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
@@ -11285,16 +11291,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (fc->func_item) {
                 int param_count = jm_count_params(resolved_fn);
 
-                // v17: set this to undefined for plain function calls (strict mode compliance)
-                // save prev this, set to undefined, call, restore
+                // v17: save prev this/new.target BEFORE evaluating args, but set
+                // undefined AFTER args — otherwise `this` in args reads undefined
                 MIR_reg_t prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
-                MIR_reg_t undef_this = jm_emit_undefined(mt);
-                jm_call_void_1(mt, "js_set_this",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
-                // Clear new.target for regular (non-new) direct calls
                 MIR_reg_t prev_nt_dc = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-                jm_call_void_1(mt, "js_set_direct_new_target",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
 
                 // Build proto for this call site
                 char p_name[160];
@@ -11328,6 +11328,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         ops[oi++] = MIR_new_reg_op(mt->ctx, undef_val);
                     }
                 }
+
+                // Set this to undefined AFTER evaluating args (so `this` in args
+                // still reads the caller's this binding, not undefined)
+                MIR_reg_t undef_this = jm_emit_undefined(mt);
+                jm_call_void_1(mt, "js_set_this",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
+                jm_call_void_1(mt, "js_set_direct_new_target",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
 
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
@@ -13610,6 +13618,10 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // (or something it calls transitively) may have modified captured
         // variables via the shared scope env
         jm_scope_env_reload_vars(mt);
+        // check for pending exception after every call — if the callee threw,
+        // we must not continue evaluating the enclosing expression (e.g.
+        // `return !!fn()` must not execute `!!` if fn() threw)
+        jm_emit_exc_propagate_check(mt);
         return r;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION:
@@ -13637,8 +13649,12 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return jm_transpile_tagged_template(mt, (JsTaggedTemplateNode*)expr);
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
         return jm_transpile_assignment(mt, (JsAssignmentNode*)expr);
-    case JS_AST_NODE_NEW_EXPRESSION:
-        return jm_transpile_new_expr(mt, (JsCallNode*)expr);
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        MIR_reg_t r = jm_transpile_new_expr(mt, (JsCallNode*)expr);
+        // check for pending exception after constructor call
+        jm_emit_exc_propagate_check(mt);
+        return r;
+    }
     case JS_AST_NODE_SEQUENCE_EXPRESSION: {
         // v11: comma operator — evaluate all expressions, return last
         JsSequenceNode* seq = (JsSequenceNode*)expr;
@@ -19226,28 +19242,89 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 bool has_scope_slot = (fc->captures[i].scope_env_slot >= 0);
                 bool is_self_capture = (self_capture_name[0] &&
                     strcmp(fc->captures[i].name, self_capture_name) == 0);
-                if (!has_scope_slot && !is_self_capture && mt->module_consts) {
-                    JsModuleConstEntry mclookup;
-                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[i].name);
-                    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR) {
-                        continue;  // read via js_get_module_var at use site
+                if (!has_scope_slot && !is_self_capture) {
+                    // When parent uses shared scope env but this capture didn't get a
+                    // slot (scope_env overflow), skip loading — the dense index 'i'
+                    // would read the wrong slot. Let identifier resolution handle it
+                    // (via id->entry for function decls, or module_consts for MODVARs).
+                    int pi = fc->parent_index;
+                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env) {
+                        continue;
+                    }
+                    // For per-closure envs, also skip MODVAR captures
+                    if (mt->module_consts) {
+                        JsModuleConstEntry mclookup;
+                        snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[i].name);
+                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                        if (mc && mc->const_type == MCONST_MODVAR) {
+                            continue;  // read via js_get_module_var at use site
+                        }
                     }
                 }
 
                 // Use scope_env_slot if remapped, otherwise use dense index
                 int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;
                 MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[i].name, MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, cap_reg),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+
+                // v29: For transitive captures with grandparent_slot, read through the
+                // parent env link (stored in last slot of env) to get the live grandparent value.
+                int gp_slot = fc->captures[i].grandparent_slot;
+                if (gp_slot >= 0) {
+                    // Find the parent env link slot (last slot in parent's scope env)
+                    int pi = fc->parent_index;
+                    int parent_env_link_slot = -1;
+                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_parent_env_link) {
+                        parent_env_link_slot = mt->func_entries[pi].scope_env_count - 1;
+                    }
+                    if (parent_env_link_slot >= 0) {
+                        // Load parent env pointer from env[last_slot]
+                        MIR_reg_t parent_env = jm_new_reg(mt, "gp_env", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, parent_env),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, parent_env_link_slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                        // Read variable from grandparent env at grandparent_slot
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, cap_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, gp_slot * (int)sizeof(uint64_t), parent_env, 0, 1)));
+                    } else {
+                        // Fallback: read from env directly
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, cap_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                    }
+                } else {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, cap_reg),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                }
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[i].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
-                entry.var.env_slot = slot;
-                entry.var.env_reg = env_reg;
+                // v29: For grandparent reads, store the grandparent env info
+                // so scope_env_reload_vars and write-back use the correct env
+                if (gp_slot >= 0) {
+                    int pi2 = fc->parent_index;
+                    int pel_slot = -1;
+                    if (pi2 >= 0 && pi2 < mt->func_count && mt->func_entries[pi2].has_parent_env_link)
+                        pel_slot = mt->func_entries[pi2].scope_env_count - 1;
+                    if (pel_slot >= 0) {
+                        // Load grandparent env reg for this var
+                        MIR_reg_t gp_env_reg = jm_new_reg(mt, "gp_envr", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, gp_env_reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, pel_slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                        entry.var.env_slot = gp_slot;
+                        entry.var.env_reg = gp_env_reg;
+                    } else {
+                        entry.var.env_slot = slot;
+                        entry.var.env_reg = env_reg;
+                    }
+                } else {
+                    entry.var.env_slot = slot;
+                    entry.var.env_reg = env_reg;
+                }
                 entry.var.typed_array_type = -1;  // not a typed array by default
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
             }
@@ -19470,9 +19547,20 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
             mt->scope_env_slot_count = fc->scope_env_count;
 
+            // v29: If this function has a parent env link, store parent env ptr in last slot
+            if (fc->has_parent_env_link && has_captures && env_reg != 0) {
+                int parent_env_slot = fc->scope_env_count - 1; // last slot
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, parent_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, env_reg)));
+                log_debug("js-mir: stored parent env link in scope_env[%d] for '%s'", parent_env_slot, fc->name);
+            }
+
             // Populate scope env with current values and mark vars for write-back
             for (int s = 0; s < fc->scope_env_count; s++) {
                 const char* sname = fc->scope_env_names[s];
+                // v29: Skip __parent_env__ slot — already populated above
+                if (fc->has_parent_env_link && s == fc->scope_env_count - 1) continue;
                 JsMirVarEntry* svar = jm_find_var(mt, sname);
                 MIR_reg_t val;
                 if (svar) {
@@ -21345,8 +21433,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         // Build per-function declaration sets for ancestor checking
         // func_decl_sets[fi] = set of names declared (var/let/const/param) in function fi
+        // IMPORTANT: build ALL decl sets first, then do ancestor checks in a second pass.
+        // Functions are collected in post-order (children before parents), so children have
+        // lower indices than parents. A single-pass approach would check ancestors before
+        // their decl sets are built.
         struct hashmap** func_decl_sets = (struct hashmap**)calloc(mt->func_count, sizeof(struct hashmap*));
 
+        // Pass 1: build declaration sets for all functions
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn = mt->func_entries[fi].node;
             if (!fn || !fn->body) {
@@ -21363,6 +21456,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             jm_collect_body_locals(fn->body, func_declared);
             func_decl_sets[fi] = func_declared;
+        }
+
+        // Pass 2: check each function's assignments against ancestors
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            if (!fn || !fn->body) continue;
 
             // Collect assignment targets within this function
             struct hashmap* func_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
@@ -21374,7 +21473,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             size_t iter = 0; void* item;
             while (hashmap_iter(func_assigned, &iter, &item)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)item;
-                if (jm_name_set_has(func_declared, e->name)) continue;  // declared locally
+                if (jm_name_set_has(func_decl_sets[fi], e->name)) continue;  // declared locally
 
                 // Check ancestor chain: if declared in any ancestor, it's a capture
                 bool in_ancestor = false;
@@ -21448,6 +21547,21 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
             if (hashmap_get(mt->module_consts, &lookup)) continue;  // already registered
+            // Skip known built-in global objects that the transpiler handles as intrinsics.
+            // These should never be shadowed by implicit global MODVARs, because the
+            // identifier codegen falls through to intrinsic calls (e.g. js_get_document_object_value)
+            // only when no MODVAR entry exists. Creating a MODVAR would intercept that path.
+            {
+                static const char* builtin_globals[] = {
+                    "_js_document", "_js_Math", "_js_JSON", "_js_Reflect",
+                    "_js_console", "_js_process", NULL
+                };
+                bool is_builtin = false;
+                for (int bi = 0; builtin_globals[bi]; bi++) {
+                    if (strcmp(e->name, builtin_globals[bi]) == 0) { is_builtin = true; break; }
+                }
+                if (is_builtin) continue;
+            }
             if (mt->module_var_count < 2048) {
                 JsModuleConstEntry mce;
                 memset(&mce, 0, sizeof(mce));
@@ -21897,7 +22011,32 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_collect_pattern_names(pp, parent_own);
                         pp = pp->next;
                     }
-                    if (pfn->body) jm_collect_body_locals(pfn->body, parent_own);
+                    if (pfn->body) {
+                        // Collect body locals, but exclude module-const entries (MODVAR,
+                        // FUNC, CLASS) — the parent won't create local registers for them.
+                        // Only add body locals that will actually be emitted as local variables.
+                        struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                            jm_name_hash, jm_name_cmp, NULL, NULL);
+                        jm_collect_body_locals(pfn->body, body_locals);
+                        size_t bl_iter = 0;
+                        void* bl_item;
+                        while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
+                            JsNameSetEntry* bl_entry = (JsNameSetEntry*)bl_item;
+                            bool is_module_const = false;
+                            if (mt->module_consts) {
+                                JsModuleConstEntry mclookup;
+                                snprintf(mclookup.name, sizeof(mclookup.name), "%s", bl_entry->name);
+                                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                                if (mc) {
+                                    is_module_const = true;
+                                }
+                            }
+                            if (!is_module_const) {
+                                jm_name_set_add(parent_own, bl_entry->name);
+                            }
+                        }
+                        hashmap_free(body_locals);
+                    }
                     // Also add parent's existing captures as "own" (already available)
                     for (int ci = 0; ci < parent->capture_count; ci++) {
                         jm_name_set_add(parent_own, parent->captures[ci].name);
@@ -21931,16 +22070,24 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             JsModuleConstEntry* mc_prop = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                             if (mc_prop) {
                                 if (mc_prop->const_type != MCONST_MODVAR) {
+                                    // Remove capture from child — immutable const is inlined
+                                    // at use site. Leaving it would create orphaned scope_env slot.
+                                    if (ci < child->capture_count - 1) {
+                                        memmove(&child->captures[ci], &child->captures[ci + 1],
+                                            (child->capture_count - ci - 1) * sizeof(child->captures[0]));
+                                    }
+                                    child->capture_count--;
+                                    ci--;
                                     continue;  // truly immutable constant, safe to skip
                                 }
                                 // Walk ancestor chain: check if any ancestor function has a
-                                // param with the same name (shadowing the module var).
+                                // param or body local with the same name (shadowing the module var).
                                 bool shadowed_by_ancestor = false;
                                 for (int ai = parent_idx; ai >= 0 && ai < mt->func_count;
                                      ai = mt->func_entries[ai].parent_index) {
                                     JsFuncCollected* anc = &mt->func_entries[ai];
                                     if (!anc->node) break;
-                                    // Check params only (safe and fast)
+                                    // Check params
                                     JsAstNode* ap = anc->node->params;
                                     while (ap) {
                                         if (ap->node_type == JS_AST_NODE_IDENTIFIER) {
@@ -21958,8 +22105,30 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         ap = ap->next;
                                     }
                                     if (shadowed_by_ancestor) break;
+                                    // Also check body locals (var declarations shadow module vars)
+                                    if (anc->node->body) {
+                                        struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                                            jm_name_hash, jm_name_cmp, NULL, NULL);
+                                        jm_collect_body_locals(anc->node->body, anc_locals);
+                                        if (jm_name_set_has(anc_locals, cap_name)) {
+                                            shadowed_by_ancestor = true;
+                                        }
+                                        hashmap_free(anc_locals);
+                                    }
+                                    if (shadowed_by_ancestor) break;
                                 }
-                                if (!shadowed_by_ancestor) continue; // not shadowed, use module var
+                                if (!shadowed_by_ancestor) {
+                                    // Remove capture from child — it will use js_get_module_var
+                                    // at use site. Leaving it would cause Phase 1.7 to create
+                                    // an orphaned scope_env slot the parent can't populate.
+                                    if (ci < child->capture_count - 1) {
+                                        memmove(&child->captures[ci], &child->captures[ci + 1],
+                                            (child->capture_count - ci - 1) * sizeof(child->captures[0]));
+                                    }
+                                    child->capture_count--;
+                                    ci--;
+                                    continue; // not shadowed, use module var
+                                }
                             }
                         }
 
@@ -21967,6 +22136,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         if (parent->capture_count < 32) {
                             snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
                             parent->captures[parent->capture_count].scope_env_slot = -1;
+                            parent->captures[parent->capture_count].grandparent_slot = -1;
                             parent->capture_count++;
                             changed = true;
                             log_debug("js-mir: propagated capture '%s' from '%s' to parent '%s'",
@@ -22008,8 +22178,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     const char* cname = child->captures[k].name;
                     if (!jm_name_set_has(scope_vars, cname)) {
                         jm_name_set_add(scope_vars, cname);
-                        if (slot_count < 128) {
-                            snprintf(parent_fc->scope_env_names[slot_count], 128, "%s", cname);
+                        if (slot_count < 256) {
+                            snprintf(parent_fc->scope_env_names[slot_count], 64, "%s", cname);
                             slot_count++;
                         }
                     }
@@ -22122,6 +22292,131 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             log_debug("js-mir: Phase 1.7b: '%s' will reuse parent env (all %d scope_env vars are transitive captures, slot_count=%d)",
                 parent_fc->name, parent_fc->scope_env_count, max_slot);
         }
+    }
+
+    // Phase 1.7c: Parent env link for mixed scope envs.
+    // When a function's scope env has BOTH local vars AND transitive captures,
+    // the transitive captures become stale after the function returns (the grandparent
+    // may modify them later). Fix: store the parent env pointer in slot 0 of the scope env,
+    // shift all other slots by 1, and mark transitive captures so children read them
+    // from the grandparent env (via the parent env link) instead of from the stale copy.
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        JsFuncCollected* parent_fc = &mt->func_entries[fi];
+        parent_fc->has_parent_env_link = false;
+        if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
+        if (parent_fc->reuse_parent_env) continue;  // Phase 1.7b already handles pure-transitive
+        if (parent_fc->capture_count == 0) continue; // no captures = no transitive vars possible
+
+        // Collect body locals for this function to distinguish locals from transitive captures
+        struct hashmap* parent_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        JsFunctionNode* parent_fn = parent_fc->node;
+        if (parent_fn && parent_fn->body) {
+            jm_collect_body_locals(parent_fn->body, parent_locals);
+            // Also add parameters as locals
+            JsAstNode* pp = parent_fn->params;
+            while (pp) {
+                char pname[128];
+                jm_get_param_name(pp, 0, pname, sizeof(pname));
+                if (pname[0]) {
+                    JsNameSetEntry pentry;
+                    snprintf(pentry.name, sizeof(pentry.name), "_js_%s", pname);
+                    hashmap_set(parent_locals, &pentry);
+                }
+                pp = pp->next;
+            }
+        }
+
+        // Check if scope env has any transitive captures (vars that are also in parent_fc's captures)
+        // Only count captures that the parent reads from its own parent's scope env
+        // (scope_env_slot >= 0), NOT module vars read via js_get_module_var.
+        // Also exclude vars that are LOCAL to the parent (shadowing the capture).
+        bool has_transitive = false;
+        bool has_local = false;
+        for (int s = 0; s < parent_fc->scope_env_count; s++) {
+            bool is_capture = false;
+            // Check if this scope env var is a local of the parent (including function declarations)
+            JsNameSetEntry local_lookup;
+            snprintf(local_lookup.name, sizeof(local_lookup.name), "%s", parent_fc->scope_env_names[s]);
+            bool is_parent_local = (hashmap_get(parent_locals, &local_lookup) != NULL);
+            if (!is_parent_local) {
+                for (int c = 0; c < parent_fc->capture_count; c++) {
+                    if (strcmp(parent_fc->scope_env_names[s], parent_fc->captures[c].name) == 0) {
+                        // Only transitive if parent reads this from its own parent's scope env
+                        if (parent_fc->captures[c].scope_env_slot >= 0) {
+                            is_capture = true;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (is_capture) has_transitive = true;
+            else has_local = true;
+        }
+
+        size_t parent_locals_count = hashmap_count(parent_locals);
+        hashmap_free(parent_locals);
+
+        if (!has_transitive || !has_local) continue; // pure-local or pure-transitive (handled by 1.7b)
+
+        // Mixed scope env: add parent env link at the LAST slot (no shifting needed)
+        parent_fc->has_parent_env_link = true;
+        int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
+        if (parent_fc->scope_env_count < 255) {
+            snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64, "__parent_env__");
+            parent_fc->scope_env_count++;
+        }
+
+        // Re-collect locals for grandparent_slot assignment (reuse same logic)
+        struct hashmap* parent_locals2 = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (parent_fn && parent_fn->body) {
+            jm_collect_body_locals(parent_fn->body, parent_locals2);
+            JsAstNode* pp2 = parent_fn->params;
+            while (pp2) {
+                char pname2[128];
+                jm_get_param_name(pp2, 0, pname2, sizeof(pname2));
+                if (pname2[0]) {
+                    JsNameSetEntry pe2;
+                    snprintf(pe2.name, sizeof(pe2.name), "_js_%s", pname2);
+                    hashmap_set(parent_locals2, &pe2);
+                }
+                pp2 = pp2->next;
+            }
+        }
+
+        // For transitive captures in direct children, set grandparent_slot
+        // NO slot shifting needed — existing slots remain unchanged
+        for (int ci = 0; ci < mt->func_count; ci++) {
+            JsFuncCollected* child = &mt->func_entries[ci];
+            if (child->parent_index != fi) continue;
+            if (child->capture_count == 0) continue;
+
+            for (int k = 0; k < child->capture_count; k++) {
+                // Check if this capture name is a LOCAL of the parent — if so, skip
+                JsNameSetEntry ll;
+                snprintf(ll.name, sizeof(ll.name), "%s", child->captures[k].name);
+                if (hashmap_get(parent_locals2, &ll)) continue;
+
+                // Check if this capture is a transitive capture (also in parent_fc's captures)
+                // Only for captures the parent reads from its own parent's scope env
+                for (int pc = 0; pc < parent_fc->capture_count; pc++) {
+                    if (strcmp(child->captures[k].name, parent_fc->captures[pc].name) == 0) {
+                        if (parent_fc->captures[pc].scope_env_slot < 0) break; // module var, skip
+                        // This is transitive — child should read from grandparent env
+                        child->captures[k].grandparent_slot = parent_fc->captures[pc].scope_env_slot;
+                        log_debug("js-mir: Phase 1.7c: capture '%s' in '%s' → grandparent slot %d (parent env at slot %d)",
+                            child->captures[k].name, child->name, child->captures[k].grandparent_slot, parent_env_link_slot);
+                        break;
+                    }
+                }
+            }
+        }
+
+        hashmap_free(parent_locals2);
+
+        log_debug("js-mir: Phase 1.7c: '%s' has parent env link at slot %d (mixed scope env, %d slots)",
+            parent_fc->name, parent_env_link_slot, parent_fc->scope_env_count);
     }
 
     // Phase 1.75: Infer parameter and return types for each function
@@ -23227,6 +23522,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        // top-level exception propagation: if any statement causes an
+        // uncaught exception, stop executing further statements
+        jm_emit_exc_propagate_check(mt);
 
         stmt = stmt->next;
     }

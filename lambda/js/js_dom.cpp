@@ -61,6 +61,13 @@ static TypeMap js_document_proxy_marker = {};
 // Cached singleton document proxy object
 static Item js_document_proxy_item = {.item = ITEM_NULL};
 
+// Stored document.defaultView value (kept separate to avoid infinite recursion
+// when calling js_property_set on the document proxy which is MAP_KIND_DOM)
+static Item js_document_default_view = {.item = ITEM_NULL};
+
+// Stored document.title value (same reason as defaultView)
+static Item js_document_title_value = {.item = ITEM_NULL};
+
 // ============================================================================
 // Thread-local DOM document context
 // ============================================================================
@@ -80,6 +87,8 @@ static inline void js_dom_mutation_notify() {
  */
 extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
+    js_document_default_view = (Item){.item = ITEM_NULL};
+    js_document_title_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     js_dom_events_reset();
     js_xhr_reset();
@@ -223,17 +232,12 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
-            // Store title on the proxy Map itself
-            if (js_document_proxy_item.item != ITEM_NULL) {
-                js_property_set(js_document_proxy_item, prop_name, value);
-            }
+            js_document_title_value = value;
             return value;
         }
         // Allow setting defaultView (used by preamble: document.defaultView = window)
         if (s && s->len == 11 && strncmp(s->chars, "defaultView", 11) == 0) {
-            if (js_document_proxy_item.item != ITEM_NULL) {
-                js_property_set(js_document_proxy_item, prop_name, value);
-            }
+            js_document_default_view = value;
             return value;
         }
     }
@@ -1611,6 +1615,24 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
         return (Item){.item = ITEM_FALSE};
     }
+    // document.contains(node) — delegate to element contains on documentElement
+    if (strcmp(method, "contains") == 0) {
+        if (argc >= 1) {
+            Item doc_elem = js_document_get_property((Item){.item = s2it(heap_create_name("documentElement"))});
+            if (doc_elem.item != ITEM_NULL && doc_elem.item != ITEM_JS_UNDEFINED) {
+                return js_dom_contains(doc_elem, args[0]);
+            }
+        }
+        return (Item){.item = ITEM_TRUE};
+    }
+    // document.compareDocumentPosition(node) — return CONTAINS|FOLLOWING (20) for all nodes
+    if (strcmp(method, "compareDocumentPosition") == 0) {
+        return (Item){.item = i2it(20)};
+    }
+    // document.createDocumentFragment() — return a dummy element
+    if (strcmp(method, "createDocumentFragment") == 0) {
+        return ItemNull;
+    }
 
     log_debug("js_document_method: unknown method '%s'", method);
     return ItemNull;
@@ -1751,23 +1773,30 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // Sizzle accesses document.defaultView for getComputedStyle
     if (strcmp(prop, "defaultView") == 0) {
         // Return stored window object if set by preamble (document.defaultView = window)
-        if (js_document_proxy_item.item != ITEM_NULL) {
-            Item key = (Item){.item = s2it(heap_create_name("defaultView"))};
-            Item val = js_property_get(js_document_proxy_item, key);
-            if (val.item != ITEM_NULL && get_type_id(val) != LMD_TYPE_UNDEFINED) {
-                return val;
-            }
+        if (js_document_default_view.item != ITEM_NULL) {
+            return js_document_default_view;
         }
         return ItemNull;
+    }
+
+    // Document method names accessed as properties return ITEM_TRUE for feature detection
+    static const char* doc_methods[] = {
+        "getElementById", "getElementsByTagName", "getElementsByClassName",
+        "getElementsByName", "querySelector", "querySelectorAll",
+        "createElement", "createElementNS", "createTextNode", "createComment",
+        "createDocumentFragment", "importNode", "adoptNode",
+        "addEventListener", "removeEventListener",
+        NULL
+    };
+    for (int i = 0; doc_methods[i]; i++) {
+        if (strcmp(prop, doc_methods[i]) == 0) {
+            return (Item){.item = ITEM_TRUE};
+        }
     }
 
     log_debug("js_document_get_property: unknown property '%s'", prop);
     return ItemNull;
 }
-
-// ============================================================================
-// Element Property Access
-// ============================================================================
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
@@ -2208,6 +2237,27 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         const char* attr_val = dom_element_get_attribute(elem, prop);
         if (attr_val) {
             return (Item){.item = s2it(heap_create_name(attr_val))};
+        }
+    }
+
+    // DOM method names accessed as properties (not calls) return ITEM_TRUE
+    // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`
+    // work correctly (jQuery, Sizzle, etc.)
+    static const char* dom_methods[] = {
+        "getAttribute", "setAttribute", "removeAttribute", "hasAttribute", "toggleAttribute",
+        "querySelector", "querySelectorAll", "closest", "matches",
+        "appendChild", "removeChild", "replaceChild", "insertBefore",
+        "insertAdjacentElement", "insertAdjacentHTML",
+        "cloneNode", "contains", "hasChildNodes", "normalize",
+        "addEventListener", "removeEventListener", "dispatchEvent",
+        "remove", "getBoundingClientRect", "getElementsByTagName",
+        "getElementsByClassName", "compareDocumentPosition",
+        "toString",
+        NULL
+    };
+    for (int i = 0; dom_methods[i]; i++) {
+        if (strcmp(prop, dom_methods[i]) == 0) {
+            return (Item){.item = ITEM_TRUE};
         }
     }
 
@@ -3173,6 +3223,43 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         k = (Item){.item = s2it(heap_create_name("height"))};
         js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
         return rect;
+    }
+
+    // compareDocumentPosition(otherNode) — returns bitmask per W3C DOM spec
+    if (strcmp(method, "compareDocumentPosition") == 0) {
+        if (argc < 1) return (Item){.item = i2it(0)};
+        DomNode* other = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!other) return (Item){.item = i2it(1)}; // disconnected
+        if (node == other) return (Item){.item = i2it(0)};
+        // check if node is ancestor of other (node contains other → 16+4)
+        for (DomNode* p = other->parent; p; p = p->parent) {
+            if (p == node) return (Item){.item = i2it(16 + 4)};
+        }
+        // check if other is ancestor of node (other contains node → 8+2)
+        for (DomNode* p = node->parent; p; p = p->parent) {
+            if (p == other) return (Item){.item = i2it(8 + 2)};
+        }
+        // find common ancestor and determine document order
+        // collect ancestors of node
+        DomNode* a_path[256]; int a_depth = 0;
+        for (DomNode* p = node; p && a_depth < 256; p = p->parent) a_path[a_depth++] = p;
+        DomNode* b_path[256]; int b_depth = 0;
+        for (DomNode* p = other; p && b_depth < 256; p = p->parent) b_path[b_depth++] = p;
+        // check if same tree (roots must match)
+        if (a_depth == 0 || b_depth == 0 || a_path[a_depth-1] != b_path[b_depth-1]) {
+            return (Item){.item = i2it(1)}; // disconnected
+        }
+        // walk down from common ancestor to find order
+        int ai = a_depth - 1, bi = b_depth - 1;
+        while (ai > 0 && bi > 0 && a_path[ai-1] == b_path[bi-1]) { ai--; bi--; }
+        // a_path[ai] and b_path[bi] are siblings under common ancestor
+        DomNode* a_child = (ai > 0) ? a_path[ai-1] : node;
+        DomNode* b_child = (bi > 0) ? b_path[bi-1] : other;
+        // scan siblings to determine order
+        for (DomNode* s = a_child->next_sibling; s; s = s->next_sibling) {
+            if (s == b_child) return (Item){.item = i2it(4)}; // other follows
+        }
+        return (Item){.item = i2it(2)}; // other precedes
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);
