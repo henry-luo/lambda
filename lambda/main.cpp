@@ -143,7 +143,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script);
 extern Element* get_html_root_element(Input* input);
 extern DomDocument* dom_document_create(Input* input);
 extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
-extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
+extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
 
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
