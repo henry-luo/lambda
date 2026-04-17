@@ -3472,8 +3472,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 return (Item){.item = ITEM_NULL};
             }
+            case MAP_KIND_DOC_PROXY: {
+                // check own properties stored on the upgraded map first
+                if (object.map->data_cap > 0) {
+                    Item own_result = map_get(object.map, key);
+                    if (own_result.item != ITEM_NULL) return own_result;
+                }
+                return js_document_proxy_get_property(key);
+            }
             case MAP_KIND_DOM:
-                if (js_is_document_proxy(object)) return js_document_proxy_get_property(key);
                 if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
             case MAP_KIND_CSSOM:
@@ -4682,8 +4689,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // MapKind fast path: skip exotic checks for plain objects
         if (m->map_kind != MAP_KIND_PLAIN) {
             switch (m->map_kind) {
+            case MAP_KIND_DOC_PROXY:
+                // upgrade map for property storage on first write (like ArrayBuffer)
+                if (m->data_cap == 0 && js_input) {
+                    m->type = (void*)&EmptyMap;
+                    m->data = NULL;
+                    m->data_cap = 0;
+                }
+                break;  // fall through to regular property set
             case MAP_KIND_DOM:
-                if (js_is_document_proxy(object)) return js_document_proxy_set_property(key, value);
                 return js_dom_set_property(object, key, value);
             case MAP_KIND_CSSOM:
                 if (js_is_css_rule(object)) return js_cssom_rule_set_property(object, key, value);

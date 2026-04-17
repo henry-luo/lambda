@@ -978,8 +978,20 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         if (elem && elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
             // Form controls have intrinsic sizes stored in form property
             content_height = elem->form->intrinsic_height;
-            measured_height = content_height;
             content_width = elem->form->intrinsic_width;
+
+            // For text-like inputs, recalculate content height using actual font
+            // (CSS may override UA font-size, so intrinsic_height from UA phase may be stale)
+            if (elem->form->control_type == FORM_CONTROL_TEXT &&
+                elem->font && elem->font->font_size > 0 && lycon->ui_context) {
+                FontBox temp_font;
+                setup_font(lycon->ui_context, &temp_font, elem->font);
+                if (temp_font.font_handle) {
+                    float line_h = calc_normal_line_height(temp_font.font_handle);
+                    if (line_h > content_height) content_height = line_h;
+                }
+            }
+            measured_height = content_height;
             measured_width = content_width;
 
             // Special handling for buttons with child content (e.g., <button>Subscribe</button>)
@@ -1031,15 +1043,26 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 }
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
-                    // Use FormDefaults::TEXT_HEIGHT to match input element height
                     elem->form->intrinsic_width = max_text_width;
-                    elem->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+
+                    // Content-area height: use line-height from font metrics (buttons use normal
+                    // block layout, so their content height is determined by the text line-height)
+                    float btn_content_height = FormDefaults::TEXT_HEIGHT
+                        - 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);  // fallback: 15
+                    if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
+                        FontBox temp_font;
+                        setup_font(lycon->ui_context, &temp_font, elem->font);
+                        if (temp_font.font_handle) {
+                            btn_content_height = calc_normal_line_height(temp_font.font_handle);
+                        }
+                    }
+                    elem->form->intrinsic_height = btn_content_height;
 
                     // Update content sizes (intrinsic, without padding/border)
                     // Padding/border will be added below in the generic code
                     content_width = max_text_width;
                     measured_width = content_width;
-                    content_height = FormDefaults::TEXT_HEIGHT;
+                    content_height = btn_content_height;
                     measured_height = content_height;
 
                     log_debug("Button %s: measured text content width=%.1f, intrinsic=%dx%d",

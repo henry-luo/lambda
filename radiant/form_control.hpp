@@ -31,7 +31,7 @@ namespace FormDefaults {
     constexpr float TEXT_HEIGHT = 21.0f;   // border-box height
     constexpr float TEXT_PADDING_H = 2.0f;
     constexpr float TEXT_PADDING_V = 1.0f;
-    constexpr float TEXT_BORDER = 1.0f;
+    constexpr float TEXT_BORDER = 2.0f;
     constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
 
     // Checkbox/Radio: square controls

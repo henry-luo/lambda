@@ -151,7 +151,36 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
         if (tid == LMD_TYPE_STRING) {
             String* s = it2s(child);
             if (s && s->chars && s->len > 0) {
-                strbuf_append_str_n(buf, s->chars, s->len);
+                const char* start = s->chars;
+                int len = s->len;
+                // strip XHTML CDATA markers: <![CDATA[ ... ]]>
+                // also handle // or /* commented variants used in HTML/XHTML polyglots
+                const char* cdata_open = strstr(start, "<![CDATA[");
+                if (cdata_open && cdata_open - start < 40) {
+                    // find the actual CDATA open, skip past it
+                    const char* after_open = cdata_open + 9; // skip "<![CDATA["
+                    // skip optional newline after CDATA open
+                    if (*after_open == '\n') after_open++;
+                    else if (*after_open == '\r' && *(after_open + 1) == '\n') after_open += 2;
+                    int prefix_len = (int)(after_open - start);
+                    start = after_open;
+                    len -= prefix_len;
+                    // strip trailing ]]> (with optional preceding whitespace)
+                    while (len > 3) {
+                        const char* end_ptr = start + len - 3;
+                        if (end_ptr[0] == ']' && end_ptr[1] == ']' && end_ptr[2] == '>') {
+                            // trim trailing whitespace before ]]>
+                            while (len > 3 && (start[len - 4] == ' ' || start[len - 4] == '\t' ||
+                                                start[len - 4] == '\n' || start[len - 4] == '\r')) {
+                                len--;
+                            }
+                            len -= 3; // remove "]]>"
+                            break;
+                        }
+                        break;
+                    }
+                }
+                strbuf_append_str_n(buf, start, len);
             }
         }
     }
@@ -442,7 +471,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
         "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
         "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
-        "window.getComputedStyle = getComputedStyle;\n"
+        "window.getComputedStyle = function(elem, pseudo) { return getComputedStyle(elem, pseudo); };\n"
         "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(){};\n"
         "window.scrollBy = function(){};\n"
