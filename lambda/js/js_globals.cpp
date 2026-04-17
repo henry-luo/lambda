@@ -1,3 +1,244 @@
+// ES2020: Descriptor type helpers
+static bool is_data_descriptor(Item desc) {
+    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
+    Item value_k = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item writable_k = (Item){.item = s2it(heap_create_name("writable", 8))};
+    return it2b(js_in(value_k, desc)) || it2b(js_in(writable_k, desc));
+}
+
+static bool is_accessor_descriptor(Item desc) {
+    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
+    Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
+    return it2b(js_in(get_k, desc)) || it2b(js_in(set_k, desc));
+}
+
+static bool is_generic_descriptor(Item desc) {
+    return get_type_id(desc) == LMD_TYPE_MAP && !is_data_descriptor(desc) && !is_accessor_descriptor(desc);
+}
+// ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
+static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
+    if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
+    if (obj.item == 0) return obj;
+    // v18m: coerce property name to string (ES5 §8.12.9 step, ToPropertyKey)
+    TypeId name_type = get_type_id(name);
+    if (name_type != LMD_TYPE_STRING) {
+        if (name.item == 0 || name_type == LMD_TYPE_NULL) {
+            name = (Item){.item = s2it(heap_create_name("null", 4))};
+        } else if (name_type == LMD_TYPE_UNDEFINED) {
+            name = (Item){.item = s2it(heap_create_name("undefined", 9))};
+        } else {
+            name = js_to_string(name);
+        }
+    }
+    // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
+    TypeId desc_type = get_type_id(descriptor);
+    if (desc_type != LMD_TYPE_MAP) {
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("Property description must be an object"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return obj;
+    }
+    // v18l: Validate descriptor — mixed accessor+data is TypeError (ES5 8.10.5 step 9)
+    {
+        Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
+        Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
+        Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
+        Item wri_k = (Item){.item = s2it(heap_create_name("writable", 8))};
+        bool has_get = it2b(js_in(get_k, descriptor));
+        bool has_set = it2b(js_in(set_k, descriptor));
+        bool has_val = it2b(js_in(val_k, descriptor));
+        bool has_wri = it2b(js_in(wri_k, descriptor));
+        if ((has_get || has_set) && (has_val || has_wri)) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("Invalid property descriptor. Cannot both specify accessors and a value or writable attribute"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return obj;
+        }
+        // v18l: Non-callable getter/setter is TypeError (ES5 8.10.5 step 7.b / 8.b)
+        if (has_get) {
+            Item getter = js_property_get(descriptor, get_k);
+            if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg = (Item){.item = s2it(heap_create_name("Getter must be a function"))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return obj;
+            }
+        }
+        if (has_set) {
+            Item setter = js_property_get(descriptor, set_k);
+            if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg = (Item){.item = s2it(heap_create_name("Setter must be a function"))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return obj;
+            }
+        }
+    }
+    // v18n: check is_new_property BEFORE setting any value (since js_property_set creates the property)
+    bool is_new_property = !it2b(js_has_own_property(obj, name));
+    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    bool is_accessor = false;
+    bool was_accessor = false; // track accessor→data conversion
+    if (it2b(js_in(value_key, descriptor))) {
+        // data property descriptor: set value directly
+        Item value = js_property_get(descriptor, value_key);
+        if (get_type_id(obj) == LMD_TYPE_FUNC) {
+            js_func_init_property(obj, name, value);
+        } else {
+            js_property_set(obj, name, value);
+        }
+        // v18m: when converting accessor→data, remove accessor markers
+        Item name_str_conv = js_to_string(name);
+        if (get_type_id(name_str_conv) == LMD_TYPE_STRING) {
+            String* ns = it2s(name_str_conv);
+            if (ns && ns->len > 0 && ns->len < 200) {
+                char mk_buf[256];
+                snprintf(mk_buf, sizeof(mk_buf), "__get_%.*s", (int)ns->len, ns->chars);
+                Item gk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
+                if (js_defprop_has_marker(obj, gk)) {
+                    was_accessor = true;
+                    js_defprop_set_marker(obj, gk, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                }
+                snprintf(mk_buf, sizeof(mk_buf), "__set_%.*s", (int)ns->len, ns->chars);
+                Item sk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
+                if (js_defprop_has_marker(obj, sk)) {
+                    was_accessor = true;
+                    js_defprop_set_marker(obj, sk, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                }
+            }
+        }
+    } else {
+        // accessor descriptor: check for get/set
+        Item name_str2 = js_to_string(name);
+        if (get_type_id(name_str2) == LMD_TYPE_STRING) {
+            String* ns = it2s(name_str2);
+            char key_buf[256];
+            bool already_accessor = false;
+            {
+                char gk_chk[256], sk_chk[256];
+                snprintf(gk_chk, sizeof(gk_chk), "__get_%.*s", (int)ns->len, ns->chars);
+                Item gk_chk_item = (Item){.item = s2it(heap_create_name(gk_chk, strlen(gk_chk)))};
+                snprintf(sk_chk, sizeof(sk_chk), "__set_%.*s", (int)ns->len, ns->chars);
+                Item sk_chk_item = (Item){.item = s2it(heap_create_name(sk_chk, strlen(sk_chk)))};
+                if (js_defprop_has_marker(obj, gk_chk_item) || js_defprop_has_marker(obj, sk_chk_item))
+                    already_accessor = true;
+            }
+            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+            Item has_get = js_in(get_key, descriptor);
+            Item getter = it2b(has_get) ? js_property_get(descriptor, get_key) : make_js_undefined();
+            if (get_type_id(getter) == LMD_TYPE_FUNC) {
+                is_accessor = true;
+                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
+                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+                js_defprop_set_marker(obj, gk, getter);
+            } else if (it2b(has_get) && already_accessor) {
+                is_accessor = true;
+                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
+                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+                js_defprop_set_marker(obj, gk, make_js_undefined());
+            }
+            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+            Item has_set = js_in(set_key, descriptor);
+            Item setter = it2b(has_set) ? js_property_get(descriptor, set_key) : make_js_undefined();
+            if (get_type_id(setter) == LMD_TYPE_FUNC) {
+                is_accessor = true;
+                snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
+                Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+                js_defprop_set_marker(obj, sk, setter);
+            } else if (it2b(has_set) && already_accessor) {
+                is_accessor = true;
+                snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
+                Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+                js_defprop_set_marker(obj, sk, make_js_undefined());
+            }
+            if (is_accessor) {
+                snprintf(key_buf, sizeof(key_buf), "__nw_%.*s", (int)ns->len, ns->chars);
+                Item nw_k = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+                if (js_defprop_has_marker(obj, nw_k)) {
+                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
+                }
+                if (get_type_id(obj) == LMD_TYPE_MAP) {
+                    bool data_found = false;
+                    js_map_get_fast_ext(obj.map, ns->chars, (int)ns->len, &data_found);
+                    if (data_found) {
+                        js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                    }
+                }
+            }
+        }
+    }
+    if (!it2b(js_in(value_key, descriptor)) && !is_accessor) {
+        if (!it2b(js_has_own_property(obj, name))) {
+            js_property_set(obj, name, (Item){.item = ITEM_JS_UNDEFINED});
+        }
+    }
+    name = js_to_string(name);
+    if (get_type_id(name) == LMD_TYPE_STRING) {
+        String* name_str = it2s(name);
+        if (name_str && name_str->len > 0 && name_str->len < 200) {
+            char attr_key[256];
+            if (!is_accessor) {
+                Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+                Item has_writable = js_in(writable_key, descriptor);
+                if (it2b(has_writable)) {
+                    Item writable_val = js_property_get(descriptor, writable_key);
+                    if (!js_is_truthy(writable_val)) {
+                        snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
+                        Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
+                    } else {
+                        snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
+                        Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
+                    }
+                } else if (is_new_property || was_accessor) {
+                    snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
+                    Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
+                }
+            }
+            Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+            Item has_configurable = js_in(configurable_key, descriptor);
+            if (it2b(has_configurable)) {
+                Item configurable_val = js_property_get(descriptor, configurable_key);
+                if (!js_is_truthy(configurable_val)) {
+                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(true)});
+                } else {
+                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(false)});
+                }
+            } else if (is_new_property) {
+                snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(true)});
+            }
+            Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+            Item has_enumerable = js_in(enumerable_key, descriptor);
+            if (it2b(has_enumerable)) {
+                Item enumerable_val = js_property_get(descriptor, enumerable_key);
+                if (!js_is_truthy(enumerable_val)) {
+                    snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                    Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(true)});
+                } else {
+                    snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                    Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(false)});
+                }
+            } else if (is_new_property) {
+                snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(true)});
+            }
+        }
+    }
+    return obj;
+}
+
 /**
  * JavaScript Process I/O and Global Functions for Lambda v5
  *
@@ -3890,226 +4131,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 }
                 if (!has_accessor) {
                     Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot define property on a non-extensible object"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
-            }
-        }
-    }
-
-    // Check if property is non-configurable before allowing redefinition.
-    // Only check OWN properties — inherited non-configurable markers must not block
-    // defining a new own property on the object (ES spec 8.12.9 step 1).
-    Item name_str_item = js_to_string(name);
-    if (get_type_id(name_str_item) == LMD_TYPE_STRING && (obj_type == LMD_TYPE_MAP || obj_type == LMD_TYPE_ARRAY)) {
-        String* name_str = it2s(name_str_item);
-        if (name_str && name_str->len > 0 && name_str->len < 200) {
-            char nc_key[256];
-            snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
-            // check actual marker value, not just existence (marker set to false = configurable)
-            bool nc_found = false;
-            Item nc_val = js_defprop_get_marker(obj, nc_key, strlen(nc_key), &nc_found);
-            if (nc_found && js_is_truthy(nc_val)) {
-                // Property is non-configurable — check what changes are being attempted
-                // Read current property state
-                char nw_key[256];
-                snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
-                // check actual marker value (marker true = non-writable)
-                bool nw_found = false;
-                Item nw_val = js_defprop_get_marker(obj, nw_key, strlen(nw_key), &nw_found);
-                bool cur_writable = !(nw_found && js_is_truthy(nw_val));
-
-                // Check writable change: non-writable → writable is forbidden
-                Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
-                Item has_writable = js_in(writable_key, descriptor);
-                if (it2b(has_writable)) {
-                    Item new_writable = js_property_get(descriptor, writable_key);
-                    if (js_is_truthy(new_writable) && !cur_writable) {
-                        // trying to make non-writable → writable on non-configurable: TypeError
-                        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                        Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                        js_throw_value(js_new_error_with_name(tn, msg));
-                        return obj;
-                    }
-                }
-                // Check configurable change: non-configurable → configurable is forbidden
-                Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                Item has_conf = js_in(configurable_key, descriptor);
-                if (it2b(has_conf)) {
-                    Item new_conf = js_property_get(descriptor, configurable_key);
-                    if (js_is_truthy(new_conf)) {
-                        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                        Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                        js_throw_value(js_new_error_with_name(tn, msg));
-                        return obj;
-                    }
-                }
-                // Check enumerable change on non-configurable
-                char ne_key[256];
-                snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                // check actual marker value (marker true = non-enumerable)
-                bool ne_found = false;
-                Item ne_val = js_defprop_get_marker(obj, ne_key, strlen(ne_key), &ne_found);
-                bool cur_enumerable = !(ne_found && js_is_truthy(ne_val));
-                Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-                Item has_enum = js_in(enumerable_key, descriptor);
-                if (it2b(has_enum)) {
-                    Item new_enum = js_property_get(descriptor, enumerable_key);
-                    if (js_is_truthy(new_enum) != cur_enumerable) {
-                        Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                        Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                        js_throw_value(js_new_error_with_name(tn, msg));
-                        return obj;
-                    }
-                }
-                // Check value change on non-configurable+non-writable
-                if (!cur_writable) {
-                    Item value_key_chk = (Item){.item = s2it(heap_create_name("value", 5))};
-                    Item has_val = js_in(value_key_chk, descriptor);
-                    if (it2b(has_val)) {
-                        Item new_val = js_property_get(descriptor, value_key_chk);
-                        Item cur_val = js_property_get(obj, name);
-                        // use SameValue (not strict equals) — NaN === NaN must be true here
-                        if (!it2b(js_object_is(new_val, cur_val))) {
-                            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                            Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                            js_throw_value(js_new_error_with_name(tn, msg));
-                            return obj;
-                        }
-                    }
-                }
-                // v18l: Check getter/setter change on non-configurable accessor
-                {
-                    char gk_buf[256];
-                    snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
-                    Item gk_item = (Item){.item = s2it(heap_create_name(gk_buf, strlen(gk_buf)))};
-                    bool is_cur_accessor = it2b(js_has_own_property(obj, gk_item));
-                    if (!is_cur_accessor) {
-                        char sk_buf[256];
-                        snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
-                        Item sk_item = (Item){.item = s2it(heap_create_name(sk_buf, strlen(sk_buf)))};
-                        is_cur_accessor = it2b(js_has_own_property(obj, sk_item));
-                    }
-                    if (is_cur_accessor) {
-                        // v18m: accessor-to-data conversion on non-configurable → TypeError
-                        Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
-                        Item wrt_k = (Item){.item = s2it(heap_create_name("writable", 8))};
-                        if (it2b(js_in(val_k, descriptor)) || it2b(js_in(wrt_k, descriptor))) {
-                            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                            Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                            js_throw_value(js_new_error_with_name(tn, msg));
-                            return obj;
-                        }
-                        // check if getter is changing
-                        Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
-                        Item has_get = js_in(get_k, descriptor);
-                        if (it2b(has_get)) {
-                            Item new_get = js_property_get(descriptor, get_k);
-                            snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
-                            Item old_gk = (Item){.item = s2it(heap_create_name(gk_buf, strlen(gk_buf)))};
-                            Item old_get = js_property_get(obj, old_gk);
-                            if (!it2b(js_strict_equal(new_get, old_get))) {
-                                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                                Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                                js_throw_value(js_new_error_with_name(tn, msg));
-                                return obj;
-                            }
-                        }
-                        // check if setter is changing
-                        Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
-                        Item has_set = js_in(set_k, descriptor);
-                        if (it2b(has_set)) {
-                            Item new_set = js_property_get(descriptor, set_k);
-                            char sk_buf[256];
-                            snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
-                            Item old_sk = (Item){.item = s2it(heap_create_name(sk_buf, strlen(sk_buf)))};
-                            Item old_set = js_property_get(obj, old_sk);
-                            if (!it2b(js_strict_equal(new_set, old_set))) {
-                                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                                Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                                js_throw_value(js_new_error_with_name(tn, msg));
-                                return obj;
-                            }
-                        }
-                    } else {
-                        // v18m: data-to-accessor conversion on non-configurable → TypeError
-                        Item get_k2 = (Item){.item = s2it(heap_create_name("get", 3))};
-                        Item set_k2 = (Item){.item = s2it(heap_create_name("set", 3))};
-                        if (it2b(js_in(get_k2, descriptor)) || it2b(js_in(set_k2, descriptor))) {
-                            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                            Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property"))};
-                            js_throw_value(js_new_error_with_name(tn, msg));
-                            return obj;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // v18n: check is_new_property BEFORE setting any value (since js_property_set creates the property)
-    bool is_new_property = !it2b(js_has_own_property(obj, name));
-
-    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
-    // use hasOwnProperty to correctly detect presence of "value" key
-    Item has_value = js_in(value_key, descriptor);
-    bool is_accessor = false;
-    bool was_accessor = false; // track accessor→data conversion
-    if (it2b(has_value)) {
-        // data property descriptor: set value directly
-        Item value = js_property_get(descriptor, value_key);
-        // v23: For FUNC type, use js_func_init_property to bypass writability checks
-        if (get_type_id(obj) == LMD_TYPE_FUNC) {
-            js_func_init_property(obj, name, value);
-        } else {
-            js_property_set(obj, name, value);
-        }
-        // v18m: when converting accessor→data, remove accessor markers
-        Item name_str_conv = js_to_string(name);
-        if (get_type_id(name_str_conv) == LMD_TYPE_STRING) {
-            String* ns = it2s(name_str_conv);
-            if (ns && ns->len > 0 && ns->len < 200) {
-                char mk_buf[256];
-                snprintf(mk_buf, sizeof(mk_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
-                if (js_defprop_has_marker(obj, gk)) {
-                    was_accessor = true;
-                    js_defprop_set_marker(obj, gk, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                }
-                snprintf(mk_buf, sizeof(mk_buf), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
-                if (js_defprop_has_marker(obj, sk)) {
-                    was_accessor = true;
-                    js_defprop_set_marker(obj, sk, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                }
-            }
-        }
-    } else {
-        // accessor descriptor: check for get/set
-        Item name_str2 = js_to_string(name);
-        if (get_type_id(name_str2) == LMD_TYPE_STRING) {
-            String* ns = it2s(name_str2);
-            char key_buf[256];
-            // v29: check if property already has accessor markers (for updating undefined case)
-            bool already_accessor = false;
-            {
-                char gk_chk[256], sk_chk[256];
-                snprintf(gk_chk, sizeof(gk_chk), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk_chk_item = (Item){.item = s2it(heap_create_name(gk_chk, strlen(gk_chk)))};
-                snprintf(sk_chk, sizeof(sk_chk), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk_chk_item = (Item){.item = s2it(heap_create_name(sk_chk, strlen(sk_chk)))};
-                if (js_defprop_has_marker(obj, gk_chk_item) || js_defprop_has_marker(obj, sk_chk_item))
-                    already_accessor = true;
-            }
-            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-            Item has_get = js_in(get_key, descriptor);
-            Item getter = it2b(has_get) ? js_property_get(descriptor, get_key) : make_js_undefined();
-            if (get_type_id(getter) == LMD_TYPE_FUNC) {
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, gk, getter);
+                    return ValidateAndApplyPropertyDescriptor(obj, name, descriptor);
             } else if (it2b(has_get) && already_accessor) {
                 // get: undefined on existing accessor — explicitly clear getter
                 is_accessor = true;

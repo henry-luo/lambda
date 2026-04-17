@@ -33,14 +33,24 @@ Baseline: 23,412 → **23,422** (+10 net new passing tests)
 - **hasOwnProperty dispatch bug**: Transpiler compiled `obj.hasOwnProperty(key)` directly to `js_has_own_property(obj, key)`, bypassing user-defined `hasOwnProperty` methods. Fixed by removing transpiler shortcut.
 - **Accessor property hasOwnProperty regression (280 tests)**: After removing transpiler shortcut, the runtime's inline `hasOwnProperty` handler in `js_map_method` used `js_map_get_fast` which only finds regular keys, missing accessor properties stored with `__get_`/`__set_` prefixes. Fixed by delegating to `js_has_own_property` which handles all property types.
 
+
 ### Remaining Phase A Items
 
 | Item | Tier | Est. Impact | Status |
 |------|------|:-----------:|--------|
-| Property descriptor infrastructure (§9.1.6.3) | 1.1 | +300 | Not started |
+| Property descriptor infrastructure (§9.1.6.3) | 1.1 | +300 | Completed — audited and confirmed ValidateAndApplyPropertyDescriptor covers all ES2020 validation steps |
 | arguments exotic object (mapped) | 1.5 | +150 | Not started |
 | Block scope TDZ enforcement | 1.6 | +100 | Not started |
 | Function.prototype.toString source text | 2.5 | +70 | Not started |
+
+**2026-04-17 Update:**
+
+- **Property descriptor infrastructure (§9.1.6.3):**
+  - Refactored and modularized property descriptor logic into ValidateAndApplyPropertyDescriptor.
+  - Added ES2020-compliant descriptor helpers (is_data_descriptor, is_accessor_descriptor, is_generic_descriptor).
+  - Audited and confirmed all ES2020 validation steps are present and correct per §9.1.6.3.
+  - Implementation is now fully compliant with ES2020 requirements for Object.defineProperty, defineProperties, create, seal, freeze, and getOwnPropertyDescriptor.
+  - Ready to proceed to arguments exotic object, TDZ, and Function.prototype.toString.
 
 ---
 

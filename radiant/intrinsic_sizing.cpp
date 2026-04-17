@@ -9,6 +9,7 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
+#include "rdt_video.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lib/strbuf.h"
@@ -1372,8 +1373,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             log_debug("  -> replaced IFRAME intrinsic width: 300");
         }
         else if (replaced_tag == HTM_TAG_VIDEO || replaced_tag == HTM_TAG_CANVAS) {
-            replaced_width = 300;
-            log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
+            // try actual video dimensions first
+            if (replaced_tag == HTM_TAG_VIDEO && view_block_replaced->embed && view_block_replaced->embed->video) {
+                int vw = rdt_video_get_width(view_block_replaced->embed->video);
+                if (vw > 0) {
+                    replaced_width = (float)vw;
+                    log_debug("  -> replaced VIDEO intrinsic width: %.0f (from video metadata)", replaced_width);
+                } else {
+                    replaced_width = 300;
+                    log_debug("  -> replaced VIDEO intrinsic width: 300 (metadata not yet loaded)");
+                }
+            } else {
+                replaced_width = 300;
+                log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
+            }
         }
         else if (replaced_tag == HTM_TAG_AUDIO) {
             replaced_width = 300;
@@ -3668,6 +3681,20 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             return 0.0f;  // no image loaded, no dimensions specified
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
+            // try actual video dimensions for aspect-correct height
+            if (elem_tag == HTM_TAG_VIDEO && view->embed && view->embed->video) {
+                int vw = rdt_video_get_width(view->embed->video);
+                int vh = rdt_video_get_height(view->embed->video);
+                if (vw > 0 && vh > 0) {
+                    float video_height = (float)vh;
+                    // scale proportionally if width was constrained
+                    if (width > 0 && width != (float)vw) {
+                        video_height = width * (float)vh / (float)vw;
+                    }
+                    log_debug("calculate_max_content_height: VIDEO intrinsic height=%.1f", video_height);
+                    return video_height;
+                }
+            }
             return 150.0f;  // CSS default 300x150
         }
         else if (elem_tag == HTM_TAG_AUDIO) {
