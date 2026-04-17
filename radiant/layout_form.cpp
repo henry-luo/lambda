@@ -25,13 +25,13 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
         if (strcmp(form->input_type, "date") == 0) {
             // Chrome: ~125px border-box (shows MM/DD/YYYY)
             form->intrinsic_width = 119.0f * pr;
-            form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
+            form->intrinsic_height = 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "time") == 0) {
             // Chrome: ~102px border-box (shows HH:MM AM/PM)
             form->intrinsic_width = 96.0f * pr;
-            form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
+            form->intrinsic_height = 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "datetime-local") == 0) {
@@ -49,19 +49,19 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
                 }
             }
             form->intrinsic_width = w * pr;
-            form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
+            form->intrinsic_height = 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "month") == 0) {
             // Chrome: ~155px border-box (shows MMMM YYYY)
             form->intrinsic_width = 149.0f * pr;
-            form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
+            form->intrinsic_height = 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "week") == 0) {
             // Chrome: ~147px border-box (shows Week ##, YYYY)
             form->intrinsic_width = 141.0f * pr;
-            form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
+            form->intrinsic_height = 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "color") == 0) {
@@ -74,21 +74,29 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
 
-    if (font && font->font_size > 0) {
-        // Chrome text input: content width ≈ size * avgCharWidth
-        // For default 16px font: content = 147px for 20 chars
-        // => char_factor = 147 / (20 * 16) ≈ 0.459
-        float content_w = size * font->font_size * 0.459f;
-        form->intrinsic_width = content_w;
-        // Height: Chrome content height ≈ font-size + 1px (empirical)
-        // For 16px font: content = 17, + 2*pad(1) + 2*border(1) = 21
-        form->intrinsic_height = font->font_size + 1.0f * pr;
-    } else {
-        // Fallback: content-area only (TEXT_WIDTH/HEIGHT are border-box, subtract defaults)
-        float def_bp_h = 2 * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
+    // Chrome text input width: content width for default 20 chars = 147px (border-box 153).
+    // The content width is independent of font-size — Chrome uses system font average char width.
+    // For non-default sizes, scale proportionally from the default.
+    float def_bp_h = 2 * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
+    float default_content_w = FormDefaults::TEXT_WIDTH - def_bp_h;  // 147
+    float content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
+    form->intrinsic_width = content_w;
+
+    // Height: Chrome uses max(default_content_height, normal_line_height).
+    // Default content height = TEXT_HEIGHT - border - padding = 17px.
+    // When font-size is larger than default, line-height dominates.
+    {
         float def_bp_v = 2 * (FormDefaults::TEXT_PADDING_V + FormDefaults::TEXT_BORDER);
-        form->intrinsic_width = (FormDefaults::TEXT_WIDTH - def_bp_h) * pr;
-        form->intrinsic_height = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        float default_content_h = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        float line_h = default_content_h;
+        if (font && font->font_size > 0 && lycon->ui_context) {
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            if (temp_font.font_handle) {
+                line_h = calc_normal_line_height(temp_font.font_handle);
+            }
+        }
+        form->intrinsic_height = (line_h > default_content_h) ? line_h : default_content_h;
     }
 }
 

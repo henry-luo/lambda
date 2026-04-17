@@ -318,7 +318,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
-        // UA stylesheet: nested lists (ul ul, ol ol, ul ol, ol ul) have margin: 0
+        // UA stylesheet: nested lists have margin: 0
+        // Chrome: :is(ul, ol, dir, menu, dl) ul, :is(ul, ol, dir, menu, dl) ol { margin-block: 0 }
         {
             bool is_nested = false;
             DomNode* ancestor = elmt->parent;
@@ -326,7 +327,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (ancestor->is_element()) {
                     uintptr_t atag = ancestor->tag();
                     if (atag == HTM_TAG_UL || atag == HTM_TAG_OL ||
-                        atag == HTM_TAG_MENU || atag == HTM_TAG_DIR) {
+                        atag == HTM_TAG_MENU || atag == HTM_TAG_DIR ||
+                        atag == HTM_TAG_DL) {
                         is_nested = true;
                         break;
                     }
@@ -1365,6 +1367,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Set display and intrinsic size based on control type
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
 
+        // Chrome UA: font-size 13.3333px, font-family Arial for all form controls
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->font_size = 13.3333f;
+        block->font->family = (char*)"Arial";
+
         switch (block->form->control_type) {
         case FORM_CONTROL_HIDDEN:
             block->display.outer = CSS_VALUE_NONE;
@@ -1459,7 +1466,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 break;
             }
             block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
-            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+            // Content-area height: TEXT_HEIGHT (21 border-box) minus default border+padding.
+            // Chrome uses fixed 21px border-box for all text inputs regardless of font-size.
+            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT
+                - 2 * (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
             // Don't set given_width/given_height — layout_form_control computes
             // intrinsic size dynamically from size attribute and font metrics
             // Default border for text inputs (CSS logical pixels)
@@ -1467,6 +1477,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
             block->bound->border->width.top = block->bound->border->width.right =
                 block->bound->border->width.bottom = block->bound->border->width.left = FormDefaults::TEXT_BORDER;
+            block->bound->border->width.top_specificity = block->bound->border->width.bottom_specificity =
+                block->bound->border->width.left_specificity = block->bound->border->width.right_specificity = -1;
             block->bound->border->top_style = block->bound->border->right_style =
                 block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
             block->bound->border->top_color.r = block->bound->border->right_color.r =
@@ -1477,8 +1489,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->bound->border->bottom_color.b = block->bound->border->left_color.b = 118;
             block->bound->border->top_color.a = block->bound->border->right_color.a =
                 block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
-            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::TEXT_PADDING_V;
-            block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXT_PADDING_H;
+            // Chrome UA: date/time inputs have padding=0; text-like inputs have padding=1
+            {
+                const char* itype = block->form->input_type;
+                bool is_date_time = itype && (
+                    strcmp(itype, "date") == 0 || strcmp(itype, "time") == 0 ||
+                    strcmp(itype, "datetime-local") == 0 || strcmp(itype, "month") == 0 ||
+                    strcmp(itype, "week") == 0);
+                if (is_date_time) {
+                    block->bound->padding.top = block->bound->padding.bottom = 0;
+                    block->bound->padding.left = block->bound->padding.right = 0;
+                } else {
+                    block->bound->padding.top = block->bound->padding.bottom = FormDefaults::TEXT_PADDING_V;
+                    block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXT_PADDING_H;
+                }
+            }
+            block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+                block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
             break;
         }
         break;
