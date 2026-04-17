@@ -125,6 +125,24 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     }
     // v18n: check is_new_property BEFORE setting any value (since js_property_set creates the property)
     bool is_new_property = !it2b(js_has_own_property(obj, name));
+    // also check accessor markers: accessor-only properties on arrays may not be detected by js_has_own_property
+    if (is_new_property && get_type_id(obj) == LMD_TYPE_ARRAY) {
+        Item nsc = js_to_string(name);
+        if (get_type_id(nsc) == LMD_TYPE_STRING) {
+            String* ns = it2s(nsc);
+            if (ns && ns->len > 0 && ns->len < 200) {
+                char gk[256];
+                snprintf(gk, sizeof(gk), "__get_%.*s", (int)ns->len, ns->chars);
+                Item gk_item = (Item){.item = s2it(heap_create_name(gk, strlen(gk)))};
+                if (js_defprop_has_marker(obj, gk_item)) is_new_property = false;
+                if (is_new_property) {
+                    snprintf(gk, sizeof(gk), "__set_%.*s", (int)ns->len, ns->chars);
+                    Item sk_item = (Item){.item = s2it(heap_create_name(gk, strlen(gk)))};
+                    if (js_defprop_has_marker(obj, sk_item)) is_new_property = false;
+                }
+            }
+        }
+    }
 
     // ES2020 §9.1.6.3 step 7: If existing property is non-configurable, reject certain changes
     if (!is_new_property) {
@@ -3111,10 +3129,10 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
         if (lt == LMD_TYPE_ARRAY || lt == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
         if (lt == LMD_TYPE_MAP) {
-            // null-prototype objects are NOT instanceof Object
-            Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-            Item proto = map_get(left.map, proto_key);
-            if (proto.item == 0 || get_type_id(proto) == LMD_TYPE_NULL || get_type_id(proto) == LMD_TYPE_UNDEFINED) {
+            // null-prototype objects (Object.create(null)) are NOT instanceof Object
+            // js_get_prototype stores undefined as sentinel for null prototype
+            Item raw_proto = js_get_prototype(left);
+            if (raw_proto.item == ITEM_JS_UNDEFINED) {
                 return (Item){.item = b2it(false)};
             }
             return (Item){.item = b2it(true)};
@@ -3929,6 +3947,34 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 if (name_str->chars[i] < '0' || name_str->chars[i] > '9') { idx = -1; break; }
                 idx = idx * 10 + (name_str->chars[i] - '0');
             }
+            // check for accessor properties in companion map (even when idx >= length)
+            if (idx >= 0 && obj.array->extra != 0) {
+                Map* props = (Map*)(uintptr_t)obj.array->extra;
+                char gk_buf[256], sk_buf[256];
+                snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
+                snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
+                bool gk_found = false, sk_found = false;
+                Item getter = js_map_get_fast_ext(props, gk_buf, (int)strlen(gk_buf), &gk_found);
+                Item setter = js_map_get_fast_ext(props, sk_buf, (int)strlen(sk_buf), &sk_found);
+                if (gk_found || sk_found) {
+                    Item desc = js_new_object();
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                        (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) ? getter : make_js_undefined());
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                        (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) ? setter : make_js_undefined());
+                    char ab[256];
+                    bool ncf = false, nef = false;
+                    snprintf(ab, sizeof(ab), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                    Item ncv = js_map_get_fast_ext(props, ab, (int)strlen(ab), &ncf);
+                    snprintf(ab, sizeof(ab), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                    Item nev = js_map_get_fast_ext(props, ab, (int)strlen(ab), &nef);
+                    bool is_configurable = !(ncf && js_is_truthy(ncv));
+                    bool is_enumerable = !(nef && js_is_truthy(nev));
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+                    return desc;
+                }
+            }
             if (idx >= 0 && idx < obj.array->length) {
                 // v25: deleted elements (holes) have no descriptor
                 if (obj.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
@@ -3952,6 +3998,35 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(is_writable)});
                 js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
                 js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+                return desc;
+            }
+        }
+        // Named properties on companion map (e.g., arguments.callee, Symbol.toStringTag)
+        if (obj.array->extra) {
+            Map* companion = (Map*)(uintptr_t)obj.array->extra;
+            Item comp_item = (Item){.map = companion};
+            Item name_key = (Item){.item = s2it(heap_create_name(name_str->chars, name_str->len))};
+            Item val = js_has_own_property(comp_item, name_key);
+            if (js_is_truthy(val)) {
+                Item prop_val = js_property_get(comp_item, name_key);
+                Item desc = js_new_object();
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, prop_val);
+                // check attribute markers on companion map
+                char ab[256];
+                bool nwf = false, ncf = false, nef = false;
+                Item nwv = ItemNull, ncv = ItemNull, nev = ItemNull;
+                snprintf(ab, sizeof(ab), "__nw_%.*s", (int)name_str->len, name_str->chars);
+                nwv = js_defprop_get_marker(comp_item, ab, (int)strlen(ab), &nwf);
+                snprintf(ab, sizeof(ab), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                ncv = js_defprop_get_marker(comp_item, ab, (int)strlen(ab), &ncf);
+                snprintf(ab, sizeof(ab), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                nev = js_defprop_get_marker(comp_item, ab, (int)strlen(ab), &nef);
+                bool wr = !(nwf && js_is_truthy(nwv));
+                bool cf = !(ncf && js_is_truthy(ncv));
+                bool en = !(nef && js_is_truthy(nev));
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(wr)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(en)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(cf)});
                 return desc;
             }
         }
@@ -6202,9 +6277,33 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             if (idx >= 0 && idx < arr->length) {
                 // v25: check for deleted sentinel (array hole)
                 if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+                    // still check for accessor marker
+                    if (arr->extra != 0) {
+                        Map* pm = (Map*)(uintptr_t)arr->extra;
+                        char gk[64];
+                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
+                        bool gk_found = false;
+                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                        if (gk_found) return (Item){.item = b2it(true)};
+                        snprintf(gk, sizeof(gk), "__set_%.*s", (int)ks->len, ks->chars);
+                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                        if (gk_found) return (Item){.item = b2it(true)};
+                    }
                     return (Item){.item = b2it(false)};
                 }
                 return (Item){.item = b2it(true)};
+            }
+            // index out of bounds — check for accessor markers in companion map
+            if (arr->extra != 0) {
+                Map* pm = (Map*)(uintptr_t)arr->extra;
+                char gk[64];
+                snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
+                bool gk_found = false;
+                js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                if (gk_found) return (Item){.item = b2it(true)};
+                snprintf(gk, sizeof(gk), "__set_%.*s", (int)ks->len, ks->chars);
+                js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                if (gk_found) return (Item){.item = b2it(true)};
             }
         }
         // check companion map for named (non-index) properties
@@ -8112,6 +8211,8 @@ struct JsCtor {
     Item properties_map; // v18: must match JsFunction layout
     uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
     int16_t formal_length; // must match JsFunction layout
+    Item* module_vars;   // must match JsFunction layout
+    String* source_text; // must match JsFunction layout (v29)
 };
 
 // Reset constructor prototype objects between batch tests.
