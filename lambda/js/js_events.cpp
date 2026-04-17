@@ -243,22 +243,44 @@ extern "C" Item js_ee_listeners(Item emitter, Item event_name) {
     return copy;
 }
 
-// ─── emitter.listenerCount(event) ──────────────────────────────────────────
-extern "C" Item js_ee_listenerCount(Item emitter, Item event_name) {
+// ─── emitter.listenerCount(event [, listener]) ─────────────────────────────
+extern "C" Item js_ee_listenerCount(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return (Item){.item = i2it(0)};
     Item map = get_events_map(emitter);
     Item arr = js_property_get(map, event_name);
     if (arr.item == 0 || get_type_id(arr) == LMD_TYPE_UNDEFINED) {
         return (Item){.item = i2it(0)};
     }
-    return (Item){.item = i2it(js_array_length(arr))};
+    int64_t len = js_array_length(arr);
+    // if no specific listener requested, return total count
+    if (listener.item == 0 || get_type_id(listener) == LMD_TYPE_UNDEFINED) {
+        return (Item){.item = i2it(len)};
+    }
+    // count only matching listeners
+    int64_t count = 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item f = js_array_get_int(arr, i);
+        if (f.item == listener.item) count++;
+    }
+    return (Item){.item = i2it(count)};
 }
 
 // ─── emitter.eventNames() ──────────────────────────────────────────────────
 extern "C" Item js_ee_eventNames(Item emitter) {
     if (emitter.item == 0) return js_array_new(0);
     Item map = get_events_map(emitter);
-    return js_object_keys(map);
+    Item all_keys = js_object_keys(map);
+    // filter out event names with 0 listeners
+    Item result = js_array_new(0);
+    int64_t klen = js_array_length(all_keys);
+    for (int64_t i = 0; i < klen; i++) {
+        Item key = js_array_get_int(all_keys, i);
+        Item arr = js_property_get(map, key);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
+            js_array_push(result, key);
+        }
+    }
+    return result;
 }
 
 // ─── emitter.setMaxListeners(n) ─────────────────────────────────────────────
@@ -268,6 +290,15 @@ extern "C" Item js_ee_setMaxListeners(Item emitter, Item n) {
     js_property_set(emitter, max_listeners_key, n);
     return emitter;
 }
+
+// ─── static events.setMaxListeners(n, ...eventTargets) ──────────────────────
+// Node.js API: first arg is n, remaining are emitters
+static Item js_ee_static_setMaxListeners(Item n, Item emitter) {
+    return js_ee_setMaxListeners(emitter, n);
+}
+
+// ─── static events.getMaxListeners(emitter) ─────────────────────────────────
+// (same order, but listed here for clarity)
 
 // ─── emitter.getMaxListeners() ──────────────────────────────────────────────
 extern "C" Item js_ee_getMaxListeners(Item emitter) {
@@ -344,8 +375,8 @@ static Item js_ee_inst_removeAllListeners(Item event_name) {
 static Item js_ee_inst_listeners(Item event_name) {
     return js_ee_listeners(js_get_this(), event_name);
 }
-static Item js_ee_inst_listenerCount(Item event_name) {
-    return js_ee_listenerCount(js_get_this(), event_name);
+static Item js_ee_inst_listenerCount(Item event_name, Item listener) {
+    return js_ee_listenerCount(js_get_this(), event_name, listener);
 }
 static Item js_ee_inst_eventNames(void) {
     return js_ee_eventNames(js_get_this());
@@ -390,6 +421,26 @@ extern "C" Item js_ee_constructor(void) {
     return emitter;
 }
 
+// events.once(emitter, eventName) — static, returns a Promise that resolves
+// with an array of args when the event fires, or rejects on 'error'.
+static Item js_ee_static_once(Item emitter, Item event_name) {
+    extern Item js_promise_with_resolvers(void);
+
+    Item resolvers = js_promise_with_resolvers();
+    Item promise = js_property_get(resolvers, make_string_item("promise"));
+    Item resolve_fn = js_property_get(resolvers, make_string_item("resolve"));
+
+    // Call emitter.once(eventName, resolve) — the listener is called with args
+    // and resolve_fn will resolve the promise with the first arg.
+    Item once_method = js_property_get(emitter, make_string_item("once"));
+    if (get_type_id(once_method) == LMD_TYPE_FUNC) {
+        Item args[2] = {event_name, resolve_fn};
+        js_call_function(once_method, emitter, args, 2);
+    }
+
+    return promise;
+}
+
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
 static Item events_namespace = {0};
@@ -417,7 +468,7 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(ee_prototype, "emit",                (void*)js_ee_inst_emit, -2);
     ee_set_method(ee_prototype, "removeAllListeners",  (void*)js_ee_inst_removeAllListeners, 1);
     ee_set_method(ee_prototype, "listeners",           (void*)js_ee_inst_listeners, 1);
-    ee_set_method(ee_prototype, "listenerCount",       (void*)js_ee_inst_listenerCount, 1);
+    ee_set_method(ee_prototype, "listenerCount",       (void*)js_ee_inst_listenerCount, 2);
     ee_set_method(ee_prototype, "eventNames",          (void*)js_ee_inst_eventNames, 0);
     ee_set_method(ee_prototype, "setMaxListeners",     (void*)js_ee_inst_setMaxListeners, 1);
     ee_set_method(ee_prototype, "getMaxListeners",     (void*)js_ee_inst_getMaxListeners, 0);
@@ -437,9 +488,9 @@ extern "C" Item js_get_events_namespace(void) {
     ee_set_method(events_namespace, "emit",                (void*)js_ee_emit, -3);
     ee_set_method(events_namespace, "removeAllListeners",  (void*)js_ee_removeAllListeners, 2);
     ee_set_method(events_namespace, "listeners",           (void*)js_ee_listeners, 2);
-    ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 2);
+    ee_set_method(events_namespace, "listenerCount",       (void*)js_ee_listenerCount, 3);
     ee_set_method(events_namespace, "eventNames",          (void*)js_ee_eventNames, 1);
-    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_setMaxListeners, 2);
+    ee_set_method(events_namespace, "setMaxListeners",     (void*)js_ee_static_setMaxListeners, 2);
     ee_set_method(events_namespace, "getMaxListeners",     (void*)js_ee_getMaxListeners, 1);
     ee_set_method(events_namespace, "prependListener",     (void*)js_ee_prependListener, 3);
     ee_set_method(events_namespace, "prependOnceListener", (void*)js_ee_prependOnceListener, 3);
@@ -463,6 +514,9 @@ extern "C" Item js_get_events_namespace(void) {
 
     // default export is the constructor
     js_property_set(events_namespace, make_string_item("default"), events_namespace);
+
+    // static events.once(emitter, eventName) — returns Promise
+    ee_set_method(events_namespace, "once", (void*)js_ee_static_once, 2);
 
     return events_namespace;
 }

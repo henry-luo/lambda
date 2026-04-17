@@ -4645,6 +4645,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             case MAP_KIND_ITERATOR:
                 // v28: iterators are opaque — ignore external property writes
                 return value;
+            case MAP_KIND_PROCESS_ENV:
+                // process.env coerces all values to strings (Node.js semantics)
+                // but allow sentinel values through for delete operations
+                if (get_type_id(value) != LMD_TYPE_STRING && value.item != JS_DELETED_SENTINEL_VAL) {
+                    value = js_to_string(value);
+                }
+                break;  // fall through to regular property set
             default:
                 break;  // typed arrays fall through to regular set
             }
@@ -11717,6 +11724,17 @@ extern "C" Item js_throw_range_error_code(const char* code, const char* message)
     return ItemNull;
 }
 
+extern "C" Item js_throw_error_with_code(const char* code, const char* message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("Error"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    Item code_key = (Item){.item = s2it(heap_create_name("code"))};
+    Item code_val = (Item){.item = s2it(heap_create_name(code, strlen(code)))};
+    js_property_set(error, code_key, code_val);
+    js_throw_value(error);
+    return ItemNull;
+}
+
 // v20: Helper: throw SyntaxError (for early errors detected during transpilation)
 extern "C" void js_throw_syntax_error(Item message) {
     Item type_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
@@ -15481,6 +15499,25 @@ extern "C" Item js_module_get(Item specifier) {
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("default", 7))}, wt_ns);
         }
         return wt_ns;
+    }
+
+    // cluster — minimal stub (isPrimary: true, isMaster: true, isWorker: false)
+    if ((spec->len == 7 && memcmp(spec->chars, "cluster", 7) == 0) ||
+        (spec->len == 10 && memcmp(spec->chars, "cluster.js", 10) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "node:cluster", 12) == 0)) {
+        static Item cl_ns = {0};
+        if (cl_ns.item == 0) {
+            cl_ns = js_new_object();
+            heap_register_gc_root(&cl_ns.item);
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
+                            (Item){.item = ITEM_TRUE});
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isMaster", 8))},
+                            (Item){.item = ITEM_TRUE});
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isWorker", 8))},
+                            (Item){.item = ITEM_FALSE});
+            js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("default", 7))}, cl_ns);
+        }
+        return cl_ns;
     }
 
     for (int i = 0; i < js_module_count_v14; i++) {

@@ -67,24 +67,33 @@ extern "C" Item js_qs_unescape(Item str_item) {
 
 // ─── querystring.parse(str, sep, eq) ─────────────────────────────────────────
 // Parses a query string into an object. Default sep='&', eq='='
+// In query strings, '+' is decoded as space (before percent-decoding)
+static void qs_plus_to_space(char* s) {
+    for (; *s; s++) {
+        if (*s == '+') *s = ' ';
+    }
+}
+
 extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
-    Item obj = js_new_object();
+    extern Item js_object_create(Item proto);
+    Item obj = js_object_create(ItemNull);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return obj;
 
     String* s = it2s(str_item);
     if (s->len == 0) return obj;
 
-    // determine separator and equals characters
-    char sep = '&';
-    char eq = '=';
-    char buf[8];
+    // determine separator and equals strings (support multi-char)
+    const char* sep = "&";
+    int sep_len = 1;
+    const char* eq = "=";
+    int eq_len = 1;
     if (get_type_id(sep_item) == LMD_TYPE_STRING) {
         String* sep_s = it2s(sep_item);
-        if (sep_s->len > 0) sep = sep_s->chars[0];
+        if (sep_s->len > 0) { sep = sep_s->chars; sep_len = (int)sep_s->len; }
     }
     if (get_type_id(eq_item) == LMD_TYPE_STRING) {
         String* eq_s = it2s(eq_item);
-        if (eq_s->len > 0) eq = eq_s->chars[0];
+        if (eq_s->len > 0) { eq = eq_s->chars; eq_len = (int)eq_s->len; }
     }
 
     // copy input to mutable buffer
@@ -96,30 +105,44 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
     // skip leading '?' if present
     char* p = input;
     if (*p == '?') p++;
+    char* end = input + len;
 
-    // split by separator
-    char sep_str[2] = {sep, '\0'};
-    char* saveptr = NULL;
-    char* pair = strtok_r(p, sep_str, &saveptr);
-    while (pair) {
-        char* eq_pos = strchr(pair, eq);
-        if (eq_pos) {
-            *eq_pos = '\0';
-            // decode key and value
+    // helper lambda-like: process one key=value pair
+    while (p < end) {
+        // find next separator
+        char* sep_pos = (sep_len == 1) ? strchr(p, sep[0]) : strstr(p, sep);
+        int pair_len = sep_pos ? (int)(sep_pos - p) : (int)(end - p);
+
+        // find equals within this pair
+        char* pair_end = p + pair_len;
+        char saved = *pair_end;
+        *pair_end = '\0';
+        char* eq_pos = (eq_len == 1) ? strchr(p, eq[0]) : strstr(p, eq);
+        *pair_end = saved;
+
+        if (eq_pos && eq_pos < pair_end) {
+            // key = value
+            int key_raw_len = (int)(eq_pos - p);
+            int val_raw_len = (int)(pair_end - eq_pos - eq_len);
+            char key_buf[4096], val_buf[4096];
+            if (key_raw_len >= (int)sizeof(key_buf)) key_raw_len = (int)sizeof(key_buf) - 1;
+            if (val_raw_len >= (int)sizeof(val_buf)) val_raw_len = (int)sizeof(val_buf) - 1;
+            memcpy(key_buf, p, key_raw_len); key_buf[key_raw_len] = '\0';
+            memcpy(val_buf, eq_pos + eq_len, val_raw_len); val_buf[val_raw_len] = '\0';
+
+            qs_plus_to_space(key_buf);
+            qs_plus_to_space(val_buf);
+
             size_t key_dec_len = 0, val_dec_len = 0;
-            char* key_dec = url_decode_component(pair, strlen(pair), &key_dec_len);
-            char* val_dec = url_decode_component(eq_pos + 1, strlen(eq_pos + 1), &val_dec_len);
+            char* key_dec = url_decode_component(key_buf, strlen(key_buf), &key_dec_len);
+            char* val_dec = url_decode_component(val_buf, strlen(val_buf), &val_dec_len);
             if (key_dec && val_dec) {
                 Item key = make_string_item(key_dec, (int)key_dec_len);
-                // check if key already exists — if so, convert to array
                 Item existing = js_property_get(obj, key);
                 if (existing.item != 0 && get_type_id(existing) != LMD_TYPE_UNDEFINED) {
-                    // already has value — make array or push to existing array
                     if (js_array_length(existing) >= 0 && get_type_id(existing) != LMD_TYPE_STRING) {
-                        // already an array, push
                         js_array_push(existing, make_string_item(val_dec, (int)val_dec_len));
                     } else {
-                        // convert single value to array
                         Item arr = js_array_new(0);
                         js_array_push(arr, existing);
                         js_array_push(arr, make_string_item(val_dec, (int)val_dec_len));
@@ -131,16 +154,22 @@ extern "C" Item js_qs_parse(Item str_item, Item sep_item, Item eq_item) {
             }
             if (key_dec) mem_free(key_dec);
             if (val_dec) mem_free(val_dec);
-        } else {
+        } else if (pair_len > 0) {
             // key with no value
+            char key_buf[4096];
+            if (pair_len >= (int)sizeof(key_buf)) pair_len = (int)sizeof(key_buf) - 1;
+            memcpy(key_buf, p, pair_len); key_buf[pair_len] = '\0';
+            qs_plus_to_space(key_buf);
             size_t key_dec_len = 0;
-            char* key_dec = url_decode_component(pair, strlen(pair), &key_dec_len);
+            char* key_dec = url_decode_component(key_buf, strlen(key_buf), &key_dec_len);
             if (key_dec) {
                 js_property_set(obj, make_string_item(key_dec, (int)key_dec_len), make_string_item(""));
                 mem_free(key_dec);
             }
         }
-        pair = strtok_r(NULL, sep_str, &saveptr);
+
+        if (!sep_pos) break;
+        p = sep_pos + sep_len;
     }
 
     mem_free(input);
@@ -153,15 +182,17 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item) {
     if (obj_item.item == 0 || get_type_id(obj_item) == LMD_TYPE_UNDEFINED)
         return make_string_item("");
 
-    char sep = '&';
-    char eq = '=';
+    const char* sep = "&";
+    int sep_len = 1;
+    const char* eq = "=";
+    int eq_len = 1;
     if (get_type_id(sep_item) == LMD_TYPE_STRING) {
         String* sep_s = it2s(sep_item);
-        if (sep_s->len > 0) sep = sep_s->chars[0];
+        if (sep_s->len > 0) { sep = sep_s->chars; sep_len = (int)sep_s->len; }
     }
     if (get_type_id(eq_item) == LMD_TYPE_STRING) {
         String* eq_s = it2s(eq_item);
-        if (eq_s->len > 0) eq = eq_s->chars[0];
+        if (eq_s->len > 0) { eq = eq_s->chars; eq_len = (int)eq_s->len; }
     }
 
     Item keys = js_object_keys(obj_item);
@@ -176,7 +207,9 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item) {
         Item key = js_array_get_int(keys, i);
         Item val = js_property_get(obj_item, key);
 
-        if (i > 0 && pos < 8000) result[pos++] = sep;
+        if (i > 0 && pos + sep_len < 8000) {
+            memcpy(result + pos, sep, sep_len); pos += sep_len;
+        }
 
         // encode key
         Item key_str = js_to_string(key);
@@ -187,10 +220,12 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item) {
             // value is an array — emit key=val for each element
             int64_t arr_len = js_array_length(val);
             for (int64_t j = 0; j < arr_len && pos < 8000; j++) {
-                if (j > 0) result[pos++] = sep;
+                if (j > 0 && pos + sep_len < 8000) {
+                    memcpy(result + pos, sep, sep_len); pos += sep_len;
+                }
                 int klen = (int)strlen(key_enc);
                 if (pos + klen < 8000) { memcpy(result + pos, key_enc, klen); pos += klen; }
-                result[pos++] = eq;
+                if (pos + eq_len < 8000) { memcpy(result + pos, eq, eq_len); pos += eq_len; }
                 Item elem = js_array_get_int(val, j);
                 Item elem_str = js_to_string(elem);
                 String* es = it2s(elem_str);
@@ -203,7 +238,7 @@ extern "C" Item js_qs_stringify(Item obj_item, Item sep_item, Item eq_item) {
             // single value
             int klen = (int)strlen(key_enc);
             if (pos + klen < 8000) { memcpy(result + pos, key_enc, klen); pos += klen; }
-            result[pos++] = eq;
+            if (pos + eq_len < 8000) { memcpy(result + pos, eq, eq_len); pos += eq_len; }
             Item val_str = js_to_string(val);
             String* vs = it2s(val_str);
             char* val_enc = url_encode_component(vs->chars, vs->len);

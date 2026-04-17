@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: 153f45d63
+# Commit: 12f85659c
 # Source: ref/node/test/parallel/
-# Total passing: 15 / 988  (skipped: 0)
+# Total passing: 48 / 1025  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -21,18 +21,51 @@
 #   util
 #   zlib
 #
+test-assert-esm-cjs-message-verify.js
+test-assert-fail.js
+test-assert-myers-diff.js
 test-buffer-failed-alloc-typed-arrays.js
+test-buffer-fakes.js
+test-buffer-isencoding.js
+test-buffer-swap-fast.js
+test-buffer-tojson.js
+test-buffer-zero-fill-reset.js
+test-crypto-aes-wrap.js
+test-crypto-authenticated-stream.js
+test-crypto-cipheriv-decipheriv.js
 test-crypto-ecdh-setpublickey-deprecation.js
+test-crypto-from-binary.js
 test-crypto-op-during-process-exit.js
-test-dns-lookup-promises.js
+test-crypto-randomuuid.js
+test-dns-setlocaladdress.js
+test-events-listener-count-with-listener.js
+test-fs-close.js
+test-fs-existssync-false.js
+test-fs-fmap.js
 test-fs-mkdir.js
+test-fs-operations-with-surrogate-pairs.js
 test-fs-promises-file-handle-sync.js
+test-fs-readdir-types-symlinks.js
+test-fs-util-validateoffsetlength.js
+test-fs-write-file-buffer.js
+test-fs-write-sync.js
+test-path-posix-exists.js
+test-process-abort.js
+test-process-constants-noatime.js
+test-process-dlopen-undefined-exports.js
 test-process-domain-segfault.js
+test-process-env-delete.js
 test-process-env-windows-error-reset.js
+test-process-exit-recursive.js
 test-process-exit.js
 test-process-getactivehandles.js
 test-process-getactiveresources-track-active-handles.js
-test-stream-iter-pull-async.js
-test-stream-push-order.js
+test-process-load-env-file.js
+test-querystring-escape.js
+test-stream-readable-constructor-set-methods.js
+test-stream-transform-constructor-set-methods.js
+test-stream-writable-constructor-set-methods.js
 test-util-primordial-monkeypatching.js
+test-zlib-flush.js
 test-zlib-no-stream.js
+test-zlib-write-after-end.js

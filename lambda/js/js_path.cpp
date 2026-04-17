@@ -165,12 +165,40 @@ extern "C" Item js_path_dirname(Item path_item) {
 extern "C" Item js_path_extname(Item path_item) {
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return make_string_item("");
+    if (!path || !*path) return make_string_item("");
 
-    const char* ext = file_path_ext(path);
-    if (!ext) return make_string_item("");
+    int path_len = (int)strlen(path);
 
-    return make_string_item(ext);
+    // strip trailing separators
+    int end = path_len - 1;
+    while (end >= 0 && path[end] == '/') end--;
+    if (end < 0) return make_string_item("");
+
+    // find start of basename (after last separator)
+    int start = end;
+    while (start > 0 && path[start - 1] != '/') start--;
+
+    int base_len = end - start + 1;
+    const char* base = path + start;
+
+    // Node.js extname rules:
+    // - Find the LAST dot in the basename
+    // - If no dot, or dot is the first char with nothing after, return ""
+    // - If basename is all dots (e.g. "..", "..."), return ""
+    int last_dot = -1;
+    for (int i = base_len - 1; i >= 0; i--) {
+        if (base[i] == '.') { last_dot = i; break; }
+    }
+    if (last_dot <= 0) return make_string_item("");
+
+    // Check that not all chars before last_dot are dots
+    bool all_dots_before = true;
+    for (int i = 0; i < last_dot; i++) {
+        if (base[i] != '.') { all_dots_before = false; break; }
+    }
+    if (all_dots_before) return make_string_item("");
+
+    return make_string_item(base + last_dot, base_len - last_dot);
 }
 
 // path.isAbsolute(path)
@@ -417,28 +445,67 @@ extern "C" Item js_path_parse(Item path_item) {
         return obj;
     }
 
+    // Strip trailing slashes for parsing (Node.js behavior)
+    // but preserve the original for dir computation on paths like /foo//bar.baz
+    char stripped_buf[2048];
+    strncpy(stripped_buf, path, sizeof(stripped_buf) - 1);
+    stripped_buf[sizeof(stripped_buf) - 1] = '\0';
+    int slen = (int)strlen(stripped_buf);
+    // strip trailing slashes, but don't strip the root slash itself
+    while (slen > 1 && (stripped_buf[slen - 1] == '/' || stripped_buf[slen - 1] == '\\')) {
+        stripped_buf[--slen] = '\0';
+    }
+    const char* stripped = stripped_buf;
+
     // root
     const char* root = "";
 #ifdef _WIN32
     char root_buf[4] = {0};
-    if (path[0] >= 'A' && path[0] <= 'z' && path[1] == ':') {
-        root_buf[0] = path[0]; root_buf[1] = ':'; root_buf[2] = '\\';
+    if (stripped[0] >= 'A' && stripped[0] <= 'z' && stripped[1] == ':') {
+        root_buf[0] = stripped[0]; root_buf[1] = ':'; root_buf[2] = '\\';
         root = root_buf;
-    } else if (path[0] == '\\' || path[0] == '/') {
+    } else if (stripped[0] == '\\' || stripped[0] == '/') {
         root = "/";
     }
 #else
-    if (path[0] == '/') root = "/";
+    if (stripped[0] == '/') root = "/";
 #endif
 
-    // dir
-    char* dir = file_path_dirname(path);
+    // dir — use original path for dirname (preserves internal slashes)
+    char* dir = file_path_dirname(stripped);
+    // Node.js: when dirname returns "." it means no directory component
+    // Only keep "." if the original path had a "/" (explicit dir reference)
+    if (dir && strcmp(dir, ".") == 0 && !strchr(stripped, '/')) {
+        mem_free(dir);
+        dir = NULL;
+    }
 
-    // base (basename)
-    const char* base = file_path_basename(path);
+    // base (basename) — use stripped path
+    const char* base = file_path_basename(stripped);
+    // Node.js: basename of root-only paths is ""
+    if (base && strcmp(base, "/") == 0) base = "";
 
     // ext
-    const char* ext = file_path_ext(path);
+    const char* ext = file_path_ext(stripped);
+    // Node.js extension rules: ext is the portion from the LAST dot in basename,
+    // but only if there's a non-dot character before that last dot.
+    // So '.', '..', '.bashrc' all have ext="" while 'file.txt' has ext=".txt"
+    if (ext && base) {
+        int blen = (int)strlen(base);
+        // Find the last dot in base
+        int last_dot = -1;
+        for (int i = blen - 1; i >= 0; i--) {
+            if (base[i] == '.') { last_dot = i; break; }
+        }
+        // ext is "" if: no dot, dot at position 0, or all chars before last_dot are dots
+        bool has_non_dot_before = false;
+        for (int i = 0; i < last_dot; i++) {
+            if (base[i] != '.') { has_non_dot_before = true; break; }
+        }
+        if (last_dot <= 0 || !has_non_dot_before) {
+            ext = "";
+        }
+    }
 
     // name (base without ext)
     int base_len = base ? (int)strlen(base) : 0;
@@ -537,6 +604,12 @@ static Item js_path_get_delimiter(void) {
 }
 
 // =============================================================================
+// path.toNamespacedPath(path) — on POSIX, returns path unchanged
+extern "C" Item js_path_toNamespacedPath(Item path_item) {
+    return path_item;
+}
+
+// =============================================================================
 // path Module Namespace Object
 // =============================================================================
 
@@ -563,6 +636,7 @@ extern "C" Item js_get_path_namespace(void) {
     js_path_set_method(path_namespace, "relative",   (void*)js_path_relative, 2);
     js_path_set_method(path_namespace, "parse",      (void*)js_path_parse, 1);
     js_path_set_method(path_namespace, "format",     (void*)js_path_format, 1);
+    js_path_set_method(path_namespace, "toNamespacedPath", (void*)js_path_toNamespacedPath, 1);
 
     // properties
     js_property_set(path_namespace, make_string_item("sep"), js_path_get_sep());
@@ -584,6 +658,7 @@ extern "C" Item js_get_path_namespace(void) {
     js_path_set_method(win32_ns, "relative",   (void*)js_path_relative, 2);
     js_path_set_method(win32_ns, "parse",      (void*)js_path_parse, 1);
     js_path_set_method(win32_ns, "format",     (void*)js_path_format, 1);
+    js_path_set_method(win32_ns, "toNamespacedPath", (void*)js_path_toNamespacedPath, 1);
     js_property_set(win32_ns, make_string_item("sep"), make_string_item("\\"));
     js_property_set(win32_ns, make_string_item("delimiter"), make_string_item(";"));
     js_property_set(path_namespace, make_string_item("win32"), win32_ns);

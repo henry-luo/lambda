@@ -327,6 +327,34 @@ extern "C" Item js_zlib_brotliDecompressSync(Item input_item) {
 // zlib Module Namespace
 // =============================================================================
 
+// crc32(data[, value]) — compute CRC32
+extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
+    unsigned long crc_val = 0;
+    if (get_type_id(init_val) == LMD_TYPE_INT) {
+        crc_val = (unsigned long)it2i(init_val);
+    }
+
+    TypeId tid = get_type_id(data_item);
+    if (tid == LMD_TYPE_STRING) {
+        String* s = it2s(data_item);
+        if (s && s->len > 0) {
+            crc_val = crc32(crc_val, (const Bytef*)s->chars, (uInt)s->len);
+        }
+    } else if (tid == LMD_TYPE_MAP) {
+        // TypedArray / Buffer — get data pointer via internal struct
+        Map* m = data_item.map;
+        if (m && m->map_kind == MAP_KIND_TYPED_ARRAY && m->data) {
+            struct TaHeader { int element_type; int length; int byte_length; int byte_offset; void* data; };
+            TaHeader* ta = (TaHeader*)m->data;
+            if (ta->data && ta->byte_length > 0) {
+                crc_val = crc32(crc_val, (const Bytef*)ta->data, (uInt)ta->byte_length);
+            }
+        }
+    }
+    // return as unsigned 32-bit integer
+    return (Item){.item = i2it((int32_t)(crc_val & 0xFFFFFFFF))};
+}
+
 static Item zlib_namespace = {0};
 
 static void zlib_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
@@ -350,6 +378,7 @@ extern "C" Item js_get_zlib_namespace(void) {
     zlib_set_method(zlib_namespace, "brotliDecompressSync",(void*)js_zlib_brotliDecompressSync, 1);
     // unzipSync is alias for gunzipSync (handles both gzip and deflate)
     zlib_set_method(zlib_namespace, "unzipSync",           (void*)js_zlib_gunzipSync, 1);
+    zlib_set_method(zlib_namespace, "crc32",               (void*)js_zlib_crc32, 2);
 
     // constants
     Item constants = js_new_object();
@@ -360,6 +389,19 @@ extern "C" Item js_get_zlib_namespace(void) {
     js_property_set(constants, make_string_item("Z_BEST_SPEED"),    (Item){.item = i2it(Z_BEST_SPEED)});
     js_property_set(constants, make_string_item("Z_BEST_COMPRESSION"), (Item){.item = i2it(Z_BEST_COMPRESSION)});
     js_property_set(zlib_namespace, make_string_item("constants"), constants);
+
+    // codes — error code map
+    Item codes = js_new_object();
+    js_property_set(codes, make_string_item("Z_OK"),              (Item){.item = i2it(Z_OK)});
+    js_property_set(codes, make_string_item("Z_STREAM_END"),      (Item){.item = i2it(Z_STREAM_END)});
+    js_property_set(codes, make_string_item("Z_NEED_DICT"),       (Item){.item = i2it(Z_NEED_DICT)});
+    js_property_set(codes, make_string_item("Z_ERRNO"),           (Item){.item = i2it(Z_ERRNO)});
+    js_property_set(codes, make_string_item("Z_STREAM_ERROR"),    (Item){.item = i2it(Z_STREAM_ERROR)});
+    js_property_set(codes, make_string_item("Z_DATA_ERROR"),      (Item){.item = i2it(Z_DATA_ERROR)});
+    js_property_set(codes, make_string_item("Z_MEM_ERROR"),       (Item){.item = i2it(Z_MEM_ERROR)});
+    js_property_set(codes, make_string_item("Z_BUF_ERROR"),       (Item){.item = i2it(Z_BUF_ERROR)});
+    js_property_set(codes, make_string_item("Z_VERSION_ERROR"),   (Item){.item = i2it(Z_VERSION_ERROR)});
+    js_property_set(zlib_namespace, make_string_item("codes"), codes);
 
     Item default_key = make_string_item("default");
     js_property_set(zlib_namespace, default_key, zlib_namespace);
