@@ -10278,14 +10278,9 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, bound_count));
             }
 
-            // obj.hasOwnProperty(key) -> js_has_own_property(obj, key)
-            if (prop->name->len == 14 && strncmp(prop->name->chars, "hasOwnProperty", 14) == 0) {
-                MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t key_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_has_own_property", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
-            }
+            // obj.hasOwnProperty(key) — handled at runtime via js_map_method cascade
+            // (removed: unconditional shortcut to js_has_own_property conflicted with
+            //  user-defined .hasOwnProperty() methods on other objects)
 
             // v11: regex.test(str) — handled at runtime via js_map_method cascade
             // (removed: unconditional shortcut to js_regex_test conflicted with
