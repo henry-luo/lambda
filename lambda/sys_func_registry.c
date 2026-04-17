@@ -122,6 +122,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
+#include "js/js_xhr.h"
 
 // shared runtime context (defined in mir.c)
 extern Context* _lambda_rt;
@@ -1509,6 +1510,8 @@ JitImport jit_runtime_imports[] = {
     {"js_event_loop_init", FPTR(js_event_loop_init)},
     {"js_event_loop_drain", FPTR(js_event_loop_drain)},
     {"js_microtask_enqueue", FPTR(js_microtask_enqueue)},
+    // v30: XMLHttpRequest
+    {"js_xhr_new", FPTR(js_xhr_new)},
     // v14: ES Module runtime
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},

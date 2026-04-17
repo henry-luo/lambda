@@ -26,7 +26,7 @@ test_result run_lambda_repl(const char* input) {
     test_result result = {nullptr, -1};
 
     // Create a temporary file for input
-    const char* temp_file = "temp_repl_input.txt";
+    const char* temp_file = "temp/temp_repl_input.txt";
     FILE* temp = fopen(temp_file, "w");
     if (!temp) {
         return result;

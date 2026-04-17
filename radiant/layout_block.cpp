@@ -3906,17 +3906,49 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
 
-    // When a float appears after inline content on the current line (is_line_start=false),
-    // offset its Y by one line height so it doesn't overlap the current line's content.
-    // Ideally, CSS 2.1 §9.5.1 says "the outer top of the floated box is aligned with
-    // the top of the current line box", but our engine commits inline content before
-    // processing floats and can't reflow text around the float. This offset compensates
-    // by placing the float below the current line, which matches more tests in practice.
+    // CSS 2.1 §9.5.1: When a float appears after inline content on the current line,
+    // check if there is enough horizontal room. Per §9.5: "If there is not enough
+    // horizontal room on the current line for the float, it is shifted downward,
+    // line by line, until a line has room for the float."
+    // If the float fits alongside existing inline content, place at current line top
+    // (§9.5.1 Rule 4). If not, shift to the next line.
     if (is_float && !pa_line->is_line_start) {
-        float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
-        block->y = pa_block->advance_y + line_height;
-        log_debug("%s Float after inline content: y=%.1f (advance_y=%.1f + line_height=%.1f)",
-                  block->source_loc(), block->y, pa_block->advance_y, line_height);
+        // Estimate float's outer width from resolved CSS properties
+        float float_outer_width = 0;
+        bool has_known_width = (block->blk && block->blk->given_width >= 0);
+        if (has_known_width) {
+            float_outer_width = block->blk->given_width;
+            if (block->bound) {
+                float_outer_width += block->bound->margin.left + block->bound->margin.right;
+                float_outer_width += block->bound->padding.left + block->bound->padding.right;
+                if (block->bound->border) {
+                    float_outer_width += block->bound->border->width.left + block->bound->border->width.right;
+                }
+            }
+        }
+        float current_line_used = pa_line->advance_x - pa_line->left;
+        float available_width = pa_block->content_width;
+
+        // Determine if float fits on the current line:
+        // - Known width: check if content + float > container width
+        // - Auto width: float will shrink-to-fit; if current line has content
+        //   that already exceeds half the container, shift down conservatively
+        bool needs_shift = false;
+        if (has_known_width) {
+            needs_shift = (current_line_used + float_outer_width > available_width);
+        } else {
+            // Auto-width float: can't know width before layout. If the current
+            // line already has substantial content, shift to next line.
+            needs_shift = (current_line_used > 0 && available_width > 0);
+        }
+
+        if (needs_shift) {
+            float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
+            block->y = pa_block->advance_y + line_height;
+            log_debug("%s Float shifted to next line: used=%.1f, float_w=%.1f, avail=%.1f, y=%.1f",
+                      block->source_loc(), current_line_used, float_outer_width, available_width, block->y);
+        }
+        // else: float fits alongside current line content — keep at advance_y
     }
 
     log_debug("%s block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d", block->source_loc(),
@@ -5696,13 +5728,53 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Skip line_break to preserve the inline cursor in pa_line->advance_x.
     // For originally block-level abs-pos elements, line_break is needed so the
     // static position is at the start of a new line.
+    // NOTE: elem->display and elem->position may not be resolved yet (dom_node_resolve_style
+    // runs after this check), so we also check the specified_style tree.
     bool is_blockified_inline_abspos = false;
     if (elmt->is_element()) {
         DomElement* elem = elmt->as_element();
-        if (elem->display.outer == CSS_VALUE_INLINE &&
-            elem->position &&
-            (elem->position->position == CSS_VALUE_ABSOLUTE ||
-             elem->position->position == CSS_VALUE_FIXED)) {
+        // Try already-resolved properties first
+        bool was_inline = false;
+        bool is_abspos = false;
+        if (elem->styles_resolved && elem->display.inner != 0) {
+            was_inline = (elem->display.outer == CSS_VALUE_INLINE);
+        } else if (elem->specified_style && elem->specified_style->tree) {
+            AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
+            if (disp_node) {
+                StyleNode* sn = (StyleNode*)disp_node->declaration;
+                if (sn && sn->winning_decl && sn->winning_decl->value &&
+                    sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    was_inline = (sn->winning_decl->value->data.keyword == CSS_VALUE_INLINE);
+                }
+            } else {
+                // No explicit display in style — use tag default. <span> etc. default to inline.
+                was_inline = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
+                              elem->tag_id == HTM_TAG_EM || elem->tag_id == HTM_TAG_STRONG ||
+                              elem->tag_id == HTM_TAG_B || elem->tag_id == HTM_TAG_I ||
+                              elem->tag_id == HTM_TAG_U || elem->tag_id == HTM_TAG_S ||
+                              elem->tag_id == HTM_TAG_SMALL || elem->tag_id == HTM_TAG_CODE ||
+                              elem->tag_id == HTM_TAG_SUB || elem->tag_id == HTM_TAG_SUP ||
+                              elem->tag_id == HTM_TAG_ABBR || elem->tag_id == HTM_TAG_CITE ||
+                              elem->tag_id == HTM_TAG_Q || elem->tag_id == HTM_TAG_VAR ||
+                              elem->tag_id == HTM_TAG_TIME || elem->tag_id == HTM_TAG_MARK ||
+                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI);
+            }
+        }
+        if (elem->position) {
+            is_abspos = (elem->position->position == CSS_VALUE_ABSOLUTE ||
+                         elem->position->position == CSS_VALUE_FIXED);
+        } else if (elem->specified_style && elem->specified_style->tree) {
+            AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
+            if (pos_node) {
+                StyleNode* sn = (StyleNode*)pos_node->declaration;
+                if (sn && sn->winning_decl && sn->winning_decl->value &&
+                    sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum kw = sn->winning_decl->value->data.keyword;
+                    is_abspos = (kw == CSS_VALUE_ABSOLUTE || kw == CSS_VALUE_FIXED);
+                }
+            }
+        }
+        if (was_inline && is_abspos) {
             is_blockified_inline_abspos = true;
         }
     }

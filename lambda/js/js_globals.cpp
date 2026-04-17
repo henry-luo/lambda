@@ -8211,6 +8211,8 @@ struct JsCtor {
     Item properties_map; // v18: must match JsFunction layout
     uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
     int16_t formal_length; // must match JsFunction layout
+    Item* module_vars;   // must match JsFunction layout
+    String* source_text; // must match JsFunction layout (v29)
 };
 
 // Reset constructor prototype objects between batch tests.

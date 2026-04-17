@@ -8320,6 +8320,19 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        // Support objects with .call method (e.g. Sizzle's push polyfill)
+        if (get_type_id(func_item) == LMD_TYPE_MAP) {
+            bool found = false;
+            Item call_fn = js_map_get_fast(func_item.map, "call", 4, &found);
+            if (found && get_type_id(call_fn) == LMD_TYPE_FUNC) {
+                // Rebuild args: [this_val, ...args] → call_fn(func_item, this_val, ...args)
+                int new_argc = arg_count + 1;
+                Item* new_args = (Item*)alloca(new_argc * sizeof(Item));
+                new_args[0] = this_val;
+                for (int i = 0; i < arg_count; i++) new_args[i + 1] = args[i];
+                return js_call_function(call_fn, func_item, new_args, new_argc);
+            }
+        }
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
         if (error_count < 5) {
@@ -8742,6 +8755,13 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 } else {
                     processed_pattern += NOT_S_EXPAND;
                 }
+                i++;
+                continue;
+            }
+            // Handle backreferences \1-\9: RE2 doesn't support them
+            // Replace with \w+ as an approximation (matches word characters)
+            if (next >= '1' && next <= '9' && bracket_depth == 0) {
+                processed_pattern += "\\w+";
                 i++;
                 continue;
             }
