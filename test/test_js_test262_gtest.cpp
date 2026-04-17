@@ -2,14 +2,15 @@
 // test262 Compliance Test Runner for LambdaJS
 // =============================================================================
 //
-// Workflow to move a test into the baseline list:
+// Removed: NONBATCH_FILE (all tests must be batch-safe)
 //   1. Fix it so that it passes, is stable, and finishes in < 3 seconds.
 //   2. Run it in a batch of 50 tests.  If still stable, add it to baseline.
 //
 // =============================================================================
-// Dynamically discovers and runs ECMAScript test262 tests against lambda.exe js.
+// Removed: g_nonbatch_tests (all tests must be batch-safe)
 //
 // Protocol:
+// Removed: g_phase_nonbatch_count (all tests must be batch-safe)
 //   1. Parse YAML frontmatter from each .js test file
 //   2. Prepend required harness files (sta.js, assert.js, plus any 'includes:')
 //   3. Execute concatenated source via: ./lambda.exe js <tempfile> --no-log
@@ -170,6 +171,7 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "regexp-v-flag",                              // Unicode sets (/v flag)
     // "promise-with-resolvers",                  // SUPPORTED
     // "array-grouping",                          // SUPPORTED
+    // Removed: load_nonbatch_list (all tests must be batch-safe)
     "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
     "String.prototype.toWellFormed",
 
@@ -202,6 +204,18 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
 
     // === Stage 3 / Proposals (not yet in any published spec) ===
     "Temporal",                                   // Temporal API (ES2027)
+        // Partition batch_indices into two groups:
+        //   1. clean_indices   — safe to run in shared batches of 50
+        //   2. crasher_indices  — known crashers quarantined from previous runs
+        std::vector<size_t> clean_indices;
+        std::vector<size_t> crasher_indices;
+        for (size_t idx : batch_indices) {
+            if (!g_known_crashers.empty() && g_known_crashers.count(prepared[idx].test_name)) {
+                crasher_indices.push_back(idx);
+            } else {
+                clean_indices.push_back(idx);
+            }
+        }
     "ShadowRealm",                                // Isolated evaluation contexts
     "decorators",                                 // Class decorators
     "explicit-resource-management",               // using / Symbol.dispose
@@ -306,9 +320,10 @@ static Test262Metadata parse_metadata(const std::string& source) {
                     size_t nl = yaml.find('\n', scan);
                     if (nl == std::string::npos) nl = yaml.size();
                     std::string ln = yaml.substr(scan, nl - scan);
+        // Removed: Phase 2a (non-batch) — all tests must be batch-safe
                     // trim
                     size_t fs = ln.find_first_not_of(" \t");
-                    if (fs == std::string::npos || ln[fs] != '-') break;
+        // Removed: load_nonbatch_list (all tests must be batch-safe)
                     std::string val = ln.substr(fs + 1);
                     size_t vs = val.find_first_not_of(" \t");
                     size_t ve = val.find_last_not_of(" \t\r");
@@ -316,6 +331,8 @@ static Test262Metadata parse_metadata(const std::string& source) {
                         meta.includes.push_back(val.substr(vs, ve - vs + 1));
                     scan = nl + 1;
                 }
+                bool gate_ok = true;
+                // Removed: nonbatch gate (all tests must be batch-safe)
             }
         }
     }
