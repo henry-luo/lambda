@@ -986,7 +986,7 @@ extern "C" Item js_buffer_toJSON(Item buf) {
     uint8_t* data = buffer_data(buf, &blen);
     Item result = js_new_object();
     js_property_set(result, make_string_item("type"), make_string_item("Buffer"));
-    Item arr = js_array_new(blen);
+    Item arr = js_array_new(0);
     if (data) {
         for (int i = 0; i < blen; i++) {
             js_array_push(arr, (Item){.item = i2it((int64_t)data[i])});
@@ -1512,6 +1512,26 @@ extern "C" Item js_get_buffer_namespace(void) {
     extern Item js_btoa(Item);
     buf_set_method(buffer_namespace, "atob", (void*)js_atob, 1);
     buf_set_method(buffer_namespace, "btoa", (void*)js_btoa, 1);
+
+    // Buffer.constants — MAX_LENGTH and MAX_STRING_LENGTH
+    {
+        Item constants_obj = js_new_object();
+        js_property_set(constants_obj, make_string_item("MAX_LENGTH"),
+            (Item){.item = i2it((int64_t)(1LL << 31) - 1)}); // 2GB - 1
+        js_property_set(constants_obj, make_string_item("MAX_STRING_LENGTH"),
+            (Item){.item = i2it((int64_t)(1LL << 28) - 16)}); // ~256MB
+        js_property_set(buffer_namespace, make_string_item("constants"), constants_obj);
+    }
+
+    // buffer.kMaxLength, buffer.kStringMaxLength — legacy aliases
+    js_property_set(buffer_namespace, make_string_item("kMaxLength"),
+        (Item){.item = i2it((int64_t)(1LL << 31) - 1)});
+    js_property_set(buffer_namespace, make_string_item("kStringMaxLength"),
+        (Item){.item = i2it((int64_t)(1LL << 28) - 16)});
+
+    // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
+    js_property_set(buffer_namespace, make_string_item("SlowBuffer"),
+        js_new_function((void*)js_buffer_allocUnsafeSlow, 1));
 
     return buffer_namespace;
 }

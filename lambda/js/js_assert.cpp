@@ -25,7 +25,7 @@ static Item assert_make_string(const char* str) {
 }
 
 // helper: throw AssertionError with full Node.js properties
-static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str) {
+static Item throw_assertion_error_full(const char* message, Item actual, Item expected, const char* op_str, bool generated = true) {
     extern Item js_new_error_with_name(Item type_name, Item message);
     extern void js_throw_value(Item error);
     extern Item js_property_set(Item obj, Item key, Item value);
@@ -34,11 +34,11 @@ static Item throw_assertion_error_full(const char* message, Item actual, Item ex
     Item error = js_new_error_with_name(type_name, msg_item);
     // Node.js AssertionError properties
     js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError [ERR_ASSERTION]"));
+    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
     js_property_set(error, assert_make_string("actual"), actual);
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
-    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(true)});
+    js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(generated)});
     js_throw_value(error);
     return make_js_undefined();
 }
@@ -73,9 +73,9 @@ static Item throw_assert_msg_or_auto(Item message, const char* default_msg,
         int len = (int)s->len < 500 ? (int)s->len : 500;
         memcpy(buf, s->chars, len);
         buf[len] = '\0';
-        return throw_assertion_error_full(buf, actual, expected, op_str);
+        return throw_assertion_error_full(buf, actual, expected, op_str, false);
     }
-    return throw_assertion_error_full(default_msg, actual, expected, op_str);
+    return throw_assertion_error_full(default_msg, actual, expected, op_str, true);
 }
 
 // assert(value[, message]) / assert.ok(value[, message])
@@ -187,15 +187,25 @@ extern "C" Item js_assert_notDeepEqual(Item actual, Item expected, Item message)
 
 // assert.fail([message])
 extern "C" Item js_assert_fail(Item message) {
-    if (get_type_id(message) == LMD_TYPE_STRING) {
+    TypeId tid = get_type_id(message);
+    if (tid == LMD_TYPE_STRING) {
         String* s = it2s(message);
         char buf[512];
         int len = (int)s->len < 500 ? (int)s->len : 500;
         memcpy(buf, s->chars, len);
         buf[len] = '\0';
-        return throw_assertion_error_full(buf, make_js_undefined(), make_js_undefined(), "fail");
+        return throw_assertion_error_full(buf, make_js_undefined(), make_js_undefined(), "fail", false);
     }
-    return throw_assertion_error_full("Failed", make_js_undefined(), make_js_undefined(), "fail");
+    // if message is an Error object, re-throw it directly (Node.js behavior)
+    if (tid == LMD_TYPE_MAP) {
+        extern void js_throw_value(Item error);
+        js_throw_value(message);
+        return make_js_undefined();
+    }
+    if (tid == LMD_TYPE_UNDEFINED || tid == LMD_TYPE_NULL) {
+        return throw_assertion_error_full("Failed", make_js_undefined(), make_js_undefined(), "fail", true);
+    }
+    return throw_assertion_error_full("Failed", make_js_undefined(), make_js_undefined(), "fail", true);
 }
 
 // assert.throws(fn[, error[, message]]) — Node.js compatible
@@ -405,6 +415,194 @@ extern "C" Item js_assert_doesNotMatch(Item string_val, Item regexp, Item messag
 }
 
 // =============================================================================
+// assert.rejects / assert.doesNotReject — async assertion helpers
+// =============================================================================
+
+// Shared state for promise handlers (single-threaded, safe)
+static Item s_rejects_error_expected = {0};
+static Item s_rejects_message = {0};
+
+// Validate a rejected value against an expected error pattern.
+// Returns true if validation passes, false if it fails (and throws assertion error).
+static bool validate_rejection(Item thrown, Item error_expected, Item message) {
+    extern Item js_instanceof(Item left, Item right);
+    extern Item js_regex_test(Item regex, Item str);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_strict_equal(Item left, Item right);
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_object_keys(Item obj);
+
+    TypeId exp_type = get_type_id(error_expected);
+    if (exp_type == LMD_TYPE_UNDEFINED || exp_type == LMD_TYPE_NULL) {
+        return true; // any rejection is fine
+    }
+
+    if (exp_type == LMD_TYPE_FUNC) {
+        // Error class: check instanceof
+        Item result = js_instanceof(thrown, error_expected);
+        if (get_type_id(result) == LMD_TYPE_BOOL && it2b(result)) return true;
+        // maybe it's a validation function
+        Item validate_result = js_call_function(error_expected, make_js_undefined(), &thrown, 1);
+        if (js_check_exception()) return true; // validator threw — propagate
+        if (assert_is_truthy(validate_result)) return true;
+        // validation failed
+        throw_assertion_error("The validation function is expected to return \"true\"");
+        return false;
+    }
+
+    if (exp_type == LMD_TYPE_MAP) {
+        // check if RegExp
+        Item cn_key = assert_make_string("__class_name__");
+        Item cn_val = js_property_get(error_expected, cn_key);
+        bool is_regex = false;
+        if (get_type_id(cn_val) == LMD_TYPE_STRING) {
+            String* cns = it2s(cn_val);
+            if (cns && cns->len == 6 && strncmp(cns->chars, "RegExp", 6) == 0)
+                is_regex = true;
+        }
+
+        if (is_regex) {
+            extern Item js_to_string_val(Item value);
+            Item msg_key = assert_make_string("message");
+            Item thrown_msg = js_property_get(thrown, msg_key);
+            if (get_type_id(thrown_msg) == LMD_TYPE_UNDEFINED)
+                thrown_msg = js_to_string_val(thrown);
+            Item test_result = js_regex_test(error_expected, thrown_msg);
+            if (get_type_id(test_result) == LMD_TYPE_BOOL && it2b(test_result)) return true;
+            throw_assertion_error("The input did not match the regular expression");
+            return false;
+        }
+
+        // Object pattern: validate each property
+        Item keys = js_object_keys(error_expected);
+        if (get_type_id(keys) == LMD_TYPE_ARRAY) {
+            for (int64_t i = 0; i < keys.array->length; i++) {
+                Item key = list_get(keys.list, (int)i);
+                Item expected_val = js_property_get(error_expected, key);
+                Item actual_val = js_property_get(thrown, key);
+
+                // check if expected_val is a RegExp
+                TypeId ev_type = get_type_id(expected_val);
+                if (ev_type == LMD_TYPE_MAP) {
+                    Item ev_cn = js_property_get(expected_val, cn_key);
+                    if (get_type_id(ev_cn) == LMD_TYPE_STRING) {
+                        String* ev_cns = it2s(ev_cn);
+                        if (ev_cns && ev_cns->len == 6 && strncmp(ev_cns->chars, "RegExp", 6) == 0) {
+                            extern Item js_to_string_val(Item value);
+                            Item actual_str = (get_type_id(actual_val) == LMD_TYPE_STRING)
+                                ? actual_val : js_to_string_val(actual_val);
+                            Item test_result = js_regex_test(expected_val, actual_str);
+                            if (get_type_id(test_result) != LMD_TYPE_BOOL || !it2b(test_result)) {
+                                char buf[256];
+                                String* ks = it2s(key);
+                                snprintf(buf, sizeof(buf), "Expected property '%.*s' to match regex",
+                                         ks ? (int)ks->len : 1, ks ? ks->chars : "?");
+                                throw_assertion_error(buf);
+                                return false;
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                Item eq = js_strict_equal(expected_val, actual_val);
+                if (get_type_id(eq) != LMD_TYPE_BOOL || !it2b(eq)) {
+                    char buf[256];
+                    String* ks = it2s(key);
+                    snprintf(buf, sizeof(buf), "Expected property '%.*s' to be strictly equal",
+                             ks ? (int)ks->len : 1, ks ? ks->chars : "?");
+                    throw_assertion_error(buf);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    return true;
+}
+
+static Item js_assert_rejects_on_fulfilled(Item value) {
+    // promise fulfilled when it should have rejected
+    throw_assertion_error("Missing expected rejection");
+    return make_js_undefined();
+}
+
+static Item js_assert_rejects_on_rejected(Item reason) {
+    Item error_expected = s_rejects_error_expected;
+    Item message = s_rejects_message;
+    validate_rejection(reason, error_expected, message);
+    return make_js_undefined();
+}
+
+// assert.rejects(asyncFnOrPromise[, error[, message]])
+extern "C" Item js_assert_rejects(Item asyncFnOrPromise, Item error_expected, Item message) {
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+
+    Item promise;
+    if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
+        promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
+        if (js_check_exception()) {
+            // synchronous throw — treat as rejection
+            Item thrown = js_clear_exception();
+            validate_rejection(thrown, error_expected, message);
+            return js_promise_resolve(make_js_undefined());
+        }
+    } else {
+        promise = asyncFnOrPromise;
+    }
+
+    s_rejects_error_expected = error_expected;
+    s_rejects_message = message;
+
+    Item on_fulfilled = js_new_function((void*)js_assert_rejects_on_fulfilled, 1);
+    Item on_rejected = js_new_function((void*)js_assert_rejects_on_rejected, 1);
+    return js_promise_then(promise, on_fulfilled, on_rejected);
+}
+
+static Item js_assert_doesNotReject_on_rejected(Item reason) {
+    // promise rejected when it should not have
+    extern void js_throw_value(Item error);
+    // if reason is already an error, re-throw it
+    if (get_type_id(reason) == LMD_TYPE_MAP) {
+        js_throw_value(reason);
+    } else {
+        throw_assertion_error("Got unwanted rejection");
+    }
+    return make_js_undefined();
+}
+
+// assert.doesNotReject(asyncFnOrPromise[, error[, message]])
+extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expected, Item message) {
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_promise_resolve(Item value);
+    extern Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+
+    Item promise;
+    if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
+        promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
+        if (js_check_exception()) {
+            Item thrown = js_clear_exception();
+            throw_assertion_error("Got unwanted rejection");
+            return js_promise_resolve(make_js_undefined());
+        }
+    } else {
+        promise = asyncFnOrPromise;
+    }
+
+    Item on_fulfilled = js_new_function(NULL, 0); // no-op
+    Item on_rejected = js_new_function((void*)js_assert_doesNotReject_on_rejected, 1);
+    return js_promise_then(promise, on_fulfilled, on_rejected);
+}
+
+// =============================================================================
 // assert Module Namespace
 // =============================================================================
 
@@ -445,7 +643,7 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     Item msg_item = assert_make_string(msg_str);
     Item error = js_new_error_with_name(type_name, msg_item);
     js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
-    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError [ERR_ASSERTION]"));
+    js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
     js_property_set(error, assert_make_string("actual"), actual);
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
@@ -474,6 +672,8 @@ extern "C" Item js_get_assert_namespace(void) {
     assert_set_method(assert_namespace, "ifError",             (void*)js_assert_ifError, 1);
     assert_set_method(assert_namespace, "match",               (void*)js_assert_match, 3);
     assert_set_method(assert_namespace, "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
+    assert_set_method(assert_namespace, "rejects",             (void*)js_assert_rejects, 3);
+    assert_set_method(assert_namespace, "doesNotReject",       (void*)js_assert_doesNotReject, 3);
 
     // AssertionError constructor
     assert_set_method(assert_namespace, "AssertionError",      (void*)js_assert_AssertionError_ctor, 1);

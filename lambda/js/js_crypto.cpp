@@ -376,7 +376,23 @@ extern "C" Item js_crypto_randomBytes(Item size_item) {
 // randomUUID() → string "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
 // ============================================================================
 
-extern "C" Item js_crypto_randomUUID(void) {
+extern "C" Item js_crypto_randomUUID(Item options) {
+    // validate options: must be undefined/null or an object
+    TypeId opt_type = get_type_id(options);
+    if (opt_type != LMD_TYPE_UNDEFINED && opt_type != LMD_TYPE_NULL && opt_type != LMD_TYPE_MAP) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"options\" argument must be of type object.");
+    }
+    if (opt_type == LMD_TYPE_MAP) {
+        // validate disableEntropyCache if present
+        Item dec = js_property_get(options, make_string_item_crypto("disableEntropyCache"));
+        TypeId dec_type = get_type_id(dec);
+        if (dec_type != LMD_TYPE_UNDEFINED && dec_type != LMD_TYPE_BOOL) {
+            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+                "The \"options.disableEntropyCache\" property must be of type boolean.");
+        }
+    }
+
     uint8_t bytes[16];
     if (!crypto_random_bytes(bytes, 16)) {
         log_error("crypto: randomUUID: entropy source failed");
@@ -1684,7 +1700,7 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "createCipheriv",     (void*)js_crypto_createCipheriv, 3);
     crypto_set_method(crypto_namespace, "createDecipheriv",   (void*)js_crypto_createDecipheriv, 3);
     crypto_set_method(crypto_namespace, "randomBytes",        (void*)js_crypto_randomBytes, 1);
-    crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 0);
+    crypto_set_method(crypto_namespace, "randomUUID",         (void*)js_crypto_randomUUID, 1);
     crypto_set_method(crypto_namespace, "randomInt",          (void*)js_crypto_randomInt, 2);
     crypto_set_method(crypto_namespace, "getHashes",          (void*)js_crypto_getHashes, 0);
     crypto_set_method(crypto_namespace, "getCiphers",         (void*)js_crypto_getCiphers, 0);

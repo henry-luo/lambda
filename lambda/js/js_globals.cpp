@@ -164,6 +164,39 @@ extern "C" Item js_process_hrtime_bigint(void) {
 #endif
 }
 
+// process.hrtime([prev]) — returns [seconds, nanoseconds]
+// If prev is given, returns difference from prev
+extern "C" Item js_process_hrtime(Item prev) {
+#ifdef __APPLE__
+    static mach_timebase_info_data_t timebase = {0, 0};
+    if (timebase.denom == 0) {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t ticks = mach_absolute_time();
+    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double ns = (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
+#endif
+    // If prev is an array [sec, nsec], subtract it
+    if (get_type_id(prev) == LMD_TYPE_ARRAY) {
+        Item prev_sec_item = js_array_get_int(prev, 0);
+        Item prev_nsec_item = js_array_get_int(prev, 1);
+        int64_t prev_sec_val = (get_type_id(prev_sec_item) == LMD_TYPE_INT) ? it2i(prev_sec_item) : 0;
+        int64_t prev_nsec_val = (get_type_id(prev_nsec_item) == LMD_TYPE_INT) ? it2i(prev_nsec_item) : 0;
+        double prev_ns = (double)prev_sec_val * 1e9 + (double)prev_nsec_val;
+        ns -= prev_ns;
+    }
+    uint64_t total_ns = (uint64_t)ns;
+    uint64_t sec = total_ns / 1000000000ULL;
+    uint64_t nsec = total_ns % 1000000000ULL;
+    Item arr = js_array_new(0);
+    js_array_push(arr, (Item){.item = i2it((int64_t)sec)});
+    js_array_push(arr, (Item){.item = i2it((int64_t)nsec)});
+    return arr;
+}
+
 // performance.now() — returns milliseconds (monotonic, high-resolution)
 // Uses static buffer (not GC heap) because the returned float must survive GC cycles.
 // MIR-generated code stores the Item value in registers/stack, where the conservative
@@ -893,6 +926,8 @@ extern "C" Item js_process_uptime(void) {
 // build process.env as a map of environment variables
 static Item build_process_env(void) {
     Item env = js_new_object();
+    // Mark as process.env so js_property_set coerces values to strings
+    env.map->map_kind = MAP_KIND_PROCESS_ENV;
     extern char** environ;
     if (environ) {
         for (char** e = environ; *e; e++) {
@@ -904,6 +939,10 @@ static Item build_process_env(void) {
             }
         }
     }
+    // Skip Node.js flag-checking in common test module — Lambda doesn't support V8 flags
+    js_property_set(env,
+        (Item){.item = s2it(heap_create_name("NODE_SKIP_FLAG_CHECK", 20))},
+        (Item){.item = s2it(heap_create_name("1", 1))});
     return env;
 }
 
@@ -1046,6 +1085,12 @@ static Item build_process_versions(void) {
                     (Item){.item = s2it(heap_create_name("1.0.0", 5))});
     js_property_set(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
                     (Item){.item = s2it(heap_create_name("115", 3))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("openssl", 7))},
+                    (Item){.item = s2it(heap_create_name("3.0.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("zlib", 4))},
+                    (Item){.item = s2it(heap_create_name("1.3.0", 5))});
+    js_property_set(versions, (Item){.item = s2it(heap_create_name("napi", 4))},
+                    (Item){.item = s2it(heap_create_name("9", 1))});
     return versions;
 }
 
@@ -1057,12 +1102,23 @@ static void js_process_set_method(Item ns, const char* name, void* func_ptr, int
 
 // ─── process.on(event, listener) ────────────────────────────────────────────
 // simple event emitter for process: supports 'exit', 'uncaughtException', 'beforeExit'
+// plus general events via a listener map
 #define MAX_PROCESS_LISTENERS 32
 static Item process_exit_listeners[MAX_PROCESS_LISTENERS] = {};
 static int process_exit_listener_count = 0;
 static Item process_uncaught_listeners[MAX_PROCESS_LISTENERS] = {};
 static int process_uncaught_listener_count = 0;
 static bool js_process_exiting = false;
+static Item process_listener_map = {0}; // general event → listener array map
+static int process_total_listener_count = 0;
+
+static Item get_process_listener_map() {
+    if (process_listener_map.item == 0) {
+        process_listener_map = js_new_object();
+        heap_register_gc_root(&process_listener_map.item);
+    }
+    return process_listener_map;
+}
 
 extern "C" Item js_process_on(Item event_name, Item listener) {
     if (get_type_id(event_name) != LMD_TYPE_STRING) return js_process_object;
@@ -1077,8 +1133,44 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
             process_uncaught_listeners[process_uncaught_listener_count++] = listener;
         }
     }
+
+    // also store in general listener map
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+        arr = js_array_new(0);
+        js_property_set(map, event_name, arr);
+    }
+    js_array_push(arr, listener);
+    process_total_listener_count++;
+
+    // update _eventsCount on process object
+    js_property_set(js_process_object,
+        (Item){.item = s2it(heap_create_name("_eventsCount", 12))},
+        (Item){.item = i2it((int64_t)process_total_listener_count)});
+
     // return process for chaining
     return js_process_object;
+}
+
+// process.emit(event, ...args) — emit an event on process
+extern "C" Item js_process_emit(Item event_name, Item arg1) {
+    if (get_type_id(event_name) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+
+    extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+    int64_t len = js_array_length(arr);
+    if (len == 0) return (Item){.item = b2it(false)};
+    for (int64_t i = 0; i < len; i++) {
+        Item listener = js_array_get_int(arr, i);
+        if (get_type_id(listener) == LMD_TYPE_FUNC) {
+            js_call_function(listener, js_process_object, &arg1, 1);
+        }
+    }
+    return (Item){.item = b2it(true)};
 }
 
 extern "C" void js_process_emit_exit(int code) {
@@ -1096,6 +1188,9 @@ extern "C" void js_process_reset_listeners(void) {
     process_exit_listener_count = 0;
     process_uncaught_listener_count = 0;
     js_process_exiting = false;
+    process_total_listener_count = 0;
+    // don't reset process_listener_map — it'll be GC'd
+    process_listener_map = (Item){0};
 }
 
 extern "C" Item js_get_process_object_value(void) {
@@ -1156,6 +1251,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
+        js_process_set_method(js_process_object, "emit", (void*)js_process_emit, 2);
 
         // versions object
         js_property_set(js_process_object,
@@ -1166,11 +1262,11 @@ extern "C" Item js_get_process_object_value(void) {
             (Item){.item = s2it(heap_create_name("title", 5))},
             (Item){.item = s2it(heap_create_name("lambda", 6))});
 
-        // hrtime object with bigint() method
-        Item hrtime_obj = js_new_object();
-        js_process_set_method(hrtime_obj, "bigint", (void*)js_process_hrtime_bigint, 0);
+        // hrtime function with bigint() method
+        Item hrtime_fn = js_new_function((void*)js_process_hrtime, 1);
+        js_process_set_method(hrtime_fn, "bigint", (void*)js_process_hrtime_bigint, 0);
         js_property_set(js_process_object,
-            (Item){.item = s2it(heap_create_name("hrtime", 6))}, hrtime_obj);
+            (Item){.item = s2it(heap_create_name("hrtime", 6))}, hrtime_fn);
 
         // env
         js_property_set(js_process_object,
@@ -1188,6 +1284,28 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("exitCode", 8))},
             (Item){.item = i2it(0)});
+
+        // execPath — absolute path to the lambda.exe binary
+        if (js_process_argv_raw && js_process_argc_raw > 0) {
+            char execpath_buf[1024];
+            if (realpath(js_process_argv_raw[0], execpath_buf)) {
+                js_property_set(js_process_object,
+                    (Item){.item = s2it(heap_create_name("execPath", 8))},
+                    (Item){.item = s2it(heap_create_name(execpath_buf, (int)strlen(execpath_buf)))});
+            } else {
+                js_property_set(js_process_object,
+                    (Item){.item = s2it(heap_create_name("execPath", 8))},
+                    (Item){.item = s2it(heap_create_name(js_process_argv_raw[0]))});
+            }
+        }
+
+        // execArgv — empty array (no V8 flags)
+        {
+            Item execArgv_arr = js_array_new(0);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("execArgv", 8))},
+                execArgv_arr);
+        }
 
         // config — minimal process.config for Node.js compat
         {
@@ -2588,9 +2706,19 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
         return (Item){.item = b2it(lt == LMD_TYPE_ARRAY)};
     }
-    // v20: Object check — any object type is instanceof Object
+    // v20: Object check — any object type is instanceof Object (unless null-prototype)
     if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
-        return (Item){.item = b2it(lt == LMD_TYPE_MAP || lt == LMD_TYPE_ARRAY || lt == LMD_TYPE_FUNC)};
+        if (lt == LMD_TYPE_ARRAY || lt == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
+        if (lt == LMD_TYPE_MAP) {
+            // null-prototype objects are NOT instanceof Object
+            Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+            Item proto = map_get(left.map, proto_key);
+            if (proto.item == 0 || get_type_id(proto) == LMD_TYPE_NULL || get_type_id(proto) == LMD_TYPE_UNDEFINED) {
+                return (Item){.item = b2it(false)};
+            }
+            return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
     }
     // v20: Function check — any function is instanceof Function
     if (rn->len == 8 && strncmp(rn->chars, "Function", 8) == 0) {
