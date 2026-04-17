@@ -10,6 +10,7 @@
  */
 
 #include "js_dom.h"
+#include "js_dom_events.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
@@ -78,6 +79,7 @@ static inline void js_dom_mutation_notify() {
 extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
+    js_dom_events_reset();
 }
 
 // ============================================================================
@@ -215,11 +217,17 @@ extern "C" Item js_document_proxy_get_property(Item prop_name) {
 
 // Dispatch property set on the document proxy object.
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
-    // For now, title is the only writable document property
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
             // Store title on the proxy Map itself
+            if (js_document_proxy_item.item != ITEM_NULL) {
+                js_property_set(js_document_proxy_item, prop_name, value);
+            }
+            return value;
+        }
+        // Allow setting defaultView (used by preamble: document.defaultView = window)
+        if (s && s->len == 11 && strncmp(s->chars, "defaultView", 11) == 0) {
             if (js_document_proxy_item.item != ITEM_NULL) {
                 js_property_set(js_document_proxy_item, prop_name, value);
             }
@@ -1581,6 +1589,26 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return args[0];
     }
 
+    // EventTarget interface on document
+    if (strcmp(method, "addEventListener") == 0) {
+        if (argc >= 2) {
+            js_dom_add_event_listener(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (strcmp(method, "removeEventListener") == 0) {
+        if (argc >= 2) {
+            js_dom_remove_event_listener(js_get_document_object_value(), args[0], args[1], argc > 2 ? args[2] : ItemNull);
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (strcmp(method, "dispatchEvent") == 0) {
+        if (argc >= 1) {
+            return js_dom_dispatch_event(js_get_document_object_value(), args[0]);
+        }
+        return (Item){.item = ITEM_FALSE};
+    }
+
     log_debug("js_document_method: unknown method '%s'", method);
     return ItemNull;
 }
@@ -1719,7 +1747,14 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // defaultView — returns window (the global object)
     // Sizzle accesses document.defaultView for getComputedStyle
     if (strcmp(prop, "defaultView") == 0) {
-        // Return the window object from module var if available
+        // Return stored window object if set by preamble (document.defaultView = window)
+        if (js_document_proxy_item.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name("defaultView"))};
+            Item val = js_property_get(js_document_proxy_item, key);
+            if (val.item != ITEM_NULL && get_type_id(val) != LMD_TYPE_UNDEFINED) {
+                return val;
+            }
+        }
         return ItemNull;
     }
 
@@ -3006,6 +3041,26 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             }
         }
         return ItemNull;
+    }
+
+    // EventTarget interface
+    if (strcmp(method, "addEventListener") == 0) {
+        if (argc >= 2) {
+            js_dom_add_event_listener(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull);
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (strcmp(method, "removeEventListener") == 0) {
+        if (argc >= 2) {
+            js_dom_remove_event_listener(elem_item, args[0], args[1], argc > 2 ? args[2] : ItemNull);
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    if (strcmp(method, "dispatchEvent") == 0) {
+        if (argc >= 1) {
+            return js_dom_dispatch_event(elem_item, args[0]);
+        }
+        return (Item){.item = ITEM_FALSE};
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);

@@ -437,11 +437,11 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.XMLHttpRequest = XMLHttpRequest;\n"
         "window.WebSocket = WebSocket;\n"
         "window.Worker = Worker;\n"
-        // Stub event listener on window
-        "window.addEventListener = function(type, fn, opts) {};\n"
-        "window.removeEventListener = function(type, fn, opts) {};\n"
-        "window.dispatchEvent = function(ev) { return true; };\n"
-        "window.getComputedStyle = function(el, pseudo) { return {}; };\n"
+        // Stub event listener on window — delegate to native DOM event system
+        "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
+        "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
+        "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
+        "window.getComputedStyle = getComputedStyle;\n"
         "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(){};\n"
         "window.scrollBy = function(){};\n"
@@ -450,6 +450,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.outerWidth = 1024;\n"
         "window.outerHeight = 768;\n"
         "window.devicePixelRatio = 1;\n"
+        // Set document.defaultView to window for jQuery/Sizzle compatibility
+        "document.defaultView = window;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
     // Postamble: call window.onload if set by scripts
