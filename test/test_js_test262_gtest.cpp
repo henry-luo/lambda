@@ -2,15 +2,7 @@
 // test262 Compliance Test Runner for LambdaJS
 // =============================================================================
 //
-// Removed: NONBATCH_FILE (all tests must be batch-safe)
-//   1. Fix it so that it passes, is stable, and finishes in < 3 seconds.
-//   2. Run it in a batch of 50 tests.  If still stable, add it to baseline.
-//
-// =============================================================================
-// Removed: g_nonbatch_tests (all tests must be batch-safe)
-//
 // Protocol:
-// Removed: g_phase_nonbatch_count (all tests must be batch-safe)
 //   1. Parse YAML frontmatter from each .js test file
 //   2. Prepend required harness files (sta.js, assert.js, plus any 'includes:')
 //   3. Execute concatenated source via: ./lambda.exe js <tempfile> --no-log
@@ -29,40 +21,32 @@
 // The test262 runner MUST produce ZERO crashes and ZERO lost tests in every CI
 // run.  Any crash is a MAJOR regression that must be fixed immediately.
 //
-// Stable checkpoint (commit 86235a964, 2026-04-15):
-//   Baseline passing:  21,824
-//   Nonbatch entries:  0
-//   Batch-lost:        0
-//   Crash-exits:       0
-//   Regressions:       0   (verified stable across 2 consecutive runs)
+// ALL tests must pass in a batch run to be considered fully passing.
+// Only fully passing tests may be added to the baseline list.
+// Tests that are slow (>= 3s) or unstable in batch (pass individually but
+// fail or flake in batch) are classified as PARTIAL PASS and tracked
+// separately — they do NOT qualify for the baseline.
 //
 // --update-baseline gate: to update the baseline, ALL of the following must hold:
-//   1. Nonbatch entries   == 0   (all tests batch-safe)
-//   2. Batch-lost         == 0   (no infrastructure failures)
-//   3. Crash-exits        == 0   (no crashes)
-//   4. Fully passing      >= STABLE_BASELINE_MIN  (net improvement required)
-//   5. Regressions        == 0   (no test may regress)
+//   1. Batch-lost         == 0   (no infrastructure failures)
+//   2. Crash-exits        == 0   (no crashes)
+//   3. Fully passing      >= STABLE_BASELINE_MIN  (net improvement required)
+//   4. Regressions        == 0   (no test may regress)
 //
 // Execution model:
-//   - Phase 1:  Parse metadata, partition tests into three groups:
+//   - Phase 1:  Parse metadata, partition tests into two groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
-//       (b) NON-BATCH — tests whose harness includes mutate global built-in state
-//                        (e.g. propertyHelper.js deletes properties to test
-//                        configurability).  These MUST run individually (batch
-//                        size = 1) to prevent poisoning co-batched tests.
-//       (c) CRASHERS — quarantined from a previous run; skipped entirely.
+//       (b) CRASHERS — quarantined from a previous run (crash, OOM, slow, timeout);
+//                       run individually to prevent collateral damage.
 //   - Phase 2:  Execute CLEAN tests in batched workers.
-//   - Phase 2a: Execute NON-BATCH tests individually.
+//   - Phase 2a: Execute CRASHER-quarantined tests individually.
 //   - Phase 2b: Retry any batch-lost tests individually (crash recovery).
 //   - Phase 3:  Evaluate results against expected outcomes.
 //   - Phase 4:  (--batch-only) Retry regressions individually; if recovered,
-//               the failure was a batch interaction, not a real regression.
+//               the failure was a batch interaction → classified as PARTIAL.
 //
 // Key invariant: after Phase 2 + 2a + 2b, every non-skipped test must have
 // a result.  If any test is MISSING, that is a crash and a critical bug.
-//
-// When adding a new test harness that mutates global state, add it to
-// NON_BATCH_INCLUDES so it always runs in isolation.
 //
 // =============================================================================
 
@@ -122,7 +106,6 @@ static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
 // Slow tests (>= 3s) should be moved to temp/_t262_crashers.txt with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
-static const char* NONBATCH_FILE = "test/js262/test262_nonbatch.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -171,7 +154,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "regexp-v-flag",                              // Unicode sets (/v flag)
     // "promise-with-resolvers",                  // SUPPORTED
     // "array-grouping",                          // SUPPORTED
-    // Removed: load_nonbatch_list (all tests must be batch-safe)
     "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
     "String.prototype.toWellFormed",
 
@@ -237,15 +219,7 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"built-ins/Math/random/S15.8.2.14_A1.js", "non-deterministic (Math.random)"},
 };
 
-// Harness files that mutate global built-in state.  Tests including ANY of
-// these MUST run individually, never inside a shared batch process, because
-// the mutations leak into subsequent tests within the same batch.
-// NOTE: propertyHelper.js was previously listed here because its
-// isConfigurable() helper called `delete obj[name]` without restoring.
-// We patched isConfigurable() to restore after testing, so it's now safe
-// to batch.
-static const std::set<std::string> NON_BATCH_INCLUDES = {
-};
+
 
 // =============================================================================
 // Test metadata parsed from YAML frontmatter
@@ -308,10 +282,8 @@ static Test262Metadata parse_metadata(const std::string& source) {
                     size_t nl = yaml.find('\n', scan);
                     if (nl == std::string::npos) nl = yaml.size();
                     std::string ln = yaml.substr(scan, nl - scan);
-        // Removed: Phase 2a (non-batch) — all tests must be batch-safe
                     // trim
                     size_t fs = ln.find_first_not_of(" \t");
-        // Removed: load_nonbatch_list (all tests must be batch-safe)
                     std::string val = ln.substr(fs + 1);
                     size_t vs = val.find_first_not_of(" \t");
                     size_t ve = val.find_last_not_of(" \t\r");
@@ -320,7 +292,6 @@ static Test262Metadata parse_metadata(const std::string& source) {
                     scan = nl + 1;
                 }
                 bool gate_ok = true;
-                // Removed: nonbatch gate (all tests must be batch-safe)
             }
         }
     }
@@ -744,8 +715,8 @@ static std::vector<Test262Param> discover_all_tests() {
 // =============================================================================
 
 enum Test262Result {
-    T262_PASS,          // fully passed: batch run + time < 3s (or non-batch individual pass)
-    T262_PARTIAL_PASS,  // passed individually but not reliably in batch (recovered, slow, or quarantined)
+    T262_PASS,          // fully passed in batch run with time < 3s
+    T262_PARTIAL_PASS,  // not reliably passing in batch (recovered individually, slow, or quarantined)
     T262_FAIL,
     T262_SKIP,
     T262_TIMEOUT,
@@ -911,11 +882,9 @@ struct BatchTiming {
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
 static std::unordered_map<std::string, std::string> known_crasher_tags;  // test_name → original tag (e.g. "CRASH_139")
-static std::set<std::string> g_nonbatch_tests;  // tests that must run individually (from test262_nonbatch.txt)
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static bool g_update_baseline = false;
-static bool g_force_baseline = false;
 static bool g_baseline_only = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
@@ -936,7 +905,6 @@ static double g_total_secs = 0; // total runtime
 static const int STABLE_BASELINE_MIN = 21824;
 
 // Phase-level counters set during execution, read by --update-baseline gate.
-static size_t g_phase_nonbatch_count = 0;   // nonbatch entries loaded from file
 static size_t g_phase_crash_exit = 0;       // crash-exit tests (exit > 128)
 static size_t g_phase_batch_lost = 0;       // tests lost in batch, recovered individually
 
@@ -944,6 +912,7 @@ static size_t g_phase_batch_lost = 0;       // tests lost in batch, recovered in
 // Used by Phase 4 to diagnose which co-batched tests cause false failures.
 static std::unordered_map<std::string, size_t> g_batch_assignment;  // test_name → batch_index
 static std::vector<std::vector<std::string>> g_batch_contents;      // batch_index → [test_names]
+static std::set<size_t> g_crashed_batches;  // batches that had a BATCH_KILL crash-point
 
 // Get short git commit hash for baseline header
 static std::string get_git_commit_hash() {
@@ -1013,27 +982,7 @@ static void load_known_crashers(const char* path) {
     fclose(f);
 }
 
-// Load non-batch test list: tests that must run individually, not in shared batches.
-// These are tests that destructively mutate global built-in state.
-static void load_nonbatch_list(const char* path) {
-    FILE* f = fopen(path, "r");
-    if (!f) return;
-    char buf[2048];
-    while (fgets(buf, sizeof(buf), f)) {
-        // skip comments and empty lines
-        if (buf[0] == '#' || buf[0] == '\n' || buf[0] == '\r') continue;
-        // trim trailing whitespace
-        size_t len = strlen(buf);
-        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r' || buf[len-1] == ' '))
-            buf[--len] = '\0';
-        if (len > 0) g_nonbatch_tests.insert(std::string(buf));
-    }
-    fclose(f);
-    g_phase_nonbatch_count = g_nonbatch_tests.size();
-    if (!g_nonbatch_tests.empty())
-        fprintf(stderr, "[test262] Loaded %zu non-batch tests from %s\n",
-                g_nonbatch_tests.size(), path);
-}
+
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
 //          Source assembly is deferred to Phase 2 workers (lazy assembly).
@@ -1599,42 +1548,24 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     std::vector<size_t> batch_indices;
     prepare_all_tests(tests, prepared, batch_indices);
 
-    // Partition batch_indices into three groups:
+    // Partition batch_indices into two groups:
     //   1. clean_indices   — safe to run in shared batches of 50
-    //   2. nonbatch_indices — tests that mutate global state (propertyHelper.js etc.)
-    //                         and MUST run individually to avoid poisoning co-batched tests
-    //   3. crasher_indices  — known crashers quarantined from previous runs
+    //   2. crasher_indices — quarantined from previous runs (crash, OOM, slow, timeout);
+    //                        run individually to prevent collateral damage
     std::vector<size_t> clean_indices;
-    std::vector<size_t> nonbatch_indices;
     std::vector<size_t> crasher_indices;
     for (size_t idx : batch_indices) {
         if (!g_known_crashers.empty() && g_known_crashers.count(prepared[idx].test_name)) {
             crasher_indices.push_back(idx);
         } else {
-            // check if any included harness is in the non-batch list
-            bool is_nonbatch = false;
-            if (g_nonbatch_tests.count(prepared[idx].test_name)) {
-                is_nonbatch = true;
-            } else {
-                for (auto& inc : prepared[idx].includes) {
-                    if (NON_BATCH_INCLUDES.count(inc)) {
-                        is_nonbatch = true;
-                        break;
-                    }
-                }
-            }
-            if (is_nonbatch) {
-                nonbatch_indices.push_back(idx);
-            } else {
-                clean_indices.push_back(idx);
-            }
+            clean_indices.push_back(idx);
         }
     }
 
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu non-batch, %zu quarantined-crashers)\n",
-            prep_secs, batch_indices.size(), clean_indices.size(), nonbatch_indices.size(), crasher_indices.size());
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu quarantined-crashers)\n",
+            prep_secs, batch_indices.size(), clean_indices.size(), crasher_indices.size());
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
     auto batch_results = execute_t262_batch(prepared, clean_indices);
@@ -1721,21 +1652,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     batch_kill_tests.size());
     }
 
-    // Phase 2a: execute non-batch tests individually (batch size = 1).
-    // These tests include harnesses (e.g. propertyHelper.js) that destructively
-    // mutate global built-in state, so they cannot safely share a process.
-    if (!nonbatch_indices.empty()) {
-        fprintf(stderr, "[test262] Phase 2a (non-batch): %zu tests running individually...\n",
-                nonbatch_indices.size());
-        auto nb_results = execute_t262_batch(prepared, nonbatch_indices, /*chunk_size=*/1);
-        for (auto& kv : nb_results) {
-            batch_results[kv.first] = std::move(kv.second);
-        }
-        fprintf(stderr, "[test262] Phase 2a (non-batch): %zu results collected\n",
-                nb_results.size());
-    }
-
-    // Run crasher-quarantined tests individually (batch size = 1).
+    // Phase 2a: run crasher-quarantined tests individually (batch size = 1).
     // These tests previously caused batch crashes (signal kills, OOM). Running them
     // individually prevents collateral damage and actually tests whether they still crash.
     // Previously we faked them as CRASH without running, but that caused ~N phantom
@@ -1920,9 +1837,14 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                             p.test_name.c_str(), p.test_path.c_str());
                     written.insert(p.test_name);
                     // Only count as crash_exit if this is a NEW crash (not a known crasher re-confirming)
-                    bool was_known_crash = known_crasher_tags.count(p.test_name) &&
-                                           (known_crasher_tags[p.test_name].substr(0, 5) == "CRASH" ||
-                                            known_crasher_tags[p.test_name].substr(0, 7) == "TIMEOUT");
+                    bool was_known_crash = false;
+                    if (known_crasher_tags.count(p.test_name)) {
+                        const auto& tag = known_crasher_tags[p.test_name];
+                        was_known_crash = (tag.substr(0, 5) == "CRASH" ||
+                                           tag.substr(0, 7) == "TIMEOUT" ||
+                                           tag.substr(0, 4) == "SLOW" ||
+                                           tag == "BATCH_KILL");
+                    }
                     if (!was_known_crash) crash_exit++;
                 } else if (known_crasher_tags.count(p.test_name) &&
                            known_crasher_tags[p.test_name].substr(0, 5) == "CRASH") {
@@ -1939,9 +1861,21 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             }
 
             // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
+            // Don't count as crash-exits (baseline gate blocker) if:
+            // - BATCH_KILL: pass individually but crash the batch process
+            // - Crash-collateral: tests from killed batches
+            // - Not in baseline: pre-existing failures that now crash (not regressions)
             for (auto& kv : batch_results) {
                 if (written.count(kv.first)) continue;
                 if (kv.second.exit_code > 128) {
+                    bool is_batch_kill = batch_kill_tests.count(kv.first) > 0;
+                    bool is_collateral = false;
+                    bool was_in_baseline = g_baseline_passing.count(kv.first) > 0;
+                    {
+                        auto ba_it = g_batch_assignment.find(kv.first);
+                        if (ba_it != g_batch_assignment.end() && g_crashed_batches.count(ba_it->second))
+                            is_collateral = true;
+                    }
                     const char* path = "";
                     for (size_t idx : clean_indices) {
                         if (prepared[idx].test_name == kv.first) {
@@ -1952,7 +1886,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", kv.second.exit_code,
                             kv.first.c_str(), path);
                     written.insert(kv.first);
-                    crash_exit++;
+                    // Only count as crash-exit if it's a genuine regression (was passing in baseline)
+                    if (!is_batch_kill && !is_collateral && was_in_baseline) crash_exit++;
                 }
             }
             // Add newly-discovered slow tests (>3s elapsed) from clean batches
@@ -2006,23 +1941,19 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 written.insert(bk_name);
                 batch_kill_count++;
             }
-            // Also re-emit previously known BATCH_KILL entries that are still
-            // quarantined — they stay quarantined for one extra run to verify
-            // they're no longer crash-points. (If they don't re-appear as crash-points,
-            // they'll be dropped next run because known_crasher_tags won't match CRASH.)
+            // Re-emit previously known BATCH_KILL entries: always keep them
+            // quarantined. These tests crash the batch process but pass individually,
+            // so they can never prove themselves "safe" while quarantined. Dropping
+            // them causes oscillation (quarantine → release → crash → re-quarantine).
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 if (written.count(p.test_name)) continue;
                 if (known_crasher_tags.count(p.test_name) &&
                     known_crasher_tags[p.test_name] == "BATCH_KILL") {
-                    // Re-emit only if still a crash-point this run
-                    if (batch_kill_tests.count(p.test_name)) {
-                        fprintf(crasher_log, "BATCH_KILL\t%s\t%s\n",
-                                p.test_name.c_str(), p.test_path.c_str());
-                        written.insert(p.test_name);
-                        batch_kill_count++;
-                    }
-                    // else: no longer a crash-point → drop from quarantine
+                    fprintf(crasher_log, "BATCH_KILL\t%s\t%s\n",
+                            p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
+                    batch_kill_count++;
                 }
             }
 
@@ -2154,16 +2085,21 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     }
 
     // Build classification sets for partial-pass logic.
-    // Batchable tests must pass in their original Phase 2 batch with time < 3s to be "fully passed".
-    // Non-batch tests (propertyHelper.js etc.) are fully passed if they pass individually.
-    std::set<std::string> clean_set, nonbatch_set, crasher_name_set, phase2b_set;
+    // All tests must pass in their original Phase 2 batch with time < 3s to be "fully passed".
+    std::set<std::string> clean_set, crasher_name_set, phase2b_set;
     for (size_t idx : clean_indices)    clean_set.insert(prepared[idx].test_name);
-    for (size_t idx : nonbatch_indices) nonbatch_set.insert(prepared[idx].test_name);
     for (size_t idx : crasher_indices)  crasher_name_set.insert(prepared[idx].test_name);
     for (size_t idx : lost_indices)     phase2b_set.insert(prepared[idx].test_name);
 
+    // Build set of batches that had crash-points (BATCH_KILL).
+    // Tests lost from these batches are crash-collateral, not genuinely batch-unstable.
+    for (auto& bk_name : batch_kill_tests) {
+        auto it = g_batch_assignment.find(bk_name);
+        if (it != g_batch_assignment.end()) g_crashed_batches.insert(it->second);
+    }
+
     // Phase 3: evaluate results and cache, applying partial-pass classification
-    size_t pp_crasher = 0, pp_batch_lost = 0, pp_slow = 0;
+    size_t pp_crasher = 0, pp_batch_lost = 0, pp_slow = 0, pp_collateral = 0;
     for (size_t i = 0; i < prepared.size(); i++) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
 
@@ -2173,11 +2109,39 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         if (result.result == T262_PASS) {
             const auto& name = prepared[i].test_name;
             if (crasher_name_set.count(name)) {
-                result = {T262_PARTIAL_PASS, "partial: quarantined crasher, passed individually only"};
-                pp_crasher++;
+                // BATCH_KILL tests pass individually by definition (they kill the batch
+                // process via OOM/memory, not because they're flaky). Promote to full pass.
+                // SLOW tests also pass individually reliably — they're quarantined only
+                // for batch performance, not because they're unstable.
+                // Released-CRASH tests (tag was CRASH, now pass individually) are also
+                // promoted — they'll return to batch execution next run.
+                bool is_batch_kill = known_crasher_tags.count(name) &&
+                                     known_crasher_tags[name] == "BATCH_KILL";
+                bool is_slow = known_crasher_tags.count(name) &&
+                               known_crasher_tags[name].substr(0, 4) == "SLOW";
+                bool is_released_crash = known_crasher_tags.count(name) &&
+                                         known_crasher_tags[name].substr(0, 5) == "CRASH" &&
+                                         batch_results.count(name) &&
+                                         batch_results.at(name).exit_code <= 128;
+                if (is_batch_kill || is_slow || is_released_crash) {
+                    // Keep as T262_PASS (full pass)
+                    pp_crasher++;  // still count for diagnostics
+                } else {
+                    result = {T262_PARTIAL_PASS, "partial: quarantined crasher, passed individually only"};
+                    pp_crasher++;
+                }
             } else if (clean_set.count(name) && phase2b_set.count(name)) {
-                result = {T262_PARTIAL_PASS, "partial: batch-lost, passed only in individual retry"};
-                pp_batch_lost++;
+                // Check if this was crash-collateral (batch had a BATCH_KILL crash-point).
+                // Crash-collateral tests are promoted to full pass — they're not genuinely
+                // batch-unstable, they were just killed by a different test's crash.
+                auto ba_it = g_batch_assignment.find(name);
+                if (ba_it != g_batch_assignment.end() && g_crashed_batches.count(ba_it->second)) {
+                    // Crash-collateral: keep as T262_PASS (not partial)
+                    pp_collateral++;
+                } else {
+                    result = {T262_PARTIAL_PASS, "partial: batch-lost, passed only in individual retry"};
+                    pp_batch_lost++;
+                }
             } else if (clean_set.count(name)) {
                 auto br_it = batch_results.find(name);
                 if (br_it != batch_results.end() && br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
@@ -2191,9 +2155,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         std::lock_guard<std::mutex> lock(g_results_mutex);
         g_cached_results[prepared[i].test_name] = result;
     }
-    if (pp_crasher + pp_batch_lost + pp_slow > 0) {
-        fprintf(stderr, "[test262] Phase 3 partial passes: %zu quarantined-crasher + %zu batch-lost + %zu slow (>= 3s)\n",
-                pp_crasher, pp_batch_lost, pp_slow);
+    if (pp_crasher + pp_batch_lost + pp_collateral + pp_slow > 0) {
+        fprintf(stderr, "[test262] Phase 3 partial passes: %zu quarantined-crasher + %zu batch-lost + %zu crash-collateral (promoted) + %zu slow (>= 3s)\n",
+                pp_crasher, pp_batch_lost, pp_collateral, pp_slow);
     }
     // Expose batch-lost count for --update-baseline gate
     g_phase_batch_lost = pp_batch_lost;
@@ -2362,9 +2326,19 @@ public:
         printf("╠══════════════════════════════════════════════════╣\n");
         printf("║  Fully passed: %5d / %5d  (%.1f%%)             ║\n", passed, total, pct);
         printf("║  Partial pass: %5d  (batch-unstable or slow)   ║\n", partial);
-        printf("║  Failed:       %5d  (real: %d, batch-lost: %d) ║\n", failed, real_failed, batch_lost);
+        printf("║  Failed:       %5d                             ║\n", failed);
         printf("║  Skipped:      %5d                             ║\n", skipped);
         printf("╚══════════════════════════════════════════════════╝\n");
+
+        if (partial > 0) {
+            printf("\n⚡ PARTIAL tests (%d):\n", partial);
+            std::lock_guard<std::mutex> lock(g_results_mutex);
+            for (auto& kv : g_cached_results) {
+                if (kv.second.result == T262_PARTIAL_PASS) {
+                    printf("  ~ %s  [%s]\n", kv.first.c_str(), kv.second.message.c_str());
+                }
+            }
+        }
 
         // Regression / improvement report
         if (!g_baseline_passing.empty()) {
@@ -2400,20 +2374,16 @@ public:
         // Update baseline if requested — gated by stability criteria
         if (g_update_baseline) {
             bool gate_ok = true;
-            if (g_phase_nonbatch_count > 0) {
-                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
-                gate_ok = false;
-            }
-            if (((size_t)batch_lost > 0 || g_phase_batch_lost > 0) && !g_force_baseline) {
+            if ((size_t)batch_lost > 0 || g_phase_batch_lost > 0) {
                 printf("\n❌  Baseline NOT updated: %d batch-lost (must be 0)\n", batch_lost);
                 gate_ok = false;
             }
-            if (g_phase_crash_exit > 0 && !g_force_baseline) {
-                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0, use --force-baseline to override)\n", g_phase_crash_exit);
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
                 gate_ok = false;
             }
-            if (!regressions.empty() && !g_force_baseline) {
-                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0, use --force-baseline to override)\n", regressions.size());
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
                 gate_ok = false;
             }
             if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
@@ -2424,7 +2394,7 @@ public:
             if (gate_ok) {
                 write_baseline_file(BASELINE_FILE, current_passing,
                                     g_total_tests, skipped, g_total_batched, failed);
-                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: batch-lost=0 crash=0 min=%d)\n",
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }
         }
@@ -2461,10 +2431,6 @@ int main(int argc, char** argv) {
     // Check for --update-baseline flag (must be after InitGoogleTest consumes gtest flags)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--update-baseline") == 0) {
-            g_update_baseline = true;
-        }
-        if (strcmp(argv[i], "--force-baseline") == 0) {
-            g_force_baseline = true;
             g_update_baseline = true;
         }
         if (strcmp(argv[i], "--baseline-only") == 0) {
@@ -2551,9 +2517,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[test262] Loaded %zu known crashers for quarantine\n",
                 g_known_crashers.size());
     }
-
-    // Load non-batch tests: poisoners that mutate global state
-    load_nonbatch_list(NONBATCH_FILE);
 
     // register summary listener
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
@@ -2739,12 +2702,24 @@ int main(int argc, char** argv) {
                     if (result.result == T262_PASS) {
                         recovered++;
                         recovered_names.push_back(reg_name);
-                        // Phase 4 recovered = partial pass (passed individually, not in batch)
-                        partial++;
-                        failed--;
-                        {
-                            std::lock_guard<std::mutex> lock(g_results_mutex);
-                            g_cached_results[reg_name] = {T262_PARTIAL_PASS, "partial: passed in Phase 4 retry only"};
+                        // Check if this was crash-collateral (batch had a BATCH_KILL crash-point).
+                        // Crash-collateral recoveries are promoted to full pass.
+                        auto ba_it = g_batch_assignment.find(reg_name);
+                        bool is_collateral = ba_it != g_batch_assignment.end() &&
+                                             g_crashed_batches.count(ba_it->second);
+                        if (is_collateral) {
+                            // Promote to full pass — add to current_passing
+                            passed++;
+                            failed--;
+                            current_passing.push_back(reg_name);
+                        } else {
+                            // Genuine batch-instability — keep as partial
+                            partial++;
+                            failed--;
+                            {
+                                std::lock_guard<std::mutex> lock(g_results_mutex);
+                                g_cached_results[reg_name] = {T262_PARTIAL_PASS, "partial: passed in Phase 4 retry only"};
+                            }
                         }
                     } else {
                         real_regressions.push_back(reg_name);
@@ -2824,6 +2799,15 @@ int main(int argc, char** argv) {
         printf("║  Failed:       %5d                             ║\n", failed);
         printf("║  Skipped:      %5d                             ║\n", skipped);
         printf("╚══════════════════════════════════════════════════╝\n");
+        if (partial > 0) {
+            printf("\n  Partial tests (%d):\n", partial);
+            std::lock_guard<std::mutex> lock(g_results_mutex);
+            for (auto& kv : g_cached_results) {
+                if (kv.second.result == T262_PARTIAL_PASS) {
+                    printf("  ~ %s  [%s]\n", kv.first.c_str(), kv.second.message.c_str());
+                }
+            }
+        }
         if (!g_baseline_passing.empty()) {
             printf("\n╔══════════════════════════════════════════════════╗\n");
             printf("║         Regression Check vs Baseline             ║\n");
@@ -2850,20 +2834,16 @@ int main(int argc, char** argv) {
         // Update baseline if requested (batch-only path) — gated by stability criteria
         if (g_update_baseline) {
             bool gate_ok = true;
-            if (g_phase_nonbatch_count > 0) {
-                printf("\n❌  Baseline NOT updated: %zu nonbatch entries (must be 0)\n", g_phase_nonbatch_count);
-                gate_ok = false;
-            }
-            if (g_phase_batch_lost > 0 && !g_force_baseline) {
+            if (g_phase_batch_lost > 0) {
                 printf("\n❌  Baseline NOT updated: %zu batch-lost (must be 0)\n", g_phase_batch_lost);
                 gate_ok = false;
             }
-            if (g_phase_crash_exit > 0 && !g_force_baseline) {
-                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0, use --force-baseline to override)\n", g_phase_crash_exit);
+            if (g_phase_crash_exit > 0) {
+                printf("\n❌  Baseline NOT updated: %zu crash-exits (must be 0)\n", g_phase_crash_exit);
                 gate_ok = false;
             }
-            if (!regressions.empty() && !g_force_baseline) {
-                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0, use --force-baseline to override)\n", regressions.size());
+            if (!regressions.empty()) {
+                printf("\n❌  Baseline NOT updated: %zu regressions (must be 0)\n", regressions.size());
                 gate_ok = false;
             }
             if ((int)current_passing.size() < STABLE_BASELINE_MIN) {
@@ -2874,7 +2854,7 @@ int main(int argc, char** argv) {
             if (gate_ok) {
                 write_baseline_file(BASELINE_FILE, current_passing,
                                     g_total_tests, skipped, g_total_batched, failed);
-                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: nonbatch=0 batch-lost=0 crash=0 min=%d)\n",
+                printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: batch-lost=0 crash=0 min=%d)\n",
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }
         }

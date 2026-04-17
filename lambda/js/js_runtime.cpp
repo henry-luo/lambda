@@ -759,8 +759,9 @@ extern "C" Item js_build_arguments_object() {
     } else {
         // Non-strict: callee is the function object (ES5 §10.6 step 13)
         if (js_pending_args_callee.item != 0) {
-            js_property_set(companion, (Item){.item = s2it(heap_create_name("callee", 6))},
-                            js_pending_args_callee);
+            Item callee_key = (Item){.item = s2it(heap_create_name("callee", 6))};
+            js_property_set(companion, callee_key, js_pending_args_callee);
+            js_mark_non_enumerable(companion, callee_key);
         }
     }
 
@@ -3826,18 +3827,18 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // Numeric index access
         int idx = (int)js_get_number(key);
-        if (idx >= 0 && idx < object.array->length) {
-            // check for accessor (getter) on companion map
-            if (object.array->extra != 0) {
-                char gk[64];
-                snprintf(gk, sizeof(gk), "__get_%d", idx);
-                Map* props = (Map*)(uintptr_t)object.array->extra;
-                bool gk_found = false;
-                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    return js_call_function(getter, object, NULL, 0);
-                }
+        // check for accessor (getter) on companion map — must check even when idx >= length
+        if (idx >= 0 && object.array->extra != 0) {
+            char gk[64];
+            snprintf(gk, sizeof(gk), "__get_%d", idx);
+            Map* props = (Map*)(uintptr_t)object.array->extra;
+            bool gk_found = false;
+            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, object, NULL, 0);
             }
+        }
+        if (idx >= 0 && idx < object.array->length) {
             // v25: check for deleted sentinel (array hole) — return undefined
             if (object.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
                 return make_js_undefined();
@@ -4575,6 +4576,30 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     Item map_item = (Item){.map = pm};
                     js_property_set(map_item, key, value);
                     return value;
+                }
+            }
+        }
+        // check for setter accessor on numeric index before array set
+        if (object.array->extra != 0) {
+            int idx = (int)js_get_number(key);
+            if (idx >= 0) {
+                char sk_buf[64];
+                snprintf(sk_buf, sizeof(sk_buf), "__set_%d", idx);
+                Map* props = (Map*)(uintptr_t)object.array->extra;
+                bool sk_found = false;
+                Item setter = js_map_get_fast(props, sk_buf, (int)strlen(sk_buf), &sk_found);
+                if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item args[1] = { value };
+                    js_call_function(setter, object, args, 1);
+                    return value;
+                }
+                // check non-writable for data property with accessor
+                char nw_buf[64];
+                snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", idx);
+                bool nw_found = false;
+                Item nw_val = js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
+                if (nw_found && js_is_truthy(nw_val)) {
+                    return value; // silently ignore assignment to non-writable
                 }
             }
         }
@@ -5378,18 +5403,18 @@ extern "C" Item js_array_get(Item array, Item index) {
 extern "C" Item js_array_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         Array* arr = array.array;
-        if (index >= 0 && index < arr->length) {
-            // check for accessor (getter) on companion map
-            if (arr->extra != 0) {
-                char gk[64];
-                snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
-                Map* props = (Map*)(uintptr_t)arr->extra;
-                bool gk_found = false;
-                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    return js_call_function(getter, array, NULL, 0);
-                }
+        // check for accessor (getter) on companion map — must check even when idx >= length
+        if (index >= 0 && arr->extra != 0) {
+            char gk[64];
+            snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
+            Map* props = (Map*)(uintptr_t)arr->extra;
+            bool gk_found = false;
+            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, array, NULL, 0);
             }
+        }
+        if (index >= 0 && index < arr->length) {
             // v25: check for deleted sentinel (array hole) — return undefined
             if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) {
                 return make_js_undefined();
@@ -5416,9 +5441,19 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         return js_property_set(array, (Item){.item = i2it((int)index)}, value);
     }
     Array* arr = array.array;
-    // v27: check __nw_ (non-writable) marker from companion map before writing
-    if (arr->extra != 0 && index >= 0 && index < arr->length) {
+    // check companion map for accessor/non-writable markers — must check even when idx >= length
+    if (arr->extra != 0 && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
+        // check setter accessor
+        char sk[64];
+        snprintf(sk, sizeof(sk), "__set_%lld", (long long)index);
+        bool sk_found = false;
+        Item setter = js_map_get_fast_ext(pm, sk, (int)strlen(sk), &sk_found);
+        if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
+            js_call_function(setter, array, &value, 1);
+            return value;
+        }
+        // check non-writable
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
         bool nw_found = false;
