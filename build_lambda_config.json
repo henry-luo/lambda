@@ -46,6 +46,7 @@
         "radiant/radiant.cpp",
         "radiant/render_dvi.cpp",
         "radiant/render_texnode.cpp",
+        "radiant/rdt_vector_cg.mm",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
         "lib/font/font_config.c",
@@ -1237,6 +1238,18 @@
                     "name": "CoreVideo",
                     "include": null,
                     "lib": "-framework CoreVideo",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "AVFoundation",
+                    "include": null,
+                    "lib": "-framework AVFoundation",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "CoreMedia",
+                    "include": null,
+                    "lib": "-framework CoreMedia",
                     "link": "dynamic"
                 },
                 {

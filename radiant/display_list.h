@@ -43,6 +43,8 @@ typedef enum {
     DL_SAVE_BACKDROP,        // save surface pixels before blend-mode element renders
     DL_APPLY_BLEND_MODE,
     DL_APPLY_FILTER,
+    // video frame placeholder (rect + clip only; actual blit is post-composite)
+    DL_VIDEO_PLACEHOLDER,
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -177,6 +179,15 @@ typedef struct {
     Bound clip;              // rectangular clip bounds at recording time
 } DlApplyFilter;
 
+// Video frame placeholder: records the layout rect and clip for post-composite blit.
+// The actual video frame pixels are blitted after tile compositing in the render loop.
+typedef struct {
+    void* video;             // RdtVideo* — borrowed, lifetime managed by view tree
+    float dst_x, dst_y, dst_w, dst_h;  // physical pixel coordinates
+    Bound clip;              // rectangular clip bounds at recording time
+    int object_fit;          // CssEnum
+} DlVideoPlaceholder;
+
 // ---------------------------------------------------------------------------
 // DisplayItem — tagged union of all draw commands
 // ---------------------------------------------------------------------------
@@ -203,6 +214,7 @@ typedef struct DisplayItem {
         DlSaveBackdrop       save_backdrop;
         DlApplyBlendMode     apply_blend_mode;
         DlApplyFilter        apply_filter;
+        DlVideoPlaceholder   video_placeholder;
     };
 } DisplayItem;
 
@@ -295,6 +307,11 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip);
+
+// Video placeholder (rect + clip only; actual blit is post-composite)
+void dl_video_placeholder(DisplayList* dl, void* video,
+                          float dst_x, float dst_y, float dst_w, float dst_h,
+                          int object_fit, const Bound* clip);
 
 // ---------------------------------------------------------------------------
 // Replay — execute all recorded commands through rdt_* calls

@@ -252,6 +252,9 @@ typedef struct RadiantState {
 
     // Animation scheduling
     AnimationScheduler* animation_scheduler;
+
+    // Video playback
+    bool has_active_video;         // true if any <video> is playing (drives continuous redraw)
 } RadiantState;
 
 

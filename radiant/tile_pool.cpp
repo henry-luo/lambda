@@ -716,6 +716,10 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
             break;
+
+        case DL_VIDEO_PLACEHOLDER:
+            // no-op during tile replay; video frames are blitted post-composite
+            break;
         }
     }
 
