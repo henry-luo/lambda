@@ -1,0 +1,8 @@
+t1:true
+t2:2
+t3:42
+t4:99
+t5:true
+t6:1
+t7:[object Arguments]
+t8:true
