@@ -7115,9 +7115,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_FUNC_TO_STRING: {
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;
+            // Helper: validate a String* pointer before dereference. Under memory pressure,
+            // pool-allocated JsFunction structs can have stale pointers — guard against SIGSEGV.
+            #define VALID_STR_PTR(s) ((s) && ((uintptr_t)(s) & 3) == 0 && (uintptr_t)(s) >= 0x1000)
             // User-defined functions with stored source text: return original source
-            if (fn->source_text && fn->source_text->len > 0 && fn->builtin_id == 0
-                && !(fn->bound_this.item || fn->bound_args)) {
+            // Check builtin_id and bound state first (safe struct fields) before
+            // dereferencing source_text which may be a dangling pointer under memory pressure.
+            if (fn->builtin_id == 0 && !(fn->bound_this.item || fn->bound_args)
+                && VALID_STR_PTR(fn->source_text) && fn->source_text->len > 0) {
                 return (Item){.item = s2it(fn->source_text)};
             }
             // Built-in, bound, or no-source functions: NativeFunction format
@@ -7126,7 +7131,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 strbuf_append_str_n(sb, "function* ", 10);
             else
                 strbuf_append_str_n(sb, "function ", 9);
-            if (fn->name && fn->name->len > 0) {
+            if (VALID_STR_PTR(fn->name) && fn->name->len > 0) {
                 // NativeFunction syntax allows only a single IdentifierName (no spaces).
                 // Bound functions have names like "bound f" — use only first word.
                 int name_len = fn->name->len;
@@ -7135,6 +7140,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 }
                 strbuf_append_str_n(sb, fn->name->chars, name_len);
             }
+            #undef VALID_STR_PTR
             strbuf_append_str_n(sb, "() { [native code] }", 20);
             String* result = heap_create_name(sb->str, sb->length);
             strbuf_free(sb);
@@ -12287,6 +12293,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item mapped = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             // directly assign to preserve arrays (avoid list_push flattening)
             dst->items[i] = mapped;
         }
@@ -12312,6 +12319,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) {
                 js_array_push_item_direct(dst, elem);
             }
@@ -12389,6 +12397,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
+            if (js_exception_pending) break;
         }
         return accumulator;
     }
@@ -12409,6 +12418,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
         }
         js_current_this = prev_this;
         return ItemNull;
@@ -12428,6 +12438,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
         js_current_this = prev_this;
@@ -12447,6 +12458,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = 0; i < len; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
         js_current_this = prev_this;
@@ -12464,6 +12476,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = src->length - 1; i >= 0; i--) {
             Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return src->items[i]; }
         }
         js_current_this = prev_this;
@@ -12481,6 +12494,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = src->length - 1; i >= 0; i--) {
             Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
         js_current_this = prev_this;
@@ -12502,6 +12516,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
         }
         js_current_this = prev_this;
@@ -12523,6 +12538,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (i >= src->length || src->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
         }
         js_current_this = prev_this;
@@ -12873,6 +12889,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         for (int i = 0; i < src->length; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item mapped = js_invoke_fn(fn, cb_args, 3);
+            if (js_exception_pending) break;
             // flatten one level
             if (get_type_id(mapped) == LMD_TYPE_ARRAY) {
                 Array* inner = mapped.array;
@@ -12951,6 +12968,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
             Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
+            if (js_exception_pending) break;
         }
         return accumulator;
     }
