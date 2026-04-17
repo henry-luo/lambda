@@ -69,6 +69,7 @@ Item js_typed_array_set_from(Item ta, Item source, int offset);
 
 // ArrayBuffer operations
 Item js_arraybuffer_new(int byte_length);
+Item js_arraybuffer_construct(Item length_arg);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 int  js_arraybuffer_byte_length(Item val);

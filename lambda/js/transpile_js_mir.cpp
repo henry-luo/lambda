@@ -12910,6 +12910,12 @@ static MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLi
             // Unbox string: it2s(str_item) -> String*
             MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
+            // Guard: if js_to_string threw (e.g. Symbol), str_ptr is null — skip append
+            MIR_label_t skip_append = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                MIR_new_label_op(mt->ctx, skip_append),
+                MIR_new_reg_op(mt->ctx, str_ptr),
+                MIR_new_int_op(mt->ctx, 0)));
             // Compute chars address: str_ptr + offsetof(String, chars)
             // (chars is a flexible array member, not a pointer)
             MIR_reg_t chars = jm_new_reg(mt, "chars", MIR_T_I64);
@@ -12927,6 +12933,7 @@ static MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLi
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sb),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, chars),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, len));
+            jm_emit_label(mt, skip_append);
             expr = expr->next;
         }
 
@@ -15695,8 +15702,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // new ArrayBuffer(byteLength)
     if (is_arraybuffer) {
-        MIR_reg_t len_arg = first_arg ? first_arg : jm_box_int_const(mt, 0);
-        return jm_call_1(mt, "js_arraybuffer_new", MIR_T_I64,
+        MIR_reg_t len_arg = first_arg ? first_arg : jm_emit_undefined(mt);
+        return jm_call_1(mt, "js_arraybuffer_construct", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
     }
 

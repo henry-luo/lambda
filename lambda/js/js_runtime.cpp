@@ -2802,8 +2802,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                int blen = (argc > 0 && args) ? (int)it2i(args[0]) : 0;
-                return js_arraybuffer_new(blen);
+                Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
+                return js_arraybuffer_construct(blen_arg);
             }
 
             // DataView
