@@ -28,6 +28,7 @@
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
+#include "../../radiant/view.hpp"
 #include "../input/html5/html5_parser.h"
 
 #include <cstring>
@@ -2089,13 +2090,88 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)count)};
     }
 
-    // offsetWidth / offsetHeight / clientWidth / clientHeight — stub returns
-    // In CSS2.1 tests, these are primarily used as layout flush triggers.
-    // Since our pipeline runs scripts before layout, return 0 as a stub.
-    if (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
-        strcmp(prop, "clientWidth") == 0 || strcmp(prop, "clientHeight") == 0) {
-        log_debug("js_dom_get_property: stub %s=0 on <%s>",
-                  prop, elem->tag_name ? elem->tag_name : "?");
+    // =========================================================================
+    // Layout dimension properties — return values from DomElement fields.
+    // After layout_html_doc() these contain real pixel values; before layout
+    // they are 0 (which matches current browser behaviour for scripts that
+    // run before first paint).
+    // =========================================================================
+
+    // offsetWidth / offsetHeight — border box dimensions
+    if (strcmp(prop, "offsetWidth") == 0) {
+        return (Item){.item = i2it((int64_t)elem->width)};
+    }
+    if (strcmp(prop, "offsetHeight") == 0) {
+        return (Item){.item = i2it((int64_t)elem->height)};
+    }
+
+    // clientWidth / clientHeight — border box minus borders
+    if (strcmp(prop, "clientWidth") == 0) {
+        float bw = 0;
+        if (elem->bound && elem->bound->border) {
+            bw = elem->bound->border->width.left + elem->bound->border->width.right;
+        }
+        return (Item){.item = i2it((int64_t)(elem->width - bw))};
+    }
+    if (strcmp(prop, "clientHeight") == 0) {
+        float bh = 0;
+        if (elem->bound && elem->bound->border) {
+            bh = elem->bound->border->width.top + elem->bound->border->width.bottom;
+        }
+        return (Item){.item = i2it((int64_t)(elem->height - bh))};
+    }
+
+    // offsetTop / offsetLeft — position relative to offsetParent
+    if (strcmp(prop, "offsetTop") == 0) {
+        return (Item){.item = i2it((int64_t)elem->y)};
+    }
+    if (strcmp(prop, "offsetLeft") == 0) {
+        return (Item){.item = i2it((int64_t)elem->x)};
+    }
+
+    // offsetParent — nearest positioned ancestor (or body)
+    if (strcmp(prop, "offsetParent") == 0) {
+        DomNode* p = elem->parent;
+        while (p) {
+            if (p->is_element()) {
+                DomElement* pe = p->as_element();
+                // body is always an offsetParent
+                if (pe->tag_name && strcasecmp(pe->tag_name, "body") == 0) {
+                    return js_dom_wrap_element(pe);
+                }
+                // positioned element (not static)
+                if (pe->position && pe->position->position != CSS_VALUE_STATIC) {
+                    return js_dom_wrap_element(pe);
+                }
+            }
+            p = p->parent;
+        }
+        return ItemNull;
+    }
+
+    // scrollWidth / scrollHeight — total scrollable content size
+    if (strcmp(prop, "scrollWidth") == 0) {
+        float cw = elem->content_width;
+        float bw = elem->width;
+        return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
+    }
+    if (strcmp(prop, "scrollHeight") == 0) {
+        float ch = elem->content_height;
+        float bh = elem->height;
+        return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
+    }
+
+    // scrollTop / scrollLeft — current scroll position
+    if (strcmp(prop, "scrollTop") == 0) {
+        if (elem->scroller && elem->scroller->pane) {
+            return (Item){.item = i2it((int64_t)elem->scroller->pane->v_scroll_position)};
+        }
+        return (Item){.item = i2it(0)};
+    }
+    if (strcmp(prop, "scrollLeft") == 0) {
+        if (elem->scroller && elem->scroller->pane) {
+            return (Item){.item = i2it((int64_t)elem->scroller->pane->h_scroll_position)};
+        }
         return (Item){.item = i2it(0)};
     }
 
@@ -3063,6 +3139,40 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             return js_dom_dispatch_event(elem_item, args[0]);
         }
         return (Item){.item = ITEM_FALSE};
+    }
+
+    // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
+    // Walks parent chain to compute absolute position.
+    if (strcmp(method, "getBoundingClientRect") == 0) {
+        float abs_x = 0, abs_y = 0;
+        DomNode* n = (DomNode*)elem;
+        while (n) {
+            abs_x += n->x;
+            abs_y += n->y;
+            n = n->parent;
+        }
+        float w = elem->width;
+        float h = elem->height;
+
+        Item rect = js_new_object();
+        Item k;
+        k = (Item){.item = s2it(heap_create_name("x"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+        k = (Item){.item = s2it(heap_create_name("y"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+        k = (Item){.item = s2it(heap_create_name("top"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+        k = (Item){.item = s2it(heap_create_name("left"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+        k = (Item){.item = s2it(heap_create_name("right"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
+        k = (Item){.item = s2it(heap_create_name("bottom"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
+        k = (Item){.item = s2it(heap_create_name("width"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)w)});
+        k = (Item){.item = s2it(heap_create_name("height"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
+        return rect;
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);

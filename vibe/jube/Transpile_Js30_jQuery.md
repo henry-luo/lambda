@@ -4,7 +4,7 @@
 
 Gap analysis of the Lambda JS runtime (Radiant browser context) against the requirements for 100% jQuery 3.x library support. jQuery is structured into ~12 modules: Core, Selectors (Sizzle), DOM Manipulation, Traversal, CSS, Events, Effects/Animation, AJAX, Deferred/Callbacks, Dimensions, Offset, and Data. The runtime already supports **~75–80%** of what jQuery needs — selectors, DOM manipulation, traversal, CSS, attributes, data, and utilities all work. The remaining gaps are concentrated in 5 areas: **Events, Async Timers, AJAX, Layout Queries, and a few missing DOM/browser APIs**.
 
-**Status:** In Progress — Phases A+B+C+D implemented, builds clean
+**Status:** Complete — All phases (A+B+C+D+E) implemented, builds clean
 
 ---
 
@@ -19,8 +19,8 @@ Gap analysis of the Lambda JS runtime (Radiant browser context) against the requ
 | **Attributes / Properties** (`.attr()`, `.prop()`, `.val()`) | ✅ Works | `getAttribute`, `setAttribute`, `hasAttribute` |
 | **Data** (`.data()`, `$.data()`) | ✅ Works | `WeakMap` (jQuery 3.x internal storage) |
 | **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ✅ Works | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ✅ |
-| **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ⚠️ Partial | `getComputedStyle` ✅, `offsetWidth/Height` returns 0 |
-| **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ❌ Blocked | No `getBoundingClientRect`, no scroll properties |
+| **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ✅ Works | `getComputedStyle` ✅, `offsetWidth/Height` ✅ (from layout) |
+| **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ✅ Works | `getBoundingClientRect` ✅, `scrollTop/Left` ✅, `offsetParent` ✅ |
 | **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ✅ Implemented | `addEventListener` ✅, 3-phase bubbling ✅, `Event` creation ✅ |
 | **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ⚠️ Partial | Timers work (libuv-backed), but no real-time frame stepping |
 | **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ✅ Implemented | `XMLHttpRequest` native (synchronous `http_fetch`) |
@@ -331,15 +331,27 @@ These are small fixes that unblock specific jQuery code paths.
 - **Preamble**: Minimal `function XMLHttpRequest() {}` kept for `typeof` feature detection; actual construction goes through transpiler
 - **Lifecycle**: `js_xhr_reset()` called from `js_dom_batch_reset()` to clean up between document runs
 
-### Phase E — Layout Queries
+### Phase E — Layout Queries ✅ DONE
 
-**Target:** `getBoundingClientRect()`, `offsetWidth/Height`, `offsetTop/Left`, `offsetParent`, `clientWidth/Height`.
+**Target:** `getBoundingClientRect()`, `offsetWidth/Height`, `offsetTop/Left`, `offsetParent`, `clientWidth/Height`, `scrollWidth/Height`, `scrollTop/Left`.
 
-**Files modified:** `js_dom.cpp`, potentially `radiant/layout.cpp` (expose layout trigger)
+**Files modified:** `js_dom.cpp` (~100 lines), `script_runner.cpp` (window scroll stubs)
 
 **Test:** jQuery `.offset()` returns `{top, left}` matching Radiant layout output. `.width()` returns content width. `.outerWidth(true)` includes margins.
 
-**Effort:** ~200 lines.
+**Effort:** ~100 lines modified.
+
+**Implementation details:**
+- **`offsetWidth`/`offsetHeight`**: Return `elem->width`/`elem->height` (border box dimensions from DomNode)
+- **`clientWidth`/`clientHeight`**: Return border box minus border widths (`elem->bound->border->width.*`)
+- **`offsetTop`/`offsetLeft`**: Return `elem->y`/`elem->x` (relative to parent border box)
+- **`offsetParent`**: Walk parent chain, return first positioned ancestor or `<body>`
+- **`scrollWidth`/`scrollHeight`**: Return `max(elem->content_width, elem->width)` / height equivalent
+- **`scrollTop`/`scrollLeft`**: Return `elem->scroller->pane->v_scroll_position` (or 0 if no scroller)
+- **`getBoundingClientRect()`**: New method in `js_dom_element_method` — walks parent chain summing x/y for absolute position, returns `{x, y, top, left, right, bottom, width, height}` JS object
+- **Window scroll**: Added `window.pageXOffset/pageYOffset/scrollX/scrollY = 0` in preamble
+- Values are 0 during initial script execution (before layout pass) and populated after `layout_html_doc()` for event handlers/animation callbacks — matches browser behaviour
+- Included `radiant/view.hpp` in js_dom.cpp for access to `BoundaryProp`/`BorderProp`/`PositionProp` field definitions
 
 ---
 
@@ -351,8 +363,8 @@ These are small fixes that unblock specific jQuery code paths.
 | B | DOM Event System | ~500 | 3 (2 new) | ✅ Done |
 | C | Timer Queue (libuv drain) | ~20 | 1 | ✅ Done |
 | D | XMLHttpRequest | ~370 | 4 (2 new) | ✅ Done |
-| E | Layout Queries | ~200 | 2 | Not started |
-| **Total** | | **~1,275** | | **A+B done** |
+| E | Layout Queries | ~100 | 2 | ✅ Done |
+| **Total** | | **~1,015** | | **All done** |
 
 ---
 
