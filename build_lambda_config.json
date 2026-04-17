@@ -1788,6 +1788,27 @@
                         "icon": "🎬"
                     },
                     {
+                        "source": "test_video_gtest.cpp",
+                        "name": "Video Playback Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "AVFoundation",
+                            "CoreMedia",
+                            "CoreVideo",
+                            "Foundation"
+                        ],
+                        "additional_sources": [
+                            "radiant/rdt_video_avf.mm"
+                        ],
+                        "binary": "test_video_gtest.exe",
+                        "icon": "🎬"
+                    },
+                    {
                         "source": "test_css_animation_gtest.cpp",
                         "name": "CSS Animation Tests",
                         "dependencies": [

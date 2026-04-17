@@ -18,7 +18,6 @@ This document proposes adding `<video>` element playback support to Radiant usin
 - Independent video playback thread for frame-rate decoupling from page rendering
 
 **Out of scope (future work):**
-- `<audio>` standalone element
 - **Web video playback** (HTTP/HTTPS URL sources)
 - **Adaptive streaming** (HLS/DASH)
 - DRM / Encrypted Media Extensions
@@ -678,7 +677,7 @@ fi
 - [ ] Implement `rdt_video_ffmpeg.cpp` — same feature set with PulseAudio/ALSA audio, explicit decode + playback threads
 - [x] A/V sync: audio-clock-as-master on macOS (AVPlayer manages internally) ✅
 - [x] Resolution capping via `rdt_video_set_layout_rect()` ✅
-- [ ] Unit tests: decode a known MP4 (H.264+AAC), verify frame dimensions, pixel output, and audio sample delivery
+- [x] Unit tests: decode a known MP4 (H.264+AAC), verify frame dimensions, pixel output, and audio sample delivery
 
 ### Phase 2 — Radiant Integration
 
@@ -687,9 +686,9 @@ fi
 - [x] Add `DL_VIDEO_PLACEHOLDER` opcode to display list (records layout rect, clip region, object-fit, RdtVideo pointer) ✅
 - [x] Implement `render_video.cpp` — post-composite blit: `rdt_video_get_frame()` → `blit_video_frame()` into final surface ✅
 - [x] Integrate into `window.cpp` render loop: `has_active_video` flag drives continuous redraw ✅
-- [ ] Video-only dirty optimisation: skip DL replay when only video frames changed
-- [ ] Update intrinsic sizing with actual video dimensions on `on_video_size_known` callback
-- [ ] Scroll/visibility: skip blit for off-viewport videos, continue audio
+- [x] Video-only dirty optimisation: skip DL replay when only video frames changed ✅
+- [x] Update intrinsic sizing with actual video dimensions on `on_video_size_known` callback ✅
+- [x] Scroll/visibility: skip blit for off-viewport videos, continue audio ✅
 
 ### Phase 3 — Controls + Polish
 
@@ -707,7 +706,7 @@ fi
 - [ ] `rdt_video_open_url()` for HTTP/HTTPS sources via `resource_manager`
 - [ ] Adaptive streaming (HLS/DASH)
 - [ ] GL overlay texture for zero-copy 4K video
-- [ ] `<audio>` standalone element
+- [x] `<audio>` standalone element — reuses `RdtVideo`/AVPlayer backend; `HTM_TAG_AUDIO` handler in `resolve_htm_style.cpp` ✅
 - [ ] Picture-in-picture
 
 ---
@@ -747,19 +746,44 @@ HTML `src` attributes use paths relative to the document (e.g., `"../media/test_
 |------|--------|
 | `radiant/rdt_video.h` | New — public C API (lifecycle, playback control, audio control, state queries, frame retrieval) |
 | `radiant/rdt_video_avf.mm` | New — macOS AVFoundation backend (~490 lines) |
-| `radiant/render_video.cpp` | New — post-composite blit: scan DL for `DL_VIDEO_PLACEHOLDER`, blit frames with nearest-neighbor scaling + clipping |
+| `radiant/render_video.cpp` | New — post-composite blit with two paths: full (`render_video_frames` — DL scan + cache placements) and cached (`render_video_frames_cached` — skip DL, blit from cached placements). Includes `is_video_visible()` viewport culling. |
 | `radiant/display_list.h` | Added `DL_VIDEO_PLACEHOLDER` opcode, `DlVideoPlaceholder` struct |
 | `radiant/display_list.cpp` | Added `dl_video_placeholder()` recording function |
 | `radiant/tile_pool.cpp` | Added `DL_VIDEO_PLACEHOLDER` no-op cases in both tile replay switches |
 | `radiant/view.hpp` | Added `RdtVideo* video` to `EmbedProp` |
-| `radiant/state_store.hpp` | Added `bool has_active_video` to `RadiantState` |
+| `radiant/state_store.hpp` | Added `bool has_active_video`, `video_placements[8]` cache, `video_placement_count` to `RadiantState` |
 | `radiant/render.cpp` | Added `render_video_content()` for DL placeholder recording; dispatch for video elements; post-composite `render_video_frames()` call |
 | `radiant/resolve_htm_style.cpp` | `HTM_TAG_VIDEO` case: resolve src path, create `RdtVideo`, parse autoplay/loop/muted, set `has_active_video` |
-| `radiant/window.cpp` | `has_active_video` forces continuous redraw |
+| `radiant/window.cpp` | `has_active_video` drives continuous redraw; video-only dirty path calls `render_video_frames_cached()` when no layout changes |
 | `build_lambda_config.json` | Added AVFoundation + CoreMedia frameworks; excluded `rdt_vector_cg.mm` from .mm glob |
 | `utils/generate_premake.py` | Added `.mm` file globbing for macOS |
 | `test/html/video_test.html` | New — test page with 3 `<video>` elements (autoplay+muted+loop, static, default size) |
+| `test/html/video_test2.html` | New — video+audio test (Sintel clip with dialogue for A/V sync testing) |
+| `test/html/audio_test.html` | New — standalone `<audio>` element test (M4A, autoplay+loop) |
 | `test/media/test_video.mp4` | New — Big Buck Bunny 360p 10s H.264 test clip (~1MB) |
+| `test/media/test_video_audio.mp4` | New — Sintel 564×240 12s H.264+AAC stereo clip (~692KB, CC-BY) |
+| `test/media/test_audio.m4a` | New — audio-only M4A test file (~37KB) |
+| `radiant/intrinsic_sizing.cpp` | Added `rdt_video_get_width/height()` queries for video intrinsic dimensions (replaces 300×150 default) |
+| `radiant/state_store.hpp` | Added `video_placements[8]` cache + `video_placement_count` to `RadiantState` for video-only dirty optimisation |
+
+### 7.6 Video-Only Dirty Optimisation
+
+After Phase 2, video playback no longer forces a full display list rebuild every frame.
+
+**Mechanism:**
+- `window.cpp` no longer sets `is_dirty = true` for `has_active_video`. Instead, when no layout/CSS/scroll changes occurred, the render loop takes a lightweight cached-blit path.
+- `render_video_frames()` (full path) caches video placement data (destination rect + clip bounds) into `RadiantState::video_placements[]` during the first full render.
+- `render_video_frames_cached()` (lightweight path) reuses cached placements to blit new video frames without scanning the display list.
+- `is_video_visible()` performs viewport culling — videos scrolled fully off-screen are skipped (audio continues).
+
+**Verified runtime results** (6-second test with Sintel 564×240 clip):
+- 382 frames used the cached blit path, 0 used the full DL path
+- Only 1 full `render_html_doc` at 4.2ms; all subsequent frames were video-only blits
+- Baseline tests: 5241/5241 pass, 0 regressions
+
+### 7.7 Audio Element Support
+
+The `<audio>` standalone element reuses the `RdtVideo`/AVPlayer backend. In `resolve_htm_style.cpp`, `HTM_TAG_AUDIO` resolves the `src` attribute and creates an `RdtVideo` instance — AVPlayer handles audio-only files natively. The audio element has no video rect, only a placeholder height (54px for future controls). Intrinsic sizing in `intrinsic_sizing.cpp` returns hardcoded 300×54 for audio elements.
 
 ---
 

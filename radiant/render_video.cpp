@@ -6,6 +6,7 @@
 
 #include "display_list.h"
 #include "rdt_video.h"
+#include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -75,11 +76,30 @@ static void blit_video_frame(ImageSurface* surface, const RdtVideoFrame* frame,
 // render_video_frames — scan display list, blit all video frames post-composite
 // ---------------------------------------------------------------------------
 
-void render_video_frames(DisplayList* dl, ImageSurface* surface) {
+// ---------------------------------------------------------------------------
+// is_video_visible — check if video rect intersects clip bounds and surface
+// ---------------------------------------------------------------------------
+
+static bool is_video_visible(float dst_x, float dst_y, float dst_w, float dst_h,
+                             float clip_l, float clip_t, float clip_r, float clip_b,
+                             int surf_w, int surf_h) {
+    // check against clip bounds (container overflow, scroll)
+    if (dst_x + dst_w <= clip_l || dst_x >= clip_r) return false;
+    if (dst_y + dst_h <= clip_t || dst_y >= clip_b) return false;
+    // check against surface bounds (viewport)
+    if (dst_x + dst_w <= 0 || dst_x >= (float)surf_w) return false;
+    if (dst_y + dst_h <= 0 || dst_y >= (float)surf_h) return false;
+    return true;
+}
+
+void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate) {
     if (!dl || !surface) return;
 
     int count = dl_item_count(dl);
     DisplayItem* items = dl->items;
+
+    // cache video placements for video-only dirty optimisation
+    int cached = 0;
 
     for (int i = 0; i < count; i++) {
         DisplayItem* item = &items[i];
@@ -89,9 +109,27 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface) {
         RdtVideo* video = (RdtVideo*)vp->video;
         if (!video) continue;
 
+        // cache placement for video-only blit path
+        if (rstate && cached < MAX_CACHED_VIDEO_PLACEMENTS) {
+            auto& p = rstate->video_placements[cached];
+            p.video = vp->video;
+            p.dst_x = vp->dst_x; p.dst_y = vp->dst_y;
+            p.dst_w = vp->dst_w; p.dst_h = vp->dst_h;
+            p.clip_left = vp->clip.left; p.clip_top = vp->clip.top;
+            p.clip_right = vp->clip.right; p.clip_bottom = vp->clip.bottom;
+            cached++;
+        }
+
         RdtVideoState state = rdt_video_get_state(video);
         if (state != RDT_VIDEO_STATE_PLAYING && state != RDT_VIDEO_STATE_PAUSED &&
             state != RDT_VIDEO_STATE_READY) {
+            continue;
+        }
+
+        // skip blit for off-viewport videos
+        if (!is_video_visible(vp->dst_x, vp->dst_y, vp->dst_w, vp->dst_h,
+                              vp->clip.left, vp->clip.top, vp->clip.right, vp->clip.bottom,
+                              surface->width, surface->height)) {
             continue;
         }
 
@@ -104,9 +142,50 @@ void render_video_frames(DisplayList* dl, ImageSurface* surface) {
                   frame.width, frame.height, frame.pts,
                   vp->dst_x, vp->dst_y, vp->dst_w, vp->dst_h);
 
-        // TODO: apply object_fit calculation (currently stretches to fill)
         blit_video_frame(surface, &frame,
                          vp->dst_x, vp->dst_y, vp->dst_w, vp->dst_h,
                          &vp->clip);
+    }
+
+    if (rstate) rstate->video_placement_count = cached;
+}
+
+// ---------------------------------------------------------------------------
+// render_video_frames_cached — blit video frames using cached placements
+// Used for video-only dirty path: skips DL rebuild + tile replay
+// ---------------------------------------------------------------------------
+
+void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface) {
+    if (!rstate || !surface || rstate->video_placement_count <= 0) return;
+
+    for (int i = 0; i < rstate->video_placement_count; i++) {
+        auto& p = rstate->video_placements[i];
+        RdtVideo* video = (RdtVideo*)p.video;
+        if (!video) continue;
+
+        RdtVideoState state = rdt_video_get_state(video);
+        if (state != RDT_VIDEO_STATE_PLAYING && state != RDT_VIDEO_STATE_PAUSED &&
+            state != RDT_VIDEO_STATE_READY) {
+            continue;
+        }
+
+        // skip blit for off-viewport videos
+        if (!is_video_visible(p.dst_x, p.dst_y, p.dst_w, p.dst_h,
+                              p.clip_left, p.clip_top, p.clip_right, p.clip_bottom,
+                              surface->width, surface->height)) {
+            continue;
+        }
+
+        RdtVideoFrame frame = {};
+        if (rdt_video_get_frame(video, &frame) != 0) continue;
+
+        log_debug("[VIDEO BLIT cached] frame %dx%d pts=%.3f → (%.0f,%.0f) %.0fx%.0f",
+                  frame.width, frame.height, frame.pts,
+                  p.dst_x, p.dst_y, p.dst_w, p.dst_h);
+
+        Bound clip = { p.clip_left, p.clip_top, p.clip_right, p.clip_bottom };
+        blit_video_frame(surface, &frame,
+                         p.dst_x, p.dst_y, p.dst_w, p.dst_h,
+                         &clip);
     }
 }

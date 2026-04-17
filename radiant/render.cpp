@@ -255,7 +255,8 @@ void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form contr
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
 // post-composite video frame blit (defined in render_video.cpp)
-void render_video_frames(DisplayList* dl, ImageSurface* surface);
+void render_video_frames(DisplayList* dl, ImageSurface* surface, RadiantState* rstate);
+void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface);
 
 // ============================================================================
 // Per-corner rounded rect path helper
@@ -3447,7 +3448,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     }
 
     // Post-composite: blit video frames onto the final surface
-    render_video_frames(&display_list, rdcon.ui_context->surface);
+    RadiantState* rstate = uicon->document ? uicon->document->state : nullptr;
+    render_video_frames(&display_list, rdcon.ui_context->surface, rstate);
 
     auto t_sync = high_resolution_clock::now();
     log_info("[TIMING] render complete: %.1fms", duration<double, std::milli>(t_sync - t_render).count());

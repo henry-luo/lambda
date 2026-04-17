@@ -255,6 +255,16 @@ typedef struct RadiantState {
 
     // Video playback
     bool has_active_video;         // true if any <video> is playing (drives continuous redraw)
+
+    // Cached video placements for video-only dirty optimisation
+    // Saved after each full render; reused to blit video frames without DL rebuild
+    #define MAX_CACHED_VIDEO_PLACEMENTS 8
+    struct {
+        void* video;               // RdtVideo* — borrowed pointer
+        float dst_x, dst_y, dst_w, dst_h;
+        float clip_left, clip_top, clip_right, clip_bottom;
+    } video_placements[MAX_CACHED_VIDEO_PLACEMENTS];
+    int video_placement_count;
 } RadiantState;
 
 
