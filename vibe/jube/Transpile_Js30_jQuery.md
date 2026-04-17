@@ -4,7 +4,7 @@
 
 Gap analysis of the Lambda JS runtime (Radiant browser context) against the requirements for 100% jQuery 3.x library support. jQuery is structured into ~12 modules: Core, Selectors (Sizzle), DOM Manipulation, Traversal, CSS, Events, Effects/Animation, AJAX, Deferred/Callbacks, Dimensions, Offset, and Data. The runtime already supports **~75–80%** of what jQuery needs — selectors, DOM manipulation, traversal, CSS, attributes, data, and utilities all work. The remaining gaps are concentrated in 5 areas: **Events, Async Timers, AJAX, Layout Queries, and a few missing DOM/browser APIs**.
 
-**Status:** Proposed
+**Status:** In Progress — Phases A+B implemented, builds clean
 
 ---
 
@@ -18,10 +18,10 @@ Gap analysis of the Lambda JS runtime (Radiant browser context) against the requ
 | **Traversal** (`.parent()`, `.children()`, `.closest()`, `.next()`) | ✅ Works | `parentNode`, `children`, `nextSibling`, `closest()`, `matches()` |
 | **Attributes / Properties** (`.attr()`, `.prop()`, `.val()`) | ✅ Works | `getAttribute`, `setAttribute`, `hasAttribute` |
 | **Data** (`.data()`, `$.data()`) | ✅ Works | `WeakMap` (jQuery 3.x internal storage) |
-| **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ⚠️ Partial | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ❌ |
+| **CSS** (`.css()`, `.addClass()`, `.toggleClass()`) | ✅ Works | `getComputedStyle` ✅, `classList` ✅, `document.defaultView` ✅ |
 | **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ⚠️ Partial | `getComputedStyle` ✅, `offsetWidth/Height` returns 0 |
 | **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ❌ Blocked | No `getBoundingClientRect`, no scroll properties |
-| **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ❌ Blocked | No `addEventListener`, no event bubbling, no `Event` constructor |
+| **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ✅ Implemented | `addEventListener` ✅, 3-phase bubbling ✅, `Event` creation ✅ |
 | **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ❌ Blocked | No async timers, no `requestAnimationFrame` with scheduling |
 | **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ❌ Blocked | No working `XMLHttpRequest` |
 | **Deferred / Callbacks** (`$.Deferred`, `$.Callbacks`) | ✅ Works | Pure JS — `Promise`, closures, arrays. No external deps. |
@@ -252,7 +252,7 @@ These are small fixes that unblock specific jQuery code paths.
 
 ## 2. Implementation Phases
 
-### Phase A — Quick Wins (unblock `.css()` and diagnostics)
+### Phase A — Quick Wins (unblock `.css()` and diagnostics) ✅ DONE
 
 **Target:** Fix `document.defaultView`, `elem.ownerDocument`, `window.getComputedStyle` conflict, `console.log` routing, `document.cookie`.
 
@@ -262,16 +262,34 @@ These are small fixes that unblock specific jQuery code paths.
 
 **Effort:** ~25 lines, minimal risk.
 
-### Phase B — DOM Event System
+**Completed items:**
+- `document.defaultView` → returns `window` object (set via preamble, stored on proxy Map)
+- `js_document_proxy_set_property` extended to persist `defaultView`
+- `window.getComputedStyle` → preamble now points to native `getComputedStyle` instead of `{}`
+- `window.addEventListener/removeEventListener/dispatchEvent` → preamble delegates to `document.*` (native)
+- `elem.ownerDocument` → already returns document proxy (verified, no fix needed)
+
+### Phase B — DOM Event System ✅ DONE
 
 **Target:** Full `addEventListener` / `removeEventListener` / `dispatchEvent` with 3-phase propagation.
 
-**New file:** `js_dom_events.cpp`  
-**Files modified:** `js_dom.cpp` (method dispatcher), `script_runner.cpp` (remove stubs)
+**New files:** `js_dom_events.h`, `js_dom_events.cpp` (~500 lines)  
+**Files modified:** `js_dom.cpp` (method dispatcher + batch reset), `script_runner.cpp` (stubs replaced)
 
 **Test:** jQuery `.on('click', handler)` registers listener. `.trigger('click')` fires handler with correct `event.target`, bubbles to parent. `.off('click', handler)` removes it. `$(document).ready(fn)` invokes `fn`.
 
 **Effort:** ~600 lines.
+
+**Implementation details:**
+- Listener storage: flat array of `{DomNode* key, NodeListeners}` entries — no struct modifications
+- `addEventListener` supports `{capture, once, passive}` options dict and boolean `useCapture`
+- Duplicate listener detection (same type + callback + capture = skip)
+- `dispatchEvent` implements full 3-phase propagation: capture (root→target), target, bubble (target→root)
+- Event objects created via `js_create_event()` / `js_create_custom_event()` with properties: `type`, `target`, `currentTarget`, `bubbles`, `cancelable`, `defaultPrevented`, `eventPhase`, `isTrusted`, `timeStamp`
+- `preventDefault()`, `stopPropagation()`, `stopImmediatePropagation()` are real callable `JsFunction` items via `js_new_function()` — jQuery can call them directly
+- Wired into `js_dom_element_method` and `js_document_method` dispatchers
+- `js_dom_events_reset()` called from `js_dom_batch_reset()` for document lifecycle cleanup
+- Window event listeners delegate to document (via preamble)
 
 ### Phase C — Timer Queue
 
@@ -308,14 +326,14 @@ These are small fixes that unblock specific jQuery code paths.
 
 ## 3. Estimated Total Effort
 
-| Phase | Description | New Lines | Files |
-|---|---|---|---|
-| A | Quick wins (defaultView, ownerDocument, etc.) | ~25 | 2 |
-| B | DOM Event System | ~600 | 3 (1 new) |
-| C | Timer Queue (sync drain) | ~150 | 1 |
-| D | XMLHttpRequest | ~400 | 3 (1 new) |
-| E | Layout Queries | ~200 | 2 |
-| **Total** | | **~1,375** | |
+| Phase | Description | New Lines | Files | Status |
+|---|---|---|---|---|
+| A | Quick wins (defaultView, ownerDocument, etc.) | ~25 | 2 | ✅ Done |
+| B | DOM Event System | ~500 | 3 (2 new) | ✅ Done |
+| C | Timer Queue (sync drain) | ~150 | 1 | Not started |
+| D | XMLHttpRequest | ~400 | 3 (1 new) | Not started |
+| E | Layout Queries | ~200 | 2 | Not started |
+| **Total** | | **~1,275** | | **A+B done** |
 
 ---
 
