@@ -90,6 +90,7 @@ double          rdt_video_get_duration(RdtVideo* video);
 int             rdt_video_get_width(RdtVideo* video);   // intrinsic video width
 int             rdt_video_get_height(RdtVideo* video);  // intrinsic video height
 bool            rdt_video_has_audio(RdtVideo* video);
+float           rdt_video_get_volume(RdtVideo* video);  // 0.0–1.0
 
 // ---------------------------------------------------------------------------
 // Frame retrieval — returns the latest decoded frame.

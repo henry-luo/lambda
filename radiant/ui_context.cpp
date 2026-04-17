@@ -2,6 +2,7 @@
 #include "rdt_vector.hpp"
 #include "render.hpp"
 #include "animation.h"
+#include "rdt_video.h"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -142,6 +143,33 @@ int ui_context_init(UiContext* uicon, bool headless) {
     return EXIT_SUCCESS;
 }
 
+// walk a view tree and destroy heap-allocated video resources
+// must be called before view_pool_destroy to avoid leaking RdtVideo*
+static void destroy_video_in_view(View* view) {
+    if (!view) return;
+    if (view->view_type >= RDT_VIEW_INLINE_BLOCK && view->is_element()) {
+        ViewBlock* blk = (ViewBlock*)view;
+        if (blk->embed && blk->embed->video) {
+            rdt_video_destroy((RdtVideo*)blk->embed->video);
+            blk->embed->video = nullptr;
+        }
+    }
+    // recurse into children if this is an element
+    if (view->is_element()) {
+        DomElement* elem = view->as_element();
+        DomNode* child = elem->first_child;
+        while (child) {
+            destroy_video_in_view(child);
+            child = child->next_sibling;
+        }
+    }
+}
+
+static void destroy_video_resources(ViewTree* tree) {
+    if (!tree || !tree->root) return;
+    destroy_video_in_view(tree->root);
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
@@ -150,6 +178,10 @@ void free_document(DomDocument* doc) {
     script_runner_cleanup_js_state(doc);
 
     if (doc->view_tree) {
+        // destroy video resources before bulk-freeing the pool
+        // (RdtVideo* and poster ImageSurface* are heap-allocated, not pool-allocated)
+        destroy_video_resources(doc->view_tree);
+
         // Note: view_pool_destroy destroys the pool that contains all view allocations
         // including the ViewTree itself (if it was pool-allocated).
         // Do NOT call free(doc->view_tree) after this - it would double-free.

@@ -571,15 +571,39 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (abs_url) url_destroy(abs_url);
 
                 if (file_path) {
+                    // preload attribute: "none" defers open until play
+                    const char* preload = elmt->get_attribute("preload");
+                    bool preload_none = preload && strcmp(preload, "none") == 0;
+
                     RdtVideo* video = rdt_video_create(NULL, NULL);
                     if (video) {
-                        log_debug("video: opening file: %s", file_path);
-                        rdt_video_open_file(video, file_path);
+                        if (!preload_none) {
+                            log_debug("video: opening file: %s", file_path);
+                            rdt_video_open_file(video, file_path);
+                        } else {
+                            log_debug("video: preload=none, deferring open: %s", file_path);
+                        }
                         if (elmt->has_attribute("loop")) rdt_video_set_loop(video, true);
                         if (elmt->has_attribute("muted")) rdt_video_set_muted(video, true);
                         block->embed->video = video;
+                        // controls attribute
+                        if (elmt->has_attribute("controls")) {
+                            block->embed->has_controls = true;
+                        }
+                        // poster attribute: load poster image
+                        const char* poster_src = elmt->get_attribute("poster");
+                        if (poster_src && *poster_src) {
+                            block->embed->poster = load_image(lycon->ui_context, poster_src);
+                            if (block->embed->poster) {
+                                log_debug("video: loaded poster image: %s", poster_src);
+                            }
+                        }
                         // autoplay: start playback immediately
                         if (elmt->has_attribute("autoplay")) {
+                            if (preload_none) {
+                                // need to open first when preload=none + autoplay
+                                rdt_video_open_file(video, file_path);
+                            }
                             rdt_video_play(video);
                             // enable continuous redraw for video playback
                             DomDocument* doc = lycon->ui_context->document;

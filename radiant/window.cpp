@@ -26,7 +26,7 @@ extern "C" {
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface);
+void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
@@ -598,7 +598,7 @@ void render(GLFWwindow* window) {
         // Video-only dirty path: skip full DL rebuild, just blit new video frames
         if (ui_context.document->state->has_active_video &&
             ui_context.document->state->video_placement_count > 0) {
-            render_video_frames_cached(ui_context.document->state, ui_context.surface);
+            render_video_frames_cached(ui_context.document->state, ui_context.surface, &ui_context);
         }
     }
 
