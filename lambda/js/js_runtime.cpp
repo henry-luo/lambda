@@ -3411,13 +3411,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (result.item != ITEM_NULL) return result;
                     }
                     // fallback: check buffer prototype for Uint8Array (Buffer) instances
+                    // use map_get (own-property only) to avoid prototype chain recursion
                     {
                         JsTypedArray* ta = (JsTypedArray*)object.map->data;
                         if (ta && ta->element_type == JS_TYPED_UINT8) {
                             extern Item js_get_buffer_prototype(void);
                             Item buf_proto = js_get_buffer_prototype();
                             if (buf_proto.item != ITEM_NULL) {
-                                Item result = js_property_get(buf_proto, key);
+                                Item result = map_get(buf_proto.map, key);
                                 if (result.item != ITEM_NULL) return result;
                             }
                         }
@@ -9716,13 +9717,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         String* method = it2s(method_name);
         if (method) {
             // Buffer (Uint8Array) instance methods: dispatch through buffer prototype first
+            // use map_get (own-property only) to avoid walking the prototype chain
+            // back to TypedArray.prototype, which would cause infinite recursion
             {
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 if (ta && ta->element_type == JS_TYPED_UINT8) {
                     extern Item js_get_buffer_prototype(void);
                     Item buf_proto = js_get_buffer_prototype();
                     if (buf_proto.item != ITEM_NULL) {
-                        Item fn = js_property_get(buf_proto, method_name);
+                        Item fn = map_get(buf_proto.map, method_name);
                         if (fn.item != ITEM_NULL && get_type_id(fn) == LMD_TYPE_FUNC) {
                             return js_call_function(fn, obj, args, argc);
                         }
@@ -10373,6 +10376,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     }
                 }
                 // Buffer prototype: Uint8Array (Buffer) instances use buffer toString
+                // use map_get (own-property only) to avoid prototype chain recursion
                 if (js_is_typed_array(obj)) {
                     JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                     if (ta && ta->element_type == JS_TYPED_UINT8) {
@@ -10380,7 +10384,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         Item buf_proto = js_get_buffer_prototype();
                         if (buf_proto.item != ITEM_NULL) {
                             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            Item ts_fn = js_property_get(buf_proto, ts_key);
+                            Item ts_fn = map_get(buf_proto.map, ts_key);
                             if (ts_fn.item != ITEM_NULL && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                                 return js_call_function(ts_fn, obj, args, argc);
                             }
