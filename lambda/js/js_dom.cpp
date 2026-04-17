@@ -11,6 +11,7 @@
 
 #include "js_dom.h"
 #include "js_dom_events.h"
+#include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
@@ -80,6 +81,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     js_dom_events_reset();
+    js_xhr_reset();
 }
 
 // ============================================================================
