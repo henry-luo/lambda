@@ -395,12 +395,21 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         // CSS 2.1 §9.5: Floats are out of flow and should not break the inline
         // flow.  They are handled by layout_flow_node → layout_block → layout_float_element.
         bool child_is_float = false;
+        // CSS 2.1 §9.6.1: Absolutely positioned elements are out of flow and
+        // should not break the inline flow.  They are handled by
+        // layout_flow_node → layout_block → layout_abs_block, which preserves
+        // the inline cursor (advance_x) as the static position (§10.3.7).
+        bool child_is_abspos = false;
         if (child->is_element()) {
             DomElement* ce = child->as_element();
             if (ce->position &&
                 (ce->position->float_prop == CSS_VALUE_LEFT ||
                  ce->position->float_prop == CSS_VALUE_RIGHT)) {
                 child_is_float = true;
+            } else if (ce->position &&
+                (ce->position->position == CSS_VALUE_ABSOLUTE ||
+                 ce->position->position == CSS_VALUE_FIXED)) {
+                child_is_abspos = true;
             } else if (ce->specified_style && ce->specified_style->tree) {
                 AvlNode* fn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_FLOAT);
                 if (fn) {
@@ -412,9 +421,21 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                         child_is_float = true;
                     }
                 }
+                if (!child_is_float) {
+                    AvlNode* pn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_POSITION);
+                    if (pn) {
+                        StyleNode* sn = (StyleNode*)pn->declaration;
+                        if (sn && sn->winning_decl && sn->winning_decl->value &&
+                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                            (sn->winning_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
+                             sn->winning_decl->value->data.keyword == CSS_VALUE_FIXED)) {
+                            child_is_abspos = true;
+                        }
+                    }
+                }
             }
         }
-        bool is_block_or_table_internal = child->is_element() && !child_is_float &&
+        bool is_block_or_table_internal = child->is_element() && !child_is_float && !child_is_abspos &&
             (child_display.outer == CSS_VALUE_BLOCK ||
              child_display.outer == CSS_VALUE_LIST_ITEM ||
              child_display.outer == CSS_VALUE_TABLE ||

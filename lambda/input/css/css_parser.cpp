@@ -928,6 +928,7 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
     compound->simple_selector_count = 0;
 
     // Parse simple selectors until we hit whitespace, combinator, comma, or brace
+    bool has_pseudo_element = false;
     while (*pos < token_count) {
         const CssToken* token = &tokens[*pos];
 
@@ -947,6 +948,13 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
             }
         }
 
+        // Per CSS spec, a pseudo-element must be the last simple selector in a compound selector.
+        // If we already saw one, reject any further simple selectors (invalidates the selector).
+        if (has_pseudo_element) {
+            log_debug("[CSS Parser] Rejecting selector: simple selector after pseudo-element");
+            return NULL;
+        }
+
         // Try to parse a simple selector (element, class, id, etc.)
         int start_pos = *pos;
         CssSimpleSelector* simple = css_parse_simple_selector_from_tokens(tokens, pos, token_count, pool);
@@ -958,6 +966,12 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
             }
             // Otherwise, we've finished the compound selector
             break;
+        }
+
+        // Track pseudo-element presence
+        if (simple->type >= CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE &&
+            simple->type <= CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
+            has_pseudo_element = true;
         }
 
         // Add the simple selector to the compound

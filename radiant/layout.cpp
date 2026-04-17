@@ -158,6 +158,20 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
         bool next_is_block = is_block_level_element(text_node->next_sibling);
 
         if (prev_is_block || next_is_block) {
+            // CSS 2.1 §9.2.1.1 note: "Whitespace content that would subsequently be
+            // collapsed away according to the 'white-space' property does not generate
+            // any anonymous inline boxes." — If white-space preserves spaces, the
+            // whitespace IS meaningful and should NOT be collapsed.
+            if (text_node->parent->is_element()) {
+                DomElement* parent_elem = text_node->parent->as_element();
+                if (parent_elem->blk && parent_elem->blk->white_space != 0) {
+                    CssEnum ws = parent_elem->blk->white_space;
+                    if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_BREAK_SPACES) {
+                        return false;
+                    }
+                }
+            }
             return true;
         }
     }

@@ -863,6 +863,10 @@ DisplayValue resolve_display_value(void* child) {
                                 // no parent (root element) — fall through to tag-based default
                             } else if (keyword == CSS_VALUE_RUN_IN) {
                                 // Chrome treats run-in as tag default (dropped CSS 2.1 run-in support)
+                                // Our test references are Chrome-based, so matching Chrome
+                                // avoids false failures. The whitespace handling fix in
+                                // should_collapse_inter_element_whitespace still correctly
+                                // preserves pre whitespace between block siblings.
                                 // Fall through to tag-based defaults below
                             } else if (keyword == CSS_VALUE_FLOW_ROOT) {
                                 // CSS Display Level 3: display:flow-root establishes a BFC
@@ -3972,7 +3976,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum valign_value = value->data.keyword;
-                if (valign_value != CSS_VALUE__UNDEF) {
+                if (valign_value == CSS_VALUE_INHERIT) {
+                    // CSS 2.1 §6.2.1: vertical-align is not inherited, but 'inherit'
+                    // forces use of parent's computed value
+                    DomElement* parent = lycon->elmt->parent ? lycon->elmt->parent->as_element() : nullptr;
+                    ViewBlock* parent_view = parent ? (ViewBlock*)parent : nullptr;
+                    if (parent_view && parent_view->in_line) {
+                        span->in_line->vertical_align = parent_view->in_line->vertical_align;
+                        span->in_line->vertical_align_offset = parent_view->in_line->vertical_align_offset;
+                        log_debug("[CSS] Vertical-align: inherit -> %d from parent", span->in_line->vertical_align);
+                    } else {
+                        // no parent inline prop — use initial value (baseline)
+                        span->in_line->vertical_align = CSS_VALUE_BASELINE;
+                        span->in_line->vertical_align_offset = 0;
+                        log_debug("[CSS] Vertical-align: inherit, no parent inline prop, using baseline");
+                    }
+                } else if (valign_value != CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
                     span->in_line->vertical_align_offset = 0;
                     const CssEnumInfo* info = css_enum_info(valign_value);

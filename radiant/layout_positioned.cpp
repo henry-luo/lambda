@@ -25,16 +25,38 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
  * with the blockified value during layout_block().
  */
 static bool was_specified_inline(DomElement* elem) {
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
-    AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
-    if (!disp_node) return false;
-    StyleNode* sn = (StyleNode*)disp_node->declaration;
-    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
-    if (sn->winning_decl->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
-    CssEnum kw = sn->winning_decl->value->data.keyword;
-    return kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK ||
-           kw == CSS_VALUE_INLINE_FLEX || kw == CSS_VALUE_INLINE_GRID ||
-           kw == CSS_VALUE_INLINE_TABLE;
+    if (!elem) return false;
+    // Check the specified (pre-blockification) display value from the style tree.
+    // We cannot use elem->display.outer because it may already be blockified
+    // by resolve_display_value() for abs-pos/float elements (CSS 2.1 §9.7).
+    if (elem->specified_style && elem->specified_style->tree) {
+        AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
+        if (disp_node) {
+            StyleNode* sn = (StyleNode*)disp_node->declaration;
+            if (sn && sn->winning_decl && sn->winning_decl->value &&
+                sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = sn->winning_decl->value->data.keyword;
+                return kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK ||
+                       kw == CSS_VALUE_INLINE_FLEX || kw == CSS_VALUE_INLINE_GRID ||
+                       kw == CSS_VALUE_INLINE_TABLE;
+            }
+        }
+        // No explicit display property — check if the element defaults to inline.
+        // Per HTML spec, phrasing content elements (span, a, em, strong, etc.)
+        // default to display:inline.
+        uintptr_t tag = elem->tag_id;
+        return (tag == HTM_TAG_SPAN || tag == HTM_TAG_A ||
+                tag == HTM_TAG_EM || tag == HTM_TAG_STRONG ||
+                tag == HTM_TAG_B || tag == HTM_TAG_I ||
+                tag == HTM_TAG_U || tag == HTM_TAG_S ||
+                tag == HTM_TAG_SMALL || tag == HTM_TAG_CODE ||
+                tag == HTM_TAG_SUB || tag == HTM_TAG_SUP ||
+                tag == HTM_TAG_ABBR || tag == HTM_TAG_CITE ||
+                tag == HTM_TAG_Q || tag == HTM_TAG_VAR ||
+                tag == HTM_TAG_TIME || tag == HTM_TAG_MARK ||
+                tag == HTM_TAG_BDO || tag == HTM_TAG_BDI);
+    }
+    return false;
 }
 
 /**

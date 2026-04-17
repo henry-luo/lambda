@@ -474,13 +474,18 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // which excludes child's border/padding. Children are already laid out at this point.
             float child_height = block->height;
 
-            // CSS 2.1 §10.6.1: For inline-level children (RDT_VIEW_INLINE), the line box
-            // height is determined by line-height, not just the element's content height.
-            // The inline element's view height may only reflect text metrics (ascender +
-            // descender), but the line box it participates in has a minimum height of
-            // cell_line_height. Apply the same max() as we do for text nodes.
-            if (child->view_type == RDT_VIEW_INLINE && cell_line_height > child_height) {
-                child_height = cell_line_height;
+            // CSS 2.1 §10.8.1: For inline non-replaced elements (RDT_VIEW_INLINE),
+            // margins, borders, and padding do NOT enter into the line box height
+            // calculation. The view height includes border+padding for visual rendering,
+            // but for line box purposes we use the element's resolved line-height
+            // (stored in content_height during layout_inline).
+            if (child->view_type == RDT_VIEW_INLINE) {
+                if (block->content_height > 0) {
+                    child_height = block->content_height;
+                }
+                if (cell_line_height > child_height) {
+                    child_height = cell_line_height;
+                }
             }
 
             // Track the min y and max bottom of block content for stacked blocks
@@ -699,18 +704,51 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
     float baseline = find_first_baseline_recursive(lycon, (View*)tcell, 0);
     if (baseline < 0) {
-        // CSS 2.1 §17.5.4: No in-flow line box or table row found.
-        // Use the bottom of the content edge as the baseline.
-        float content_edge_bottom = tcell->height;
-        if (tcell->bound) {
-            if (tcell->bound->border) {
-                content_edge_bottom -= tcell->bound->border->width.bottom;
+        // No text found. Check if the cell has non-replaced inline children
+        // that create a line box with a strut.
+        // CSS 2.1 §17.5.4: "The baseline of a cell is the baseline of the first
+        // in-flow line box in the cell." Non-replaced inline children create a line
+        // box with a strut, so the baseline is the strut's ascent (font ascent).
+        // Note: inline-block (RDT_VIEW_INLINE_BLOCK) is replaced-level and has its
+        // own baseline rules (bottom margin edge when empty), so we don't use the
+        // strut for those — the content-edge-bottom fallback is more appropriate.
+        bool has_line_box = false;
+        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+            if (child->view_type == RDT_VIEW_INLINE) {
+                has_line_box = true;
+                break;
             }
-            content_edge_bottom -= tcell->bound->padding.bottom;
         }
-        baseline = content_edge_bottom;
-        log_debug("find_cell_baseline: cell col=%d row=%d -> content-edge baseline=%.1f (no text found)",
-                  tcell->td->col_index, tcell->td->row_index, baseline);
+        if (has_line_box && tcell->font) {
+            FontBox fbox = {};
+            setup_font(lycon->ui_context, &fbox, tcell->font);
+            if (fbox.font_handle) {
+                TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+                if (typo.valid && typo.use_typo_metrics) {
+                    baseline = typo.ascender;
+                } else {
+                    const FontMetrics* m = font_get_metrics(fbox.font_handle);
+                    if (m) baseline = m->hhea_ascender;
+                }
+                log_debug("find_cell_baseline: cell col=%d row=%d -> strut baseline=%.1f (inline children, no text)",
+                          tcell->td->col_index, tcell->td->row_index, baseline);
+            }
+        }
+
+        if (baseline < 0) {
+            // CSS 2.1 §17.5.4: No in-flow line box or table row found.
+            // Use the bottom of the content edge as the baseline.
+            float content_edge_bottom = tcell->height;
+            if (tcell->bound) {
+                if (tcell->bound->border) {
+                    content_edge_bottom -= tcell->bound->border->width.bottom;
+                }
+                content_edge_bottom -= tcell->bound->padding.bottom;
+            }
+            baseline = content_edge_bottom;
+            log_debug("find_cell_baseline: cell col=%d row=%d -> content-edge baseline=%.1f (no text found)",
+                      tcell->td->col_index, tcell->td->row_index, baseline);
+        }
     } else {
         log_debug("find_cell_baseline: cell col=%d row=%d -> baseline=%.1f",
                   tcell->td->col_index, tcell->td->row_index, baseline);
@@ -4057,6 +4095,43 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             if (row->font) {
                 setup_font(lycon->ui_context, &lycon->font, row->font);
             }
+
+            // CSS 2.1 §12.1: Generate ::before/::after pseudo-elements for table rows.
+            // When pseudo-elements have display:table-cell, they become cell children of the row.
+            // Otherwise, they need wrapping in an anonymous table-cell (CSS 2.1 §17.2.1).
+            if (node->is_element()) {
+                row->pseudo = alloc_pseudo_content_prop(lycon, (ViewBlock*)row);
+                if (row->pseudo) {
+                    DomElement* row_elem = node->as_element();
+                    // Helper lambda to insert pseudo and wrap in anon cell if needed
+                    auto insert_pseudo_for_row = [&](DomElement* pseudo, bool is_before) {
+                        if (!pseudo) return;
+                        DisplayValue pseudo_display = resolve_display_value(pseudo);
+                        bool is_cell = is_cell_display(pseudo_display.inner);
+                        if (is_cell) {
+                            // Pseudo-element is already a table-cell, insert directly
+                            insert_pseudo_into_dom(row_elem, pseudo, is_before);
+                        } else {
+                            // Wrap non-cell pseudo-element in an anonymous table-cell
+                            DomElement* anon_td = create_anonymous_table_element(lycon, row_elem,
+                                CSS_VALUE_TABLE_CELL, "::anon-td");
+                            if (anon_td) {
+                                // Reparent pseudo into the anonymous cell
+                                pseudo->parent = anon_td;
+                                anon_td->first_child = pseudo;
+                                anon_td->last_child = pseudo;
+                                // Insert the anonymous cell into the row
+                                insert_pseudo_into_dom(row_elem, anon_td, is_before);
+                                log_debug("%s [TABLE] Wrapped ::%s pseudo in anonymous cell",
+                                         node->source_loc(), is_before ? "before" : "after");
+                            }
+                        }
+                    };
+                    insert_pseudo_for_row(row->pseudo->before, true);
+                    insert_pseudo_for_row(row->pseudo->after, false);
+                }
+            }
+
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)row);
@@ -8906,8 +8981,14 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         }
 
         // Determine what wrapper we need based on the child display types
-        // CSS 2.1: cells need row, rows need table
-        bool needs_row = false;
+        // CSS 2.1 §17.2.1: All orphaned table-internal elements need an anonymous table.
+        // When the run contains ONLY cells (no rows/row-groups), also create an
+        // anonymous row to wrap them directly (avoiding an unnecessary extra anon-tbody
+        // level from generate_anonymous_table_boxes()). When there's a MIX of cells
+        // and row-groups/rows, put cells into an anon-row and row-groups/rows directly
+        // into the table — generate_anonymous_table_boxes() handles the rest.
+        bool has_cells = false;
+        bool has_rows_or_groups = false;
         bool needs_table = false;
 
         for (DomNode* n = run_start; n; n = n->next_sibling) {
@@ -8916,13 +8997,13 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 CssEnum disp = n_display.inner;
 
                 if (disp == CSS_VALUE_TABLE_CELL) {
-                    needs_row = true;
+                    has_cells = true;
                     needs_table = true;
-                } else if (disp == CSS_VALUE_TABLE_ROW) {
-                    needs_table = true;
-                } else if (disp == CSS_VALUE_TABLE_ROW_GROUP ||
+                } else if (disp == CSS_VALUE_TABLE_ROW ||
+                           disp == CSS_VALUE_TABLE_ROW_GROUP ||
                            disp == CSS_VALUE_TABLE_HEADER_GROUP ||
                            disp == CSS_VALUE_TABLE_FOOTER_GROUP) {
+                    has_rows_or_groups = true;
                     needs_table = true;
                 }
             }
@@ -8932,7 +9013,6 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         // Create anonymous wrappers
         DomElement* table_wrapper = nullptr;
         DomElement* row_wrapper = nullptr;
-        DomElement* insertion_parent = nullptr;
 
         if (needs_table) {
             // Create anonymous table
@@ -8984,30 +9064,28 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     }
                 }
 
-                insertion_parent = table_wrapper;
                 log_debug("%s [ORPHAN-TABLE] Created anonymous table wrapper (font from %s)", parent->source_loc(),
                           parent->font ? "parent" : "lycon context");
             }
         }
 
-        if (needs_row && table_wrapper) {
-            // Create anonymous table-row inside the table
-            // CSS Display Level 3: table-row has implicit block-level outer
+        // Create anonymous row for cells when needed:
+        // - cells-only: create anon-tr as sole child of anon-table
+        // - mixed cells + rows/groups: create anon-tr for cells, rows/groups go directly in table
+        if (has_cells && table_wrapper) {
             row_wrapper = (DomElement*)pool_calloc(pool, sizeof(DomElement));
             if (row_wrapper) {
                 row_wrapper->node_type = DOM_NODE_ELEMENT;
                 row_wrapper->tag_name = "::anon-tr";
                 row_wrapper->doc = parent->doc;
                 row_wrapper->parent = table_wrapper;
-                row_wrapper->display.outer = CSS_VALUE_BLOCK;     // Block-level for layout purposes
-                row_wrapper->display.inner = CSS_VALUE_TABLE_ROW; // Inner is table-row
+                row_wrapper->display.outer = CSS_VALUE_BLOCK;
+                row_wrapper->display.inner = CSS_VALUE_TABLE_ROW;
                 row_wrapper->styles_resolved = true;
 
-                // Inherit font from table wrapper
                 if (table_wrapper->font) {
                     row_wrapper->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
                     if (row_wrapper->font) {
-                        // Copy only specified font properties, not derived/cached fields
                         row_wrapper->font->family = table_wrapper->font->family;
                         row_wrapper->font->font_size = table_wrapper->font->font_size;
                         row_wrapper->font->font_style = table_wrapper->font->font_style;
@@ -9016,7 +9094,6 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         row_wrapper->font->text_deco = table_wrapper->font->text_deco;
                         row_wrapper->font->letter_spacing = table_wrapper->font->letter_spacing;
                         row_wrapper->font->word_spacing = table_wrapper->font->word_spacing;
-                        // Derived fields left zero/NULL from pool_calloc
                     }
                 }
                 if (table_wrapper->in_line) {
@@ -9028,16 +9105,11 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     }
                 }
 
-                // Add row to table
-                table_wrapper->first_child = row_wrapper;
-                table_wrapper->last_child = row_wrapper;
-
-                insertion_parent = row_wrapper;
                 log_debug("%s [ORPHAN-TABLE] Created anonymous table-row wrapper", parent->source_loc());
             }
         }
 
-        if (insertion_parent) {
+        if (table_wrapper) {
             // Insert the anonymous table at run_start's position
             DomNode* prev = run_start->prev_sibling;
             DomNode* next_after_run = run_end->next_sibling;
@@ -9059,26 +9131,73 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 parent->last_child = table_wrapper;
             }
 
-            // Move the run of children into the appropriate wrapper
+            // Move children into the appropriate wrapper:
+            // - Cells go into row_wrapper (if present)
+            // - Rows/row-groups go directly into table_wrapper
+            // - When no mix (cells-only), all go into row_wrapper
+            // - When no cells, all go directly into table_wrapper
+            bool has_mix = has_cells && has_rows_or_groups;
+            bool row_added_to_table = false;
+
             DomNode* move_node = run_start;
             while (move_node) {
                 DomNode* next_to_move = move_node->next_sibling;
                 bool is_last = (move_node == run_end);
 
+                // Determine where this node goes
+                DomElement* target = table_wrapper;  // default: direct child of table
+
+                if (row_wrapper) {
+                    if (has_mix && move_node->is_element()) {
+                        DisplayValue n_display = resolve_display_value((void*)move_node);
+                        CssEnum disp = n_display.inner;
+                        if (disp == CSS_VALUE_TABLE_ROW ||
+                            disp == CSS_VALUE_TABLE_ROW_GROUP ||
+                            disp == CSS_VALUE_TABLE_HEADER_GROUP ||
+                            disp == CSS_VALUE_TABLE_FOOTER_GROUP) {
+                            // Row/row-group: goes directly into table
+                            // But first, flush the row_wrapper if it has children
+                            if (!row_added_to_table && row_wrapper->first_child) {
+                                append_child_to_element(table_wrapper, row_wrapper);
+                                row_added_to_table = true;
+                            }
+                            target = table_wrapper;
+                        } else {
+                            // Cells and other content: go into row_wrapper
+                            target = row_wrapper;
+                        }
+                    } else {
+                        // Cells-only: all go into row_wrapper
+                        target = row_wrapper;
+                    }
+                }
+
                 // Reparent this node
-                move_node->parent = insertion_parent;
-                move_node->prev_sibling = insertion_parent->last_child;
+                move_node->parent = target;
+                move_node->prev_sibling = target->last_child;
                 move_node->next_sibling = nullptr;
 
-                if (insertion_parent->last_child) {
-                    insertion_parent->last_child->next_sibling = move_node;
+                if (target->last_child) {
+                    target->last_child->next_sibling = move_node;
                 } else {
-                    insertion_parent->first_child = move_node;
+                    target->first_child = move_node;
                 }
-                insertion_parent->last_child = move_node;
+                target->last_child = move_node;
 
                 if (is_last) break;
                 move_node = next_to_move;
+            }
+
+            // If row_wrapper has children and hasn't been added to table yet, add it
+            if (row_wrapper && row_wrapper->first_child && !row_added_to_table) {
+                // For cells-only case or when row comes at the end
+                append_child_to_element(table_wrapper, row_wrapper);
+                // Move all row_wrapper's children to be under the table's child list
+                // by making the row_wrapper a child of the table
+                // (row_wrapper is already set up as child above via append_child_to_element)
+            } else if (row_wrapper && !row_wrapper->first_child) {
+                // row_wrapper was created but nothing was added to it (shouldn't happen)
+                // Just ignore it
             }
 
             wrapped_any = true;
