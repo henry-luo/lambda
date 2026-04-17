@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+    font-family: sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    padding: 40px;
+}
+h1 { color: #e94560; margin-bottom: 30px; }
+h2 { color: #0f3460; background: #e94560; padding: 8px 16px; border-radius: 4px; }
+.section {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 30px;
+}
+p { color: #aaa; margin: 8px 0 16px 0; }
+</style>
+</head>
+<body>
+    <h1>Audio Playback Test</h1>
+
+    <div class="section">
+        <h2>Audio Only (M4A)</h2>
+        <p>3-second sine tone melody (A4 → C5 → E5 → C5 → A4 → E4). Autoplay + loop.</p>
+        <audio src="../media/test_audio.m4a" autoplay loop></audio>
+    </div>
+</body>
+</html>

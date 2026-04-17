@@ -2433,6 +2433,12 @@ class PremakeGenerator:
             cpp_files = glob.glob(cpp_pattern, recursive=False)
             all_source_files.extend(cpp_files)
 
+            # Find Objective-C++ files on macOS (one level only, non-recursive)
+            if self.use_macos_config:
+                mm_pattern = f"{source_dir}/*.mm"
+                mm_files = glob.glob(mm_pattern, recursive=False)
+                all_source_files.extend(mm_files)
+
         # Remove excluded files
         if exclude_files:
             all_source_files = [f for f in all_source_files if f not in exclude_files]

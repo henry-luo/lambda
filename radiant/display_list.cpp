@@ -338,6 +338,22 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
     item->apply_filter.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
 }
 
+void dl_video_placeholder(DisplayList* dl, void* video,
+                          float dst_x, float dst_y, float dst_w, float dst_h,
+                          int object_fit, const Bound* clip) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_VIDEO_PLACEHOLDER;
+    item->bounds[0] = dst_x; item->bounds[1] = dst_y;
+    item->bounds[2] = dst_w; item->bounds[3] = dst_h;
+    item->video_placeholder.video = video;
+    item->video_placeholder.dst_x = dst_x;
+    item->video_placeholder.dst_y = dst_y;
+    item->video_placeholder.dst_w = dst_w;
+    item->video_placeholder.dst_h = dst_h;
+    item->video_placeholder.object_fit = object_fit;
+    item->video_placeholder.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
+}
+
 // ---------------------------------------------------------------------------
 // Replay: glyph drawing (standalone, no RenderContext dependency)
 // ---------------------------------------------------------------------------
@@ -723,6 +739,10 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
             // Phase 2+: element group markers — no-op during flat replay
+            break;
+
+        case DL_VIDEO_PLACEHOLDER:
+            // no-op during tile replay; video frames are blitted post-composite
             break;
         }
     }
