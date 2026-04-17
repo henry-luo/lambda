@@ -289,16 +289,7 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
         return ItemNull;
     }
 
-    // Check encoding option
-    bool return_string = false;
-    if (get_type_id(options_item) == LMD_TYPE_MAP) {
-        extern Item js_property_get(Item obj, Item key);
-        Item enc_key = make_string_item("encoding");
-        Item enc_val = js_property_get(options_item, enc_key);
-        if (get_type_id(enc_val) == LMD_TYPE_STRING) {
-            return_string = true; // any encoding specified → return string
-        }
-    }
+    (void)options_item; // options not currently used
 
     // Use popen for simplicity — synchronous and blocking
     FILE* fp = popen(cmd, "r");
@@ -331,28 +322,16 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
 
     if (result_buf) {
         result_buf[result_len] = '\0';
-        // trim trailing newline only when returning as string
-        if (return_string) {
-            while (result_len > 0 && (result_buf[result_len - 1] == '\n' || result_buf[result_len - 1] == '\r')) {
-                result_len--;
-            }
-            Item result = make_string_item(result_buf, (int)result_len);
-            mem_free(result_buf);
-            return result;
+        // trim trailing newline
+        while (result_len > 0 && (result_buf[result_len - 1] == '\n' || result_buf[result_len - 1] == '\r')) {
+            result_len--;
         }
-        // return Buffer (Uint8Array) via Buffer.from(string)
-        Item str_result = make_string_item(result_buf, (int)result_len);
-        extern Item js_buffer_from(Item data, Item encoding);
-        Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-        Item buf = js_buffer_from(str_result, undef);
+        Item result = make_string_item(result_buf, (int)result_len);
         mem_free(result_buf);
-        return buf;
+        return result;
     }
 
-    if (return_string) return make_string_item("");
-    extern Item js_buffer_from(Item data, Item encoding);
-    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    return js_buffer_from(make_string_item(""), undef);
+    return make_string_item("");
 }
 
 // =============================================================================

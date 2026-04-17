@@ -39,7 +39,7 @@ Baseline: 23,412 → **23,422** (+10 net new passing tests)
 | Item | Tier | Est. Impact | Status |
 |------|------|:-----------:|--------|
 | Property descriptor infrastructure (§9.1.6.3) | 1.1 | +300 | Completed — audited and confirmed ValidateAndApplyPropertyDescriptor covers all ES2020 validation steps |
-| arguments exotic object (mapped) | 1.5 | +150 | Not started |
+| arguments exotic object (mapped) | 1.5 | +150 | Completed — callee/caller, strict mode TypeError, Symbol.toStringTag |
 | Block scope TDZ enforcement | 1.6 | +100 | Not started |
 | Function.prototype.toString source text | 2.5 | +70 | Not started |
 
@@ -51,6 +51,16 @@ Baseline: 23,412 → **23,422** (+10 net new passing tests)
   - Audited and confirmed all ES2020 validation steps are present and correct per §9.1.6.3.
   - Implementation is now fully compliant with ES2020 requirements for Object.defineProperty, defineProperties, create, seal, freeze, and getOwnPropertyDescriptor.
   - Ready to proceed to arguments exotic object, TDZ, and Function.prototype.toString.
+
+- **Arguments exotic object (mapped, Tier 1.5):**
+  - Implemented `js_set_arguments_info()` runtime function to pass strict mode flag before building arguments.
+  - `js_build_arguments_object()` now stores callee on companion map (sloppy) or marks `__strict_arguments__` (strict).
+  - Callee is captured in `js_call_function()` via `js_pending_args_callee` static.
+  - `js_property_get` for arrays intercepts `callee`/`caller` access on arguments objects (`is_content==1`) — throws TypeError for strict, returns function for sloppy.
+  - Transpiler wired: computes `args_aliased` flag first, calls `js_set_arguments_info(!args_aliased)` before `js_build_arguments_object()`.
+  - Two-way param↔arguments aliasing already existed via param writeback in transpiler (INT/FLOAT/boxed paths) and readback for static literal indices.
+  - Added test `test/js/arguments_callee_strict.js` covering callee, strict TypeError, [object Arguments] tag, mapped aliasing.
+  - Also fixed pre-existing `js_globals.cpp` build errors: moved includes to top, added forward declarations, replaced corrupted `js_object_define_property` body with clean delegation to `ValidateAndApplyPropertyDescriptor`.
 
 ---
 
