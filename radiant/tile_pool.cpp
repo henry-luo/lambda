@@ -720,6 +720,23 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_VIDEO_PLACEHOLDER:
             // no-op during tile replay; video frames are blitted post-composite
             break;
+
+        case DL_WEBVIEW_LAYER_PLACEHOLDER: {
+            DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
+            ImageSurface* src = (ImageSurface*)r->surface;
+            if (src && src->pixels) {
+                Rect dst_rect = {r->dst_x - tile_x, r->dst_y - tile_y, r->dst_w, r->dst_h};
+                Bound bound;
+                bound.left   = std::max(0.0f, r->clip.left   - tile_x);
+                bound.top    = std::max(0.0f, r->clip.top    - tile_y);
+                bound.right  = std::min((float)tile_surface->width,  r->clip.right  - tile_x);
+                bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
+                blit_surface_scaled(src, nullptr, tile_surface, &dst_rect, &bound,
+                                    SCALE_MODE_LINEAR, nullptr, 0);
+                items_drawn++;
+            }
+            break;
+        }
         }
     }
 

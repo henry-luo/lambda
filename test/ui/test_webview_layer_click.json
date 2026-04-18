@@ -1,0 +1,15 @@
+{
+  "name": "Webview layer mode: click forwarding",
+  "html": "test/html/webview_layer_test.html",
+  "auto_close": true,
+  "events": [
+    {"type": "log", "message": "=== webview layer click test ==="},
+    {"type": "wait", "ms": 1500},
+    {"type": "log", "message": "Clicking center of webview area at button (332, 370)"},
+    {"type": "click", "x": 332, "y": 370},
+    {"type": "wait", "ms": 500},
+    {"type": "log", "message": "Click done, waiting for re-snapshot"},
+    {"type": "wait", "ms": 1000},
+    {"type": "log", "message": "Test complete"}
+  ]
+}
