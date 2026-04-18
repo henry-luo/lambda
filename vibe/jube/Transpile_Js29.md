@@ -2,7 +2,7 @@
 
 ## Overview
 
-Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **10,672** failing tests (out of 34,094 in-scope). Current pass rate: **68.7%** (23,422 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
+Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **10,286** failing tests (out of 34,094 in-scope). Current pass rate: **69.8%** (23,808 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
 
 The analysis identifies **8 structural gaps** and **5 incremental enhancement areas**, organized into tiers by impact and dependency order.
 
@@ -38,10 +38,10 @@ Baseline: 23,412 → **23,422** (+10 net new passing tests)
 
 | Item | Tier | Est. Impact | Status |
 |------|------|:-----------:|--------|
-| Property descriptor infrastructure (§9.1.6.3) | 1.1 | +300 | Completed — audited and confirmed ValidateAndApplyPropertyDescriptor covers all ES2020 validation steps |
-| arguments exotic object (mapped) | 1.5 | +150 | Completed — callee/caller, strict mode TypeError, Symbol.toStringTag |
-| Block scope TDZ enforcement | 1.6 | +100 | Not started |
-| Function.prototype.toString source text | 2.5 | +70 | Not started |
+| Property descriptor infrastructure (§9.1.6.3) | 1.1 | +300 | **Completed** — ValidateAndApplyPropertyDescriptor covers all ES2020 validation steps |
+| arguments exotic object (mapped) | 1.5 | +150 | **Completed** — callee/caller, strict mode TypeError, Symbol.toStringTag |
+| Block scope TDZ enforcement | 1.6 | +100 | **Completed** — js_check_tdz(), ITEM_JS_TDZ sentinel, jm_init_block_tdz() |
+| Function.prototype.toString source text | 2.5 | +70 | **Completed** — JsFunction.source_text, native code format for builtins |
 
 **2026-04-17 Update:**
 
@@ -62,6 +62,69 @@ Baseline: 23,412 → **23,422** (+10 net new passing tests)
   - Added test `test/js/arguments_callee_strict.js` covering callee, strict TypeError, [object Arguments] tag, mapped aliasing.
   - Also fixed pre-existing `js_globals.cpp` build errors: moved includes to top, added forward declarations, replaced corrupted `js_object_define_property` body with clean delegation to `ValidateAndApplyPropertyDescriptor`.
 
+**2026-04-18 Update — Regex wrapper, TDZ, toString, misc (+386 tests):**
+
+Baseline: 23,422 → **23,808** (+386 net new passing tests)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| Regex wrapper rewrite (Phases A–G) | `js_regex_wrapper.cpp`, `js_regex_wrapper.h` | +291 | Backrefs, lookaheads, negative lookaheads, group remapping, output limiting |
+| `js_regex_num_groups()` helper | `js_runtime.cpp` | — | Fixed 4 call sites: exec, split, replace, String.split |
+| Block scope TDZ enforcement | `transpile_js_mir.cpp` | +~50 | `js_check_tdz()`, `ITEM_JS_TDZ` sentinel, `jm_init_block_tdz()` |
+| Function.prototype.toString | `js_globals.cpp` | +~30 | `JsFunction.source_text`, `"function name() { [native code] }"` for builtins |
+| Class public fields (instance + static) | `build_js_ast.cpp`, `transpile_js_mir.cpp` | (counted in prior sessions) | `build_js_field_definition()`, `JsInstanceFieldEntry`/`JsStaticFieldEntry` |
+| Promise.allSettled/any compliance | `js_runtime.cpp` | +~15 | `js_promise_any()`, `js_promise_all_settled()`, AggregateError |
+
+**Completed items across all tiers:**
+- **1.1** Property descriptor infrastructure — Done
+- **1.4** Class public fields — Done
+- **1.5** arguments exotic object — Done
+- **1.6** Block scope TDZ — Done
+- **2.3** for-of IteratorClose — Done
+- **2.5** Function.prototype.toString — Done
+- **2.6** Promise.allSettled/any — Done
+- **3.4** Strict mode detection — Done
+- **3.6** Future reserved words — Done
+- **4.4** JSON reviver/replacer — Done
+
+**Partially implemented:**
+- **2.1** Symbol.match/replace/search/split — RegExp side done, String methods don't delegate
+- **2.2** Array @@species + isConcatSpreadable — isConcatSpreadable done, species not
+- **2.4** RegExp named groups + \p{} — Both present but coverage incomplete
+- **2.7** Reflect ↔ Proxy — All 13 Reflect methods done, blocked by Proxy stub
+- **3.5** Unicode whitespace — regex \p{Z} only
+- **4.1** DataView BigInt + Float16 — BigInt64 done, Float16 not
+- **4.3** Date setter edge cases — Setters exist, NaN/coercion unclear
+
+**Not implemented:**
+- **1.2** Proxy handler traps — pass-through stub
+- **1.3** TypedArray species + detached checks
+- **3.3** Annex B legacy RegExp
+- **4.2** Atomics
+- **4.5** BigInt complete
+- **4.6** SharedArrayBuffer
+
+**2026-06-06 Update — Sloppy-mode eval var scoping + Annex B function hoisting (+51 tests):**
+
+Baseline: 23,808 → **23,859** (+51 fully passing, net +57 improvements, 2 regressions)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| Sloppy-mode eval var export to globalThis | `transpile_js_mir.cpp` | +20 | `is_eval_direct` flag, export loop after top-level statements |
+| Annex B §B.3.3.1 function hoisting in blocks | `transpile_js_mir.cpp` | +15 | Block-scoped function declarations write back to var-hoisted binding |
+| Annex B skip condition: let/const conflict | `transpile_js_mir.cpp` | +26 | `is_nested_func_hoist` flag skips Annex B candidates from eval export |
+| for-in/for-of let/const identifier guard | `transpile_js_mir.cpp` | +16 | Fixed `jm_collect_body_locals` to respect `fo->kind` for IDENTIFIER left |
+| `jm_set_var` preserves `is_let_const` flag | `transpile_js_mir.cpp` | — | Fixes TDZ regression where `jm_set_var` overwrote let/const metadata |
+| Eval Phase 3 function hoisting to globalThis | `transpile_js_mir.cpp` | — | Non-capturing function declarations exported from eval |
+
+**Key bugs found and fixed:**
+- **for-in/for-of identifier left node**: Tree-sitter parses `for (let f in ...)` with `left` as an IDENTIFIER (not VARIABLE_DECLARATION). `jm_collect_body_locals` unconditionally added it via `jm_collect_pattern_names` (no `from_func_decl`), then when the nested function declaration `function f() {}` tried to add with `from_func_decl=true`, the `!existing` guard skipped it. Fix: check `fo->kind` (0=var, 1=let, 2=const) in the IDENTIFIER case and skip when `var_only && kind != 0`.
+- **Annex B skip condition**: The eval export loop was exporting nested function declaration names to globalThis. Fixed by tracking `is_nested_func_hoist` on `JsModuleConstEntry` and propagating `from_func_decl` from `JsNameSetEntry` during pass (b) hoisted var registration.
+
+**Completed items:**
+- **3.1** Sloppy-mode eval var scoping — Done
+- **3.2** Annex B function hoisting — Done
+
 ---
 
 ## 1. Current Compliance Snapshot
@@ -77,8 +140,8 @@ Skipped by harness:       7,663
   - unsupported features: 1,508   (Temporal, WeakRef, etc.)
 In scope (batchable):    34,094
 
-Currently passing:       23,422  (68.7%)   ← updated 2025-04-17
-Failing:                 10,672  (31.3%)
+Currently passing:       23,859  (70.0%)   ← updated 2026-06-06
+Failing:                 10,235  (30.0%)
 ```
 
 ### 1.2 Top Failure Categories
@@ -391,54 +454,54 @@ Reflect methods are thin wrappers over internal operations. Once Proxy traps are
 
 These are structural prerequisites that unlock cascading improvements.
 
-| # | Work Item | Est. Impact | Dependencies | Files |
-|---|-----------|-------------|-------------|-------|
-| 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300 | None | `js_runtime.cpp` |
-| 1.2 | Proxy handler traps — all 13 | +200 (direct) +100 (indirect) | 1.1 | `js_runtime.cpp`, `js_globals.cpp` |
-| 1.3 | TypedArray species + detached checks | +400 | 1.1 | `js_typed_array.cpp` |
-| 1.4 | Class public fields (instance + static) | +800 | None | `build_js_ast.cpp`, `transpile_js_mir.cpp` |
-| 1.5 | arguments exotic object (mapped) | +150 | None | `js_runtime.cpp` |
-| 1.6 | Block scope TDZ enforcement | +100 | None | `transpile_js_mir.cpp` |
+| #   | Work Item                                     | Est. Impact                   | Dependencies | Files                                      | Status      |
+| --- | --------------------------------------------- | ----------------------------- | ------------ | ------------------------------------------ | ----------- |
+| 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300                          | None         | `js_runtime.cpp`                           | **Done**    |
+| 1.2 | Proxy handler traps — all 13                  | +200 (direct) +100 (indirect) | 1.1          | `js_runtime.cpp`, `js_globals.cpp`         | Not started |
+| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | Not started |
+| 1.4 | Class public fields (instance + static)       | +800                          | None         | `build_js_ast.cpp`, `transpile_js_mir.cpp` | **Done**    |
+| 1.5 | arguments exotic object (mapped)              | +150                          | None         | `js_runtime.cpp`                           | **Done**    |
+| 1.6 | Block scope TDZ enforcement                   | +100                          | None         | `transpile_js_mir.cpp`                     | **Done**    |
 
 ### Tier 2: Protocol Compliance (Estimated +1,500 tests)
 
 Correctly implementing ES2020 protocols across all built-ins.
 
-| # | Work Item | Est. Impact | Dependencies | Files |
-|---|-----------|-------------|-------------|-------|
-| 2.1 | Symbol.match/replace/search/split protocol | +200 | None | `js_runtime.cpp` |
-| 2.2 | Array @@species + @@isConcatSpreadable | +100 | 1.1 | `js_runtime.cpp` |
-| 2.3 | for-of IteratorClose on break/throw | +200 | None | `transpile_js_mir.cpp` |
-| 2.4 | RegExp named groups + \p{} property escapes | +300 | None | `re2_wrapper.cpp` |
-| 2.5 | Function.prototype.toString source text | +70 | None | `js_globals.cpp` |
-| 2.6 | Promise static methods (allSettled, any) compliance | +80 | None | `js_runtime.cpp` |
-| 2.7 | Reflect ↔ Proxy integration | +50 | 1.2 | `js_globals.cpp` |
+| # | Work Item | Est. Impact | Dependencies | Files | Status |
+|---|-----------|-------------|-------------|-------|--------|
+| 2.1 | Symbol.match/replace/search/split protocol | +200 | None | `js_runtime.cpp` | Partial |
+| 2.2 | Array @@species + @@isConcatSpreadable | +100 | 1.1 | `js_runtime.cpp` | Partial |
+| 2.3 | for-of IteratorClose on break/throw | +200 | None | `transpile_js_mir.cpp` | **Done** |
+| 2.4 | RegExp named groups + \p{} property escapes | +300 | None | `re2_wrapper.cpp` | Partial |
+| 2.5 | Function.prototype.toString source text | +70 | None | `js_globals.cpp` | **Done** |
+| 2.6 | Promise static methods (allSettled, any) compliance | +80 | None | `js_runtime.cpp` | **Done** |
+| 2.7 | Reflect ↔ Proxy integration | +50 | 1.2 | `js_globals.cpp` | Partial |
 
 ### Tier 3: Sloppy Mode & Annex B (Estimated +1,000 tests)
 
 Web-compatibility behaviors that are part of ES2020 but lower priority.
 
-| # | Work Item | Est. Impact | Dependencies | Files |
-|---|-----------|-------------|-------------|-------|
-| 3.1 | Sloppy-mode eval var scoping | +300 | None | `js_runtime.cpp`, `transpile_js_mir.cpp` |
-| 3.2 | Annex B function hoisting (blocks) | +200 | 3.1 | `build_js_ast.cpp` |
-| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` |
-| 3.4 | Strict mode detection ("use strict") | +100 | None | `build_js_ast.cpp` |
-| 3.5 | Unicode whitespace / line terminators | +70 | None | `js_runtime.cpp` |
-| 3.6 | Future reserved words in strict mode | +55 | 3.4 | `js_early_errors.cpp` |
+| # | Work Item | Est. Impact | Dependencies | Files | Status |
+|---|-----------|-------------|-------------|-------|--------|
+| 3.1 | Sloppy-mode eval var scoping | +300 | None | `js_runtime.cpp`, `transpile_js_mir.cpp` | Not started |
+| 3.2 | Annex B function hoisting (blocks) | +200 | 3.1 | `build_js_ast.cpp` | Not started |
+| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` | Not started |
+| 3.4 | Strict mode detection ("use strict") | +100 | None | `build_js_ast.cpp` | **Done** |
+| 3.5 | Unicode whitespace / line terminators | +70 | None | `js_runtime.cpp` | Partial |
+| 3.6 | Future reserved words in strict mode | +55 | 3.4 | `js_early_errors.cpp` | **Done** |
 
 ### Tier 4: Deep Built-in Compliance (Estimated +600 tests)
 
 Edge cases and advanced features.
 
-| # | Work Item | Est. Impact | Dependencies | Files |
-|---|-----------|-------------|-------------|-------|
-| 4.1 | DataView BigInt accessors + Float16 | +100 | None | `js_typed_array.cpp` |
-| 4.2 | Atomics on non-shared buffers (throw) | +100 | None | `js_typed_array.cpp` |
-| 4.3 | Date setter NaN/coercion edge cases | +90 | None | `js_runtime.cpp` |
-| 4.4 | JSON.parse reviver + stringify replacer | +30 | None | `js_runtime.cpp` |
-| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` |
-| 4.6 | SharedArrayBuffer constructor + species | +40 | None | `js_typed_array.cpp` |
+| # | Work Item | Est. Impact | Dependencies | Files | Status |
+|---|-----------|-------------|-------------|-------|--------|
+| 4.1 | DataView BigInt accessors + Float16 | +100 | None | `js_typed_array.cpp` | Partial |
+| 4.2 | Atomics on non-shared buffers (throw) | +100 | None | `js_typed_array.cpp` | Not started |
+| 4.3 | Date setter NaN/coercion edge cases | +90 | None | `js_runtime.cpp` | Partial |
+| 4.4 | JSON.parse reviver + stringify replacer | +30 | None | `js_runtime.cpp` | **Done** |
+| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` | Not started |
+| 4.6 | SharedArrayBuffer constructor + species | +40 | None | `js_typed_array.cpp` | Not started |
 
 ---
 
@@ -447,7 +510,9 @@ Edge cases and advanced features.
 | Milestone | Passing | %Pass | Cumulative Gain |
 |-----------|--------:|------:|:---------------:|
 | Initial baseline | 23,412 | 68.7% | — |
-| **Current baseline** | **23,422** | **68.7%** | **+10** |
+| Phase A (quick wins) | 23,422 | 68.7% | +10 |
+| Regex wrapper + TDZ + toString + misc | 23,808 | 69.8% | +396 |
+| **Current baseline** | **23,808** | **69.8%** | **+396** |
 | After Tier 1 | ~25,900 | ~76% | +2,500 |
 | After Tier 2 | ~27,500 | ~81% | +4,000 |
 | After Tier 3 | ~28,500 | ~84% | +5,000 |

@@ -104,7 +104,7 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node);
 JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type = JS_SCOPE_BLOCK);
 JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
 JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
 JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
