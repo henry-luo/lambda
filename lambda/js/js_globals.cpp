@@ -1489,6 +1489,12 @@ extern "C" Item js_process_umask(Item mask_item) {
 #endif
 }
 
+// process.abort() — abort the process
+extern "C" Item js_process_abort() {
+    abort();
+    return (Item){.item = ITEM_NULL}; // unreachable
+}
+
 // build process.versions object
 static Item build_process_versions(void) {
     Item versions = js_new_object();
@@ -1514,6 +1520,12 @@ static Item build_process_versions(void) {
 static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
     Item fn = js_new_function(func_ptr, param_count);
+    // Mark as non-constructor (native builtin) so .prototype returns undefined
+    // Use offset to set builtin_id = -2 (JsFunction layout: type_id, func_ptr, param_count,
+    // env, env_size, prototype, bound_this, bound_args, bound_argc, name, builtin_id)
+    struct { TypeId t; void* fp; int pc; Item* e; int es; Item p; Item bt; Item* ba; int bc; String* n; int bid; } *fl;
+    fl = decltype(fl)(fn.function);
+    fl->bid = -2;
     js_property_set(ns, key, fn);
 }
 
@@ -1667,6 +1679,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
         js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
+        js_process_set_method(js_process_object, "abort", (void*)js_process_abort, 0);
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "emit", (void*)js_process_emit, 2);
 
@@ -3505,6 +3518,12 @@ extern "C" Item js_get_prototype_of(Item object) {
         return ItemNull;
     }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+
+    // TypedArray instances → return %TypedArray%.prototype
+    if (object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        extern Item js_get_typed_array_base_proto();
+        return js_get_typed_array_base_proto();
+    }
 
     // v18h: Check if this is a class object (has __instance_proto__) → return Function.prototype
     {

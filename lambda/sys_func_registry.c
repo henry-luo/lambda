@@ -39,6 +39,9 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
 
+// Symbol key check for typed array P9 guard (js_runtime.cpp)
+extern int64_t js_key_is_symbol_c(Item key);
+
 // view/edit template apply
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
@@ -123,6 +126,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
+extern Item js_buffer_construct(Item arg, Item encoding);
 
 // shared runtime context (defined in mir.c)
 extern Context* _lambda_rt;
@@ -1196,6 +1200,7 @@ JitImport jit_runtime_imports[] = {
     {"js_property_get", FPTR(js_property_get)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_property_access", FPTR(js_property_access)},
+    {"js_key_is_symbol_c", FPTR(js_key_is_symbol_c)},
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_property_get_str", FPTR(js_property_get_str)},
@@ -1434,6 +1439,8 @@ JitImport jit_runtime_imports[] = {
     {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
     {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},
     {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
+    // Buffer constructor
+    {"js_buffer_construct", FPTR(js_buffer_construct)},
     {"js_arraybuffer_wrap", FPTR(js_arraybuffer_wrap)},
     // DataView
     {"js_dataview_new", FPTR(js_dataview_new)},

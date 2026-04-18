@@ -2854,15 +2854,35 @@ float calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* f
 
     // Form controls use FormControlProp (union with fi) — fi pointer is invalid
     // Read min/max constraints directly from blk (which is valid for form controls)
+    // CSS Flexbox §4.5: min-width:auto for form controls = intrinsic width (replaced elements)
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
         float min_main = 0, max_main = FLT_MAX;
         if (item->blk) {
             if (is_horizontal) {
-                if (item->blk->given_min_width >= 0) min_main = item->blk->given_min_width;
+                if (item->blk->given_min_width >= 0) {
+                    min_main = item->blk->given_min_width;
+                } else if (item->form && item->form->intrinsic_width > 0) {
+                    // min-width: auto → intrinsic width for replaced elements
+                    min_main = item->form->intrinsic_width;
+                    if (item->bound) {
+                        min_main += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            min_main += item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                }
                 if (item->blk->given_max_width > 0) max_main = item->blk->given_max_width;
             } else {
-                if (item->blk->given_min_height >= 0) min_main = item->blk->given_min_height;
+                if (item->blk->given_min_height >= 0) {
+                    min_main = item->blk->given_min_height;
+                } else if (item->form && item->form->intrinsic_height > 0) {
+                    min_main = item->form->intrinsic_height;
+                    if (item->bound) {
+                        min_main += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            min_main += item->bound->border->width.top + item->bound->border->width.bottom;
+                    }
+                }
                 if (item->blk->given_max_height > 0) max_main = item->blk->given_max_height;
             }
         }
@@ -2926,9 +2946,11 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
         return;
     }
 
-    // Form controls don't have fi - they use intrinsic sizes directly
+    // Form controls don't have fi (the union shares memory with FormControlProp).
+    // Min/max constraints are resolved directly in calculate_hypothetical_main_size
+    // and apply_flex_constraint using intrinsic sizes. Nothing to store here.
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
-        log_debug("%s resolve_flex_item_constraints: form control, using intrinsic sizes", item->source_loc());
+        log_debug("%s resolve_flex_item_constraints: form control, constraints resolved inline", item->source_loc());
         return;
     }
 
@@ -3323,11 +3345,60 @@ float apply_flex_constraint(
 ) {
     if (!item) return computed_size;
 
-    // Form controls don't have FlexItemProp - the union shares memory with FormControlProp
-    // They use intrinsic sizes and don't have resolved min/max constraints
+    // Form controls don't have FlexItemProp - the union shares memory with FormControlProp.
+    // Compute min/max constraints from CSS given_min/max and intrinsic sizes.
+    // CSS Flexbox §4.5: min-width:auto for replaced elements = intrinsic width.
     if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
-        log_debug("apply_flex_constraint: form control, skipping constraint (computed=%.1f)", computed_size);
-        return computed_size;
+        bool is_horizontal = is_main_axis_horizontal(flex_layout);
+        float min_size = 0;
+        float max_size = FLT_MAX;
+
+        if (is_main_axis) {
+            if (is_horizontal) {
+                if (item->blk && item->blk->given_min_width >= 0) {
+                    min_size = item->blk->given_min_width;
+                } else if (item->form && item->form->intrinsic_width > 0) {
+                    // min-width: auto → intrinsic width for form controls (replaced elements)
+                    min_size = item->form->intrinsic_width;
+                    // add border+padding for border-box consistency
+                    if (item->bound) {
+                        min_size += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            min_size += item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                }
+                if (item->blk && item->blk->given_max_width > 0) max_size = item->blk->given_max_width;
+            } else {
+                if (item->blk && item->blk->given_min_height >= 0) {
+                    min_size = item->blk->given_min_height;
+                } else if (item->form && item->form->intrinsic_height > 0) {
+                    min_size = item->form->intrinsic_height;
+                    if (item->bound) {
+                        min_size += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            min_size += item->bound->border->width.top + item->bound->border->width.bottom;
+                    }
+                }
+                if (item->blk && item->blk->given_max_height > 0) max_size = item->blk->given_max_height;
+            }
+        }
+        // Cross axis: min-size auto = 0 (already 0)
+
+        if (hit_min) *hit_min = false;
+        if (hit_max) *hit_max = false;
+
+        float clamped = computed_size;
+        if (max_size > 0 && max_size < FLT_MAX && clamped > max_size) {
+            clamped = max_size;
+            if (hit_max) *hit_max = true;
+        }
+        if (clamped < min_size) {
+            clamped = min_size;
+            if (hit_min) *hit_min = true;
+        }
+        log_debug("apply_flex_constraint: form control %s axis, computed=%.1f, min=%.1f, max=%.1f, result=%.1f",
+                  is_main_axis ? "main" : "cross", computed_size, min_size, max_size, clamped);
+        return clamped;
     }
 
     if (!item->fi) return computed_size;

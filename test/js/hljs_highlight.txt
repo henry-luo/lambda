@@ -1,5 +1,3 @@
-Language definition for 'typescript' could not be registered.
-Error: can not find mode to replace
 true
 function
 function
@@ -29,6 +27,6 @@ json-highlight-error
 json-highlight-error
 auto-error
 auto-error
-r
+Could not find the language 'nonexistent_xyz', did you forget to load/include a language module?
 true
 HLJS_TESTS_DONE

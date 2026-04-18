@@ -1375,6 +1375,25 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // <button> start tag: per WHATWG §13.2.6.4.7, if a button element is
+        // already in scope, generate implied end tags and pop until button is removed.
+        // This prevents nested buttons (e.g. <button>...<button> auto-closes the first).
+        if (strcmp(tag, "button") == 0) {
+            if (html5_has_element_in_scope(parser, "button")) {
+                log_debug("html5: <button> auto-closing existing <button> in scope");
+                html5_generate_implied_end_tags(parser);
+                while (parser->open_elements->length > 0) {
+                    Element* popped = html5_pop_element(parser);
+                    const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                    if (strcmp(popped_tag, "button") == 0) break;
+                }
+            }
+            html5_reconstruct_active_formatting_elements(parser);
+            html5_insert_html_element(parser, token);
+            parser->frameset_ok = false;
+            return;
+        }
+
         if (strcmp(tag, "div") == 0 || strcmp(tag, "p") == 0 ||
             strcmp(tag, "ul") == 0 || strcmp(tag, "ol") == 0 ||
             strcmp(tag, "section") == 0 || strcmp(tag, "article") == 0 || strcmp(tag, "nav") == 0 ||
@@ -1383,7 +1402,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             strcmp(tag, "address") == 0 || strcmp(tag, "center") == 0 || strcmp(tag, "details") == 0 ||
             strcmp(tag, "dialog") == 0 || strcmp(tag, "dir") == 0 || strcmp(tag, "dl") == 0 ||
             strcmp(tag, "fieldset") == 0 || strcmp(tag, "figcaption") == 0 || strcmp(tag, "figure") == 0 ||
-            strcmp(tag, "form") == 0 || strcmp(tag, "hgroup") == 0 || strcmp(tag, "menu") == 0 ||
+            strcmp(tag, "hgroup") == 0 || strcmp(tag, "menu") == 0 ||
             strcmp(tag, "search") == 0 || strcmp(tag, "summary") == 0) {
 
             // Close any <p> element in button scope per spec
@@ -1392,6 +1411,30 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             }
 
             html5_insert_html_element(parser, token);
+            return;
+        }
+
+        // WHATWG §13.2.6.4.7: <form> in body mode
+        // If form pointer is set and no template on stack, ignore.
+        // Otherwise close p, insert element, set form pointer.
+        if (strcmp(tag, "form") == 0) {
+            bool has_template = false;
+            for (int i = 0; i < (int)parser->open_elements->length; i++) {
+                Element* elem = (Element*)parser->open_elements->items[i].element;
+                const char* tname = ((TypeElmt*)elem->type)->name.str;
+                if (strcmp(tname, "template") == 0) { has_template = true; break; }
+            }
+            if (!has_template && parser->form_element != nullptr) {
+                log_debug("html5: ignoring <form> - form pointer already set");
+                return;
+            }
+            if (html5_has_element_in_button_scope(parser, "p")) {
+                html5_close_p_element(parser);
+            }
+            html5_insert_html_element(parser, token);
+            if (!has_template) {
+                parser->form_element = html5_current_node(parser);
+            }
             return;
         }
 
@@ -1771,6 +1814,52 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             return;
         }
 
+        // WHATWG §13.2.6.4.7: </form> end tag
+        if (strcmp(tag, "form") == 0) {
+            bool has_template = false;
+            for (int i = 0; i < (int)parser->open_elements->length; i++) {
+                Element* elem = (Element*)parser->open_elements->items[i].element;
+                const char* tname = ((TypeElmt*)elem->type)->name.str;
+                if (strcmp(tname, "template") == 0) { has_template = true; break; }
+            }
+            if (!has_template) {
+                // Save and clear form element pointer
+                Element* node = parser->form_element;
+                parser->form_element = nullptr;
+                if (!node || !html5_has_element_in_scope(parser, "form")) {
+                    log_error("html5: </form> without <form> in scope");
+                    return;
+                }
+                html5_generate_implied_end_tags(parser);
+                // Remove node from the stack of open elements
+                for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                    Element* elem = (Element*)parser->open_elements->items[i].element;
+                    if (elem == node) {
+                        // Remove this element from stack (shift elements down)
+                        for (int j = i; j < (int)parser->open_elements->length - 1; j++) {
+                            parser->open_elements->items[j] = parser->open_elements->items[j + 1];
+                        }
+                        parser->open_elements->length--;
+                        break;
+                    }
+                }
+            } else {
+                // Template case: normal scope-based handling
+                if (!html5_has_element_in_scope(parser, "form")) {
+                    log_error("html5: </form> without <form> in scope");
+                    return;
+                }
+                html5_generate_implied_end_tags(parser);
+                while (parser->open_elements->length > 0) {
+                    Element* popped = html5_pop_element(parser);
+                    if (strcmp(((TypeElmt*)popped->type)->name.str, "form") == 0) {
+                        break;
+                    }
+                }
+            }
+            return;
+        }
+
         // generic end tag handling: pop elements until matching tag found
         // Use strcasecmp for the match to handle SVG camelCase tags (e.g. clipPath vs clippath)
         // HTML tags are all lowercase in both tag and elem_tag, so this is safe for HTML too.
@@ -2092,6 +2181,28 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
             }
             html5_reset_insertion_mode(parser);
             html5_process_token(parser, token);  // reprocess
+            return;
+        }
+
+        // <form> - WHATWG spec §13.2.6.4.9: insert element, set form pointer, immediately pop
+        // The form element is inserted into the tree but immediately popped from the
+        // stack of open elements, so subsequent content is NOT nested inside it.
+        if (strcmp(tag, "form") == 0) {
+            log_debug("html5: <form> in table mode");
+            // If there is a template element on the stack, or form pointer is set, ignore
+            bool has_template = false;
+            for (int i = 0; i < (int)parser->open_elements->length; i++) {
+                Element* elem = (Element*)parser->open_elements->items[i].element;
+                const char* tname = ((TypeElmt*)elem->type)->name.str;
+                if (strcmp(tname, "template") == 0) { has_template = true; break; }
+            }
+            if (has_template || parser->form_element != nullptr) {
+                return;  // ignore the token
+            }
+            // Insert element into tree, set form pointer, then immediately pop
+            html5_insert_html_element(parser, token);
+            parser->form_element = html5_current_node(parser);
+            html5_pop_element(parser);
             return;
         }
 

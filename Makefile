@@ -501,7 +501,7 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline + layout page suite regression check"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form) + other checks"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
@@ -1048,15 +1048,19 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "=============================================================="; \
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
+# Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
+LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text pretext form
+
 test-radiant-baseline: build-test
-	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
-	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
-	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
+	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
-	pretext_passed=0; pretext_failed=0; pretext_skipped=0; pretext_status="⏭️  SKIP"; \
 	any_failed=0; \
+	layout_total_passed=0; layout_total_failed=0; layout_total_skipped=0; \
+	layout_overall_status="✅ PASS"; \
+	mkdir -p temp; \
+	> temp/_layout_baseline_results.txt; \
 	\
 	echo ""; \
 	echo "=============================================================="; \
@@ -1065,25 +1069,23 @@ test-radiant-baseline: build-test
 	\
 	echo ""; \
 	echo "📦 Layout Baseline Tests:"; \
-	output=$$(node test/layout/test_radiant_layout.js -c baseline 2>&1) || true; \
-	echo "$$output" | tail -10; \
-	layout_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	layout_failed=$$(echo "$$output" | grep "Failed:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	layout_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	layout_passed=$${layout_passed:-0}; layout_failed=$${layout_failed:-0}; layout_skipped=$${layout_skipped:-0}; \
-	if [ "$$layout_failed" = "0" ] || [ -z "$$layout_failed" ]; then layout_status="✅ PASS"; layout_failed=0; else layout_status="❌ FAIL"; any_failed=1; fi; \
-	\
-	echo ""; \
-	echo "📦 WPT CSS Text Baseline:"; \
-	output=$$(node test/layout/test_radiant_layout.js -c wpt-css-text 2>&1) || true; \
-	echo "$$output" | tail -10; \
-	wpt_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	wpt_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	wpt_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	wpt_passed=$${wpt_passed:-0}; wpt_failed=$${wpt_failed:-0}; wpt_skipped=$${wpt_skipped:-0}; \
-	if echo "$$output" | grep -q "Baseline Regressions"; then wpt_status="❌ FAIL"; any_failed=1; \
-	elif echo "$$output" | grep -q "all .* required tests passed"; then wpt_status="✅ PASS"; \
-	else wpt_status="✅ PASS"; fi; \
+	for suite in $(LAYOUT_BASELINE_SUITES); do \
+		echo ""; \
+		echo "  ▸ $$suite:"; \
+		output=$$(node test/layout/test_radiant_layout.js -c $$suite 2>&1) || true; \
+		echo "$$output" | tail -8; \
+		s_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
+		s_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
+		s_failed=0; s_status="✅ PASS"; \
+		if echo "$$output" | grep -q "Baseline Regressions"; then \
+			s_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-0}; \
+			s_status="❌ FAIL"; any_failed=1; layout_overall_status="❌ FAIL"; \
+		fi; \
+		layout_total_passed=$$((layout_total_passed + s_passed)); \
+		layout_total_failed=$$((layout_total_failed + s_failed)); \
+		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
+		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> temp/_layout_baseline_results.txt; \
+	done; \
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
@@ -1141,21 +1143,9 @@ test-radiant-baseline: build-test
 		echo "   ⚠️  test/test_fuzzy_crash_gtest.exe not found"; \
 	fi; \
 	\
-	echo ""; \
-	echo "📦 Pretext Corpus Baseline:"; \
-	output=$$(node test/layout/test_radiant_layout.js -c pretext 2>&1) || true; \
-	echo "$$output" | tail -10; \
-	pretext_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	pretext_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	pretext_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-	pretext_passed=$${pretext_passed:-0}; pretext_failed=$${pretext_failed:-0}; pretext_skipped=$${pretext_skipped:-0}; \
-	if echo "$$output" | grep -q "Baseline Regressions"; then pretext_status="❌ FAIL"; any_failed=1; \
-	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
-	else pretext_status="✅ PASS"; fi; \
-	\
-	total_passed=$$((layout_passed + wpt_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + pretext_passed)); \
-	total_failed=$$((layout_failed + wpt_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + pretext_failed)); \
-	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed)); \
+	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + total_failed)); \
 	\
 	echo ""; \
@@ -1164,13 +1154,21 @@ test-radiant-baseline: build-test
 	echo "=============================================================="; \
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped) (test_radiant_layout.js -c baseline)"; \
-	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped) (test_radiant_layout.js -c wpt-css-text)"; \
+	echo "   ├── Layout Baseline     $$layout_overall_status  ($$layout_total_passed passed, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
+	suite_count=$$(wc -l < temp/_layout_baseline_results.txt | tr -d ' '); \
+	suite_idx=0; \
+	while IFS='|' read -r sname sstatus spassed sfailed sskipped; do \
+		suite_idx=$$((suite_idx + 1)); \
+		if [ $$suite_idx -eq $$suite_count ]; then \
+			printf "   │   └── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname"; \
+		else \
+			printf "   │   ├── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname"; \
+		fi; \
+	done < temp/_layout_baseline_results.txt; \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
-	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
-	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped) (test_radiant_layout.js -c pretext)"; \
+	echo "   └── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
@@ -1182,6 +1180,7 @@ test-radiant-baseline: build-test
 		echo "   ⏭️  Skipped:  $$total_skipped"; \
 	fi; \
 	echo "=============================================================="; \
+	rm -f temp/_layout_baseline_results.txt; \
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-layout-baseline: build-test
