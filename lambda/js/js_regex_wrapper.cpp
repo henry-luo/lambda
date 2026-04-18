@@ -210,20 +210,14 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
     std::string result = original;
     int added_groups = 0;
 
-    // Pre-assign group indices in left-to-right order so that right-to-left
-    // replacement doesn't get the numbering wrong.
-    int preassigned_group[32];
-    {
-        int precount = 0;
-        for (int a = 0; a < assert_count; a++) {
-            if (infos[a].kind == ASSERT_POS_LOOKAHEAD || infos[a].kind == ASSERT_BACKREF) {
-                preassigned_group[a] = out->original_group_count + precount + 1;
-                precount++;
-            } else {
-                preassigned_group[a] = -1;
-            }
-        }
-    }
+    // Track positions of synthetic '(' characters in the rewritten pattern
+    // so we can build a proper group remap after all rewrites.
+    struct SyntheticEntry {
+        size_t position;   // position of synthetic '(' in pattern string
+        int filter_idx;    // index into out->filters[] for this entry
+    };
+    SyntheticEntry synthetic[JS_REGEX_MAX_FILTERS];
+    int synthetic_count = 0;
 
     // Process from right to left to keep indices valid
     for (int a = assert_count - 1; a >= 0; a--) {
@@ -235,40 +229,64 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
             case ASSERT_POS_LOOKAHEAD: {
                 // X(?=Y) → X(Y) with PF_TRIM_GROUP
                 // Replace (?=Y) with (Y), add filter to trim the captured Y from match
-                int group_idx = preassigned_group[a];
                 std::string replacement = "(" + info.inner + ")";
-                result.replace(info.start_pos, info.end_pos - info.start_pos, replacement);
+                size_t syn_pos = info.start_pos;
+                size_t old_len = info.end_pos - info.start_pos;
+                result.replace(info.start_pos, old_len, replacement);
+                int delta = (int)replacement.size() - (int)old_len;
                 added_groups++;
 
+                // Adjust previously recorded synthetic positions (they're at higher positions)
+                for (int s = 0; s < synthetic_count; s++) {
+                    if (synthetic[s].position > syn_pos) {
+                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                    }
+                }
+
+                int fi = out->filter_count;
                 JsRegexFilter& f = out->filters[out->filter_count++];
                 f.type = JS_PF_TRIM_GROUP;
-                f.trim_group_idx = group_idx;
+                f.trim_group_idx = -1; // placeholder, fixed after pattern walk
                 f.reject_pattern = nullptr;
+
+                synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
             }
             case ASSERT_NEG_LOOKAHEAD: {
-                // (?!Y)X or X(?!Y) → remove the assertion, add PF_REJECT_MATCH
-                // Build a RE2 pattern from the inner content for post-filtering
-                bool at_start = !info.is_trailing;
+                // (?!Y)X or X(?!Y) → insert marker group (), add PF_REJECT_MATCH
+                // The marker group captures the position where the lookahead was
+                std::string replacement = "()";
+                size_t syn_pos = info.start_pos;
+                size_t old_len = info.end_pos - info.start_pos;
+                result.replace(info.start_pos, old_len, replacement);
+                int delta = (int)replacement.size() - (int)old_len;
+                added_groups++;
 
-                // Erase the (?!Y) from the pattern
-                result.erase(info.start_pos, info.end_pos - info.start_pos);
+                for (int s = 0; s < synthetic_count; s++) {
+                    if (synthetic[s].position > syn_pos) {
+                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                    }
+                }
 
                 // Create the rejection pattern
                 re2::RE2::Options reject_opts;
                 reject_opts.set_log_errors(false);
                 reject_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
-                std::string reject_pat = info.inner;
-                re2::RE2* reject_re = new re2::RE2(reject_pat, reject_opts);
+                re2::RE2* reject_re = new re2::RE2(info.inner, reject_opts);
 
                 if (reject_re->ok()) {
+                    int fi = out->filter_count;
                     JsRegexFilter& f = out->filters[out->filter_count++];
                     f.type = JS_PF_REJECT_MATCH;
                     f.reject_pattern = reject_re;
-                    f.reject_at_start = at_start ? 1 : 0;
+                    f.reject_at_start = -1; // placeholder, will use marker group
+
+                    synthetic[synthetic_count++] = {syn_pos, fi};
                 } else {
-                    log_debug("js regex wrapper: failed to compile rejection pattern '%s'", reject_pat.c_str());
+                    log_debug("js regex wrapper: failed to compile rejection pattern '%s'", info.inner.c_str());
                     delete reject_re;
+                    // still record synthetic for the () we inserted
+                    synthetic[synthetic_count++] = {syn_pos, -1};
                 }
                 break;
             }
@@ -282,34 +300,116 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
             case ASSERT_BACKREF: {
                 // \N → replace with capture group and add PF_GROUP_EQUALITY
                 int ref_num = info.backref_num;
-                int new_group_idx = preassigned_group[a];
-                // Replace \N with a greedy capture. The equality filter will
-                // verify it matched the same content as the referenced group.
-                std::string replacement = "(.+)";
-                result.replace(info.start_pos, info.end_pos - info.start_pos, replacement);
+                // Replace \N with a capture that can match anything (including empty).
+                // The equality filter will verify it matched the same content as group N.
+                std::string replacement = "(.*)";
+                size_t syn_pos = info.start_pos;
+                size_t old_len = info.end_pos - info.start_pos;
+                result.replace(info.start_pos, old_len, replacement);
+                int delta = (int)replacement.size() - (int)old_len;
                 added_groups++;
 
+                for (int s = 0; s < synthetic_count; s++) {
+                    if (synthetic[s].position > syn_pos) {
+                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                    }
+                }
+
+                int fi = out->filter_count;
                 JsRegexFilter& f = out->filters[out->filter_count++];
                 f.type = JS_PF_GROUP_EQUALITY;
-                f.eq_group_a = ref_num;      // original capture group
-                f.eq_group_b = new_group_idx; // the replacement capture
+                f.eq_group_a = ref_num;  // original group number (will be remapped)
+                f.eq_group_b = -1;       // placeholder, fixed after pattern walk
                 f.reject_pattern = nullptr;
+
+                synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
             }
         }
     }
 
-    // Build group remap if we added groups
-    if (added_groups > 0 && out->original_group_count > 0) {
-        int total = out->original_group_count + added_groups;
-        out->group_remap = (int*)calloc(total + 1, sizeof(int));
-        out->group_remap_count = total + 1;
-        // Identity mapping for original groups (may need adjustment if
-        // added groups were inserted between original ones, but since we add
-        // at assertion positions which are usually after all original groups,
-        // identity is correct for the common case)
-        for (int g = 0; g <= out->original_group_count; g++) {
-            out->group_remap[g] = g;
+    // Walk the rewritten pattern to build group remap and fix filter indices.
+    // Classify each capturing group as original or synthetic.
+    {
+        int re2_idx = 0;
+        int orig_idx = 0;
+        int total_re2_groups = count_capture_groups(result);
+        int remap_size = out->original_group_count + 1;
+        out->group_remap = (int*)calloc(remap_size, sizeof(int));
+        out->group_remap_count = remap_size;
+        out->group_remap[0] = 0; // group 0 always maps to itself
+
+        // Map from synthetic entry index → RE2 group index
+        int syn_re2_idx[JS_REGEX_MAX_FILTERS];
+        for (int s = 0; s < synthetic_count; s++) syn_re2_idx[s] = -1;
+
+        for (size_t i = 0; i < result.size(); i++) {
+            if (result[i] == '\\' && i + 1 < result.size()) { i++; continue; }
+            // skip character classes
+            if (result[i] == '[') {
+                i++;
+                while (i < result.size() && result[i] != ']') {
+                    if (result[i] == '\\' && i + 1 < result.size()) i++;
+                    i++;
+                }
+                continue;
+            }
+            if (result[i] != '(') continue;
+
+            // determine if this '(' starts a capturing group
+            bool is_capturing = false;
+            if (i + 1 < result.size() && result[i + 1] != '?') {
+                is_capturing = true;
+            } else if (i + 3 < result.size() && result[i + 1] == '?' && result[i + 2] == 'P' && result[i + 3] == '<') {
+                is_capturing = true; // (?P<name>...)
+            } else if (i + 3 < result.size() && result[i + 1] == '?' && result[i + 2] == '<' &&
+                       result[i + 3] != '=' && result[i + 3] != '!') {
+                is_capturing = true; // (?<name>...)
+            }
+
+            if (!is_capturing) continue;
+            re2_idx++;
+
+            // check if this group is synthetic
+            bool is_synthetic = false;
+            int syn_idx = -1;
+            for (int s = 0; s < synthetic_count; s++) {
+                if (synthetic[s].position == i) {
+                    is_synthetic = true;
+                    syn_idx = s;
+                    break;
+                }
+            }
+
+            if (is_synthetic) {
+                syn_re2_idx[syn_idx] = re2_idx;
+            } else {
+                orig_idx++;
+                if (orig_idx < remap_size) {
+                    out->group_remap[orig_idx] = re2_idx;
+                }
+            }
+        }
+
+        // Fix filter indices using the computed RE2 group positions
+        for (int s = 0; s < synthetic_count; s++) {
+            int fi = synthetic[s].filter_idx;
+            if (fi < 0) continue;
+            JsRegexFilter& f = out->filters[fi];
+
+            if (f.type == JS_PF_TRIM_GROUP) {
+                f.trim_group_idx = syn_re2_idx[s];
+            } else if (f.type == JS_PF_REJECT_MATCH) {
+                // store the marker group's RE2 index in reject_at_start
+                // (repurposed: positive values = marker group index)
+                f.reject_at_start = syn_re2_idx[s];
+            } else if (f.type == JS_PF_GROUP_EQUALITY) {
+                f.eq_group_b = syn_re2_idx[s];
+                // remap eq_group_a from original group number to RE2 group index
+                if (f.eq_group_a >= 1 && f.eq_group_a < remap_size) {
+                    f.eq_group_a = out->group_remap[f.eq_group_a];
+                }
+            }
         }
     }
 
@@ -388,23 +488,12 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
     }
 
     if (has_backref_filters) {
-        // Two-pass backref matching:
-        // Pass 1: Match with .+ replacements to find referenced group content
-        // Pass 2: Build pattern with literal backrefs and re-match
-        bool found = compiled->re2->Match(text, start_pos, input_len, anchor, groups, ngroups);
-        if (!found) return 0;
+        // Two-pass backref matching with retry loop:
+        // Pass 1: Match with .* replacements to find referenced group content
+        // Pass 2: Build pattern with literal backrefs and re-match at same position
+        // If pass 2 fails, advance start position and retry pass 1
 
-        // Extract referenced group contents and build a literal-substituted pattern
-        // For each GROUP_EQUALITY filter, get the content of group_a
-        std::string source_pattern = compiled->re2->pattern();
-        std::string refined_pattern = source_pattern;
-
-        // Collect all backreference substitutions
-        // Process from highest eq_group_b to lowest so replacing a group
-        // doesn't shift lower-numbered groups.
-        bool needs_recompile = false;
-
-        // Sort filters by eq_group_b descending for correct replacement order
+        // Pre-sort backref filters by eq_group_b descending for correct replacement order
         int backref_order[JS_REGEX_MAX_FILTERS];
         int backref_count = 0;
         for (int fi = 0; fi < compiled->filter_count; fi++) {
@@ -412,7 +501,6 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                 backref_order[backref_count++] = fi;
             }
         }
-        // Simple insertion sort by eq_group_b descending
         for (int i = 1; i < backref_count; i++) {
             int key = backref_order[i];
             int j = i - 1;
@@ -423,18 +511,41 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
             backref_order[j + 1] = key;
         }
 
-        for (int bi = 0; bi < backref_count; bi++) {
-            JsRegexFilter& f = compiled->filters[backref_order[bi]];
+        std::string source_pattern = compiled->re2->pattern();
+        re2::RE2::Options refined_opts;
+        refined_opts.set_log_errors(false);
+        refined_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+        refined_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
+        refined_opts.set_dot_nl(compiled->re2->options().dot_nl());
+        refined_opts.set_one_line(compiled->re2->options().one_line());
 
-            int ref_group = f.eq_group_a;
-            if (ref_group < ngroups && groups[ref_group].data()) {
-                // escape the captured content for use as a literal in regex
-                std::string literal = re2::RE2::QuoteMeta(
-                    re2::StringPiece(groups[ref_group].data(), groups[ref_group].size()));
+        int pos = start_pos;
+        bool matched = false;
 
-                // Find the (.+) group that replaced this backref (it's group eq_group_b)
-                // Replace the (.+) in the pattern with the literal
-                // Find the nth capturing group in the pattern string
+        while (pos <= input_len) {
+            bool found = compiled->re2->Match(text, pos, input_len, anchor, groups, ngroups);
+            if (!found) return 0;
+
+            int match_start = (int)(groups[0].data() - input);
+
+            // Build refined pattern by substituting literal values for backref groups
+            std::string refined_pattern = source_pattern;
+            bool needs_recompile = false;
+
+            for (int bi = 0; bi < backref_count; bi++) {
+                JsRegexFilter& f = compiled->filters[backref_order[bi]];
+                int ref_group = f.eq_group_a;
+                std::string literal;
+                if (ref_group < ngroups && groups[ref_group].data()) {
+                    literal = re2::RE2::QuoteMeta(
+                        re2::StringPiece(groups[ref_group].data(), groups[ref_group].size()));
+                } else {
+                    // referenced group didn't participate — \N matches empty string
+                    literal = "";
+                }
+                needs_recompile = true;
+
+                // Find the target capturing group in the pattern and replace with literal
                 int target_group = f.eq_group_b;
                 int group_count = 0;
                 for (size_t p = 0; p < refined_pattern.size(); p++) {
@@ -445,48 +556,53 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         refined_pattern[p + 1] != '?') {
                         group_count++;
                         if (group_count == target_group) {
-                            // Find the matching close paren
                             size_t close = find_matching_paren(refined_pattern, p);
                             if (close != std::string::npos) {
-                                // Replace (group_content) with the literal
                                 refined_pattern.replace(p, close - p + 1, literal);
-                                needs_recompile = true;
                             }
                             break;
                         }
                     }
                 }
             }
-        }
 
-        if (needs_recompile) {
-            // Compile and match with the refined pattern
-            re2::RE2::Options refined_opts;
-            refined_opts.set_log_errors(false);
-            refined_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
-            // Copy options from original
-            refined_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
-            refined_opts.set_dot_nl(compiled->re2->options().dot_nl());
-            refined_opts.set_one_line(compiled->re2->options().one_line());
-
-            re2::RE2 refined_re2(refined_pattern, refined_opts);
-            if (refined_re2.ok()) {
-                int refined_ngroups = refined_re2.NumberOfCapturingGroups() + 1;
-                if (refined_ngroups > JS_REGEX_MAX_GROUPS) refined_ngroups = JS_REGEX_MAX_GROUPS;
-                re2::StringPiece refined_groups[JS_REGEX_MAX_GROUPS];
-                found = refined_re2.Match(text, start_pos, input_len, anchor,
-                                          refined_groups, refined_ngroups);
-                if (!found) return 0;
-                // Copy results (use refined groups, but map back to original group count)
-                for (int g = 0; g < ngroups && g < refined_ngroups; g++) {
-                    groups[g] = refined_groups[g];
+            if (needs_recompile) {
+                re2::RE2 refined_re2(refined_pattern, refined_opts);
+                if (refined_re2.ok()) {
+                    int refined_ngroups = refined_re2.NumberOfCapturingGroups() + 1;
+                    if (refined_ngroups > JS_REGEX_MAX_GROUPS) refined_ngroups = JS_REGEX_MAX_GROUPS;
+                    re2::StringPiece refined_groups[JS_REGEX_MAX_GROUPS];
+                    // Try matching at the same position the first pass found
+                    found = refined_re2.Match(text, match_start, input_len,
+                                              re2::RE2::ANCHOR_START,
+                                              refined_groups, refined_ngroups);
+                    if (found) {
+                        // Copy refined results back
+                        for (int g = 0; g < ngroups && g < refined_ngroups; g++) {
+                            groups[g] = refined_groups[g];
+                        }
+                        matched = true;
+                        break; // success
+                    }
+                    // Refined match failed at this position — retry at next position
+                } else {
+                    log_debug("js regex wrapper: refined backref pattern compile failed: %s",
+                              refined_re2.error().c_str());
                 }
             } else {
-                // Refined pattern failed to compile — fall through and use original match
-                log_debug("js regex wrapper: refined backref pattern compile failed: %s",
-                          refined_re2.error().c_str());
+                // No recompile needed (shouldn't happen with always-set flag)
+                matched = true;
+                break;
             }
+
+            // Can't retry if anchored at start
+            if (anchor_start) return 0;
+
+            // Advance past the current first-pass match start
+            pos = match_start + 1;
         }
+
+        if (!matched) return 0;
 
         // Apply non-backref filters (trim, reject) on the refined match
         if (groups[0].data()) {
@@ -505,16 +621,23 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                     }
                 } else if (f.type == JS_PF_REJECT_MATCH) {
                     if (f.reject_pattern) {
-                        re2::StringPiece check_text;
-                        if (f.reject_at_start) {
-                            check_text = re2::StringPiece(match_begin, input_len - match_begin_offset);
+                        // reject_at_start holds the marker group's RE2 index
+                        // Use the marker group's position for the rejection check
+                        const char* check_start;
+                        if (f.reject_at_start > 0 && f.reject_at_start < ngroups && groups[f.reject_at_start].data()) {
+                            check_start = groups[f.reject_at_start].data();
                         } else {
-                            check_text = re2::StringPiece(input + match_end_offset, input_len - match_end_offset);
+                            // fallback: check at match end
+                            check_start = input + match_end_offset;
                         }
-                        re2::StringPiece dummy;
-                        if (f.reject_pattern->Match(check_text, 0, (int)check_text.size(),
-                                                     re2::RE2::ANCHOR_START, &dummy, 0)) {
-                            return 0;
+                        int check_len = input_len - (int)(check_start - input);
+                        if (check_len > 0) {
+                            re2::StringPiece check_text(check_start, check_len);
+                            re2::StringPiece dummy;
+                            if (f.reject_pattern->Match(check_text, 0, check_len,
+                                                         re2::RE2::ANCHOR_START, &dummy, 0)) {
+                                return 0;
+                            }
                         }
                     }
                 }
@@ -545,16 +668,20 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                     }
                     case JS_PF_REJECT_MATCH: {
                         if (f.reject_pattern) {
-                            re2::StringPiece check_text;
-                            if (f.reject_at_start) {
-                                check_text = re2::StringPiece(match_begin, input_len - match_begin_offset);
+                            const char* check_start;
+                            if (f.reject_at_start > 0 && f.reject_at_start < ngroups && groups[f.reject_at_start].data()) {
+                                check_start = groups[f.reject_at_start].data();
                             } else {
-                                check_text = re2::StringPiece(input + match_end_offset, input_len - match_end_offset);
+                                check_start = input + match_end_offset;
                             }
-                            re2::StringPiece dummy;
-                            if (f.reject_pattern->Match(check_text, 0, (int)check_text.size(),
-                                                         re2::RE2::ANCHOR_START, &dummy, 0)) {
-                                return 0;
+                            int check_len = input_len - (int)(check_start - input);
+                            if (check_len > 0) {
+                                re2::StringPiece check_text(check_start, check_len);
+                                re2::StringPiece dummy;
+                                if (f.reject_pattern->Match(check_text, 0, check_len,
+                                                             re2::RE2::ANCHOR_START, &dummy, 0)) {
+                                    return 0;
+                                }
                             }
                         }
                         break;
@@ -566,8 +693,10 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
         }
     }
 
-    // Fill output arrays
-    int out_count = ngroups < max_groups ? ngroups : max_groups;
+    // Fill output arrays — limit to original JS group count (hide synthetic groups)
+    int out_count = compiled->original_group_count + 1;
+    if (out_count > ngroups) out_count = ngroups;
+    if (out_count > max_groups) out_count = max_groups;
     // Remap groups back to original numbering if needed
     for (int g = 0; g < out_count; g++) {
         int src_g = g; // default: identity

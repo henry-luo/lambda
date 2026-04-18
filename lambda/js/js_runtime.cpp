@@ -8598,6 +8598,15 @@ struct JsRegexData {
     bool sticky;              // 'y' flag (v46)
 };
 
+// Helper: get the correct number of capturing groups for output
+// When wrapper is active, use original JS group count (not RE2's inflated count)
+static int js_regex_num_groups(JsRegexData* rd) {
+    if (rd->wrapper && rd->wrapper->has_filters) {
+        return rd->wrapper->original_group_count + 1; // +1 for full match
+    }
+    return rd->re2->NumberOfCapturingGroups() + 1;
+}
+
 // Helper: match using wrapper if available, otherwise direct RE2
 // Returns true if matched. Fills `matches` array with StringPiece groups.
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
@@ -9224,7 +9233,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     }
 
     // perform match with captures
-    int num_groups = rd->re2->NumberOfCapturingGroups() + 1; // +1 for full match
+    int num_groups = js_regex_num_groups(rd);
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
@@ -9395,7 +9404,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     if (max_parts == 0) return js_array_new(0);
 
     Item result = js_array_new(0);
-    int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+    int num_groups = js_regex_num_groups(rd);
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
     int pos = 0;
@@ -10748,7 +10757,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     if (rd) {
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
-        int ngroups = rd->re2->NumberOfCapturingGroups() + 1;
+        int ngroups = js_regex_num_groups(rd);
         if (ngroups > 16) ngroups = 16;
         re2::StringPiece matches[16];
         StrBuf* buf = strbuf_new();
@@ -11258,8 +11267,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
                 Item result = js_array_new(0);
                 re2::StringPiece input(s->chars, s->len);
-                int num_groups = rd->re2->NumberOfCapturingGroups();
-                int total_groups = num_groups + 1;
+                int total_groups = js_regex_num_groups(rd);
                 if (total_groups > 16) total_groups = 16;
                 re2::StringPiece match[16];
                 int pos = 0;
