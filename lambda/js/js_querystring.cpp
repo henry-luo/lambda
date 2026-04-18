@@ -41,14 +41,185 @@ static Item make_string_item(const char* str) {
 }
 
 // ─── querystring.escape(str) ─────────────────────────────────────────────────
-// Percent-encodes a string (same as encodeURIComponent)
+// Percent-encodes a string matching Node.js querystring.escape() semantics.
+// Implements Node's encodeStr() logic which handles surrogate pairs by blindly
+// combining high surrogates with the next code unit (not encodeURIComponent).
 extern "C" Item js_qs_escape(Item str_item) {
-    if (get_type_id(str_item) != LMD_TYPE_STRING) return make_string_item("");
+    if (get_type_id(str_item) != LMD_TYPE_STRING) {
+        if (get_type_id(str_item) == LMD_TYPE_SYMBOL) {
+            // Symbol + '' throws TypeError in JS
+            extern Item js_throw_type_error(const char* msg);
+            return js_throw_type_error("Cannot convert a Symbol value to a string");
+        }
+        TypeId t = get_type_id(str_item);
+        if (t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY) {
+            // Object: Node uses String(str) which does ToPrimitive(hint:string)
+            // Try toString first, then valueOf. Throw TypeError if neither gives primitive.
+            extern Item js_property_get(Item obj, Item key);
+            extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
+            extern Item js_throw_type_error(const char* msg);
+            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item ts_fn = js_property_get(str_item, ts_key);
+            if (get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(ts_fn, str_item, NULL, 0);
+                TypeId rt = get_type_id(result);
+                if (rt == LMD_TYPE_STRING) { str_item = result; goto do_encode; }
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) {
+                    str_item = js_to_string(result);
+                    if (get_type_id(str_item) == LMD_TYPE_STRING) goto do_encode;
+                }
+            }
+            // toString not callable or returned object — try valueOf
+            Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
+            Item vo_fn = js_property_get(str_item, vo_key);
+            if (get_type_id(vo_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(vo_fn, str_item, NULL, 0);
+                TypeId rt = get_type_id(result);
+                if (rt == LMD_TYPE_STRING) { str_item = result; goto do_encode; }
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) {
+                    str_item = js_to_string(result);
+                    if (get_type_id(str_item) == LMD_TYPE_STRING) goto do_encode;
+                }
+            }
+            // Neither toString nor valueOf produced a primitive string
+            return js_throw_type_error("Cannot convert object to primitive value");
+        }
+        // Non-object, non-symbol: use js_to_string (numbers, booleans, etc.)
+        str_item = js_to_string(str_item);
+        if (get_type_id(str_item) != LMD_TYPE_STRING) return make_string_item("");
+    }
+do_encode:;
     String* s = it2s(str_item);
-    char* encoded = url_encode_component(s->chars, s->len);
-    if (!encoded) return make_string_item("");
-    Item result = make_string_item(encoded, (int)strlen(encoded));
-    mem_free(encoded);
+    if (s->len == 0) return str_item;
+
+    // Node's noEscape table: unreserved chars that pass through unencoded
+    // A-Z a-z 0-9 - _ . ~ ! ' ( ) *
+    static const char hex[] = "0123456789ABCDEF";
+    // Worst case: every code point becomes 4 bytes → 12 percent-encoded chars
+    size_t max_out = s->len * 12 + 1;
+    char* out = (char*)mem_alloc(max_out, MEM_CAT_TEMP);
+    if (!out) return make_string_item("");
+    size_t j = 0;
+
+    // Walk the UTF-8 bytes, decoding code points
+    const unsigned char* p = (const unsigned char*)s->chars;
+    const unsigned char* end = p + s->len;
+
+    while (p < end) {
+        unsigned int c;
+        int cp_bytes;
+        unsigned char b0 = *p;
+        if (b0 < 0x80) {
+            c = b0; cp_bytes = 1;
+        } else if ((b0 & 0xE0) == 0xC0 && p + 1 < end) {
+            c = ((b0 & 0x1F) << 6) | (p[1] & 0x3F);
+            cp_bytes = 2;
+        } else if ((b0 & 0xF0) == 0xE0 && p + 2 < end) {
+            c = ((b0 & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+            cp_bytes = 3;
+        } else if ((b0 & 0xF8) == 0xF0 && p + 3 < end) {
+            c = ((b0 & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+            cp_bytes = 4;
+        } else {
+            c = b0; cp_bytes = 1; // invalid byte, encode as-is
+        }
+        p += cp_bytes;
+
+        // ASCII fast path
+        if (c < 0x80) {
+            unsigned char cc = (unsigned char)c;
+            if ((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z') ||
+                (cc >= '0' && cc <= '9') || cc == '-' || cc == '_' ||
+                cc == '.' || cc == '~' || cc == '!' || cc == '\'' ||
+                cc == '(' || cc == ')' || cc == '*') {
+                out[j++] = (char)cc;
+            } else {
+                out[j++] = '%'; out[j++] = hex[cc >> 4]; out[j++] = hex[cc & 0x0F];
+            }
+            continue;
+        }
+
+        // 2-byte: 0x80 - 0x7FF
+        if (c < 0x800) {
+            unsigned char b1 = 0xC0 | (c >> 6);
+            unsigned char b2 = 0x80 | (c & 0x3F);
+            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
+            continue;
+        }
+
+        // High surrogate: 0xD800 - 0xDBFF
+        if (c >= 0xD800 && c <= 0xDBFF) {
+            // Need next code unit - decode next code point from UTF-8
+            if (p >= end) {
+                // Lone surrogate at end → throw URIError
+                mem_free(out);
+                extern Item js_new_error_with_name(Item name, Item msg);
+                extern void js_throw_value(Item error);
+                Item err_name = (Item){.item = s2it(heap_create_name("URIError", 8))};
+                Item err_msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+                Item error = js_new_error_with_name(err_name, err_msg);
+                // Set .code = 'ERR_INVALID_URI'
+                Item code_key = (Item){.item = s2it(heap_create_name("code", 4))};
+                Item code_val = (Item){.item = s2it(heap_create_name("ERR_INVALID_URI", 15))};
+                js_property_set(error, code_key, code_val);
+                js_throw_value(error);
+                return make_js_undefined();
+            }
+            // Decode next code point (treated as c2 code unit)
+            unsigned int c2;
+            unsigned char nb0 = *p;
+            if (nb0 < 0x80) {
+                c2 = nb0; p += 1;
+            } else if ((nb0 & 0xE0) == 0xC0 && p + 1 < end) {
+                c2 = ((nb0 & 0x1F) << 6) | (p[1] & 0x3F); p += 2;
+            } else if ((nb0 & 0xF0) == 0xE0 && p + 2 < end) {
+                c2 = ((nb0 & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F); p += 3;
+            } else if ((nb0 & 0xF8) == 0xF0 && p + 3 < end) {
+                c2 = ((nb0 & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F); p += 4;
+            } else {
+                c2 = nb0; p += 1;
+            }
+            // Node.js behavior: blindly combine high surrogate with next code unit
+            unsigned int cp = 0x10000 + (((c & 0x3FF) << 10) | (c2 & 0x3FF));
+            // Encode as 4-byte UTF-8
+            unsigned char b1 = 0xF0 | (cp >> 18);
+            unsigned char b2 = 0x80 | ((cp >> 12) & 0x3F);
+            unsigned char b3 = 0x80 | ((cp >> 6) & 0x3F);
+            unsigned char b4 = 0x80 | (cp & 0x3F);
+            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b4 >> 4]; out[j++] = hex[b4 & 0x0F];
+            continue;
+        }
+
+        // 3-byte: 0x800 - 0xFFFF (non-surrogate)
+        if (c < 0x10000) {
+            unsigned char b1 = 0xE0 | (c >> 12);
+            unsigned char b2 = 0x80 | ((c >> 6) & 0x3F);
+            unsigned char b3 = 0x80 | (c & 0x3F);
+            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
+            continue;
+        }
+
+        // 4-byte: 0x10000+ (supplementary)
+        {
+            unsigned char b1 = 0xF0 | (c >> 18);
+            unsigned char b2 = 0x80 | ((c >> 12) & 0x3F);
+            unsigned char b3 = 0x80 | ((c >> 6) & 0x3F);
+            unsigned char b4 = 0x80 | (c & 0x3F);
+            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
+            out[j++] = '%'; out[j++] = hex[b4 >> 4]; out[j++] = hex[b4 & 0x0F];
+        }
+    }
+    out[j] = '\0';
+    Item result = make_string_item(out, (int)j);
+    mem_free(out);
     return result;
 }
 

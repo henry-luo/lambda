@@ -3179,12 +3179,13 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                     MIR_reg_t idx_float = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_FLOAT);
                     idx_native = jm_emit_double_to_int(mt, idx_float);
                 } else {
-                    MIR_reg_t idx_boxed = jm_transpile_box_item(mt, mem->property);
-                    idx_native = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+                    // Unknown type: might be a Symbol at runtime. Fall through to boxed path.
+                    goto skip_ta_native;
                 }
                 return jm_transpile_typed_array_get_native(mt, ta_var->reg, idx_native,
                     ta_var->typed_array_type, target_type, ta_var->hoisted_data_reg);
             }
+            skip_ta_native:
 
             // A3: Regular array element access — get boxed Item then unbox to target.
             // When used in a float expression (target_type == FLOAT), the caller needs
@@ -7655,8 +7656,8 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                     MIR_reg_t idx_float = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_FLOAT);
                     idx_native = jm_emit_double_to_int(mt, idx_float);
                 } else {
-                    MIR_reg_t idx_boxed = jm_transpile_box_item(mt, member->property);
-                    idx_native = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+                    // Unknown type: might be Symbol. Fall through to generic property set.
+                    goto skip_ta_write;
                 }
 
                 MIR_reg_t new_val;
@@ -7689,6 +7690,7 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 return jm_transpile_typed_array_set(mt, ta_var->reg, idx_native, new_val, ta_var->typed_array_type,
                     ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
             }
+            skip_ta_write:
 
             // A4: Regular array write fast path — when index is known INT, use js_array_set_int
             TypeId idx_type = jm_get_effective_type(mt, member->property);
@@ -12230,10 +12232,23 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     }
 
     // P9: arr[i] for known typed arrays → inline memory load
+    // Skip P9 when the computed key might be a Symbol (e.g. arr[Symbol.iterator]).
+    // Symbols are encoded as negative ints and would be misinterpreted as array indices.
     if (mem->computed) {
-        JsMirVarEntry* ta_var = jm_get_typed_array_var(mt, mem->object);
+        // Check if the key expression is Symbol.xxx (compile-time known symbol)
+        bool key_might_be_symbol = false;
+        if (mem->property && mem->property->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* km = (JsMemberNode*)mem->property;
+            if (km->object && km->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* kid = (JsIdentifierNode*)km->object;
+                if (kid->name && kid->name->len == 6 && strncmp(kid->name->chars, "Symbol", 6) == 0)
+                    key_might_be_symbol = true;
+            }
+        }
+
+        JsMirVarEntry* ta_var = !key_might_be_symbol ? jm_get_typed_array_var(mt, mem->object) : NULL;
         if (ta_var) {
-            // Get native int index
+            // Get native int index — with runtime Symbol guard for non-literal keys
             MIR_reg_t idx_native;
             TypeId idx_type = jm_get_effective_type(mt, mem->property);
             if (idx_type == LMD_TYPE_INT) {
@@ -12242,8 +12257,13 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 MIR_reg_t idx_float = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_FLOAT);
                 idx_native = jm_emit_double_to_int(mt, idx_float);
             } else {
-                MIR_reg_t idx_boxed = jm_transpile_box_item(mt, mem->property);
-                idx_native = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_boxed));
+                // Unknown type: might be a Symbol at runtime.
+                // Fall through to js_property_access for safe handling.
+                MIR_reg_t obj_boxed = jm_transpile_box_item(mt, mem->object);
+                MIR_reg_t key_boxed = jm_transpile_box_item(mt, mem->property);
+                return jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_boxed),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
             }
             return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native, ta_var->typed_array_type,
                 ta_var->hoisted_data_reg, ta_var->hoisted_len_reg);
@@ -15669,6 +15689,7 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     int typed_array_type = -1;
     bool is_arraybuffer = false;
     bool is_dataview = false;
+    bool is_buffer = false;
     if (ctor_len == 10 && strncmp(ctor_name, "Int32Array", 10) == 0) { typed_array_type = 4; is_builtin = true; }
     else if (ctor_len == 10 && strncmp(ctor_name, "Int16Array", 10) == 0) { typed_array_type = 2; is_builtin = true; }
     else if (ctor_len == 9 && strncmp(ctor_name, "Int8Array", 9) == 0) { typed_array_type = 0; is_builtin = true; }
@@ -15709,6 +15730,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) is_builtin = true;
     // XMLHttpRequest constructor (Radiant browser context)
     else if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) is_builtin = true;
+    // Buffer constructor (deprecated new Buffer(size/string/array))
+    else if (ctor_len == 6 && strncmp(ctor_name, "Buffer", 6) == 0) { is_buffer = true; is_builtin = true; }
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -15740,6 +15763,18 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, buf_arg),
             MIR_T_I64, off_op,
             MIR_T_I64, len_op);
+    }
+
+    // new Buffer(arg [, encoding]) — deprecated constructor
+    if (is_buffer) {
+        MIR_reg_t arg_val = first_arg ? first_arg : jm_emit_undefined(mt);
+        MIR_reg_t enc_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) enc_arg = jm_transpile_box_item(mt, arg2);
+        MIR_reg_t enc_val = enc_arg ? enc_arg : jm_emit_undefined(mt);
+        return jm_call_2(mt, "js_buffer_construct", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_val));
     }
 
     // new TypedArray(arg [, byteOffset [, length]])

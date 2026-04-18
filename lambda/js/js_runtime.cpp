@@ -139,6 +139,11 @@ static inline Item js_symbol_to_key(Item sym) {
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};    
 }
 
+// extern "C" wrapper for js_key_is_symbol — callable from MIR JIT
+extern "C" int64_t js_key_is_symbol_c(Item key) {
+    return js_key_is_symbol(key) ? 1 : 0;
+}
+
 // Convert any key (string or symbol) to a getter key (__get_<key_string>)
 extern "C" Item js_make_getter_key(Item key) {
     // convert symbol to string key first
@@ -3406,9 +3411,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                     }
                     Item ta_proto = js_get_prototype(object);
+                    if (ta_proto.item == ITEM_NULL) {
+                        // TypedArray instances don't store __proto__ in properties;
+                        // use the implicit %TypedArray%.prototype for method lookup
+                        extern Item js_get_typed_array_base_proto();
+                        ta_proto = js_get_typed_array_base_proto();
+                    }
                     if (ta_proto.item != ITEM_NULL) {
                         Item result = js_property_get(ta_proto, key);
-                        if (result.item != ITEM_NULL) return result;
+                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
                     }
                     // fallback: check buffer prototype for Uint8Array (Buffer) instances
                     // use map_get (own-property only) to avoid prototype chain recursion
@@ -4615,8 +4626,20 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     // Typed array: ta[i] = val (use map_kind for fast check)
+    // Only intercept numeric index writes; string keys (e.g. __proto__) fall through
+    // to the normal Map property set path below.
     if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        return js_typed_array_set(object, key, value);
+        TypeId kt = get_type_id(key);
+        if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
+            return js_typed_array_set(object, key, value);
+        }
+        if (kt == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->chars[0] >= '0' && sk->chars[0] <= '9') {
+                return js_typed_array_set(object, key, value);
+            }
+        }
+        // fall through for non-numeric string keys (e.g. __proto__)
     }
 
     if (type == LMD_TYPE_MAP) {
@@ -10112,6 +10135,30 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (idx < 0) idx += ta->length;
                 if (idx < 0 || idx >= ta->length) return make_js_undefined();
                 return js_typed_array_get(obj, (Item){.item = i2it(idx)});
+            }
+            // TypedArray.prototype.keys/values/entries — return array iterators
+            // Convert typed array to regular array, then create iterator object
+            if ((method->len == 4 && strncmp(method->chars, "keys", 4) == 0) ||
+                (method->len == 6 && strncmp(method->chars, "values", 6) == 0) ||
+                (method->len == 7 && strncmp(method->chars, "entries", 7) == 0)) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item arr = js_array_new(0);
+                for (int i = 0; i < len; i++) {
+                    js_array_push_item_direct(arr.array, js_typed_array_get(obj, (Item){.item = i2it(i)}));
+                }
+                int kind = 1; // values
+                if (method->chars[0] == 'k') kind = 0; // keys
+                else if (method->chars[0] == 'e') kind = 2; // entries
+                Item iter = js_new_object();
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, arr);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(kind)});
+                Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+                Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
+                return iter;
             }
             if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;

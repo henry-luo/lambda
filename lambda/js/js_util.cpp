@@ -200,6 +200,18 @@ extern "C" Item js_util_format(Item args_item) {
 
 extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
     (void)options_item;
+
+    // handle values that JSON.stringify doesn't represent correctly
+    TypeId tid = get_type_id(obj_item);
+    if (tid == LMD_TYPE_FLOAT) {
+        double d = it2d(obj_item);
+        if (d != d) return make_string_item("NaN");
+        if (d == 1.0/0.0) return make_string_item("Infinity");
+        if (d == -1.0/0.0) return make_string_item("-Infinity");
+    }
+    if (tid == LMD_TYPE_UNDEFINED) return make_string_item("undefined");
+    if (tid == LMD_TYPE_NULL) return make_string_item("null");
+
     // use JSON.stringify as a basic inspect
     Item result = js_json_stringify(obj_item);
     if (get_type_id(result) == LMD_TYPE_STRING) return result;
