@@ -1,0 +1,34 @@
+Language definition for 'typescript' could not be registered.
+Error: can not find mode to replace
+true
+function
+function
+function
+function
+function
+36
+true
+true
+true
+true
+true
+true
+true
+true
+true
+true
+JavaScript
+Python
+js-highlight-error
+js-highlight-error
+py-highlight-error
+py-highlight-error
+css-highlight-error
+css-highlight-error
+json-highlight-error
+json-highlight-error
+auto-error
+auto-error
+r
+true
+HLJS_TESTS_DONE

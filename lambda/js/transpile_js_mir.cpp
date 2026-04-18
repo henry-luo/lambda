@@ -1808,7 +1808,9 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc) continue;  // resolved via module_consts, no capture needed
+            if (mc) {
+                continue;  // resolved via module_consts, no capture needed
+            }
         }
         // This is a capture
         if (fc->capture_count < 32) {
@@ -7433,7 +7435,7 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                     return rhs;
                 }
             }
-            log_error("js-mir: assignment to undefined var '%s'", vname);
+            log_error("js-mir: assignment to undefined var '%s' in func_idx=%d", vname, mt->current_func_index);
             return jm_emit_null(mt);
         }
 
@@ -8289,8 +8291,15 @@ static bool jm_is_console_log(JsCallNode* call) {
     if (!m->property || m->property->node_type != JS_AST_NODE_IDENTIFIER) return false;
     JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
     JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-    return obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "console", 7) == 0 &&
-           prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "log", 3) == 0;
+    if (!obj->name || obj->name->len != 7 || strncmp(obj->name->chars, "console", 7) != 0) return false;
+    if (!prop->name) return false;
+    int pl = (int)prop->name->len;
+    const char* pn = prop->name->chars;
+    return (pl == 3 && strncmp(pn, "log", 3) == 0) ||
+           (pl == 5 && strncmp(pn, "error", 5) == 0) ||
+           (pl == 4 && strncmp(pn, "warn", 4) == 0) ||
+           (pl == 5 && strncmp(pn, "debug", 5) == 0) ||
+           (pl == 4 && strncmp(pn, "info", 4) == 0);
 }
 
 static bool jm_is_math_call(JsCallNode* call) {
@@ -16810,14 +16819,27 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_label_t l_iter_exc = jm_new_label(mt);
 
     // Push synthetic try context: exceptions in body → l_iter_exc
+    // Allocate return_val_reg/has_return_reg so return inside for-of body
+    // can delay the return, call IteratorClose, then actually return.
     bool pushed_try = false;
+    MIR_reg_t forit_return_val = 0;
+    MIR_reg_t forit_has_return = 0;
+    MIR_label_t l_forit_ret = jm_new_label(mt);
     if (mt->try_ctx_depth < 16) {
+        forit_return_val = jm_new_reg(mt, "_forit_ret", MIR_T_I64);
+        forit_has_return = jm_new_reg(mt, "_forit_hret", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, forit_return_val),
+            MIR_new_int_op(mt->ctx, 0)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, forit_has_return),
+            MIR_new_int_op(mt->ctx, 0)));
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
         tc->catch_label = l_iter_exc;
         tc->finally_label = 0;
-        tc->end_label = 0;
-        tc->return_val_reg = 0;
-        tc->has_return_reg = 0;
+        tc->end_label = l_forit_ret;
+        tc->return_val_reg = forit_return_val;
+        tc->has_return_reg = forit_has_return;
         tc->has_catch = true;
         tc->has_finally = false;
         tc->inlining_finally = false;
@@ -16868,6 +16890,38 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         // Propagate to outer handler
         jm_emit_exc_propagate_check(mt);
         jm_emit_label(mt, l_iter_exc_done);
+    }
+
+    // Handle delayed return from inside for-of body.
+    // jm_transpile_return stores val in forit_return_val, sets forit_has_return=1,
+    // and jumps to l_forit_ret. Here we close the iterator and do the actual return.
+    if (pushed_try) {
+        jm_emit_label(mt, l_forit_ret);
+        MIR_label_t l_no_delayed_ret = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_no_delayed_ret),
+            MIR_new_reg_op(mt->ctx, forit_has_return)));
+        // Close iterator before returning
+        jm_call_1(mt, "js_iterator_close", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+        // Propagate return to outer try context if any
+        if (mt->try_ctx_depth > 0) {
+            JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, outer->return_val_reg),
+                MIR_new_reg_op(mt->ctx, forit_return_val)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, outer->has_return_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+            MIR_label_t target = outer->has_finally ? outer->finally_label : outer->end_label;
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, target)));
+        } else {
+            // No outer try — emit actual return
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_reg_op(mt->ctx, forit_return_val)));
+        }
+        jm_emit_label(mt, l_no_delayed_ret);
     }
 
     if (mt->for_of_depth > 0) mt->for_of_depth--;
@@ -22198,22 +22252,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                      ai = mt->func_entries[ai].parent_index) {
                                     JsFuncCollected* anc = &mt->func_entries[ai];
                                     if (!anc->node) break;
-                                    // Check params
-                                    JsAstNode* ap = anc->node->params;
-                                    while (ap) {
-                                        if (ap->node_type == JS_AST_NODE_IDENTIFIER) {
-                                            JsIdentifierNode* id = (JsIdentifierNode*)ap;
-                                            if (id->name) {
-                                                char pname[128];
-                                                snprintf(pname, sizeof(pname), "_js_%.*s",
-                                                    (int)id->name->len, id->name->chars);
-                                                if (strcmp(pname, cap_name) == 0) {
-                                                    shadowed_by_ancestor = true;
-                                                    break;
-                                                }
-                                            }
+                                    // Check params (use jm_collect_pattern_names to handle
+                                    // all param forms: identifiers, defaults, rest, destructuring)
+                                    {
+                                        struct hashmap* anc_params = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                                            jm_name_hash, jm_name_cmp, NULL, NULL);
+                                        JsAstNode* ap = anc->node->params;
+                                        while (ap) {
+                                            jm_collect_pattern_names(ap, anc_params);
+                                            ap = ap->next;
                                         }
-                                        ap = ap->next;
+                                        if (jm_name_set_has(anc_params, cap_name)) {
+                                            shadowed_by_ancestor = true;
+                                        }
+                                        hashmap_free(anc_params);
                                     }
                                     if (shadowed_by_ancestor) break;
                                     // Also check body locals (var declarations shadow module vars)
