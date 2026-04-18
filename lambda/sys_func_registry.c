@@ -773,6 +773,10 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 // v24: strict mode flag setter (js_runtime.cpp)
 extern void js_set_strict_mode(int64_t strict);
 
+// with-statement scope support (js_globals.cpp)
+extern void js_with_push(Item obj);
+extern void js_with_pop(void);
+
 // Object.groupBy / Map.groupBy (ES2024)
 extern Item js_object_group_by(Item items, Item callback);
 extern Item js_map_group_by(Item items, Item callback);
@@ -1467,6 +1471,8 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
+    {"js_with_push", FPTR(js_with_push)},
+    {"js_with_pop", FPTR(js_with_pop)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
