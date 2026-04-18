@@ -312,6 +312,7 @@ struct JsMirTranspiler {
     // ES module support
     bool is_module;                  // true when compiling an ES module (not main script)
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
+    bool is_eval_direct;             // true when compiling eval code as direct script (sloppy-mode var export)
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 
@@ -424,6 +425,7 @@ struct JsModuleConstEntry {
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
+    bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -578,6 +580,10 @@ static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->is_const) {
                 entry.var.is_const = true;
             }
+            // Preserve let/const flag from TDZ init
+            if (existing->is_let_const) {
+                entry.var.is_let_const = true;
+            }
         }
     }
 
@@ -605,6 +611,7 @@ static JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
 struct JsNameSetEntry {
     char name[128];
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)
+    bool from_func_decl;  // true if this name came from a nested function declaration
 };
 
 static uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1) {
@@ -1519,7 +1526,12 @@ static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool
         if (fn->name && fn->name->chars) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
-            jm_name_set_add(locals, name);
+            JsNameSetEntry e;
+            memset(&e, 0, sizeof(e));
+            snprintf(e.name, sizeof(e.name), "%s", name);
+            e.from_func_decl = true;
+            JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(locals, &e);
+            if (!existing) hashmap_set(locals, &e);
         }
         break;
     }
@@ -1559,12 +1571,18 @@ static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool
         JsForOfNode* fo = (JsForOfNode*)node;
         if (fo->left) {
             if (fo->left->node_type == JS_AST_NODE_IDENTIFIER) {
-                // plain identifier: for (s of arr) or for (const s of arr)
-                jm_collect_pattern_names(fo->left, locals);
+                // plain identifier: for (s of arr) or for (let/const s of arr)
+                // When var_only, skip let/const loop variables (they're block-scoped)
+                if (!var_only || fo->kind == 0) {
+                    jm_collect_pattern_names(fo->left, locals);
+                }
             } else if (fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                 JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)fo->left;
-                JsAstNode* d = vd->declarations;
-                while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
+                // Respect var_only: skip let/const loop variables (they're block-scoped)
+                if (!var_only || vd->kind == JS_VAR_VAR) {
+                    JsAstNode* d = vd->declarations;
+                    while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
+                }
             } else {
                 // destructuring pattern: for ([a,b] of arr) or for ({x} of arr)
                 jm_collect_pattern_names(fo->left, locals);
@@ -4038,6 +4056,36 @@ static JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNo
         if (mt->func_entries[i].node == fn) return &mt->func_entries[i];
     }
     return NULL;
+}
+
+// Annex B §B.3.3.1: Check if enclosing function has a parameter whose name
+// matches the given identifier.  When it does, the block-scoped function
+// declaration must NOT overwrite the parameter binding.
+static bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len) {
+    if (!fn || !fn->params) return false;
+    JsAstNode* p = fn->params;
+    while (p) {
+        JsIdentifierNode* pid = NULL;
+        if (p->node_type == JS_AST_NODE_IDENTIFIER) {
+            pid = (JsIdentifierNode*)p;
+        } else if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            // default parameter: (x = defaultVal) — check left side
+            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)p;
+            if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER)
+                pid = (JsIdentifierNode*)ap->left;
+        } else if (p->node_type == JS_AST_NODE_REST_ELEMENT) {
+            JsSpreadElementNode* rest = (JsSpreadElementNode*)p;
+            if (rest->argument && rest->argument->node_type == JS_AST_NODE_IDENTIFIER)
+                pid = (JsIdentifierNode*)rest->argument;
+        }
+        if (pid && pid->name &&
+            (int)pid->name->len == name_len &&
+            memcmp(pid->name->chars, name, name_len) == 0) {
+            return true;
+        }
+        p = p->next;
+    }
+    return false;
 }
 
 // P3: Find property slot index in constructor's ctor_prop_ptrs[]. Returns -1 if not found.
@@ -11042,8 +11090,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // eval(code) — dynamic evaluation
             if (nl == 4 && strncmp(n, "eval", 4) == 0 && !jm_find_var(mt, "eval")) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_builtin_eval", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+                // Pass scope flag: 1 = global scope (mt->in_main), 0 = function scope
+                return jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, mt->in_main ? 1 : 0));
             }
             // ES spec §20.2.1.1: Function(p1, p2, ..., body) is equivalent to new Function(...)
             if (nl == 8 && strncmp(n, "Function", 8) == 0) {
@@ -16491,11 +16541,22 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     // Create loop variable (for simple case) or temp var (for destructuring)
     MIR_reg_t loop_var;
+    bool is_let_const_loop = false;
+    if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
+        if (decl->kind == JS_VAR_LET || decl->kind == JS_VAR_CONST)
+            is_let_const_loop = true;
+    }
     if (var_name) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
         loop_var = jm_new_reg(mt, vname, MIR_T_I64);
         jm_set_var(mt, vname, loop_var);
+        // Mark let/const loop variables so Annex B skip condition works
+        if (is_let_const_loop) {
+            JsMirVarEntry* ve = jm_find_var(mt, vname);
+            if (ve) ve->is_let_const = true;
+        }
     } else {
         loop_var = jm_new_reg(mt, "_destr_elem", MIR_T_I64);
     }
@@ -16998,41 +17059,64 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_transpile_var_decl(mt, (JsVariableDeclarationNode*)stmt);
         break;
     case JS_AST_NODE_FUNCTION_DECLARATION: {
-        // Top-level function declarations are hoisted in the pre-pass.
-        // Block-scoped function declarations (inside nested { }) are NOT hoisted,
-        // so we must create/update the binding here.
+        // Annex B §B.3.3.1: In sloppy mode, function declarations inside blocks/if/switch
+        // are var-hoisted with undefined (Phase 2), and when evaluated, the function
+        // value is written back to the var-scoped binding.
+        // For top-level function declarations (direct children of function body),
+        // Phase 3 already hoisted them with the function value. Re-binding here
+        // is harmless (same value) but ensures consistent behavior.
+        //
+        // Skip condition: if enclosing function has a parameter with the same name,
+        // do NOT overwrite the parameter binding (B.3.3.1 step 2.ii).
         JsFunctionNode* fn_decl = (JsFunctionNode*)stmt;
         if (fn_decl->name) {
+            // Check Annex B skip condition: parameter name collision
+            JsFunctionNode* enclosing_fn = mt->current_fc ? mt->current_fc->node : NULL;
+            if (enclosing_fn && jm_func_has_param_named(enclosing_fn,
+                    fn_decl->name->chars, (int)fn_decl->name->len)) {
+                log_debug("js-mir: skip Annex B binding for '%.*s' — parameter name collision",
+                    (int)fn_decl->name->len, fn_decl->name->chars);
+                break;
+            }
             char fn_vname[128];
             snprintf(fn_vname, sizeof(fn_vname), "_js_%.*s",
                 (int)fn_decl->name->len, fn_decl->name->chars);
             JsMirVarEntry* existing = jm_find_var(mt, fn_vname);
-            // Check if this was already properly hoisted (has a function value, not undefined).
-            // If the existing var holds UNDEF, it was pre-created by var hoisting but
-            // the function hasn't been bound yet (block-scoped fn decl).
-            bool needs_binding = false;
-            if (!existing) {
-                needs_binding = true;
-            } else if (mt->scope_depth > 1) {
-                // Inside a nested block — update the variable with the function closure
-                needs_binding = true;
+            // Annex B skip: if the existing binding is let/const, don't overwrite
+            // (B.3.3.1/B.3.3.3 — would produce early error if replaced with var)
+            if (existing && existing->is_let_const) {
+                log_debug("js-mir: skip Annex B binding for '%.*s' — let/const conflict (scope_depth=%d)",
+                    (int)fn_decl->name->len, fn_decl->name->chars, mt->scope_depth);
+                break;
             }
-            if (needs_binding) {
-                JsFuncCollected* fc_decl = jm_find_collected_func(mt, fn_decl);
-                if (fc_decl && fc_decl->func_item) {
-                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc_decl);
-                    if (existing) {
-                        // Update existing var
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, existing->reg),
-                            MIR_new_reg_op(mt->ctx, fn_reg)));
-                    } else {
-                        MIR_reg_t var_reg = jm_new_reg(mt, fn_vname, MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, var_reg),
-                            MIR_new_reg_op(mt->ctx, fn_reg)));
-                        jm_set_var(mt, fn_vname, var_reg);
-                    }
+            if (existing) {
+                log_debug("js-mir: Annex B binding '%.*s' — existing found (is_let_const=%d scope_depth=%d)",
+                    (int)fn_decl->name->len, fn_decl->name->chars, existing->is_let_const, mt->scope_depth);
+            } else {
+                log_debug("js-mir: Annex B binding '%.*s' — no existing var",
+                    (int)fn_decl->name->len, fn_decl->name->chars);
+            }
+            JsFuncCollected* fc_decl = jm_find_collected_func(mt, fn_decl);
+            if (fc_decl && fc_decl->func_item) {
+                MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc_decl);
+                if (existing) {
+                    // Update existing var-scoped binding with function value
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, existing->reg),
+                        MIR_new_reg_op(mt->ctx, fn_reg)));
+                    // Reset type to ANY since the register now holds a function, not its
+                    // previous type (e.g. INT from `var f = 42`). Modify the entry
+                    // in-place since it lives in the function scope, not the current block.
+                    existing->type_id = LMD_TYPE_ANY;
+                    existing->mir_type = MIR_T_I64;
+                    jm_scope_env_mark_and_writeback(mt, fn_vname, existing->reg);
+                } else {
+                    MIR_reg_t var_reg = jm_new_reg(mt, fn_vname, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, var_reg),
+                        MIR_new_reg_op(mt->ctx, fn_reg)));
+                    jm_set_var(mt, fn_vname, var_reg);
+                    jm_scope_env_mark_and_writeback(mt, fn_vname, var_reg);
                 }
             }
         }
@@ -21458,8 +21542,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 mce.const_type = MCONST_MODVAR;
                 mce.int_val = mt->module_var_count++;
                 mce.modvar_type = 0;
+                mce.is_nested_func_hoist = e->from_func_decl;
                 hashmap_set(mt->module_consts, &mce);
-                log_debug("js-mir: hoisted var '%s' → module_var[%d]", mce.name, (int)mce.int_val);
+                log_debug("js-mir: hoisted var '%s' → module_var[%d]%s", mce.name, (int)mce.int_val,
+                    e->from_func_decl ? " (nested func decl)" : "");
             }
         }
         hashmap_free(hoisted_vars);
@@ -22880,6 +22966,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         }
                     }
+                    // Sloppy-mode eval: also export function to globalThis
+                    if (mt->is_eval_direct && !mt->is_global_strict) {
+                        MIR_reg_t gl = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+                        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, gl),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                    }
                 }
             }
         }
@@ -23092,6 +23187,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pmc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         }
+                    }
+                    // Sloppy-mode eval: also export capturing function to globalThis
+                    if (mt->is_eval_direct && !mt->is_global_strict) {
+                        MIR_reg_t gl = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+                        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, gl),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                     }
                 }
             }
@@ -23661,6 +23765,39 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         jm_emit_exc_propagate_check(mt);
 
         stmt = stmt->next;
+    }
+
+    // Sloppy-mode eval: export var/function declarations to globalThis
+    // so they're visible in the calling scope after eval() returns.
+    // Only for global-scope direct eval (not strict mode, not modules).
+    if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && mt->module_consts) {
+        int preamble_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
+            ? mt->preamble_var_count : 0;
+        MIR_reg_t global_reg = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+        size_t ev_iter = 0; void* ev_item;
+        while (hashmap_iter(mt->module_consts, &ev_iter, &ev_item)) {
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)ev_item;
+            if (mce->const_type != MCONST_MODVAR) continue;
+            // Skip preamble entries (inherited from outer scope)
+            if ((int)mce->int_val < preamble_limit) continue;
+            log_debug("js-mir: eval export checking '%s' var_kind=%d nested_func=%d preamble_limit=%d idx=%d",
+                mce->name, mce->var_kind, mce->is_nested_func_hoist, preamble_limit, (int)mce->int_val);
+            // Skip let/const (only var declarations leak from eval)
+            if (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) continue;
+            // Skip nested function declaration names (Annex B candidates, not real vars)
+            if (mce->is_nested_func_hoist) continue;
+            // Strip _js_ prefix to get the original JS name
+            const char* js_name = mce->name;
+            if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+            MIR_reg_t val_reg = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
+            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, global_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+            log_debug("js-mir: eval export var '%s' to globalThis", js_name);
+        }
     }
 
     // Module mode: return namespace instead of result
@@ -24641,8 +24778,9 @@ static char* eval_try_insert_return(const char* code, size_t len) {
 // ============================================================================
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
+// is_global_scope: 1 = called at global level, 0 = called inside a function
 // ============================================================================
-extern "C" Item js_builtin_eval(Item code_item) {
+extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     if (!js_source_runtime) {
         log_error("js-eval: no runtime context for dynamic evaluation");
         return ItemNull;
@@ -24839,6 +24977,7 @@ extern "C" Item js_builtin_eval(Item code_item) {
         mt->tp = tp;
         mt->ctx = eval_ctx;
         mt->is_module = false;
+        mt->is_eval_direct = (is_global_scope != 0);  // sloppy-mode eval: export vars to globalThis
         mt->filename = "<eval>";
         mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 16, 0, 0,
             js_import_cache_hash, js_import_cache_cmp, NULL, NULL);

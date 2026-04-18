@@ -106,7 +106,7 @@ extern "C" {
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
 // Forward declarations
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type);
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node);
 JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node);
 JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node);
@@ -1089,7 +1089,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
-            func->body = build_js_block_statement(tp, body_node);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_FUNCTION);
         } else {
             // Arrow function with expression body
             func->body = build_js_expression(tp, body_node);
@@ -1221,11 +1221,11 @@ JsAstNode* build_js_return_statement(JsTranspiler* tp, TSNode return_node) {
 }
 
 // Build JavaScript block statement node
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node) {
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type) {
     JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, block_node, sizeof(JsBlockNode));
 
-    // Create new block scope
-    JsScope* block_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    // Create new scope (JS_SCOPE_FUNCTION for function bodies, JS_SCOPE_BLOCK otherwise)
+    JsScope* block_scope = js_scope_create(tp, scope_type, tp->current_scope);
     js_scope_push(tp, block_scope);
 
     uint32_t stmt_count = ts_node_named_child_count(block_node);
@@ -3526,7 +3526,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
-            func->body = build_js_block_statement(tp, body_node);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_FUNCTION);
         } else {
             func->body = build_js_expression(tp, body_node);
         }
