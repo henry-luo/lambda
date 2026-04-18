@@ -6578,9 +6578,11 @@ static bool js_has_property(Item obj, Item key) {
 
 // Convert an array-like object (MAP with length + numeric indices) to an Array
 static Item js_array_like_to_array(Item obj) {
-    // Get length property
+    // Get length property — per ES spec, length getter may throw (step 2 of forEach/map/etc.)
     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item len_val = js_property_get(obj, length_key);
+    // propagate exception from length getter (e.g. Object.defineProperty getter that throws)
+    if (js_check_exception()) return ItemNull;
     int len = (int)js_get_number(len_val);
     if (len < 0) len = 0;
     if (len > 100000) len = 100000; // safety cap
@@ -7094,6 +7096,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // Plain Map: treat as array-like object (has length + numeric indices)
             js_array_method_real_this = this_val;
             Item temp_arr = js_array_like_to_array(this_val);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
@@ -7108,6 +7111,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // since js_property_get on strings supports indexed char access
             Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
             Item temp_arr = js_array_like_to_array(source);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;

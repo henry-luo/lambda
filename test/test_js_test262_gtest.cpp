@@ -2565,6 +2565,7 @@ int main(int argc, char** argv) {
             p.skip_result = T262_PASS;
             p.is_negative = false;
             p.is_strict = false;
+            p.native_harness = false;
             auto cm_it = g_metadata_cache.find(param.test_path);
             if (cm_it != g_metadata_cache.end()) {
                 const CachedMeta& cm = cm_it->second;
@@ -2572,6 +2573,7 @@ int main(int argc, char** argv) {
                 p.negative_type = cm.neg_type;
                 p.is_strict = cm.flags & 8;
                 p.includes = cm.includes;
+                p.native_harness = cm.native_harness;
             }
             indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
@@ -2669,6 +2671,7 @@ int main(int argc, char** argv) {
                 p.skip_result = T262_PASS;
                 p.is_negative = false;
                 p.is_strict = false;
+                p.native_harness = false;
                 // Load metadata from cache
                 auto cm_it = g_metadata_cache.find(param.test_path);
                 if (cm_it != g_metadata_cache.end()) {
@@ -2677,13 +2680,14 @@ int main(int argc, char** argv) {
                     p.negative_type = cm.neg_type;
                     p.is_strict = cm.flags & 8;
                     p.includes = cm.includes;
+                    p.native_harness = cm.native_harness;
                 }
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }
-            // Run each individually in small batches
+            // Run each individually (chunk_size=1) to isolate from batch effects
             if (!retry_prepared.empty()) {
-                auto retry_results = execute_t262_batch(retry_prepared, retry_indices);
+                auto retry_results = execute_t262_batch(retry_prepared, retry_indices, 1);
                 std::vector<std::string> real_regressions;
                 std::vector<std::string> recovered_names;
                 size_t recovered = 0;
