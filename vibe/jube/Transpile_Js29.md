@@ -454,14 +454,14 @@ Reflect methods are thin wrappers over internal operations. Once Proxy traps are
 
 These are structural prerequisites that unlock cascading improvements.
 
-| # | Work Item | Est. Impact | Dependencies | Files | Status |
-|---|-----------|-------------|-------------|-------|--------|
-| 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300 | None | `js_runtime.cpp` | **Done** |
-| 1.2 | Proxy handler traps — all 13 | +200 (direct) +100 (indirect) | 1.1 | `js_runtime.cpp`, `js_globals.cpp` | Not started |
-| 1.3 | TypedArray species + detached checks | +400 | 1.1 | `js_typed_array.cpp` | Not started |
-| 1.4 | Class public fields (instance + static) | +800 | None | `build_js_ast.cpp`, `transpile_js_mir.cpp` | **Done** |
-| 1.5 | arguments exotic object (mapped) | +150 | None | `js_runtime.cpp` | **Done** |
-| 1.6 | Block scope TDZ enforcement | +100 | None | `transpile_js_mir.cpp` | **Done** |
+| #   | Work Item                                     | Est. Impact                   | Dependencies | Files                                      | Status      |
+| --- | --------------------------------------------- | ----------------------------- | ------------ | ------------------------------------------ | ----------- |
+| 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300                          | None         | `js_runtime.cpp`                           | **Done**    |
+| 1.2 | Proxy handler traps — all 13                  | +200 (direct) +100 (indirect) | 1.1          | `js_runtime.cpp`, `js_globals.cpp`         | Not started |
+| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | Not started |
+| 1.4 | Class public fields (instance + static)       | +800                          | None         | `build_js_ast.cpp`, `transpile_js_mir.cpp` | **Done**    |
+| 1.5 | arguments exotic object (mapped)              | +150                          | None         | `js_runtime.cpp`                           | **Done**    |
+| 1.6 | Block scope TDZ enforcement                   | +100                          | None         | `transpile_js_mir.cpp`                     | **Done**    |
 
 ### Tier 2: Protocol Compliance (Estimated +1,500 tests)
 
