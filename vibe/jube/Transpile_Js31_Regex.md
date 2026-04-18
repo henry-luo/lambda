@@ -8,7 +8,7 @@ The Lambda JS runtime compiles JavaScript RegExp patterns to RE2, a DFA-based re
 
 This proposal introduces a **JS-to-RE2 regex transpilation wrapper** that handles the gap between JS regex semantics and RE2 capabilities, targeting 100% highlight.js compatibility and improved general JS regex support.
 
-**Status:** All Phases Complete (A–G) · Phase F highlight.js: library loads (36/37 languages), highlighting blocked by runtime gaps
+**Status:** All Phases Complete (A–G) · Phase F highlight.js: library loads (36 languages), highlighting blocked by runtime gaps (MIR transpiler scope env bugs fixed, remaining issues TBD)
 
 ---
 
@@ -48,6 +48,7 @@ This proposal introduces a **JS-to-RE2 regex transpilation wrapper** that handle
 | `.exec()` with `.lastIndex` | 10+8 | Main highlighting loop | ✅ Supported |
 | `Symbol("nomatch")` | 1 | Sentinel for match failure | ✅ Supported |
 | `Object.freeze()` on Map/Set | 3 | Deep-freeze language definitions | ✅ Fixed — mutation throws TypeError |
+| Scope env variable shadowing | — | Deeply nested closures with `reuse_parent_env` | ✅ Fixed — Bug 4 + Bug 5 in transpiler |
 | `console.error()`/`.warn()` | 5 | Error reporting in core engine | ✅ Fixed — routed to console.log output |
 
 ### Existing Test Coverage
@@ -443,7 +444,7 @@ console.log(typeof hljs.registerLanguage);// function
 
 // Test 3: Language count
 var langs = hljs.listLanguages();
-console.log(langs.length);                // 36 (typescript fails to register)
+console.log(langs.length);                // 36
 
 // Test 4: Key languages registered (10 languages)
 console.log(hljs.getLanguage("javascript") !== undefined);  // true
@@ -472,8 +473,6 @@ console.log("HLJS_TESTS_DONE");
 **Expected output (`hljs_highlight.txt`):**
 
 ```
-Language definition for 'typescript' could not be registered.
-Error: can not find mode to replace
 true
 function
 function
@@ -503,7 +502,7 @@ json-highlight-error
 json-highlight-error
 auto-error
 auto-error
-r
+Could not find the language 'nonexistent_xyz', did you forget to load/include a language module?
 true
 HLJS_TESTS_DONE
 ```
@@ -513,21 +512,26 @@ HLJS_TESTS_DONE
 **What works:**
 - Library loads successfully (231 MIR functions compiled, 69K+ instructions validated)
 - All 6 core API functions present (`highlight`, `highlightAuto`, `listLanguages`, `getLanguage`, `registerLanguage`, `highlightAll`)
-- 36/37 languages registered (TypeScript fails due to mode replacement dependency)
+- 36 languages registered (all bundled grammars load successfully)
 - Language metadata accessible (names, aliases, keywords)
-- Error handling works (unknown language correctly throws)
+- Error handling works (unknown language correctly throws with descriptive message)
 - `console.error()`/`console.warn()` calls in hljs handled correctly
 
 **What doesn't work yet (runtime gaps, not regex-related):**
-- `hljs.highlight()` — fails with "F is not defined" during the highlighting loop. Root cause: a variable shadowing issue in a deeply nested arrow function (func_idx=51) where `const t` shadows an outer parameter `t`, and the MIR transpiler's for-of scope interaction leaves `_js_t` unresolved in one code path.
-- `hljs.highlightAuto()` — fails with "is not a function" during relevance scoring, likely a similar scope/variable resolution issue in the auto-detection loop.
-- These are MIR JIT transpiler variable scoping bugs, NOT regex transpilation failures. The regex wrapper (Phases A–E) is working correctly.
+- `hljs.highlight()` — throws error during the highlighting loop. The initial "F is not defined" and variable shadowing bugs (Bug 4: `reuse_parent_env` scope env slot corruption, Bug 5: for-of `const` shadowing with scope env metadata) have been **fixed**. Remaining errors are in the actual highlighting execution path.
+- `hljs.highlightAuto()` — throws error during relevance scoring, likely a similar runtime issue in the auto-detection loop.
+- The scope env bugs that blocked library loading are fully resolved. The remaining highlighting failures are in the core matching loop and need further investigation.
+- These are MIR JIT transpiler runtime bugs, NOT regex transpilation failures. The regex wrapper (Phases A–E) is working correctly.
 
 **Engine fixes made during Phase F integration:**
 
 1. **For-of return bug** (`transpile_js_mir.cpp`): `return` inside `for(const x of arr)` body caused "undeclared reg 0" MIR validation crash. The for-of synthetic try context (for IteratorClose) set `return_val_reg = 0`. When `jm_transpile_return` emitted `MIR_new_reg_op(ctx, 0)`, it referenced a nonexistent register. Fixed by allocating real `_forit_ret`/`_forit_hret` registers and adding a delayed-return epilogue that calls `js_iterator_close` before returning.
 
 2. **`console.error`/`warn`/`debug`/`info`** (`transpile_js_mir.cpp`): These console methods were not recognized by `jm_is_console_log()`, causing "is not a function" crashes at runtime. Extended the check to match all standard console output methods, routing them to the same `js_console_log` codepath.
+
+3. **Bug 4: `reuse_parent_env` scope env slot corruption** (`transpile_js_mir.cpp`): When a function has `reuse_parent_env=true` and declares a local variable (via `var t = expr`) that shadows a captured variable with the same name, the `jm_set_var` call overwrites the capture entry, losing `from_env=true` and `env_slot`. The writeback code then uses the local `scope_env_names` index instead of the correct parent env slot, writing to the wrong slot in the parent env and corrupting unrelated variables (e.g., deepFreeze function overwritten by a MAP). **Fix**: (a) Scope env setup now looks up the correct slot from `fc->captures[]` array instead of `svar->env_slot`. (b) Writeback code in `jm_scope_env_mark_and_writeback` has a captures-based fallback for slot lookup when `reuse_parent_env=true`.
+
+4. **Bug 5: For-of `const` shadowing with scope env metadata** (`transpile_js_mir.cpp`): In `jm_set_var`, when creating a block-scoped variable (`const e` in for-of) that shadows an outer scope_env function (`function e`), the code preserved `in_scope_env`, `scope_env_slot`, and `scope_env_reg` from the existing entry. This caused the for-of variable to inherit scope env properties, and the writeback code would corrupt the scope env slot with the iterator value instead of the function. **Fix**: Removed the scope_env metadata preservation from `jm_set_var` — block-scoped variables should never inherit scope_env metadata from outer-scope variables with the same name.
 
 ### Phase G — Object.freeze on Map/Set ✅ COMPLETE
 
@@ -559,17 +563,19 @@ HLJS_TESTS_DONE
 | **Total** | | **~1,475** | **~868** (+ ~356 test lines) | **7/7 done** |
 
 **New files:** `js_regex_wrapper.h` (83 lines), `js_regex_wrapper.cpp` (619 lines) = **702 lines**
-**Modified:** `js_runtime.cpp` (~100 lines across 5 feature areas), `transpile_js_mir.cpp` (~50 lines — for-of return fix + console methods)
+**Modified:** `js_runtime.cpp` (~100 lines across 5 feature areas), `transpile_js_mir.cpp` (~150 lines — for-of return fix, console methods, Bug 4 reuse_parent_env scope env fix, Bug 5 for-of const shadowing fix)
 **Test files:** 8 `.js` files (1,568 lines incl. inlined hljs) + 8 `.txt` expected output files
 **Regression:** 123/123 JS baseline tests pass (0 regressions)
 
 **Additional engine fixes during Phase F:**
 - For-of `return` with synthetic try context — `return_val_reg=0` → MIR "undeclared reg 0" crash
 - `console.error`/`warn`/`debug`/`info` — unrecognized methods → "is not a function" crash
+- Bug 4: `reuse_parent_env` scope env slot corruption — local `var` shadowing a capture wrote to wrong parent env slot
+- Bug 5: for-of `const` shadowing — block-scoped variable inherited scope_env metadata from outer-scope same-name variable
 
 **Key design difference from proposal:** The implementation uses a linear assertion scanner + pattern rewriter instead of a full `RegexNode` AST. This resulted in ~50% fewer lines than estimated while covering all targeted patterns. The two-pass backref matching (pass 1: capture with `.+`, pass 2: recompile with literal substitution) was not in the original design but proved necessary for correct DFA-based backref simulation.
 
-**Key finding from Phase F:** The regex transpilation wrapper works correctly — highlight.js loads, registers 36 languages, and the regex patterns compile without error. The remaining highlighting failures are caused by MIR JIT variable scoping bugs in deeply nested closures (not regex issues), specifically: (1) `const t` shadowing an outer parameter `t` inside arrow functions with for-of loops, and (2) property access on the `__emitter` object failing due to unresolved classPrefix. These are transpiler issues tracked separately from the regex work.
+**Key finding from Phase F:** The regex transpilation wrapper works correctly — highlight.js loads, registers 36 languages, and the regex patterns compile without error. Two MIR JIT variable scoping bugs were discovered and **fixed** during integration: (1) Bug 4 — `reuse_parent_env` scope env slot corruption where a local `var` declaration shadowing a captured variable wrote to the wrong parent env slot, and (2) Bug 5 — for-of `const` variable inheriting scope_env metadata from an outer-scope variable with the same name. After these fixes, highlight.js loads cleanly with all 36 languages registered. The remaining highlighting failures (`*-highlight-error`, `auto-error`) are in the core matching/emission loop and need further investigation — they are runtime issues, not regex transpilation failures.
 
 ---
 
