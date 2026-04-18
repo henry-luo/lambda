@@ -8196,7 +8196,18 @@ static Item js_ctor_requires_new() {
     return ItemNull;
 }
 
-// v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
+// v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x), Object(x))
+static Item js_ctor_object_fn(Item arg) { return js_to_object(arg); }
+// v50: Array() called as function — same as new Array() per ES spec
+extern "C" Item js_array_new(int length);
+extern "C" Item js_array_new_from_item(Item arg);
+static Item js_ctor_array_fn(Item arg) {
+    // When called with 0 args, arg is padded to undefined
+    if (arg.item == ITEM_JS_UNDEFINED) {
+        return js_array_new(0);
+    }
+    return js_array_new_from_item(arg);
+}
 static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
 static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
 static Item js_ctor_string_fn(Item arg) {
@@ -8448,6 +8459,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_BOOLEAN) fn->func_ptr = (void*)js_ctor_boolean_fn;
     else if (ctor_id == JS_CTOR_NUMBER) fn->func_ptr = (void*)js_ctor_number_fn;
     else if (ctor_id == JS_CTOR_STRING) fn->func_ptr = (void*)js_ctor_string_fn;
+    else if (ctor_id == JS_CTOR_OBJECT) fn->func_ptr = (void*)js_ctor_object_fn;
+    else if (ctor_id == JS_CTOR_ARRAY) fn->func_ptr = (void*)js_ctor_array_fn;
     else if (ctor_id == JS_CTOR_REGEXP) fn->func_ptr = (void*)js_ctor_regexp_fn;
     else if (ctor_id == JS_CTOR_DATE) fn->func_ptr = (void*)js_ctor_date_fn;
     else if (ctor_id == JS_CTOR_ERROR) fn->func_ptr = (void*)js_ctor_error_fn;
