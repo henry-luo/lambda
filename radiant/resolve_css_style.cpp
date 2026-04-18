@@ -778,6 +778,7 @@ DisplayValue resolve_display_value(void* child) {
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
                             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
+                            tag_id == HTM_TAG_WEBVIEW ||
                             (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
                             (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
                             tag_id == HTM_TAG_EMBED);
@@ -1071,6 +1072,7 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
+            tag_id == HTM_TAG_WEBVIEW ||
             (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
             (tag_id == HTM_TAG_AUDIO && dom_elem && dom_elem->has_attribute("controls")) ||
             tag_id == HTM_TAG_EMBED) {

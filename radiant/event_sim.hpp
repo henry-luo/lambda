@@ -116,7 +116,10 @@ enum SimEventType {
     // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
-    SIM_EVENT_DUMP_CARET       // dump caret state to file
+    SIM_EVENT_DUMP_CARET,      // dump caret state to file
+    // Webview commands
+    SIM_EVENT_WEBVIEW_EVAL_JS,      // execute JS in a webview element
+    SIM_EVENT_WEBVIEW_WAIT_LOAD,    // wait for webview navigation to complete
 };
 
 // Simulated event command
@@ -198,6 +201,8 @@ struct SimEvent {
     float style_tolerance;       // tolerance for animated float comparison (default 0.05)
     // Phase 7: assert_scroll negate flag
     bool negate_scroll;          // invert assertion (pass when NOT at expected position)
+    // Webview fields
+    char* js_code;               // for webview_eval_js: JavaScript code to execute
 };
 
 // Event simulation context

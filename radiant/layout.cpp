@@ -8,6 +8,7 @@
 #include "font_face.h"
 #include "../lib/font/font.h"
 #include "css_animation.h"
+#include "webview.h"
 
 #include <chrono>
 
@@ -2297,6 +2298,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
 
     log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);
+
+    // post-layout: sync web view positions (create/reposition native child windows)
+    if (doc->view_tree && uicon->window) {
+        webview_manager_sync_layout(uicon, doc->view_tree);
+    }
 
     // Serialization is handled by the caller (cmd_layout.cpp layout_single_file).
     // print_view_tree is NOT called here to avoid redundant file I/O.

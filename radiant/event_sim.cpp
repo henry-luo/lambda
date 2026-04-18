@@ -7,6 +7,7 @@
 #include "state_store.hpp"
 #include "form_control.hpp"
 #include "view.hpp"
+#include "webview.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
@@ -1248,6 +1249,23 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "webview_eval_js") == 0) {
+        ev->type = SIM_EVENT_WEBVIEW_EVAL_JS;
+        parse_target(reader, ev);
+        const char* js = reader.get("js").cstring();
+        if (js) ev->js_code = mem_strdup(js, MEM_CAT_LAYOUT);
+        else {
+            log_error("event_sim: webview_eval_js requires 'js' field");
+            mem_free(ev);
+            return NULL;
+        }
+    }
+    else if (strcmp(type_str, "webview_wait_load") == 0) {
+        ev->type = SIM_EVENT_WEBVIEW_WAIT_LOAD;
+        parse_target(reader, ev);
+        ev->wait_ms = reader.get("timeout_ms").asInt32();
+        if (ev->wait_ms <= 0) ev->wait_ms = 5000;  // default 5s timeout
+    }
     else {
         log_error("event_sim: unknown event type '%s'", type_str);
         mem_free(ev);
@@ -1380,6 +1398,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->assert_equals) mem_free(ev->assert_equals);
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
+            if (ev->js_code) mem_free(ev->js_code);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
@@ -2897,6 +2916,51 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
             break;
+
+        // ===== Webview commands =====
+
+        case SIM_EVENT_WEBVIEW_EVAL_JS: {
+            // find the webview element by selector and execute JS in it
+            DomDocument* doc = uicon->document;
+            if (!doc) { log_error("event_sim: webview_eval_js - no document"); ctx->fail_count++; break; }
+            View* view = ev->target_selector ? find_element_by_selector(doc, ev->target_selector, ev->target_index) : nullptr;
+            if (!view || !view->is_element()) {
+                log_error("event_sim: webview_eval_js - element '%s' not found", ev->target_selector);
+                ctx->fail_count++;
+                break;
+            }
+            ViewBlock* block = (ViewBlock*)view;
+            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview || !block->embed->webview->handle) {
+                log_error("event_sim: webview_eval_js - '%s' is not an active webview", ev->target_selector);
+                ctx->fail_count++;
+                break;
+            }
+            webview_eval_js(block->embed->webview->handle, ev->js_code);
+            log_info("event_sim: webview_eval_js on '%s': %s", ev->target_selector, ev->js_code);
+            break;
+        }
+
+        case SIM_EVENT_WEBVIEW_WAIT_LOAD: {
+            // wait for webview to finish loading (poll loaded flag)
+            DomDocument* doc = uicon->document;
+            if (!doc) { log_error("event_sim: webview_wait_load - no document"); ctx->fail_count++; break; }
+            View* view = ev->target_selector ? find_element_by_selector(doc, ev->target_selector, ev->target_index) : nullptr;
+            if (!view || !view->is_element()) {
+                log_error("event_sim: webview_wait_load - element '%s' not found", ev->target_selector);
+                ctx->fail_count++;
+                break;
+            }
+            ViewBlock* block = (ViewBlock*)view;
+            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview) {
+                log_error("event_sim: webview_wait_load - '%s' is not a webview", ev->target_selector);
+                ctx->fail_count++;
+                break;
+            }
+            // for now, just log — actual load waiting requires async polling
+            // which the event sim doesn't support (it's synchronous)
+            log_info("event_sim: webview_wait_load for '%s' (timeout=%dms)", ev->target_selector, ev->wait_ms);
+            break;
+        }
     }
 }
 
