@@ -1283,6 +1283,12 @@
                     "link": "dynamic"
                 },
                 {
+                    "name": "WebKit",
+                    "include": null,
+                    "lib": "-framework WebKit",
+                    "link": "dynamic"
+                },
+                {
                     "name": "rpmalloc",
                     "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
                     "include": "mac-deps/rpmalloc-install/include",

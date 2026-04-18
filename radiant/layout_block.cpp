@@ -13,6 +13,7 @@
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
+#include "webview.h"
 
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
@@ -3052,6 +3053,28 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
+        }
+        else if (elmt_name == HTM_TAG_WEBVIEW) {
+            // <webview> element: replaced block with default intrinsic size 300x150 (like iframe)
+            // Web view creation/positioning happens in post-layout sync
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            if (!block->embed->webview) {
+                WebViewProp* wv = (WebViewProp*)alloc_prop(lycon, sizeof(WebViewProp));
+                wv->src = block->get_attribute("src");
+                wv->srcdoc = block->get_attribute("srcdoc");
+                const char* mode_attr = block->get_attribute("mode");
+                wv->mode = (mode_attr && strcmp(mode_attr, "layer") == 0)
+                    ? WEBVIEW_MODE_LAYER : WEBVIEW_MODE_WINDOW;
+                wv->needs_create = true;
+                block->embed->webview = wv;
+                log_info("%s webview layout: src=%s mode=%s size=%.0fx%.0f",
+                         block->source_loc(),
+                         wv->src ? wv->src : "(srcdoc)",
+                         wv->mode == WEBVIEW_MODE_WINDOW ? "window" : "layer",
+                         block->width, block->height);
+            }
         }
         else if (elmt_name == HTM_TAG_SVG) {
             // Inline SVG element: use width/height attributes or viewBox for intrinsic size

@@ -144,6 +144,7 @@ static const HtmlElementInfo html_elements[] = {
     {"var", HTM_TAG_VAR},
     {"video", HTM_TAG_VIDEO},
     {"wbr", HTM_TAG_WBR},
+    {"webview", HTM_TAG_WEBVIEW},
     {"xmp", HTM_TAG_XMP},
 };
 

@@ -3,6 +3,7 @@
 #include "form_control.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
+#include "webview.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -142,6 +143,23 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;
         evcon->block.y -= block->scroller->pane->v_scroll_position;
+    }
+
+    // Check if this block is a child-window webview — stop hit-testing here.
+    // In child-window mode, the OS delivers events directly to the native web view.
+    // Radiant should not process events that land inside the webview area.
+    if (block->embed && block->embed->webview &&
+        block->embed->webview->mode == WEBVIEW_MODE_WINDOW) {
+        float bx = evcon->block.x, by = evcon->block.y;
+        MousePositionEvent* mev = &evcon->event.mouse_position;
+        if (bx <= mev->x && mev->x < bx + block->width &&
+            by <= mev->y && mev->y < by + block->height) {
+            log_debug("hit on webview (child-window mode), stopping: %s", block->node_name());
+            evcon->target = (View*)block;
+            evcon->offset_x = mev->x - bx;
+            evcon->offset_y = mev->y - by;
+            goto RETURN;
+        }
     }
 
     // Check if this block contains an embedded iframe document
