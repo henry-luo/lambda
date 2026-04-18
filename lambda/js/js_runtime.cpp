@@ -79,8 +79,6 @@ static const char* _trace_setter_prop = "(none)";
 static int _trace_setter_prop_len = 6;
 static int _trace_call_id = 0;
 static int _trace_total_calls = 0;
-static int _trace_last_params = 0;
-static void* _trace_last_fptr = nullptr;
 
 // new.target: set to the constructor function when called via 'new', undefined otherwise.
 // Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
@@ -8348,7 +8346,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
-        if (error_count < 5) {
+        if (error_count < 20) {
             void* ret_addr = __builtin_return_address(0);
             log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d ret_addr=%p func_raw=0x%llx",
                 get_type_id(func_item), arg_count, get_type_id(this_val),
@@ -8370,7 +8368,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     JsFunction* fn = (JsFunction*)func_item.function;
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
-    _trace_total_calls++; _trace_last_params = fn->param_count; _trace_last_fptr = fn->func_ptr;
+    _trace_total_calls++;
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         // TypedArray stub methods: validate this before returning
         if (fn && (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {

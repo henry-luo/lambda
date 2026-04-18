@@ -578,6 +578,12 @@ static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->is_const) {
                 entry.var.is_const = true;
             }
+            // Preserve scope env metadata: when a capture entry is overwritten by a
+            // local var declaration (e.g., var t = expr shadows captured t), retain
+            // the scope_env slot/reg so writebacks continue targeting the correct slot.
+            // NOTE: removed — this incorrectly propagated scope_env to block-scoped
+            // variables (const in for-of) that shadow outer scope_env vars.
+            // The writeback code now looks up correct slots from fc->captures directly.
         }
     }
 
@@ -1753,6 +1759,42 @@ static void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names) {
     }
 }
 
+// Collect identifier references from default parameter expressions.
+// E.g., function f(x, t=F) — F is a reference that needs to be captured.
+// Handles nested destructuring defaults like ({a, b=F}) and [a, b=F].
+static void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs) {
+    JsAstNode* p = params;
+    while (p) {
+        if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)p;
+            if (ap->right) jm_collect_body_refs(ap->right, refs);
+            // Also recurse into the left side for nested destructuring defaults
+            if (ap->left) jm_collect_param_default_refs(ap->left, refs);
+        } else if (p->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+            JsObjectPatternNode* op = (JsObjectPatternNode*)p;
+            JsAstNode* prop = op->properties;
+            while (prop) {
+                if (prop->node_type == JS_AST_NODE_PROPERTY) {
+                    JsPropertyNode* pp = (JsPropertyNode*)prop;
+                    if (pp->value) jm_collect_param_default_refs(pp->value, refs);
+                } else if (prop->node_type == JS_AST_NODE_REST_PROPERTY || prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                    JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
+                    if (sp->argument) jm_collect_param_default_refs(sp->argument, refs);
+                }
+                prop = prop->next;
+            }
+        } else if (p->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+            JsArrayPatternNode* ap = (JsArrayPatternNode*)p;
+            JsAstNode* elem = ap->elements;
+            while (elem) {
+                jm_collect_param_default_refs(elem, refs);
+                elem = elem->next;
+            }
+        }
+        p = p->next;
+    }
+}
+
 static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                                 struct hashmap* module_consts,
                                 struct hashmap* ancestor_func_locals) {
@@ -1777,6 +1819,9 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     if (fn->body) jm_collect_body_refs(fn->body, refs);
+
+    // Also collect refs from default parameter expressions (e.g., function f(x, t=F) — F is a ref)
+    jm_collect_param_default_refs(fn->params, refs);
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus
@@ -2711,7 +2756,21 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
             int slot = s;
             if (fc->reuse_parent_env) {
                 JsMirVarEntry* var = jm_find_var(mt, name);
-                if (var && var->from_env) slot = var->env_slot;
+                if (var && var->in_scope_env) {
+                    // Use preserved scope_env_slot (set during scope env setup)
+                    slot = var->scope_env_slot;
+                } else if (var && var->from_env) {
+                    slot = var->env_slot;
+                } else {
+                    // Fallback: look up the correct slot from captures
+                    for (int c = 0; c < fc->capture_count; c++) {
+                        if (strcmp(name, fc->captures[c].name) == 0) {
+                            int cap_slot = fc->captures[c].scope_env_slot;
+                            if (cap_slot >= 0) slot = cap_slot;
+                            break;
+                        }
+                    }
+                }
             }
             // Mark the variable entry
             JsMirVarEntry* var = jm_find_var(mt, name);
@@ -13195,6 +13254,37 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
+
+            // Patch NFE self-reference in shared scope_env: the parent scope_env
+            // includes the NFE name as a slot (from Phase 1.7), but the parent
+            // never defines it — only the closure itself knows its own identity.
+            // Without this, recursive calls via the NFE name find null in the env.
+            if (fn->name && fn->name->chars) {
+                char nfe_self[128];
+                snprintf(nfe_self, sizeof(nfe_self), "_js_%.*s",
+                    (int)fn->name->len, fn->name->chars);
+                for (int i = 0; i < fc->capture_count; i++) {
+                    if (strcmp(fc->captures[i].name, nfe_self) == 0 && fc->captures[i].scope_env_slot >= 0) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                fc->captures[i].scope_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, fn_reg)));
+                        break;
+                    }
+                }
+            }
+            // Also handle assign_target_vname self-reference (e.g., var f = function() { ... f() ... })
+            if (mt->assign_target_vname) {
+                for (int i = 0; i < fc->capture_count; i++) {
+                    if (strcmp(fc->captures[i].name, mt->assign_target_vname) == 0 && fc->captures[i].scope_env_slot >= 0) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                fc->captures[i].scope_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, fn_reg)));
+                        break;
+                    }
+                }
+            }
         } else {
             bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
             int env_alloc_size = has_remapped ? mt->scope_env_slot_count : fc->capture_count;
@@ -19358,7 +19448,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             snprintf(self_capture_name, sizeof(self_capture_name), "_js_%.*s",
                 (int)fn->name->len, fn->name->chars);
         }
-        if (has_captures) {
+            if (has_captures) {
             env_reg = MIR_reg(mt->ctx, "_js_env", func);
             for (int i = 0; i < fc->capture_count; i++) {
                 // Skip captures that are MCONST_MODVAR (IIFE-promoted vars):
@@ -19653,7 +19743,23 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
         if (fc->has_scope_env && fc->scope_env_count > 0) {
-            if (fc->reuse_parent_env && has_captures && env_reg != 0) {
+            // v16 safety check: verify reuse_parent_env assumption at compile time.
+            // If any scope_env var is locally declared (not from_env), the var shadows
+            // a same-named capture and reuse is unsafe (would write to wrong parent slot).
+            bool reuse_valid = fc->reuse_parent_env && has_captures && env_reg != 0;
+            if (reuse_valid) {
+                for (int s = 0; s < fc->scope_env_count; s++) {
+                    const char* sname = fc->scope_env_names[s];
+                    JsMirVarEntry* svar = jm_find_var(mt, sname);
+                    if (svar && !svar->from_env) {
+                        log_debug("js-mir: reuse_parent_env aborted for '%s': scope_env var '%s' is locally declared (shadows capture)",
+                            fc->name, sname);
+                        reuse_valid = false;
+                        break;
+                    }
+                }
+            }
+            if (reuse_valid) {
                 // v16: Reuse parent env as scope_env — no allocation needed.
                 // All scope_env vars are transitive captures, so children can
                 // read/write directly from the grandparent's scope_env.
@@ -19661,13 +19767,23 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 mt->scope_env_reg = env_reg;
                 mt->scope_env_slot_count = fc->reuse_env_slot_count;
 
-                // Mark vars for scope_env write-back using parent env slots
+                // Mark vars for scope_env write-back using parent env slots.
+                // Look up the correct slot from the captures array (not the var entry),
+                // because a local var declaration (param or var) may have overwritten the
+                // capture entry, losing the env_slot information.
                 for (int s = 0; s < fc->scope_env_count; s++) {
                     const char* sname = fc->scope_env_names[s];
+                    int parent_slot = -1;
+                    for (int c = 0; c < fc->capture_count; c++) {
+                        if (strcmp(sname, fc->captures[c].name) == 0) {
+                            parent_slot = fc->captures[c].scope_env_slot;
+                            break;
+                        }
+                    }
                     JsMirVarEntry* svar = jm_find_var(mt, sname);
-                    if (svar) {
+                    if (svar && parent_slot >= 0) {
                         svar->in_scope_env = true;
-                        svar->scope_env_slot = svar->env_slot;
+                        svar->scope_env_slot = parent_slot;
                         svar->scope_env_reg = mt->scope_env_reg;
                     }
                 }
@@ -22199,26 +22315,27 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             snprintf(lookup.name, sizeof(lookup.name), "%s", cap_name);
                             JsModuleConstEntry* mc_prop = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                             if (mc_prop) {
-                                if (mc_prop->const_type != MCONST_MODVAR) {
-                                    // Remove capture from child — immutable const is inlined
-                                    // at use site. Leaving it would create orphaned scope_env slot.
-                                    if (ci < child->capture_count - 1) {
-                                        memmove(&child->captures[ci], &child->captures[ci + 1],
-                                            (child->capture_count - ci - 1) * sizeof(child->captures[0]));
-                                    }
-                                    child->capture_count--;
-                                    ci--;
-                                    continue;  // truly immutable constant, safe to skip
-                                }
-                                // Walk ancestor chain: check if any ancestor function has a
-                                // param or body local with the same name (shadowing the module var).
+                                // For ALL module_const types (CLASS, FUNC, MODVAR, etc.),
+                                // check if an ancestor function declares a local, param, or
+                                // function name that shadows this module-level constant.
+                                // If shadowed, keep the capture — the local binding takes
+                                // precedence over the module constant.
                                 bool shadowed_by_ancestor = false;
                                 for (int ai = parent_idx; ai >= 0 && ai < mt->func_count;
                                      ai = mt->func_entries[ai].parent_index) {
                                     JsFuncCollected* anc = &mt->func_entries[ai];
                                     if (!anc->node) break;
-                                    // Check params (use jm_collect_pattern_names to handle
-                                    // all param forms: identifiers, defaults, rest, destructuring)
+                                    // Check ancestor's function name (NFE self-reference)
+                                    if (anc->node->name && anc->node->name->chars) {
+                                        char aname[128];
+                                        snprintf(aname, sizeof(aname), "_js_%.*s",
+                                            (int)anc->node->name->len, anc->node->name->chars);
+                                        if (strcmp(aname, cap_name) == 0) {
+                                            shadowed_by_ancestor = true;
+                                            break;
+                                        }
+                                    }
+                                    // Check params
                                     {
                                         struct hashmap* anc_params = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                                             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -22233,7 +22350,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         hashmap_free(anc_params);
                                     }
                                     if (shadowed_by_ancestor) break;
-                                    // Also check body locals (var declarations shadow module vars)
+                                    // Check body locals
                                     if (anc->node->body) {
                                         struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                                             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -22246,17 +22363,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     if (shadowed_by_ancestor) break;
                                 }
                                 if (!shadowed_by_ancestor) {
-                                    // Remove capture from child — it will use js_get_module_var
-                                    // at use site. Leaving it would cause Phase 1.7 to create
-                                    // an orphaned scope_env slot the parent can't populate.
+                                    // No ancestor shadows this module_const — safe to remove
+                                    // the capture. The identifier will be resolved at the use
+                                    // site via module_consts (MCONST_CLASS → js_get_module_var,
+                                    // MCONST_FUNC → js_new_function, etc.)
                                     if (ci < child->capture_count - 1) {
                                         memmove(&child->captures[ci], &child->captures[ci + 1],
                                             (child->capture_count - ci - 1) * sizeof(child->captures[0]));
                                     }
                                     child->capture_count--;
                                     ci--;
-                                    continue; // not shadowed, use module var
+                                    continue;
                                 }
+                                // Shadowed — keep the capture and propagate to parent
                             }
                         }
 
