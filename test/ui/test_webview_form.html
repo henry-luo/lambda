@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Webview Form Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        p { color: #666; font-size: 14px; margin-bottom: 20px; }
+        webview {
+            border: 2px solid #4a90d9;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Webview Form State Test</h1>
+    <p>The form below is rendered inside a native WKWebView child window via the lambda:// scheme.</p>
+    <webview src="lambda:///test/layout/data/form/form_state.html" width="800" height="900"></webview>
+</body>
+</html>

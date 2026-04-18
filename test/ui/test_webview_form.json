@@ -1,0 +1,104 @@
+{
+    "name": "Webview Form Interaction",
+    "html": "test/ui/test_webview_form.html",
+    "description": "Tests webview embedding with lambda:// scheme: scrolls page, fills form inputs, toggles checkboxes/radios, selects dropdown options — all via JS injection into the native WKWebView.",
+    "viewport": { "width": 900, "height": 1000 },
+    "events": [
+        {"type": "log", "message": "=== Webview Form Test Start ==="},
+        {"type": "wait", "ms": 1500},
+        {"type": "log", "message": "--- Waiting for webview load ---"},
+
+        {"type": "log", "message": "--- Scroll host page down to see webview ---"},
+        {"type": "scroll", "x": 450, "y": 500, "dx": 0, "dy": -3},
+        {"type": "wait", "ms": 300},
+        {"type": "scroll", "x": 450, "y": 500, "dx": 0, "dy": -3},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Fill text input via JS injection ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "document.querySelector('.focus-input').focus(); document.querySelector('.focus-input').value = 'Hello from event sim';"},
+        {"type": "wait", "ms": 500},
+
+        {"type": "log", "message": "--- Fill second text input ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var inputs = document.querySelectorAll('.focus-input'); if (inputs[1]) { inputs[1].focus(); inputs[1].value = 'Second input filled'; }"},
+        {"type": "wait", "ms": 500},
+
+        {"type": "log", "message": "--- Fill textarea ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var ta = document.querySelector('.focus-textarea'); if (ta) { ta.focus(); ta.value = 'Multi-line text\\nfilled by event simulation\\nvia webview_eval_js'; }"},
+        {"type": "wait", "ms": 500},
+
+        {"type": "log", "message": "--- Scroll webview content down to checkbox section ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "document.querySelector('.checked-test').scrollIntoView({behavior: 'smooth'});"},
+        {"type": "wait", "ms": 800},
+
+        {"type": "log", "message": "--- Toggle checkboxes ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var cbs = document.querySelectorAll('.checkbox-label input[type=checkbox]'); if (cbs[0]) cbs[0].click();"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var cbs = document.querySelectorAll('.checkbox-label input[type=checkbox]'); if (cbs[2]) cbs[2].click();"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Select radio button ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var radios = document.querySelectorAll('.radio-label input[type=radio]'); if (radios[2]) radios[2].click();"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Toggle standalone checkboxes ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sc = document.getElementById('check1'); if (sc) sc.click();"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sc = document.getElementById('check2'); if (sc) sc.click();"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Select standalone radio ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var r = document.getElementById('radio3'); if (r) r.click();"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Scroll to select dropdown section ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "document.querySelector('.select-test').scrollIntoView({behavior: 'smooth'});"},
+        {"type": "wait", "ms": 800},
+
+        {"type": "log", "message": "--- Change select dropdown values ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sel = document.getElementById('select-basic'); if (sel) { sel.value = 'cherry'; sel.dispatchEvent(new Event('change')); }"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sel = document.getElementById('select-preselected'); if (sel) { sel.value = 'blue'; sel.dispatchEvent(new Event('change')); }"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sel = document.getElementById('select-many'); if (sel) { sel.value = 'jul'; sel.dispatchEvent(new Event('change')); }"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var sel = document.getElementById('select-optgroup'); if (sel) { sel.value = 'broccoli'; sel.dispatchEvent(new Event('change')); }"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Scroll to placeholder section ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var els = document.querySelectorAll('.placeholder-input'); if (els[0]) els[0].scrollIntoView({behavior: 'smooth'});"},
+        {"type": "wait", "ms": 800},
+
+        {"type": "log", "message": "--- Fill placeholder inputs to trigger :not(:placeholder-shown) ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var els = document.querySelectorAll('.placeholder-input'); if (els[0]) { els[0].focus(); els[0].value = 'Typed text'; els[0].dispatchEvent(new Event('input')); }"},
+        {"type": "wait", "ms": 300},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var els = document.querySelectorAll('.placeholder-input'); if (els[1]) { els[1].focus(); els[1].value = 'More text'; els[1].dispatchEvent(new Event('input')); }"},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "--- Scroll to contenteditable section ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "document.querySelector('.selection-contenteditable').scrollIntoView({behavior: 'smooth'});"},
+        {"type": "wait", "ms": 800},
+
+        {"type": "log", "message": "--- Edit contenteditable div ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var ce = document.querySelector('.selection-contenteditable'); if (ce) { ce.focus(); ce.innerHTML = '<p>Edited by event simulation.</p><p>This text was injected via <strong>webview_eval_js</strong>.</p>'; }"},
+        {"type": "wait", "ms": 500},
+
+        {"type": "log", "message": "--- Scroll to top of webview ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "window.scrollTo({top: 0, behavior: 'smooth'});"},
+        {"type": "wait", "ms": 800},
+
+        {"type": "log", "message": "--- Hover simulation via JS ---"},
+        {"type": "webview_eval_js", "target": {"selector": "webview"}, "js": "var box = document.querySelector('.hover-box'); if (box) { box.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true})); box.dispatchEvent(new MouseEvent('mouseover', {bubbles: true})); }"},
+        {"type": "wait", "ms": 500},
+
+        {"type": "log", "message": "--- Scroll host page back to top ---"},
+        {"type": "scroll", "x": 450, "y": 500, "dx": 0, "dy": 10},
+        {"type": "wait", "ms": 300},
+        {"type": "scroll", "x": 450, "y": 500, "dx": 0, "dy": 10},
+        {"type": "wait", "ms": 300},
+
+        {"type": "log", "message": "=== Webview Form Test Complete ==="},
+        {"type": "wait", "ms": 1000},
+
+        {"type": "render", "file": "temp/webview_form_test.png"}
+    ]
+}
