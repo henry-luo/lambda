@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
 # Commit: 12f85659c
 # Source: ref/node/test/parallel/
-# Total passing: 208 / 1025  (skipped: 0)
+# Total passing: 208 / 3926  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
