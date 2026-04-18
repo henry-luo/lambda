@@ -3576,7 +3576,12 @@ extern "C" Item js_get_prototype_of(Item object) {
     Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
     if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        return js_property_get(obj_ctor, proto_key);
+        Item obj_proto = js_property_get(obj_ctor, proto_key);
+        // if object IS Object.prototype itself, return null (end of chain)
+        if (get_type_id(obj_proto) == LMD_TYPE_MAP && obj_proto.map == object.map) {
+            return ItemNull;
+        }
+        return obj_proto;
     }
     return ItemNull;
 }

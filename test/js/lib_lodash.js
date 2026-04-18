@@ -300,4 +300,8 @@ console.log(_.toNumber("3.14"));
 console.log(_.toInteger(3.7));
 console.log(_.toString(42));
 
+// === Test 35: Object — pick / omit ===
+console.log(JSON.stringify(_.pick({a: 1, b: 2, c: 3}, "a", "c")));
+console.log(JSON.stringify(_.omit({a: 1, b: 2, c: 3}, "a")));
+
 console.log("LODASH_DONE");
