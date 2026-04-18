@@ -809,6 +809,10 @@ static int jm_count_yields(JsAstNode* node) {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         return jm_count_yields(ls->body);
     }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        return jm_count_yields(ws->object) + jm_count_yields(ws->body);
+    }
     // destructuring patterns: yield can appear in default values
     case JS_AST_NODE_ASSIGNMENT_PATTERN: {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
@@ -1036,6 +1040,10 @@ static int jm_count_awaits(JsAstNode* node) {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         return jm_count_awaits(ls->body);
     }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        return jm_count_awaits(ws->object) + jm_count_awaits(ws->body);
+    }
     // destructuring patterns: await can appear in default values
     case JS_AST_NODE_ASSIGNMENT_PATTERN: {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
@@ -1261,6 +1269,11 @@ static void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) 
         jm_collect_func_assignments(ls->body, names);
         break;
     }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        jm_collect_func_assignments(ws->body, names);
+        break;
+    }
     case JS_AST_NODE_DO_WHILE_STATEMENT: {
         JsDoWhileNode* dw = (JsDoWhileNode*)node;
         jm_collect_func_assignments(dw->body, names);
@@ -1482,6 +1495,11 @@ static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
         jm_collect_body_refs(ls->body, refs);
         break;
     }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        jm_collect_body_refs(ws->body, refs);
+        break;
+    }
     default:
         // For unhandled node types, we may miss some references
         // but that's OK — we'll just not capture those variables
@@ -1608,6 +1626,11 @@ static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool
     case JS_AST_NODE_LABELED_STATEMENT: {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         jm_collect_body_locals(ls->body, locals, var_only);
+        break;
+    }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        jm_collect_body_locals(ws->body, locals, var_only);
         break;
     }
     default:
@@ -4074,6 +4097,12 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         // v24: labeled statement — recurse into body
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         if (ls->body) jm_collect_functions(mt, ls->body);
+        break;
+    }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        if (ws->object) jm_collect_functions(mt, ws->object);
+        if (ws->body) jm_collect_functions(mt, ws->body);
         break;
     }
     case JS_AST_NODE_ARRAY_PATTERN: {
@@ -10379,21 +10408,9 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
             }
 
-            // v11: Function.prototype.bind(thisArg, ...args)
-            if (prop->name->len == 4 && strncmp(prop->name->chars, "bind", 4) == 0) {
-                MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                // remaining args after thisArg are partial application args
-                int bound_count = arg_count > 1 ? arg_count - 1 : 0;
-                JsAstNode* bound_args = (call->arguments && call->arguments->next) ? call->arguments->next : NULL;
-                MIR_reg_t args_ptr = jm_build_args_array(mt, bound_args, bound_count);
-                MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
-                return jm_call_4(mt, "js_func_bind", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_arg),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, bound_count));
-            }
+            // v11: Function.prototype.bind(thisArg, ...args) — handled at runtime
+            // via js_map_method cascade. Removed unconditional shortcut because
+            // it intercepted user-defined .bind() methods (e.g. underscore _.bind)
 
             // obj.hasOwnProperty(key) — handled at runtime via js_map_method cascade
             // (removed: unconditional shortcut to js_has_own_property conflicted with
@@ -18031,6 +18048,20 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         }
         break;
     }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* with_node = (JsWithStatementNode*)stmt;
+        if (with_node->object) {
+            // push with-scope object
+            MIR_reg_t obj_reg = jm_transpile_box_item(mt, with_node->object);
+            jm_call_void_1(mt, "js_with_push", MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg));
+            // transpile body
+            if (with_node->body)
+                jm_transpile_statement(mt, with_node->body);
+            // pop with-scope
+            jm_call_void_0(mt, "js_with_pop");
+        }
+        break;
+    }
     default:
         log_error("js-mir: unsupported statement type %d", stmt->node_type);
         break;
@@ -20937,6 +20968,12 @@ static void jm_p4b_ctor_walk(JsMirTranspiler* mt, JsAstNode* node,
     case JS_AST_NODE_LABELED_STATEMENT: {
         JsLabeledStatementNode* lab = (JsLabeledStatementNode*)node;
         jm_p4b_ctor_walk(mt, lab->body, evidence);
+        break;
+    }
+    case JS_AST_NODE_WITH_STATEMENT: {
+        JsWithStatementNode* ws = (JsWithStatementNode*)node;
+        jm_p4b_ctor_walk(mt, ws->object, evidence);
+        jm_p4b_ctor_walk(mt, ws->body, evidence);
         break;
     }
     default:

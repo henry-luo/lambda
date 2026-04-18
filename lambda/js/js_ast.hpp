@@ -567,6 +567,13 @@ typedef struct JsLabeledStatementNode {
     JsAstNode* body;                 // Labeled statement body
 } JsLabeledStatementNode;
 
+// v17: With statement node
+typedef struct JsWithStatementNode {
+    JsAstNode base;
+    JsAstNode* object;               // Expression in with(expr)
+    JsAstNode* body;                 // Body statement
+} JsWithStatementNode;
+
 // v11: Regex literal node
 typedef struct JsRegexNode {
     JsAstNode base;

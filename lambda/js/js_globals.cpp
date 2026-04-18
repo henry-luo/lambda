@@ -7994,9 +7994,50 @@ extern "C" Item js_get_global_object() {
     return js_get_global_this();
 }
 
+// ============================================================================
+// With-scope stack for 'with' statement support
+// ============================================================================
+#define JS_WITH_STACK_MAX 16
+static Item js_with_stack[JS_WITH_STACK_MAX];
+static int js_with_stack_depth = 0;
+
+extern "C" void js_with_push(Item obj) {
+    if (js_with_stack_depth < JS_WITH_STACK_MAX) {
+        js_with_stack[js_with_stack_depth++] = obj;
+    }
+}
+
+extern "C" void js_with_pop() {
+    if (js_with_stack_depth > 0) {
+        js_with_stack_depth--;
+    }
+}
+
+// Check with-scope stack for a property (most recent scope first)
+static Item js_with_scope_lookup(Item key, bool* found) {
+    *found = false;
+    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+        Item scope_obj = js_with_stack[i];
+        if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+            extern Item js_has_own_property(Item obj, Item key);
+            if (it2b(js_has_own_property(scope_obj, key))) {
+                *found = true;
+                return js_property_get(scope_obj, key);
+            }
+        }
+    }
+    return make_js_undefined();
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
+    // Check with-scope stack first
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found);
+        if (found) return result;
+    }
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -8005,6 +8046,12 @@ extern "C" Item js_get_global_property(Item key) {
 // for properties that don't exist on the global object. Used for bare identifier reads
 // (e.g. `x` as opposed to `obj.x`), which per ES spec must throw ReferenceError.
 extern "C" Item js_get_global_property_strict(Item key) {
+    // Check with-scope stack first
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found);
+        if (found) return result;
+    }
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
