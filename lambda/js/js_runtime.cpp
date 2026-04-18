@@ -139,6 +139,19 @@ static inline Item js_symbol_to_key(Item sym) {
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};    
 }
 
+// ES2020 §7.1.14 ToPropertyKey(argument)
+// Symbols → internal __sym_N string; strings → as-is; others → ToString
+extern "C" Item js_to_property_key(Item key) {
+    if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_STRING) return key;
+    if (key.item == 0 || kt == LMD_TYPE_NULL)
+        return (Item){.item = s2it(heap_create_name("null", 4))};
+    if (kt == LMD_TYPE_UNDEFINED)
+        return (Item){.item = s2it(heap_create_name("undefined", 9))};
+    return js_to_string(key);
+}
+
 // Convert any key (string or symbol) to a getter key (__get_<key_string>)
 extern "C" Item js_make_getter_key(Item key) {
     // convert symbol to string key first

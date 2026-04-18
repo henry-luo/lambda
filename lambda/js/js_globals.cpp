@@ -13,6 +13,9 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
+
+extern "C" Item js_to_property_key(Item key);
+
 #include "../format/format.h"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
@@ -68,16 +71,11 @@ static bool is_generic_descriptor(Item desc) {
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
-    // v18m: coerce property name to string (ES5 §8.12.9 step, ToPropertyKey)
+    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey)
+    // Symbols stay as internal __sym_N keys; others coerced to string.
     TypeId name_type = get_type_id(name);
     if (name_type != LMD_TYPE_STRING) {
-        if (name.item == 0 || name_type == LMD_TYPE_NULL) {
-            name = (Item){.item = s2it(heap_create_name("null", 4))};
-        } else if (name_type == LMD_TYPE_UNDEFINED) {
-            name = (Item){.item = s2it(heap_create_name("undefined", 9))};
-        } else {
-            name = js_to_string(name);
-        }
+        name = js_to_property_key(name);
     }
     // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
     TypeId desc_type = get_type_id(descriptor);
@@ -4285,16 +4283,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         Item is_ext = js_object_is_extensible(obj);
         if (!js_is_truthy(is_ext)) {
             // Coerce name for property existence check
-            Item check_name = name;
-            TypeId nt = get_type_id(check_name);
-            if (nt != LMD_TYPE_STRING) {
-                if (check_name.item == 0 || nt == LMD_TYPE_NULL)
-                    check_name = (Item){.item = s2it(heap_create_name("null", 4))};
-                else if (nt == LMD_TYPE_UNDEFINED)
-                    check_name = (Item){.item = s2it(heap_create_name("undefined", 9))};
-                else
-                    check_name = js_to_string(check_name);
-            }
+            Item check_name = js_to_property_key(name);
             Item has = js_has_own_property(obj, check_name);
             if (!it2b(has)) {
                 // also check accessor properties
