@@ -137,6 +137,11 @@ static inline Item js_symbol_to_key(Item sym) {
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};    
 }
 
+// extern "C" wrapper for js_key_is_symbol — callable from MIR JIT
+extern "C" int64_t js_key_is_symbol_c(Item key) {
+    return js_key_is_symbol(key) ? 1 : 0;
+}
+
 // ES2020 §7.1.14 ToPropertyKey(argument)
 // Symbols → internal __sym_N string; strings → as-is; others → ToString
 extern "C" Item js_to_property_key(Item key) {
@@ -3417,9 +3422,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                     }
                     Item ta_proto = js_get_prototype(object);
+                    if (ta_proto.item == ITEM_NULL) {
+                        // TypedArray instances don't store __proto__ in properties;
+                        // use the implicit %TypedArray%.prototype for method lookup
+                        extern Item js_get_typed_array_base_proto();
+                        ta_proto = js_get_typed_array_base_proto();
+                    }
                     if (ta_proto.item != ITEM_NULL) {
                         Item result = js_property_get(ta_proto, key);
-                        if (result.item != ITEM_NULL) return result;
+                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
                     }
                     // fallback: check buffer prototype for Uint8Array (Buffer) instances
                     // use map_get (own-property only) to avoid prototype chain recursion
@@ -4626,8 +4637,20 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     // Typed array: ta[i] = val (use map_kind for fast check)
+    // Only intercept numeric index writes; string keys (e.g. __proto__) fall through
+    // to the normal Map property set path below.
     if (type == LMD_TYPE_MAP && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
-        return js_typed_array_set(object, key, value);
+        TypeId kt = get_type_id(key);
+        if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
+            return js_typed_array_set(object, key, value);
+        }
+        if (kt == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->chars[0] >= '0' && sk->chars[0] <= '9') {
+                return js_typed_array_set(object, key, value);
+            }
+        }
+        // fall through for non-numeric string keys (e.g. __proto__)
     }
 
     if (type == LMD_TYPE_MAP) {
@@ -6576,9 +6599,11 @@ static bool js_has_property(Item obj, Item key) {
 
 // Convert an array-like object (MAP with length + numeric indices) to an Array
 static Item js_array_like_to_array(Item obj) {
-    // Get length property
+    // Get length property — per ES spec, length getter may throw (step 2 of forEach/map/etc.)
     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item len_val = js_property_get(obj, length_key);
+    // propagate exception from length getter (e.g. Object.defineProperty getter that throws)
+    if (js_check_exception()) return ItemNull;
     int len = (int)js_get_number(len_val);
     if (len < 0) len = 0;
     if (len > 100000) len = 100000; // safety cap
@@ -7092,6 +7117,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // Plain Map: treat as array-like object (has length + numeric indices)
             js_array_method_real_this = this_val;
             Item temp_arr = js_array_like_to_array(this_val);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
@@ -7106,6 +7132,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // since js_property_get on strings supports indexed char access
             Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
             Item temp_arr = js_array_like_to_array(source);
+            if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
@@ -8592,6 +8619,15 @@ struct JsRegexData {
     bool sticky;              // 'y' flag (v46)
 };
 
+// Helper: get the correct number of capturing groups for output
+// When wrapper is active, use original JS group count (not RE2's inflated count)
+static int js_regex_num_groups(JsRegexData* rd) {
+    if (rd->wrapper && rd->wrapper->has_filters) {
+        return rd->wrapper->original_group_count + 1; // +1 for full match
+    }
+    return rd->re2->NumberOfCapturingGroups() + 1;
+}
+
 // Helper: match using wrapper if available, otherwise direct RE2
 // Returns true if matched. Fills `matches` array with StringPiece groups.
 static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
@@ -9218,7 +9254,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     }
 
     // perform match with captures
-    int num_groups = rd->re2->NumberOfCapturingGroups() + 1; // +1 for full match
+    int num_groups = js_regex_num_groups(rd);
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
@@ -9389,7 +9425,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     if (max_parts == 0) return js_array_new(0);
 
     Item result = js_array_new(0);
-    int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+    int num_groups = js_regex_num_groups(rd);
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
     int pos = 0;
@@ -10124,6 +10160,30 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (idx < 0 || idx >= ta->length) return make_js_undefined();
                 return js_typed_array_get(obj, (Item){.item = i2it(idx)});
             }
+            // TypedArray.prototype.keys/values/entries — return array iterators
+            // Convert typed array to regular array, then create iterator object
+            if ((method->len == 4 && strncmp(method->chars, "keys", 4) == 0) ||
+                (method->len == 6 && strncmp(method->chars, "values", 6) == 0) ||
+                (method->len == 7 && strncmp(method->chars, "entries", 7) == 0)) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item arr = js_array_new(0);
+                for (int i = 0; i < len; i++) {
+                    js_array_push_item_direct(arr.array, js_typed_array_get(obj, (Item){.item = i2it(i)}));
+                }
+                int kind = 1; // values
+                if (method->chars[0] == 'k') kind = 0; // keys
+                else if (method->chars[0] == 'e') kind = 2; // entries
+                Item iter = js_new_object();
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, arr);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(kind)});
+                Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+                Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
+                js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
+                return iter;
+            }
             if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 int len = ta->length;
@@ -10742,7 +10802,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     if (rd) {
         // regex-based replace
         re2::StringPiece input(s->chars, s->len);
-        int ngroups = rd->re2->NumberOfCapturingGroups() + 1;
+        int ngroups = js_regex_num_groups(rd);
         if (ngroups > 16) ngroups = 16;
         re2::StringPiece matches[16];
         StrBuf* buf = strbuf_new();
@@ -11252,8 +11312,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
                 Item result = js_array_new(0);
                 re2::StringPiece input(s->chars, s->len);
-                int num_groups = rd->re2->NumberOfCapturingGroups();
-                int total_groups = num_groups + 1;
+                int total_groups = js_regex_num_groups(rd);
                 if (total_groups > 16) total_groups = 16;
                 re2::StringPiece match[16];
                 int pos = 0;
