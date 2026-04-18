@@ -826,6 +826,9 @@ JitImport jit_runtime_imports[] = {
     {"memset", FPTR(memset)},
     {"memcpy", FPTR(memcpy)},
     {"fmod", FPTR(fmod)},
+    // float32 bit conversion (C2MIR can't inline these correctly)
+    {"f32_to_bits", FPTR(f32_to_bits)},
+    {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
 
