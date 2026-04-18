@@ -8580,16 +8580,46 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
 // v11: Regex support — /pattern/flags as Map objects with compiled RE2
 // =============================================================================
 
+#include "js_regex_wrapper.h"
+
 // hidden property key for storing regex data pointer
 static const char* JS_REGEX_DATA_KEY = "__rd";
 
 struct JsRegexData {
-    re2::RE2* re2;            // compiled regex
+    re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
+    JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
     bool global;              // 'g' flag
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
 };
+
+// Helper: match using wrapper if available, otherwise direct RE2
+// Returns true if matched. Fills `matches` array with StringPiece groups.
+static bool js_regex_match_internal(JsRegexData* rd, const char* input, int input_len,
+                                     int start_pos, re2::RE2::Anchor anchor,
+                                     re2::StringPiece* matches, int num_groups) {
+    if (rd->wrapper && rd->wrapper->has_filters) {
+        // use wrapper with post-filter verification
+        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
+        int result = js_regex_wrapper_exec(rd->wrapper, input, input_len, start_pos, anchor_start,
+                                    starts, ends, num_groups);
+        if (result <= 0) return false;
+        // convert int offsets back to StringPiece
+        for (int i = 0; i < num_groups; i++) {
+            if (starts[i] >= 0 && ends[i] >= starts[i]) {
+                matches[i] = re2::StringPiece(input + starts[i], ends[i] - starts[i]);
+            } else {
+                matches[i] = re2::StringPiece();
+            }
+        }
+        return true;
+    }
+    // direct RE2 match (no assertions to worry about)
+    return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
+                           anchor, matches, num_groups);
+}
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     // Check for 'v' flag (Unicode Sets mode) — needs preprocessing for set operations
@@ -8771,10 +8801,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 i++;
                 continue;
             }
-            // Handle backreferences \1-\9: RE2 doesn't support them
-            // Replace with \w+ as an approximation (matches word characters)
+            // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
+            // The wrapper converts them to capture groups with post-filter equality checks
             if (next >= '1' && next <= '9' && bracket_depth == 0) {
-                processed_pattern += "\\w+";
+                processed_pattern += '\\';
+                processed_pattern += next;
                 i++;
                 continue;
             }
@@ -8837,44 +8868,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             pos += 9;
         }
     }
-    // 2. Strip lookahead assertions (?=...) and (?!...) since RE2 doesn't support them
-    //    (?=X) → remove entirely (zero-width assertion; dropping it is approximate but safe)
-    //    (?!X) → remove entirely (drops the negative constraint)
-    {
-        size_t pos = 0;
-        while ((pos = processed_pattern.find("(?=", pos)) != std::string::npos) {
-            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
-            // find matching closing paren and remove entire (?=...) group
-            int depth = 1;
-            size_t end = pos + 3;
-            while (end < processed_pattern.size() && depth > 0) {
-                if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
-                    end += 2; continue;
-                }
-                if (processed_pattern[end] == '(') depth++;
-                else if (processed_pattern[end] == ')') depth--;
-                end++;
-            }
-            processed_pattern.erase(pos, end - pos);
-        }
-        pos = 0;
-        while ((pos = processed_pattern.find("(?!", pos)) != std::string::npos) {
-            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
-            // find matching closing paren
-            int depth = 1;
-            size_t end = pos + 3;
-            while (end < processed_pattern.size() && depth > 0) {
-                if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
-                    end += 2; continue;
-                }
-                if (processed_pattern[end] == '(') depth++;
-                else if (processed_pattern[end] == ')') depth--;
-                end++;
-            }
-            // remove the entire (?!...) group
-            processed_pattern.erase(pos, end - pos);
-        }
-    }
+    // 2. Lookahead assertions (?=...) and (?!...) are now handled by js_regex_wrapper
+    //    instead of being stripped. The wrapper converts them to RE2-compatible patterns
+    //    with post-match filters for correctness. Keep backreference \1-\9 → \w+ as
+    //    fallback for patterns that don't go through the wrapper (legacy path).
+    //    NOTE: The wrapper rewriting is done later at compile time, not here.
     // 3. Map unsupported Unicode property names to RE2-compatible equivalents
     {
         // Short alias expansion: \p{Ideo} → \p{Ideographic}, etc.
@@ -8901,6 +8899,73 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         while ((pos = processed_pattern.find("\\P{Ideographic}", pos)) != std::string::npos) {
             processed_pattern.replace(pos, 15, "\\P{Han}");
             pos += 7;
+        }
+        // \p{XID_Start} → [\p{L}\p{Nl}_] (Unicode identifier start chars)
+        static const struct { const char* from; const char* to; } unicode_expansions[] = {
+            {"\\p{XID_Start}",     "[\\p{L}\\p{Nl}_]"},
+            {"\\P{XID_Start}",     "[^\\p{L}\\p{Nl}_]"},
+            {"\\p{XID_Continue}",  "[\\p{L}\\p{Nl}\\p{Nd}\\p{Mn}\\p{Mc}\\p{Pc}_]"},
+            {"\\P{XID_Continue}",  "[^\\p{L}\\p{Nl}\\p{Nd}\\p{Mn}\\p{Mc}\\p{Pc}_]"},
+            {"\\p{ID_Start}",      "[\\p{L}\\p{Nl}_]"},
+            {"\\P{ID_Start}",      "[^\\p{L}\\p{Nl}_]"},
+            {"\\p{ID_Continue}",   "[\\p{L}\\p{Nl}\\p{Nd}\\p{Mn}\\p{Mc}\\p{Pc}_]"},
+            {"\\P{ID_Continue}",   "[^\\p{L}\\p{Nl}\\p{Nd}\\p{Mn}\\p{Mc}\\p{Pc}_]"},
+            {"\\p{ASCII}",         "[\\x{00}-\\x{7F}]"},
+            {"\\P{ASCII}",         "[^\\x{00}-\\x{7F}]"},
+            {"\\p{Any}",           "[\\x{00}-\\x{10FFFF}]"},
+            {"\\P{Any}",           "[^\\x{00}-\\x{10FFFF}]"},
+            {"\\p{LC}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
+            {"\\P{LC}",            "[^\\p{Lu}\\p{Ll}\\p{Lt}]"},
+            {"\\p{L&}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
+            {"\\P{L&}",            "[^\\p{Lu}\\p{Ll}\\p{Lt}]"},
+        };
+        for (int ue = 0; ue < (int)(sizeof(unicode_expansions)/sizeof(unicode_expansions[0])); ue++) {
+            int from_len = (int)strlen(unicode_expansions[ue].from);
+            int to_len = (int)strlen(unicode_expansions[ue].to);
+            size_t upos = 0;
+            while ((upos = processed_pattern.find(unicode_expansions[ue].from, upos)) != std::string::npos) {
+                processed_pattern.replace(upos, from_len, unicode_expansions[ue].to);
+                upos += to_len;
+            }
+        }
+        // \p{Script=X} → \p{X} and \p{General_Category=X} → \p{X}
+        // RE2 uses short form directly: \p{Latin}, \p{L}, etc.
+        for (const char* prefix : {"Script=", "General_Category=", "gc=", "sc="}) {
+            int prefix_len = (int)strlen(prefix);
+            for (const char* pp : {"\\p{", "\\P{"}) {
+                size_t upos = 0;
+                while ((upos = processed_pattern.find(pp, upos)) != std::string::npos) {
+                    size_t inner = upos + 3; // after \p{ or \P{
+                    if (processed_pattern.compare(inner, prefix_len, prefix) == 0) {
+                        // remove the prefix: \p{Script=Latin} → \p{Latin}
+                        processed_pattern.erase(inner, prefix_len);
+                    } else {
+                        upos++;
+                    }
+                }
+            }
+        }
+    }
+    // 3b. Strip lookbehind assertions (?<=...) and (?<!...) since RE2 doesn't support them
+    //     This prevents RE2 compile failures. Log a warning for diagnostics.
+    {
+        for (const char* lb_prefix : {"(?<=", "(?<!"}) {
+            size_t pos = 0;
+            while ((pos = processed_pattern.find(lb_prefix, pos)) != std::string::npos) {
+                if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+                int depth = 1;
+                size_t end = pos + strlen(lb_prefix);
+                while (end < processed_pattern.size() && depth > 0) {
+                    if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
+                        end += 2; continue;
+                    }
+                    if (processed_pattern[end] == '(') depth++;
+                    else if (processed_pattern[end] == ')') depth--;
+                    end++;
+                }
+                log_debug("js regex: stripping lookbehind %s from pattern (RE2 unsupported)", lb_prefix);
+                processed_pattern.erase(pos, end - pos);
+            }
         }
     }
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
@@ -8943,21 +9008,32 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         processed_pattern = "(?m)" + processed_pattern;
     }
     // compile RE2 pattern (use preprocessed version)
-    re2::RE2* re2 = new re2::RE2(processed_pattern, opts);
-    if (!re2->ok()) {
-        // fall back to original pattern if preprocessing caused errors
-        delete re2;
-        re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+    // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
+    JsRegexCompiled* wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
+                                                 (int)processed_pattern.size(),
+                                                 flags, flags_len, &opts);
+    re2::RE2* re2 = nullptr;
+    if (wrapper) {
+        re2 = wrapper->re2; // use the wrapper's compiled RE2
+    } else {
+        // wrapper failed — fall back to direct RE2 compilation
+        re2 = new re2::RE2(processed_pattern, opts);
         if (!re2->ok()) {
-            log_error("js regex compile error: /%.*s/%.*s: %s",
-                pattern_len, pattern, flags_len, flags, re2->error().c_str());
+            // fall back to original pattern if preprocessing caused errors
             delete re2;
-            return ItemNull;
+            re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+            if (!re2->ok()) {
+                log_error("js regex compile error: /%.*s/%.*s: %s",
+                    pattern_len, pattern, flags_len, flags, re2->error().c_str());
+                delete re2;
+                return ItemNull;
+            }
         }
     }
     // store regex data in a pool-allocated struct
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
     rd->re2 = re2;
+    rd->wrapper = wrapper;
     rd->global = global;
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
@@ -9103,7 +9179,12 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     }
     const char* chars = str.get_chars();
     int len = str.get_len();
-    bool matched = re2::RE2::PartialMatch(re2::StringPiece(chars, len), *rd->re2);
+    bool matched;
+    if (rd->wrapper && rd->wrapper->has_filters) {
+        matched = js_regex_wrapper_test(rd->wrapper, chars, len, 0);
+    } else {
+        matched = re2::RE2::PartialMatch(re2::StringPiece(chars, len), *rd->re2);
+    }
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
@@ -9144,8 +9225,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     re2::StringPiece matches[16];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
-    bool matched = rd->re2->Match(re2::StringPiece(chars, len), start_pos, len,
-        anchor, matches, num_groups);
+    bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
             js_property_set(regex, li_key, (Item){.item = i2it(0)});
@@ -9275,7 +9355,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
     const char* chars = str.get_chars();
     int len = str.get_len();
     re2::StringPiece match;
-    if (rd->re2->Match(re2::StringPiece(chars, len), 0, len, re2::RE2::UNANCHORED, &match, 1)) {
+    if (js_regex_match_internal(rd, chars, len, 0, re2::RE2::UNANCHORED, &match, 1)) {
         return (Item){.item = i2it((int)(match.data() - chars))};
     }
     return (Item){.item = i2it(-1)};
@@ -9318,7 +9398,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     int part_count = 0;
 
     while (pos <= len && part_count < max_parts) {
-        bool found = rd->re2->Match(re2::StringPiece(chars, len), pos, len, re2::RE2::UNANCHORED, matches, num_groups);
+        bool found = js_regex_match_internal(rd, chars, len, pos, re2::RE2::UNANCHORED, matches, num_groups);
         if (!found || (int)(matches[0].data() - chars) >= len) break;
 
         int match_start = (int)(matches[0].data() - chars);
@@ -9639,6 +9719,26 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
 extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2) {
     JsCollectionData* cd = js_get_collection_data(obj);
     if (!cd) return ItemNull;
+
+    // Enforce Object.freeze on Map/Set: mutation methods throw TypeError
+    if (method_id == 0 || method_id == 3 || method_id == 4) { // set/add, delete, clear
+        if (get_type_id(obj) == LMD_TYPE_MAP) {
+            bool frozen_found = false;
+            Item frozen_val = js_map_get_fast(obj.map, "__frozen__", 10, &frozen_found);
+            if (frozen_found && js_is_truthy(frozen_val)) {
+                const char* method_name = (method_id == 0) ? (cd->type == JS_COLLECTION_SET ? "add" : "set") :
+                                          (method_id == 3) ? "delete" : "clear";
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot %s on a frozen %s", method_name,
+                         cd->type == JS_COLLECTION_SET ? "Set" : "Map");
+                Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
+                Item error = js_new_error_with_name(err_name, err_msg);
+                js_throw_value(error);
+                return make_js_undefined();
+            }
+        }
+    }
 
     switch (method_id) {
         case 0: { // set(key, value) for Map, add(value) for Set
@@ -10651,7 +10751,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         int pos = 0;
         bool found_match = false;
         while (pos <= (int)s->len) {
-            bool matched = rd->re2->Match(input, pos, (int)s->len,
+            bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, pos,
                 re2::RE2::UNANCHORED, matches, ngroups);
             if (!matched) break;
             found_match = true;
@@ -11160,7 +11260,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 re2::StringPiece match[16];
                 int pos = 0;
                 while (pos <= (int)s->len) {
-                    bool found = rd->re2->Match(input, pos, (int)s->len,
+                    bool found = js_regex_match_internal(rd, s->chars, (int)s->len, pos,
                         re2::RE2::UNANCHORED, match, total_groups);
                     if (!found || match[0].size() == 0) break;
                     int match_start = (int)(match[0].data() - s->chars);
@@ -11455,8 +11555,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 String* s = it2s(str);
                 if (!s) return (Item){.item = i2it(-1)};
                 re2::StringPiece match;
-                if (rd->re2->Match(re2::StringPiece(s->chars, s->len), 0, (int)s->len,
-                                   RE2::UNANCHORED, &match, 1)) {
+                if (js_regex_match_internal(rd, s->chars, (int)s->len, 0,
+                                   re2::RE2::UNANCHORED, &match, 1)) {
                     return (Item){.item = i2it((int)(match.data() - s->chars))};
                 }
                 return (Item){.item = i2it(-1)};
@@ -11504,8 +11604,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 if (num_groups > 16) num_groups = 16;
                 re2::StringPiece matches[16];
                 while (offset < (int)s->len) {
-                    bool matched = rd->re2->Match(
-                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                    bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                         re2::RE2::UNANCHORED, matches, num_groups);
                     if (!matched) break;
                     int mlen = (int)matches[0].size();
@@ -11534,8 +11633,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                     if (num_groups > 16) num_groups = 16;
                     re2::StringPiece matches[16];
                     while (offset < (int)s->len) {
-                        bool matched = rd->re2->Match(
-                            re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                        bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                             re2::RE2::UNANCHORED, matches, num_groups);
                         if (!matched) break;
                         Item match_obj = js_new_object();

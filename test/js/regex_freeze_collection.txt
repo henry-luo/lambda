@@ -1,0 +1,10 @@
+t1:Cannot set on a frozen Map
+t1b:1
+t2:Cannot delete on a frozen Map
+t3:Cannot clear on a frozen Map
+t4:value,true,1
+t5:Cannot add on a frozen Set
+t5b:true,1
+t6:Cannot delete on a frozen Set
+t7:Cannot clear on a frozen Set
+t8:1,true

@@ -1,0 +1,6 @@
+t1:true,foo
+t2:foo,3
+t3:hello,hello
+t4:false
+t5:10,30
+t6:hello
