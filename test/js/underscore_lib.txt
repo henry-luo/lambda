@@ -1,0 +1,7 @@
+UNDERSCORE_LOAD_OK
+110/114 tests passed
+FAIL: bind => false
+FAIL: template-basic => false
+FAIL: template-escape => false
+FAIL: template-evaluate => false
+UNDERSCORE_DONE

@@ -3029,8 +3029,11 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         MIR_reg_t boxed = jm_transpile_expression(mt, expr);
         if (target_type == LMD_TYPE_FLOAT)
             return jm_emit_unbox_float(mt, boxed);
-        else
-            return jm_emit_unbox_int(mt, boxed);
+        else {
+            // Use it2d + D2I for robust int extraction (handles INT, FLOAT, any numeric)
+            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
+            return jm_emit_double_to_int(mt, as_dbl);
+        }
     }
 
     // P9: MEMBER_EXPRESSION — typed array element access returns native directly
@@ -3278,8 +3281,11 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     MIR_reg_t boxed = jm_transpile_box_item(mt, expr);
     if (target_type == LMD_TYPE_FLOAT)
         return jm_emit_unbox_float(mt, boxed);
-    else
-        return jm_emit_unbox_int(mt, boxed);
+    else {
+        // Use it2d + D2I for robust int extraction (handles INT, FLOAT, any numeric)
+        MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
+        return jm_emit_double_to_int(mt, as_dbl);
+    }
 }
 
 // ============================================================================
@@ -14728,6 +14734,26 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                     // v15: In generators, force boxed types for consistent env save/load
                     if (mt->in_generator) {
                         init_type = LMD_TYPE_ANY;
+                    }
+
+                    // v24: Scope-env captured vars must stay boxed (ANY) because a child
+                    // closure can assign any type to them. If we keep a native type
+                    // (e.g. FLOAT from `-Infinity` init), the scope_env reload after a
+                    // call will misinterpret the boxed value written by the closure.
+                    if (jm_is_native_type(init_type) && !mt->in_generator) {
+                        int fi = mt->current_func_index;
+                        if (fi >= 0 && fi < mt->func_count) {
+                            JsFuncCollected* fc = &mt->func_entries[fi];
+                            if (fc->has_scope_env) {
+                                for (int s = 0; s < fc->scope_env_count; s++) {
+                                    if (strcmp(vname, fc->scope_env_names[s]) == 0) {
+                                        log_debug("v24: widening scope-env var '%s' from %d to ANY", vname, init_type);
+                                        init_type = LMD_TYPE_ANY;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // P9: Widen INT to FLOAT if pre-scan detected float usage

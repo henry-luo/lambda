@@ -6858,6 +6858,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
         }        if (tt == LMD_TYPE_BOOL)
             return (Item){.item = s2it(heap_create_name("[object Boolean]", 16))};
+        if (js_is_symbol(this_val))
+            return (Item){.item = s2it(heap_create_name("[object Symbol]", 15))};
         if (tt == LMD_TYPE_INT || tt == LMD_TYPE_FLOAT)
             return (Item){.item = s2it(heap_create_name("[object Number]", 15))};
         if (tt == LMD_TYPE_STRING)

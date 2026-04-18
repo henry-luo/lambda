@@ -2183,9 +2183,9 @@ extern "C" Item js_get_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "copy",       (void*)js_buffer_copy, 5);
     buf_set_method(buffer_namespace, "equals",     (void*)js_buffer_equals, 2);
     buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare, 2);
-    buf_set_method(buffer_namespace, "indexOf",    (void*)js_buffer_indexOf, 3);
-    buf_set_method(buffer_namespace, "lastIndexOf",(void*)js_buffer_lastIndexOf, 3);
-    buf_set_method(buffer_namespace, "includes",   (void*)js_buffer_includes, 3);
+    buf_set_method(buffer_namespace, "indexOf",    (void*)js_buffer_indexOf, 4);
+    buf_set_method(buffer_namespace, "lastIndexOf",(void*)js_buffer_lastIndexOf, 4);
+    buf_set_method(buffer_namespace, "includes",   (void*)js_buffer_includes, 4);
     buf_set_method(buffer_namespace, "slice",      (void*)js_buffer_slice, 3);
     buf_set_method(buffer_namespace, "subarray",   (void*)js_buffer_subarray, 3);
     buf_set_method(buffer_namespace, "fill",       (void*)js_buffer_fill, 2);
