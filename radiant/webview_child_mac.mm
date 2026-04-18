@@ -15,24 +15,12 @@
 #include <unistd.h>
 
 #include "webview.h"
+#include "webview_handle_mac.h"
 
 extern "C" {
 #include "../lib/log.h"
 #include "../lib/mem.h"
 }
-
-// ---------------------------------------------------------------------------
-// WebViewHandle — wraps a WKWebView instance
-// ---------------------------------------------------------------------------
-
-@class LambdaSchemeHandler;
-
-struct WebViewHandle {
-    WKWebView* wk_view;        // the native web view
-    NSView* parent_view;       // the GLFW window's content view (for coordinate transforms)
-    float pixel_ratio;         // DPI scale factor
-    LambdaSchemeHandler* scheme_handler;  // retained lambda:// handler
-};
 
 // Navigation delegate to track load completion
 @interface LambdaWebViewDelegate : NSObject <WKNavigationDelegate>
@@ -259,6 +247,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
         handle->parent_view = content_view;
         handle->pixel_ratio = pixel_ratio;
         handle->scheme_handler = scheme_handler;
+        handle->mode = WEBVIEW_MODE_WINDOW;
 
         delegate.handle = handle;
         ipc_handler.handle = handle;

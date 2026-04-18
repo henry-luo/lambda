@@ -45,6 +45,8 @@ typedef enum {
     DL_APPLY_FILTER,
     // video frame placeholder (rect + clip only; actual blit is post-composite)
     DL_VIDEO_PLACEHOLDER,
+    // webview layer placeholder (rect + clip; actual blit is post-composite)
+    DL_WEBVIEW_LAYER_PLACEHOLDER,
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -188,6 +190,13 @@ typedef struct {
     int object_fit;          // CssEnum
 } DlVideoPlaceholder;
 
+// Webview layer placeholder: records the layout rect and clip for post-composite blit.
+typedef struct {
+    void* surface;           // ImageSurface* — borrowed, lifetime managed by WebViewProp
+    float dst_x, dst_y, dst_w, dst_h;
+    Bound clip;
+} DlWebviewLayerPlaceholder;
+
 // ---------------------------------------------------------------------------
 // DisplayItem — tagged union of all draw commands
 // ---------------------------------------------------------------------------
@@ -215,6 +224,7 @@ typedef struct DisplayItem {
         DlApplyBlendMode     apply_blend_mode;
         DlApplyFilter        apply_filter;
         DlVideoPlaceholder   video_placeholder;
+        DlWebviewLayerPlaceholder webview_layer_placeholder;
     };
 } DisplayItem;
 
@@ -312,6 +322,11 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
 void dl_video_placeholder(DisplayList* dl, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip);
+
+// Webview layer placeholder (rect + clip only; actual blit is post-composite)
+void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
+                                  float dst_x, float dst_y, float dst_w, float dst_h,
+                                  const Bound* clip);
 
 // ---------------------------------------------------------------------------
 // Replay — execute all recorded commands through rdt_* calls

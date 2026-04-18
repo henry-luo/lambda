@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webview Layer Mode — Overlay Test</title>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            margin: 30px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #e94560; margin-bottom: 8px; }
+        p.subtitle { color: #999; margin-top: 0; }
+
+        .scene {
+            position: relative;
+            width: 600px;
+            height: 400px;
+            margin: 20px 0;
+        }
+
+        /* The webview in layer mode — sits behind the overlay */
+        webview.layer {
+            position: absolute;
+            top: 0; left: 0;
+            border-radius: 8px;
+            border: 2px solid #333;
+        }
+
+        /* Radiant-rendered overlay that must appear ON TOP of the webview */
+        .overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(233, 69, 96, 0.9);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+
+        .overlay-bottom {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .overlay-bottom .pill {
+            background: linear-gradient(135deg, #e94560, #0f3460);
+            color: white;
+            padding: 10px 24px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+
+        .badge {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 32px;
+            height: 32px;
+            background: #e94560;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            z-index: 20;
+            border: 2px solid #1a1a2e;
+        }
+
+        .info {
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: #16213e;
+            border-left: 3px solid #e94560;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <h1>Webview Layer Mode Test</h1>
+    <p class="subtitle">Radiant elements overlapping a <code>mode="layer"</code> webview</p>
+
+    <!-- Scene 1: Overlay badge and label on top of a layer-mode webview -->
+    <div class="scene">
+        <div class="badge">1</div>
+
+        <webview class="layer" mode="layer" width="600" height="400"
+            srcdoc="
+                <html>
+                <body style='margin:0; font-family:sans-serif; background:linear-gradient(135deg,#667eea,#764ba2); color:white; display:flex; align-items:center; justify-content:center; height:100vh;'>
+                    <div style='text-align:center'>
+                        <h1 style='font-size:32px; margin:0'>WKWebView Content</h1>
+                        <p style='opacity:0.8; margin-top:8px'>Rendered offscreen &rarr; composited as RGBA texture</p>
+                        <p style='margin-top:20px; font-size:14px; opacity:0.6'>If you can read this, the snapshot is working.</p>
+                        <button onclick='this.textContent=&quot;Clicked!&quot;' style='margin-top:16px; padding:8px 24px; font-size:16px; border:none; border-radius:6px; background:white; color:#764ba2; cursor:pointer;'>Click Me</button>
+                    </div>
+                </body>
+                </html>
+            ">
+        </webview>
+
+        <div class="overlay">Radiant Overlay</div>
+        <div class="overlay-bottom"><span class="pill">This pill is rendered by Radiant — on top of the webview</span></div>
+    </div>
+
+    <div class="info">
+        <strong>What to verify:</strong><br>
+        • The gradient webview content is visible (snapshot compositing works)<br>
+        • The red "Radiant Overlay" badge appears ON TOP of the webview (z-order correct)<br>
+        • The bottom pill overlaps the webview (layer compositing, not child window)<br>
+        • Clicking the "Click Me" button changes its text (event forwarding works)
+    </div>
+</body>
+</html>

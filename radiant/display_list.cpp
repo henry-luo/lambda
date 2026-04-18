@@ -354,6 +354,21 @@ void dl_video_placeholder(DisplayList* dl, void* video,
     item->video_placeholder.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
 }
 
+void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
+                                  float dst_x, float dst_y, float dst_w, float dst_h,
+                                  const Bound* clip) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_WEBVIEW_LAYER_PLACEHOLDER;
+    item->bounds[0] = dst_x; item->bounds[1] = dst_y;
+    item->bounds[2] = dst_w; item->bounds[3] = dst_h;
+    item->webview_layer_placeholder.surface = surface;
+    item->webview_layer_placeholder.dst_x = dst_x;
+    item->webview_layer_placeholder.dst_y = dst_y;
+    item->webview_layer_placeholder.dst_w = dst_w;
+    item->webview_layer_placeholder.dst_h = dst_h;
+    item->webview_layer_placeholder.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
+}
+
 // ---------------------------------------------------------------------------
 // Replay: glyph drawing (standalone, no RenderContext dependency)
 // ---------------------------------------------------------------------------
@@ -744,6 +759,17 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_VIDEO_PLACEHOLDER:
             // no-op during tile replay; video frames are blitted post-composite
             break;
+
+        case DL_WEBVIEW_LAYER_PLACEHOLDER: {
+            DlWebviewLayerPlaceholder* r = &item->webview_layer_placeholder;
+            ImageSurface* src = (ImageSurface*)r->surface;
+            if (src && src->pixels) {
+                Rect dst_rect = { r->dst_x, r->dst_y, r->dst_w, r->dst_h };
+                blit_surface_scaled(src, nullptr, surface, &dst_rect,
+                                    &r->clip, SCALE_MODE_LINEAR, nullptr, 0);
+            }
+            break;
+        }
         }
     }
 

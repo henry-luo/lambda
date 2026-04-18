@@ -727,12 +727,13 @@ In `render` mode, all `<webview>` elements are treated as layer mode regardless 
 ```
 radiant/webview.h                          — public C API (WebViewManager, WebViewHandle, WebViewMode, WebViewProp)
 radiant/webview_manager.cpp                — lifecycle management, post-layout sync tree walk
+radiant/webview_handle_mac.h               — shared WebViewHandle struct for macOS (child + layer modes)
 radiant/webview_child_mac.mm               — macOS child-window backend (WKWebView, #ifdef __APPLE__)
 radiant/webview_child_stub.cpp             — no-op stub for non-macOS platforms (#ifndef __APPLE__)
-radiant/platform/webview_layer_mac.mm      — (Stage 2) macOS offscreen layer backend
-radiant/platform/webview_layer_linux.cpp   — (Stage 2) Linux offscreen layer backend
-radiant/platform/webview_layer_win.cpp     — (Stage 2) Windows offscreen layer backend
-radiant/platform/webview_layer_stub.cpp    — (Stage 2) no-op stub for headless builds
+radiant/webview_layer_mac.mm               — macOS offscreen layer backend (#ifdef __APPLE__)
+radiant/webview_layer_stub.cpp             — no-op stub for non-macOS platforms (#ifndef __APPLE__)
+radiant/platform/webview_layer_linux.cpp   — (Stage 2, future) Linux offscreen layer backend
+radiant/platform/webview_layer_win.cpp     — (Stage 2, future) Windows offscreen layer backend
 ```
 
 ### build_lambda_config.json Changes
@@ -826,13 +827,13 @@ Direct platform API integration (WKWebView on macOS) for native web page perform
 
 Adds `mode="layer"` for use cases requiring z-order compositing or headless rendering to PNG/PDF.
 
-12. Implement `webview_layer_mac.mm`: create offscreen WKWebView, capture snapshot via `takeSnapshot`
-13. Composite web view RGBA texture during Radiant's render pass
-14. Event forwarding for layer mode: translate Radiant mouse/key events → `webview_inject_*()` calls
-15. Dirty-flag snapshot scheduling (MutationObserver-based change detection)
+12. ~~Implement `webview_layer_mac.mm`: create offscreen WKWebView, capture snapshot via `takeSnapshot`~~ **Done** — `radiant/webview_layer_mac.mm` implements offscreen WKWebView with `takeSnapshotWithConfiguration:`, IPC bridge via `WKScriptMessageHandler`, MutationObserver dirty detection, and `lambda://` scheme handler.
+13. ~~Composite web view RGBA texture during Radiant's render pass~~ **Done** — `render_webview_layer_content()` in `render.cpp` composites snapshots via `blit_surface_scaled()`. SVG/PDF export handled in `render_walk.cpp` via `backend->render_image`.
+14. ~~Event forwarding for layer mode: translate Radiant mouse/key events → `webview_inject_*()` calls~~ **Done** — `event.cpp` forwards mouse move/click/scroll/key/text events to layer-mode webviews via `webview_layer_platform_inject_*()` functions (implemented as JS `dispatchEvent` injection).
+15. ~~Dirty-flag snapshot scheduling (MutationObserver-based change detection)~~ **Done** — MutationObserver + IPC message handler sets dirty flag; `webview_manager.cpp` sync_walk only re-snapshots when dirty.
 16. Implement `webview_layer_linux.cpp` (WebKitGTK offscreen)
 17. Implement `webview_layer_win.cpp` (WebView2 CompositionController)
-18. Implement `webview_layer_stub.cpp` for headless mode
+18. ~~Implement `webview_layer_stub.cpp` for headless mode~~ **Done** — `radiant/webview_layer_stub.cpp` provides no-op stubs guarded by `#ifndef __APPLE__`.
 19. `render` mode: force all web views to layer mode for PNG/PDF/SVG export
 20. Extend event simulation with `SIM_EVENT_WEBVIEW_EVAL_JS`, `WEBVIEW_WAIT_LOAD`, `WEBVIEW_ASSERT_TEXT`, `WEBVIEW_SNAPSHOT`
 

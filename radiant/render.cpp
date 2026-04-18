@@ -9,6 +9,7 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "tile_pool.h"
+#include "webview.h"
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -248,6 +249,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void render_video_content(RenderContext* rdcon, ViewBlock* view);
+void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     bool show_hz_scroll = true, bool show_vt_scroll = true);
@@ -2669,6 +2671,36 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     log_leave();
 }
 
+// render webview in layer mode: record a DL placeholder for post-composite blit
+void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->embed || !view->embed->webview) return;
+    WebViewProp* wv = view->embed->webview;
+    if (wv->mode != WEBVIEW_MODE_LAYER || !wv->surface || !wv->surface->pixels) return;
+    if (!wv->visible) return;
+
+    float s = rdcon->scale;
+    float dst_x = rdcon->block.x + view->x * s;
+    float dst_y = rdcon->block.y + view->y * s;
+    float dst_w = view->width * s;
+    float dst_h = view->height * s;
+
+    log_debug("[WEBVIEW LAYER RENDER] pos=(%.0f,%.0f) size=%.0fx%.0f surface=%dx%d",
+              dst_x, dst_y, dst_w, dst_h,
+              wv->surface->width, wv->surface->height);
+
+    if (rdcon->dl) {
+        dl_webview_layer_placeholder(rdcon->dl, wv->surface,
+                                     dst_x, dst_y, dst_w, dst_h,
+                                     &rdcon->block.clip);
+    } else {
+        // fallback: direct blit (single-threaded path)
+        Rect rect = { dst_x, dst_y, dst_w, dst_h };
+        blit_surface_scaled(wv->surface, NULL, rdcon->ui_context->surface, &rect,
+                            &rdcon->block.clip, SCALE_MODE_LINEAR,
+                            rdcon->clip_shapes, rdcon->clip_shape_depth);
+    }
+}
+
 // render video element: record a DL_VIDEO_PLACEHOLDER for post-composite blit
 void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->video) return;
@@ -2861,6 +2893,12 @@ void render_children(RenderContext* rdcon, View* view) {
                 log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
                 render_block_view(rdcon, block);
                 render_video_content(rdcon, block);
+            }
+            else if (block->embed && block->embed->webview &&
+                     block->embed->webview->mode == WEBVIEW_MODE_LAYER) {
+                log_debug("[RENDER DISPATCH] calling render_webview_layer_content");
+                render_block_view(rdcon, block);
+                render_webview_layer_content(rdcon, block);
             }
             else if (block->embed && block->embed->doc) {
                 render_embed_doc(rdcon, block);

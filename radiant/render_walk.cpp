@@ -1,5 +1,6 @@
 #include "render_backend.h"
 #include "view.hpp"
+#include "webview.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/log.h"
@@ -57,6 +58,14 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
 
     // render embedded image
     if (block->embed && block->embed->img && backend->render_image) {
+        backend->render_image(backend->ctx, block, state->x, state->y);
+    }
+
+    // render webview layer mode snapshot (composite as image)
+    if (block->embed && block->embed->webview &&
+        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+        block->embed->webview->surface && block->embed->webview->surface->pixels &&
+        backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
 
