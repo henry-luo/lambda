@@ -35,6 +35,14 @@
 #include <cctype>
 #include "../../lib/mem.h"
 
+// JS undefined helpers (matching js_runtime.cpp encoding)
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+static inline bool is_js_undefined(Item val) {
+    return get_type_id(val) == LMD_TYPE_UNDEFINED;
+}
+
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern Input* js_input;
@@ -86,6 +94,7 @@ static inline void js_dom_mutation_notify() {
  * Reset JS DOM state for batch mode. Clears cached document proxy and
  * document pointer so next file starts fresh.
  */
+static void expando_reset(); // forward declaration
 extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -93,6 +102,62 @@ extern "C" void js_dom_batch_reset() {
     _js_current_document = nullptr;
     js_dom_events_reset();
     js_xhr_reset();
+    expando_reset();
+}
+
+// ============================================================================
+// DOM Expando Properties
+// Allows arbitrary JS values to be stored on DOM elements, e.g.
+//   element._myData = { ... }; let x = element._myData;
+// Uses a global side-table mapping DomNode* → JS Map of expandos.
+// ============================================================================
+
+// simple open-addressing hash table for DomNode* → Item (JS Map)
+#define EXPANDO_TABLE_SIZE 256
+static struct { DomNode* key; Item map; } _expando_table[EXPANDO_TABLE_SIZE];
+static bool _expando_initialized = false;
+
+static void expando_init() {
+    if (!_expando_initialized) {
+        memset(_expando_table, 0, sizeof(_expando_table));
+        _expando_initialized = true;
+    }
+}
+
+static Item expando_get_map(DomNode* node) {
+    expando_init();
+    uintptr_t h = ((uintptr_t)node >> 4) % EXPANDO_TABLE_SIZE;
+    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
+        int idx = (h + i) % EXPANDO_TABLE_SIZE;
+        if (_expando_table[idx].key == node) return _expando_table[idx].map;
+        if (_expando_table[idx].key == nullptr) return ItemNull;
+    }
+    return ItemNull;
+}
+
+static Item expando_get_or_create_map(DomNode* node) {
+    expando_init();
+    uintptr_t h = ((uintptr_t)node >> 4) % EXPANDO_TABLE_SIZE;
+    // look for existing entry or first empty slot
+    int first_empty = -1;
+    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
+        int idx = (h + i) % EXPANDO_TABLE_SIZE;
+        if (_expando_table[idx].key == node) return _expando_table[idx].map;
+        if (_expando_table[idx].key == nullptr) {
+            if (first_empty < 0) first_empty = idx;
+            break;
+        }
+    }
+    if (first_empty < 0) return ItemNull; // table full
+    Item m = js_new_object();
+    _expando_table[first_empty].key = node;
+    _expando_table[first_empty].map = m;
+    return m;
+}
+
+static void expando_reset() {
+    memset(_expando_table, 0, sizeof(_expando_table));
+    _expando_initialized = false;
 }
 
 // ============================================================================
@@ -2256,12 +2321,25 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "addEventListener", "removeEventListener", "dispatchEvent",
         "remove", "getBoundingClientRect", "getElementsByTagName",
         "getElementsByClassName", "compareDocumentPosition",
+        "append", "prepend", "getClientRects", "focus", "blur",
         "toString",
         NULL
     };
     for (int i = 0; dom_methods[i]; i++) {
         if (strcmp(prop, dom_methods[i]) == 0) {
             return (Item){.item = ITEM_TRUE};
+        }
+    }
+
+    // check expando properties (arbitrary JS values stored on this DOM node)
+    {
+        Item exp_map = expando_get_map((DomNode*)elem);
+        if (exp_map.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name(prop))};
+            Item val = js_property_get(exp_map, key);
+            if (val.item != ITEM_NULL && !is_js_undefined(val)) {
+                return val;
+            }
         }
     }
 
@@ -2498,13 +2576,22 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         return value;
     }
 
-    // generic property set via setAttribute
-    // Handle boolean values for HTML boolean attributes (multiple, disabled,
-    // checked, selected, hidden, etc.): true → setAttribute, false → removeAttribute
+    // generic property set — store as expando AND as HTML attribute when possible
+    // This allows `element.myProp = someObj` to be stored and retrieved as JS values,
+    // while still reflecting string/bool values to the DOM attributes.
     TypeId val_type = get_type_id(value);
+
+    // always store in expando map for JS-level retrieval
+    {
+        Item exp_map = expando_get_or_create_map((DomNode*)elem);
+        if (exp_map.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name(prop))};
+            js_property_set(exp_map, key, value);
+        }
+    }
+
+    // also reflect to HTML attributes for string/bool values
     if (val_type == LMD_TYPE_BOOL) {
-        // Check low byte for true/false (ITEM_TRUE/ITEM_FALSE macros lack
-        // outer parens, so direct == comparison has operator precedence issues)
         bool is_true = (value.item & 0xFF) != 0;
         if (is_true) {
             dom_element_set_attribute(elem, prop, "");
@@ -3264,6 +3351,92 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             if (s == b_child) return (Item){.item = i2it(4)}; // other follows
         }
         return (Item){.item = i2it(2)}; // other precedes
+    }
+
+    // append(...nodes) — ParentNode.append(), accepts multiple args and strings
+    if (strcmp(method, "append") == 0) {
+        for (int i = 0; i < argc; i++) {
+            DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+            if (child_node) {
+                // detach from current parent if any
+                if (child_node->parent) child_node->parent->remove_child(child_node);
+                ((DomNode*)elem)->append_child(child_node);
+            } else {
+                // string arg → create text node
+                const char* text = fn_to_cstr(args[i]);
+                if (text) {
+                    String* s = heap_create_name(text);
+                    DomText* tn = dom_text_create(s, elem);
+                    if (tn) ((DomNode*)elem)->append_child(tn);
+                }
+            }
+        }
+        js_dom_mutation_notify();
+        return make_js_undefined();
+    }
+
+    // prepend(...nodes) — ParentNode.prepend()
+    if (strcmp(method, "prepend") == 0) {
+        // insert before first child
+        DomNode* ref = elem->first_child;
+        for (int i = 0; i < argc; i++) {
+            DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
+            if (child_node) {
+                if (child_node->parent) child_node->parent->remove_child(child_node);
+                ((DomNode*)elem)->insert_before(child_node, ref);
+            } else {
+                const char* text = fn_to_cstr(args[i]);
+                if (text) {
+                    String* s = heap_create_name(text);
+                    DomText* tn = dom_text_create(s, elem);
+                    if (tn) ((DomNode*)elem)->insert_before(tn, ref);
+                }
+            }
+        }
+        js_dom_mutation_notify();
+        return make_js_undefined();
+    }
+
+    // getClientRects() — returns array containing single DOMRect (same as getBoundingClientRect)
+    if (strcmp(method, "getClientRects") == 0) {
+        // compute absolute position
+        float abs_x = 0, abs_y = 0;
+        DomNode* n2 = (DomNode*)elem;
+        while (n2) {
+            abs_x += n2->x;
+            abs_y += n2->y;
+            n2 = n2->parent;
+        }
+        float w = elem->width;
+        float h = elem->height;
+        // create the DOMRect
+        Item rect = js_new_object();
+        Item k;
+        k = (Item){.item = s2it(heap_create_name("x"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+        k = (Item){.item = s2it(heap_create_name("y"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+        k = (Item){.item = s2it(heap_create_name("top"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_y)});
+        k = (Item){.item = s2it(heap_create_name("left"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)abs_x)});
+        k = (Item){.item = s2it(heap_create_name("right"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_x + w))});
+        k = (Item){.item = s2it(heap_create_name("bottom"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)(abs_y + h))});
+        k = (Item){.item = s2it(heap_create_name("width"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)w)});
+        k = (Item){.item = s2it(heap_create_name("height"))};
+        js_property_set(rect, k, (Item){.item = i2it((int64_t)h)});
+        // wrap in array
+        Item arr = js_array_new(0);
+        js_array_push(arr, rect);
+        return arr;
+    }
+
+    // focus() / blur() — stubs for headless mode
+    if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        return make_js_undefined();
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);

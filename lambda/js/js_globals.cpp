@@ -10,6 +10,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_dom_events.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
@@ -8110,6 +8111,7 @@ extern "C" Item js_get_global_this() {
             {"Int32Array", 10}, {"Uint32Array", 11},
             {"Float32Array", 12}, {"Float64Array", 12},
             {"Proxy", 5},
+            {"Event", 5}, {"CustomEvent", 11},
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -8170,6 +8172,31 @@ extern "C" Item js_get_global_this() {
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
+
+        // DOM: Node constants (Node.ELEMENT_NODE, etc.)
+        {
+            Item node_obj = js_new_object();
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ELEMENT_NODE", 12))}, (Item){.item = i2it(1)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ATTRIBUTE_NODE", 14))}, (Item){.item = i2it(2)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("TEXT_NODE", 9))}, (Item){.item = i2it(3)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("CDATA_SECTION_NODE", 18))}, (Item){.item = i2it(4)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("COMMENT_NODE", 12))}, (Item){.item = i2it(8)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_NODE", 13))}, (Item){.item = i2it(9)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_TYPE_NODE", 18))}, (Item){.item = i2it(10)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_FRAGMENT_NODE", 22))}, (Item){.item = i2it(11)});
+            // document position bitmask
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_DISCONNECTED", 30))}, (Item){.item = i2it(1)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_PRECEDING", 27))}, (Item){.item = i2it(2)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_FOLLOWING", 27))}, (Item){.item = i2it(4)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINS", 26))}, (Item){.item = i2it(8)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINED_BY", 30))}, (Item){.item = i2it(16)});
+            // make Node also usable as a prototype-like check (Node.prototype = Node for typeof == 'function' checks)
+            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Node", 4))}, node_obj);
+        }
+
+        // DOM: window.innerWidth / innerHeight (headless defaults)
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerWidth", 10))}, (Item){.item = i2it(1024)});
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerHeight", 11))}, (Item){.item = i2it(768)});
     }
     return js_global_this_obj;
 }
@@ -8400,6 +8427,8 @@ enum JsConstructorId {
     JS_CTOR_FLOAT64ARRAY,
     JS_CTOR_AGGREGATE_ERROR,
     JS_CTOR_PROXY,
+    JS_CTOR_EVENT,
+    JS_CTOR_CUSTOM_EVENT,
     JS_CTOR_MAX
 };
 
@@ -8497,6 +8526,16 @@ static Item js_ctor_uri_error_fn(Item msg) {
 static Item js_ctor_eval_error_fn(Item msg) {
     Item tn = (Item){.item = s2it(heap_create_name("EvalError", 9))};
     return js_new_error_with_name(tn, msg);
+}
+
+// Event(type, options) / CustomEvent(type, options) — called without 'new'
+static Item js_ctor_event_fn(Item type_arg) {
+    const char* type = fn_to_cstr(type_arg);
+    return js_create_event(type ? type : "", false, false);
+}
+static Item js_ctor_custom_event_fn(Item type_arg) {
+    const char* type = fn_to_cstr(type_arg);
+    return js_create_custom_event(type ? type : "", false, false, ItemNull);
 }
 
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
@@ -8708,6 +8747,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_SYNTAX_ERROR) fn->func_ptr = (void*)js_ctor_syntax_error_fn;
     else if (ctor_id == JS_CTOR_URI_ERROR) fn->func_ptr = (void*)js_ctor_uri_error_fn;
     else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
+    else if (ctor_id == JS_CTOR_EVENT) fn->func_ptr = (void*)js_ctor_event_fn;
+    else if (ctor_id == JS_CTOR_CUSTOM_EVENT) fn->func_ptr = (void*)js_ctor_custom_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
@@ -8775,6 +8816,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
         {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
         {"Proxy", 5, JS_CTOR_PROXY, 2},
+        {"Event", 5, JS_CTOR_EVENT, 1},
+        {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 1},
         {NULL, 0, 0, 0}
     };
 

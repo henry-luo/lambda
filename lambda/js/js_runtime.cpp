@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_dom.h"
+#include "js_dom_events.h"
 #include "js_cssom.h"
 #include "js_typed_array.h"
 #include "js_event_loop.h"
@@ -3709,6 +3710,51 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 if (argc > 0 && args) return js_to_object(args[0]);
                 return js_new_object();
+            }
+
+            // Event(type, options)
+            if (nl == 5 && strncmp(n, "Event", 5) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                const char* type = "";
+                bool bubbles = false, cancelable = false;
+                if (argc > 0 && args) {
+                    const char* t = fn_to_cstr(args[0]);
+                    if (t) type = t;
+                }
+                if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
+                    Item bv = js_property_get(args[1], bk);
+                    Item cv = js_property_get(args[1], ck);
+                    bubbles = js_is_truthy(bv);
+                    cancelable = js_is_truthy(cv);
+                }
+                return js_create_event(type, bubbles, cancelable);
+            }
+
+            // CustomEvent(type, options)
+            if (nl == 11 && strncmp(n, "CustomEvent", 11) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                const char* type = "";
+                bool bubbles = false, cancelable = false;
+                Item detail = ItemNull;
+                if (argc > 0 && args) {
+                    const char* t = fn_to_cstr(args[0]);
+                    if (t) type = t;
+                }
+                if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
+                    Item dk = (Item){.item = s2it(heap_create_name("detail", 6))};
+                    Item bv = js_property_get(args[1], bk);
+                    Item cv = js_property_get(args[1], ck);
+                    detail = js_property_get(args[1], dk);
+                    bubbles = js_is_truthy(bv);
+                    cancelable = js_is_truthy(cv);
+                }
+                return js_create_custom_event(type, bubbles, cancelable, detail);
             }
         }
 
