@@ -29,7 +29,7 @@ yes
 undefined
 text
 hello
-null
+value123
 css-error
 1
 2
@@ -43,7 +43,7 @@ hello
 2
 true
 true
-false
+true
 false
 1
 Welcome to the test page.
