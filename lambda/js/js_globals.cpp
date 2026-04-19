@@ -8062,6 +8062,9 @@ extern "C" void js_globals_batch_reset() {
     js_process_object = (Item){.item = ITEM_NULL};
     js_process_argc_raw = 0;
     js_process_argv_raw = NULL;
+    // reset with-statement scope stack — stale Items become dangling after heap reset
+    extern void js_with_batch_reset(void);
+    js_with_batch_reset();
 }
 
 // forward declaration for populating globalThis with constructors
@@ -8182,6 +8185,11 @@ extern "C" Item js_get_global_object() {
 #define JS_WITH_STACK_MAX 16
 static Item js_with_stack[JS_WITH_STACK_MAX];
 static int js_with_stack_depth = 0;
+
+extern "C" void js_with_batch_reset(void) {
+    js_with_stack_depth = 0;
+    memset(js_with_stack, 0, sizeof(js_with_stack));
+}
 
 extern "C" void js_with_push(Item obj) {
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {

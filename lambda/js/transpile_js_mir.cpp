@@ -20610,6 +20610,18 @@ static int module_mir_context_count = 0;
 static Runtime* js_source_runtime = NULL;
 static int js_dynamic_func_counter = 0;
 
+// Track the active MIR context during compilation/execution so that
+// batch timeout recovery (longjmp from SIGALRM) can finish the leaked context.
+// Set before execution, cleared after normal cleanup in transpile_js_to_mir_core.
+static MIR_context_t g_active_mir_ctx = NULL;
+
+void jm_cleanup_active_mir(void) {
+    if (g_active_mir_ctx) {
+        MIR_finish(g_active_mir_ctx);
+        g_active_mir_ctx = NULL;
+    }
+}
+
 static void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
         module_mir_name_pools[module_mir_context_count] = NULL;
@@ -25920,6 +25932,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
     // Install batch error handler if set (prevents exit(1) on MIR errors)
     if (g_batch_mir_error_handler) {
@@ -26170,6 +26183,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         MIR_finish(ctx);
     }
+    g_active_mir_ctx = NULL;  // normal cleanup done, no longer need recovery
 
     // stash ephemeral GC heap on Runtime for caller cleanup.
     // each heap allocates ~12MB (data zone + tenured zone + bump block), so

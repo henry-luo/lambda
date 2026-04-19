@@ -3262,6 +3262,10 @@ int main(int argc, char *argv[]) {
                     // Clean up deferred MIR contexts from previous tests — heap objects
                     // referencing their code pages are now gone after heap_destroy().
                     jm_cleanup_deferred_mir();
+                    // Clean up the active MIR context that was interrupted by longjmp
+                    // (never deferred because transpile_js_to_mir_core didn't finish).
+                    extern void jm_cleanup_active_mir(void);
+                    jm_cleanup_active_mir();
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;

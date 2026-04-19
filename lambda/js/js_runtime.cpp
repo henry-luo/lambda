@@ -430,6 +430,20 @@ extern "C" void js_batch_reset() {
     // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
+    // reset globalThis, constructor cache, process object — stale heap pointers
+    extern void js_globals_batch_reset(void);
+    js_globals_batch_reset();
+    // reset DOM state — stale document proxy and document pointer
+    extern void js_dom_batch_reset(void);
+    js_dom_batch_reset();
+    // reset microtask queue and timers — callbacks referencing old heap
+    extern void js_event_loop_init(void);
+    js_event_loop_init();
+    // reset process event listeners — callbacks referencing old heap
+    extern void js_process_reset_listeners(void);
+    js_process_reset_listeners();
+    // reset strict mode — prevents strict-mode test from poisoning subsequent tests
+    js_strict_mode = false;
     // reset module namespace caches (pool-allocated function wrappers become dangling)
     js_child_process_reset();
     js_fs_reset();
@@ -536,6 +550,9 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset microtask queue and timers — callbacks referencing old heap
     extern void js_event_loop_init(void);
     js_event_loop_init();
+    // reset process event listeners — callbacks referencing old heap
+    extern void js_process_reset_listeners(void);
+    js_process_reset_listeners();
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -16635,7 +16652,9 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 11 && memcmp(spec->chars, "node:timers", 11) == 0)) {
         // return a namespace with setTimeout/setInterval/etc
         static Item timers_ns = {0};
-        if (timers_ns.item == 0) {
+        static int timers_epoch = -1;
+        if (timers_ns.item == 0 || timers_epoch != js_heap_epoch) {
+            timers_epoch = js_heap_epoch;
             extern Item js_setTimeout(Item, Item);
             extern Item js_setInterval(Item, Item);
             extern void js_clearTimeout(Item);
@@ -16672,7 +16691,9 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 17 && memcmp(spec->chars, "worker_threads.js", 17) == 0) ||
         (spec->len == 19 && memcmp(spec->chars, "node:worker_threads", 19) == 0)) {
         static Item wt_ns = {0};
-        if (wt_ns.item == 0) {
+        static int wt_epoch = -1;
+        if (wt_ns.item == 0 || wt_epoch != js_heap_epoch) {
+            wt_epoch = js_heap_epoch;
             wt_ns = js_new_object();
             heap_register_gc_root(&wt_ns.item);
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("isMainThread", 12))},
@@ -16691,7 +16712,9 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 10 && memcmp(spec->chars, "cluster.js", 10) == 0) ||
         (spec->len == 12 && memcmp(spec->chars, "node:cluster", 12) == 0)) {
         static Item cl_ns = {0};
-        if (cl_ns.item == 0) {
+        static int cl_epoch = -1;
+        if (cl_ns.item == 0 || cl_epoch != js_heap_epoch) {
+            cl_epoch = js_heap_epoch;
             cl_ns = js_new_object();
             heap_register_gc_root(&cl_ns.item);
             js_property_set(cl_ns, (Item){.item = s2it(heap_create_name("isPrimary", 9))},
