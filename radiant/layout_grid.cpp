@@ -992,6 +992,10 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
 
     log_debug(" Item span: %d cols x %d rows\n", col_span, row_span);
 
+    // clamp excessive spans to prevent performance issues
+    if (col_span > 1000) col_span = 1000;
+    if (row_span > 1000) row_span = 1000;
+
     // Determine grid dimensions from template
     int max_columns = grid_layout->explicit_column_count;
     int max_rows = grid_layout->explicit_row_count;

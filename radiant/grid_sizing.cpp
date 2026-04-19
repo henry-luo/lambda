@@ -20,7 +20,10 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     int neg_row_offset = grid_layout->negative_implicit_row_count;
     int neg_col_offset = grid_layout->negative_implicit_column_count;
 
-    // Allocate computed tracks
+    // Allocate computed tracks (clamp to prevent excessive allocation)
+    if (grid_layout->computed_row_count > 1000) grid_layout->computed_row_count = 1000;
+    if (grid_layout->computed_column_count > 1000) grid_layout->computed_column_count = 1000;
+
     if (grid_layout->computed_row_count > 0) {
         grid_layout->computed_rows = (GridTrack*)mem_calloc(grid_layout->computed_row_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
         log_debug("  Allocated %d row tracks", grid_layout->computed_row_count);
