@@ -384,6 +384,7 @@ struct JsMirTranspiler {
     // control flow statements like for/while/if/switch), implementing ES spec §13.5.1.
     MIR_reg_t eval_completion_reg;           // 0 if not tracking completion values
     bool in_typeof;                          // true when transpiling operand of typeof
+    int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
 };
 
 // ============================================================================
@@ -1301,8 +1302,8 @@ static void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) 
         break;
     }
     case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        jm_collect_func_assignments(ws->body, names);
+        // Do NOT recurse into 'with' bodies — assignments inside 'with' may resolve
+        // to the scope object at runtime, so they are not implicit globals
         break;
     }
     case JS_AST_NODE_DO_WHILE_STATEMENT: {
@@ -6868,6 +6869,12 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     jm_scope_env_mark_and_writeback(mt, vname, result);
+                } else if (!mc) {
+                    // Implicit global: write back to global object
+                    MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    jm_call_void_2(mt, "js_set_global_property",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                 }
             }
         } else if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
@@ -7051,6 +7058,12 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     jm_scope_env_mark_and_writeback(mt, vname, result);
+                } else if (!mc) {
+                    // Implicit global: write back to global object
+                    MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    jm_call_void_2(mt, "js_set_global_property",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                 }
             }
         } else if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
@@ -7602,8 +7615,43 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                     return rhs;
                 }
             }
-            log_error("js-mir: assignment to undefined var '%s' in func_idx=%d", vname, mt->current_func_index);
-            return jm_emit_null(mt);
+            // Implicit global assignment: write to global object via js_set_global_property
+            {
+                MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                if (asgn->op != JS_OP_ASSIGN) {
+                    // Compound assignment: read current value from global, apply op, store
+                    MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    MIR_reg_t old_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+                    const char* fn = NULL;
+                    switch (asgn->op) {
+                    case JS_OP_ADD_ASSIGN: fn = "js_add"; break;
+                    case JS_OP_SUB_ASSIGN: fn = "js_subtract"; break;
+                    case JS_OP_MUL_ASSIGN: fn = "js_multiply"; break;
+                    case JS_OP_DIV_ASSIGN: fn = "js_divide"; break;
+                    case JS_OP_MOD_ASSIGN: fn = "js_modulo"; break;
+                    case JS_OP_EXP_ASSIGN: fn = "js_power"; break;
+                    case JS_OP_BIT_AND_ASSIGN: fn = "js_bitwise_and"; break;
+                    case JS_OP_BIT_OR_ASSIGN: fn = "js_bitwise_or"; break;
+                    case JS_OP_BIT_XOR_ASSIGN: fn = "js_bitwise_xor"; break;
+                    case JS_OP_LSHIFT_ASSIGN: fn = "js_left_shift"; break;
+                    case JS_OP_RSHIFT_ASSIGN: fn = "js_right_shift"; break;
+                    case JS_OP_URSHIFT_ASSIGN: fn = "js_unsigned_right_shift"; break;
+                    case JS_OP_NULLISH_ASSIGN: fn = "js_nullish_coalesce"; break;
+                    case JS_OP_AND_ASSIGN: fn = "js_logical_and"; break;
+                    case JS_OP_OR_ASSIGN: fn = "js_logical_or"; break;
+                    default: fn = "js_add"; break;
+                    }
+                    rhs = jm_call_2(mt, fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                }
+                MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                jm_call_void_2(mt, "js_set_global_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                return rhs;
+            }
         }
 
         // const variable: throw TypeError on assignment
@@ -10823,8 +10871,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             p3_ops[p3_oi++] = MIR_new_reg_op(mt->ctx, p3_arg_regs[i]);
                         }
 
+                        // save with-scope depth before direct call
+                        MIR_reg_t p3_saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
+
                         jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p3_nops, p3_ops));
 
+                        // restore with-scope depth after direct call
+                        jm_call_void_1(mt, "js_with_restore_depth",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_saved_wd));
                         // Restore this + new.target
                         jm_call_void_1(mt, "js_set_this",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_prev_this));
@@ -11591,8 +11645,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_set_direct_new_target",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
 
+                // save with-scope depth before direct call (function may return from inside 'with')
+                MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
+
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
+                // restore with-scope depth after direct call
+                jm_call_void_1(mt, "js_with_restore_depth",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_wd));
                 // v17: restore previous this after direct call
                 jm_call_void_1(mt, "js_set_this",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this));
@@ -17858,6 +17918,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->inlining_finally = false;
             }
         }
+        // pop with-scope(s) before jumping out of with block
+        for (int w = 0; w < mt->with_depth; w++)
+            jm_call_void_0(mt, "js_with_pop");
         if (brk->label && brk->label_len > 0) {
             // labeled break: search loop_stack for matching label
             for (int i = mt->loop_depth - 1; i >= 0; i--) {
@@ -17889,6 +17952,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->inlining_finally = false;
             }
         }
+        // pop with-scope(s) before jumping out of with block
+        for (int w = 0; w < mt->with_depth; w++)
+            jm_call_void_0(mt, "js_with_pop");
         if (cont->label && cont->label_len > 0) {
             // labeled continue: search loop_stack for matching label
             for (int i = mt->loop_depth - 1; i >= 0; i--) {
@@ -18006,6 +18072,9 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             tc->finally_body = has_finally ? try_node->finalizer : NULL; // v18
         }
 
+        // Save with-scope depth so we can restore it if an exception escapes a 'with' block
+        MIR_reg_t saved_with_depth = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
+
         // === Try body ===
         if (try_node->block && try_node->block->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             jm_push_scope(mt);
@@ -18042,6 +18111,11 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // === Catch block ===
         if (has_catch) {
             jm_emit_label(mt, catch_label);
+
+            // Restore with-scope depth (exception may have escaped a 'with' block)
+            jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
+                MIR_new_reg_op(mt->ctx, saved_with_depth));
+
             JsCatchNode* catch_node = (JsCatchNode*)try_node->handler;
 
             // Clear exception and get thrown value
@@ -18095,6 +18169,10 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // === Finally block ===
         if (has_finally) {
             jm_emit_label(mt, finally_label);
+
+            // Restore with-scope depth (exception or early exit may have escaped a 'with' block)
+            jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
+                MIR_new_reg_op(mt->ctx, saved_with_depth));
 
             // In generators, push a minimal try context so that yield inside
             // the finally body can re-initialize has_return_reg/return_val_reg
@@ -18254,9 +18332,11 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // push with-scope object
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, with_node->object);
             jm_call_void_1(mt, "js_with_push", MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg));
+            mt->with_depth++;
             // transpile body
             if (with_node->body)
                 jm_transpile_statement(mt, with_node->body);
+            mt->with_depth--;
             // pop with-scope
             jm_call_void_0(mt, "js_with_pop");
         }
@@ -22115,39 +22195,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
         hashmap_free(top_assigned);
 
-        // Also filter: if a candidate is declared at the top level, it's not a global
-        // (it's already a top-level local/var). Only register truly undeclared names.
-        size_t iter = 0; void* item;
-        while (hashmap_iter(implicit_globals, &iter, &item)) {
-            JsNameSetEntry* e = (JsNameSetEntry*)item;
-            if (jm_name_set_has(top_declarations, e->name)) continue;  // already a top-level var
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
-            if (hashmap_get(mt->module_consts, &lookup)) continue;  // already registered
-            // Skip known built-in global objects that the transpiler handles as intrinsics.
-            // These should never be shadowed by implicit global MODVARs, because the
-            // identifier codegen falls through to intrinsic calls (e.g. js_get_document_object_value)
-            // only when no MODVAR entry exists. Creating a MODVAR would intercept that path.
-            {
-                static const char* builtin_globals[] = {
-                    "_js_document", "_js_Math", "_js_JSON", "_js_Reflect",
-                    "_js_console", "_js_process", NULL
-                };
-                bool is_builtin = false;
-                for (int bi = 0; builtin_globals[bi]; bi++) {
-                    if (strcmp(e->name, builtin_globals[bi]) == 0) { is_builtin = true; break; }
-                }
-                if (is_builtin) continue;
-            }
-            if (mt->module_var_count < 2048) {
-                JsModuleConstEntry mce;
-                memset(&mce, 0, sizeof(mce));
-                snprintf(mce.name, sizeof(mce.name), "%s", e->name);
-                mce.const_type = MCONST_MODVAR;
-                mce.int_val = mt->module_var_count++;
-                mce.is_implicit_global = true;
-                hashmap_set(mt->module_consts, &mce);
-                log_info("js-mir: implicit global '%s' → module_var[%d]", mce.name, (int)mce.int_val);
+        // Implicit globals no longer create module_vars — reads fall through to
+        // js_get_global_property, writes emit js_set_global_property. This avoids
+        // shadowing properties set via this.X = val on the global object.
+        // Log implicit globals for debugging but don't register them.
+        {
+            size_t iter = 0; void* item;
+            while (hashmap_iter(implicit_globals, &iter, &item)) {
+                JsNameSetEntry* e = (JsNameSetEntry*)item;
+                if (jm_name_set_has(top_declarations, e->name)) continue;
+                JsModuleConstEntry lookup;
+                snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                if (hashmap_get(mt->module_consts, &lookup)) continue;
+                log_info("js-mir: implicit global '%s' (no modvar — uses global property)", e->name);
             }
         }
 

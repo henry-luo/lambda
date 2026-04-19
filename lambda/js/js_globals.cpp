@@ -1836,14 +1836,15 @@ static Item structured_clone_impl(Item value, int depth) {
 
     // typed array: copy buffer
     extern bool js_is_typed_array(Item item);
+    extern JsTypedArray* js_get_typed_array_ptr(Map* m);
     if (js_is_typed_array(value)) {
         Map* m = value.map;
-        JsTypedArray* ta = (JsTypedArray*)m->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(m);
         if (ta && ta->data && ta->byte_length > 0) {
             extern Item js_typed_array_new(int element_type, int length);
             Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
             Map* cm = clone.map;
-            JsTypedArray* cta = (JsTypedArray*)cm->data;
+            JsTypedArray* cta = js_get_typed_array_ptr(cm);
             if (cta && cta->data) {
                 memcpy(cta->data, ta->data, ta->byte_length);
             }
@@ -2740,7 +2741,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
 
     // Handle TypedArray (Uint8Array, Int32Array, etc.)
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(arr_item.map);
         int len = ta->length;
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
         char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
@@ -3178,7 +3179,7 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 
         // TypedArray types
         if (js_is_typed_array(left)) {
-            JsTypedArray* ta = (JsTypedArray*)left.map->data;
+            JsTypedArray* ta = js_get_typed_array_ptr(left.map);
             if (rn->len == 10 && strncmp(rn->chars, "Uint8Array", 10) == 0)
                 return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8)};
             if (rn->len == 17 && strncmp(rn->chars, "Uint8ClampedArray", 17) == 0)
@@ -6883,7 +6884,7 @@ extern "C" Item js_array_from(Item iterable) {
     }
     // TypedArray: convert each element to a JS number in a regular array
     if (js_is_typed_array(iterable)) {
-        JsTypedArray* ta = (JsTypedArray*)iterable.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(iterable.map);
         int len = ta->length;
         Item result = js_array_new(0);
         for (int i = 0; i < len; i++) {
@@ -8171,14 +8172,41 @@ extern "C" void js_with_pop() {
     }
 }
 
+extern "C" int js_with_save_depth() {
+    return js_with_stack_depth;
+}
+
+extern "C" void js_with_restore_depth(int depth) {
+    js_with_stack_depth = depth;
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found) {
+    extern int js_check_exception(void);
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
         if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
             extern Item js_has_own_property(Item obj, Item key);
             if (it2b(js_has_own_property(scope_obj, key))) {
+                // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
+                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))}; // Symbol.unscopables
+                Item unscopables = js_property_get(scope_obj, unscopables_sym);
+                if (js_check_exception()) {
+                    *found = true;
+                    return ItemNull; // getter threw — propagate
+                }
+                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                    Item blocked = js_property_get(unscopables, key);
+                    if (js_check_exception()) {
+                        *found = true;
+                        return ItemNull;
+                    }
+                    extern bool js_is_truthy(Item value);
+                    if (js_is_truthy(blocked)) {
+                        continue; // binding is blocked by @@unscopables
+                    }
+                }
                 *found = true;
                 return js_property_get(scope_obj, key);
             }
@@ -8228,6 +8256,26 @@ extern "C" Item js_get_global_property_strict(Item key) {
         }
     }
     return result;
+}
+
+// js_set_global_property: write a property to the global object by name string
+// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
+extern "C" void js_set_global_property(Item key, Item value) {
+    // Check with-scope stack first — assignments inside 'with' resolve to scope object
+    if (js_with_stack_depth > 0) {
+        for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+            Item scope_obj = js_with_stack[i];
+            if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+                extern Item js_has_own_property(Item obj, Item key);
+                if (it2b(js_has_own_property(scope_obj, key))) {
+                    js_property_set(scope_obj, key, value);
+                    return;
+                }
+            }
+        }
+    }
+    Item global = js_get_global_this();
+    js_property_set(global, key, value);
 }
 
 // v48: Return a function wrapper for global builtins (parseInt, parseFloat, etc.)
