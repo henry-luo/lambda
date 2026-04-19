@@ -850,17 +850,10 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
-        // The transpiler routes .toISOString()/.toString() here unconditionally;
+        // The transpiler routes .toISOString() here unconditionally;
         // non-Date objects may have their own methods via prototype chain.
         if (method_id == 8) { // toISOString
             Item mk = (Item){.item = s2it(heap_create_name("toISOString", 11))};
-            Item fn = js_property_access(date_obj, mk);
-            if (get_type_id(fn) == LMD_TYPE_FUNC) {
-                return js_call_function(fn, date_obj, nullptr, 0);
-            }
-        }
-        if (method_id == 17) { // toString
-            Item mk = (Item){.item = s2it(heap_create_name("toString", 8))};
             Item fn = js_property_access(date_obj, mk);
             if (get_type_id(fn) == LMD_TYPE_FUNC) {
                 return js_call_function(fn, date_obj, nullptr, 0);
@@ -1087,108 +1080,141 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     }
 
     if (method_id == 20) { // setTime
-        double new_ms = to_double(arg0);
+        Item num = js_to_number(arg0);
+        if (js_check_exception()) return ItemNull;
+        double new_ms = to_double(num);
         return store_ms(new_ms);
     }
 
-    // ES spec: if any required arg is NaN, set [[DateValue]] to NaN
+    // Date setters (methods 21-36): local (21-27) and UTC (30-36)
+    // ES spec: call ToNumber on all present arguments first (left-to-right, for side effects),
+    // then check NaN on date/args, then compute. This ensures valueOf/toString side effects
+    // and Symbol TypeError throws happen in the correct order.
     if (method_id >= 21 && method_id <= 36) {
-        double v0 = to_double(arg0);
+        Item n0 = js_to_number(arg0);
+        if (js_check_exception()) return ItemNull;
+        double v0 = to_double(n0);
+
+        double v1 = NAN;
+        if (is_present(arg1)) {
+            Item n1 = js_to_number(arg1);
+            if (js_check_exception()) return ItemNull;
+            v1 = to_double(n1);
+        }
+        double v2 = NAN;
+        if (is_present(arg2)) {
+            Item n2 = js_to_number(arg2);
+            if (js_check_exception()) return ItemNull;
+            v2 = to_double(n2);
+        }
+        double v3 = NAN;
+        if (is_present(arg3)) {
+            Item n3 = js_to_number(arg3);
+            if (js_check_exception()) return ItemNull;
+            v3 = to_double(n3);
+        }
+
+        // ES spec: if any required arg is NaN, result is NaN
         if (isnan(v0)) return store_ms(NAN);
-        if (is_present(arg1) && isnan(to_double(arg1))) return store_ms(NAN);
-        if (is_present(arg2) && isnan(to_double(arg2))) return store_ms(NAN);
-        if (is_present(arg3) && isnan(to_double(arg3))) return store_ms(NAN);
-    }
+        if (is_present(arg1) && isnan(v1)) return store_ms(NAN);
+        if (is_present(arg2) && isnan(v2)) return store_ms(NAN);
+        if (is_present(arg3) && isnan(v3)) return store_ms(NAN);
 
-    // local setters (21-27)
-    if (method_id >= 21 && method_id <= 27) {
-        time_t secs = (time_t)(ms / 1000.0);
-        int old_millis = (int)(ms - (double)secs * 1000.0);
-        if (old_millis < 0) old_millis += 1000;
-        struct tm tm;
-        localtime_r(&secs, &tm);
+        // ES spec: setFullYear/setUTCFullYear — if date is NaN, use +0
+        if ((method_id == 21 || method_id == 30) && isnan(ms)) ms = 0.0;
+        // all other setters: if date is NaN, result is NaN
+        if (isnan(ms)) return store_ms(NAN);
 
-        switch (method_id) {
-            case 21: // setFullYear(year [, month, date])
-                tm.tm_year = (int)to_double(arg0) - 1900;
-                if (is_present(arg1)) tm.tm_mon = (int)to_double(arg1);
-                if (is_present(arg2)) tm.tm_mday = (int)to_double(arg2);
-                break;
-            case 22: // setMonth(month [, date])
-                tm.tm_mon = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_mday = (int)to_double(arg1);
-                break;
-            case 23: // setDate(date)
-                tm.tm_mday = (int)to_double(arg0);
-                break;
-            case 24: // setHours(hour [, min, sec, ms])
-                tm.tm_hour = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_min = (int)to_double(arg1);
-                if (is_present(arg2)) tm.tm_sec = (int)to_double(arg2);
-                if (is_present(arg3)) old_millis = (int)to_double(arg3);
-                break;
-            case 25: // setMinutes(min [, sec, ms])
-                tm.tm_min = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_sec = (int)to_double(arg1);
-                if (is_present(arg2)) old_millis = (int)to_double(arg2);
-                break;
-            case 26: // setSeconds(sec [, ms])
-                tm.tm_sec = (int)to_double(arg0);
-                if (is_present(arg1)) old_millis = (int)to_double(arg1);
-                break;
-            case 27: // setMilliseconds(ms)
-                old_millis = (int)to_double(arg0);
-                break;
+        // local setters (21-27)
+        if (method_id >= 21 && method_id <= 27) {
+            time_t secs = (time_t)(ms / 1000.0);
+            int old_millis = (int)(ms - (double)secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm tm;
+            localtime_r(&secs, &tm);
+
+            switch (method_id) {
+                case 21: // setFullYear(year [, month, date])
+                    tm.tm_year = (int)v0 - 1900;
+                    if (is_present(arg1)) tm.tm_mon = (int)v1;
+                    if (is_present(arg2)) tm.tm_mday = (int)v2;
+                    break;
+                case 22: // setMonth(month [, date])
+                    tm.tm_mon = (int)v0;
+                    if (is_present(arg1)) tm.tm_mday = (int)v1;
+                    break;
+                case 23: // setDate(date)
+                    tm.tm_mday = (int)v0;
+                    break;
+                case 24: // setHours(hour [, min, sec, ms])
+                    tm.tm_hour = (int)v0;
+                    if (is_present(arg1)) tm.tm_min = (int)v1;
+                    if (is_present(arg2)) tm.tm_sec = (int)v2;
+                    if (is_present(arg3)) old_millis = (int)v3;
+                    break;
+                case 25: // setMinutes(min [, sec, ms])
+                    tm.tm_min = (int)v0;
+                    if (is_present(arg1)) tm.tm_sec = (int)v1;
+                    if (is_present(arg2)) old_millis = (int)v2;
+                    break;
+                case 26: // setSeconds(sec [, ms])
+                    tm.tm_sec = (int)v0;
+                    if (is_present(arg1)) old_millis = (int)v1;
+                    break;
+                case 27: // setMilliseconds(ms)
+                    old_millis = (int)v0;
+                    break;
+            }
+            tm.tm_isdst = -1;
+            time_t new_secs = mktime(&tm);
+            double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
+            return store_ms(new_ms);
         }
-        tm.tm_isdst = -1;
-        time_t new_secs = mktime(&tm);
-        double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
-        return store_ms(new_ms);
-    }
 
-    // UTC setters (30-36)
-    if (method_id >= 30 && method_id <= 36) {
-        time_t secs = (time_t)(ms / 1000.0);
-        int old_millis = (int)(ms - (double)secs * 1000.0);
-        if (old_millis < 0) old_millis += 1000;
-        struct tm utc;
-        gmtime_r(&secs, &utc);
+        // UTC setters (30-36)
+        if (method_id >= 30 && method_id <= 36) {
+            time_t secs = (time_t)(ms / 1000.0);
+            int old_millis = (int)(ms - (double)secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm utc;
+            gmtime_r(&secs, &utc);
 
-        switch (method_id) {
-            case 30: // setUTCFullYear(year [, month, date])
-                utc.tm_year = (int)to_double(arg0) - 1900;
-                if (is_present(arg1)) utc.tm_mon = (int)to_double(arg1);
-                if (is_present(arg2)) utc.tm_mday = (int)to_double(arg2);
-                break;
-            case 31: // setUTCMonth(month [, date])
-                utc.tm_mon = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_mday = (int)to_double(arg1);
-                break;
-            case 32: // setUTCDate(date)
-                utc.tm_mday = (int)to_double(arg0);
-                break;
-            case 33: // setUTCHours(hour [, min, sec, ms])
-                utc.tm_hour = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_min = (int)to_double(arg1);
-                if (is_present(arg2)) utc.tm_sec = (int)to_double(arg2);
-                if (is_present(arg3)) old_millis = (int)to_double(arg3);
-                break;
-            case 34: // setUTCMinutes(min [, sec, ms])
-                utc.tm_min = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_sec = (int)to_double(arg1);
-                if (is_present(arg2)) old_millis = (int)to_double(arg2);
-                break;
-            case 35: // setUTCSeconds(sec [, ms])
-                utc.tm_sec = (int)to_double(arg0);
-                if (is_present(arg1)) old_millis = (int)to_double(arg1);
-                break;
-            case 36: // setUTCMilliseconds(ms)
-                old_millis = (int)to_double(arg0);
-                break;
+            switch (method_id) {
+                case 30: // setUTCFullYear(year [, month, date])
+                    utc.tm_year = (int)v0 - 1900;
+                    if (is_present(arg1)) utc.tm_mon = (int)v1;
+                    if (is_present(arg2)) utc.tm_mday = (int)v2;
+                    break;
+                case 31: // setUTCMonth(month [, date])
+                    utc.tm_mon = (int)v0;
+                    if (is_present(arg1)) utc.tm_mday = (int)v1;
+                    break;
+                case 32: // setUTCDate(date)
+                    utc.tm_mday = (int)v0;
+                    break;
+                case 33: // setUTCHours(hour [, min, sec, ms])
+                    utc.tm_hour = (int)v0;
+                    if (is_present(arg1)) utc.tm_min = (int)v1;
+                    if (is_present(arg2)) utc.tm_sec = (int)v2;
+                    if (is_present(arg3)) old_millis = (int)v3;
+                    break;
+                case 34: // setUTCMinutes(min [, sec, ms])
+                    utc.tm_min = (int)v0;
+                    if (is_present(arg1)) utc.tm_sec = (int)v1;
+                    if (is_present(arg2)) old_millis = (int)v2;
+                    break;
+                case 35: // setUTCSeconds(sec [, ms])
+                    utc.tm_sec = (int)v0;
+                    if (is_present(arg1)) old_millis = (int)v1;
+                    break;
+                case 36: // setUTCMilliseconds(ms)
+                    old_millis = (int)v0;
+                    break;
+            }
+            time_t new_secs = timegm(&utc);
+            double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
+            return store_ms(new_ms);
         }
-        time_t new_secs = timegm(&utc);
-        double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
-        return store_ms(new_ms);
     }
 
     return ItemNull;
@@ -4455,6 +4481,11 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
 // =============================================================================
 
 extern "C" Item js_array_is_array(Item value) {
+    // ES spec §7.2.2: unwrap Proxy recursively
+    if (js_is_proxy(value)) {
+        value = js_proxy_get_target(value);
+        if (value.item == ItemNull.item) return (Item){.item = ITEM_FALSE}; // revoked proxy
+    }
     TypeId type = get_type_id(value);
     return (Item){.item = (type == LMD_TYPE_ARRAY) ? ITEM_TRUE : ITEM_FALSE};
 }
