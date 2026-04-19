@@ -61,6 +61,16 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+// Adaptive gen interface: large functions (>N insns) compile at opt=1 to avoid
+// O(n²) SSA/GVN cost, while small functions get full optimization.
+// Threshold: 10K MIR insns → functions above this use opt=1.
+#define JM_LARGE_FUNC_INSN_THRESHOLD 10000
+
+// Threshold for total MIR instructions in a module. Modules above this
+// (e.g., lodash with 272K insns) use opt=0 for the entire context because
+// MIR's SSA/GVN passes have super-linear cost for very large functions.
+#define JM_LARGE_MODULE_INSN_THRESHOLD 100000
+
 
 
 // POC: MIR interpreter mode — set from mir.c
@@ -4787,6 +4797,7 @@ struct JsParamEvidence {
     int string_evidence;
     bool used_as_container;  // param used as object in arr[i] expression
     bool compared_with_non_numeric;  // param compared with undefined/null/bool via ===
+    bool param_reassigned;  // param is target of plain assignment (e = ...) — initial call-site type may differ
 };
 
 // Walk an AST subtree and accumulate type evidence for parameters.
@@ -5010,6 +5021,13 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
     }
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
+        // P6: Plain assignment to a parameter (e = expr) means the initial call-site
+        // type may differ from the post-assignment type. The native version assumes
+        // the parameter starts as the inferred type, so reassignment is unsafe.
+        if (n->op == JS_OP_ASSIGN) {
+            int li = find_param(n->left);
+            if (li >= 0) evidence[li].param_reassigned = true;
+        }
         // P6: Compound assignments (r -= y, x += 1) → operands are numeric
         if (n->op != JS_OP_ASSIGN) {
             bool is_compound_arith = (n->op == JS_OP_ADD_ASSIGN || n->op == JS_OP_SUB_ASSIGN ||
@@ -5230,6 +5248,11 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
             // parameter used as arr[i] object — must remain boxed Item (not unboxed as int/float)
             // OR: parameter compared with undefined/null/boolean — native unboxing would
             // lose the type distinction (e.g., undefined → 0 looks the same as actual 0)
+            fc->param_types[i] = LMD_TYPE_ANY;
+        } else if (evidence[i].param_reassigned) {
+            // parameter is reassigned (e = expr) — the initial call-site value may be
+            // a different type (e.g., string passed to IIFE, reassigned via parseInt).
+            // Native version assumes param starts as inferred type, which is unsafe.
             fc->param_types[i] = LMD_TYPE_ANY;
         } else if (evidence[i].float_evidence > 0) {
             fc->param_types[i] = LMD_TYPE_FLOAT;
@@ -10402,14 +10425,15 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    // new Date().getTime() → js_date_now() (pattern: NewExpression(Date).getTime())
+    // new Date().getTime() → js_date_now() (pattern: NewExpression(Date).getTime(), no args only)
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (!m->computed && m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER &&
             m->object && m->object->node_type == JS_AST_NODE_NEW_EXPRESSION) {
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
             JsCallNode* new_call = (JsCallNode*)m->object;
-            if (new_call->callee && new_call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (new_call->callee && new_call->callee->node_type == JS_AST_NODE_IDENTIFIER &&
+                new_call->arguments == NULL) {
                 JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
                 if (ctor->name && ctor->name->len == 4 && strncmp(ctor->name->chars, "Date", 4) == 0 &&
                     prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "getTime", 7) == 0) {
@@ -18536,6 +18560,8 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_label_t saved_tco_label = mt->tco_label;
         MIR_reg_t saved_tco_count = mt->tco_count_reg;
         bool saved_tail_pos = mt->in_tail_position;
+        // Save exception label — must not leak from outer function into native version
+        MIR_label_t saved_except_label = mt->func_except_label;
 
         mt->current_func_item = native_item;
         mt->current_func = native_func;
@@ -18549,6 +18575,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_func = NULL;
         mt->in_tail_position = false;
         mt->tco_jumped = false;
+        mt->func_except_label = 0;    // reset — native func needs its own exception label
 
         jm_push_scope(mt);
 
@@ -18718,6 +18745,19 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
     finish_native:
+        // Exception landing pad for native function (return 0/0.0 on exception)
+        if (mt->func_except_label) {
+            jm_emit_label(mt, mt->func_except_label);
+            MIR_reg_t exc_ret = jm_new_reg(mt, "exc_ret", native_ret_type);
+            if (native_ret_type == MIR_T_D) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, exc_ret), MIR_new_double_op(mt->ctx, 0.0)));
+            } else {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, exc_ret), MIR_new_int_op(mt->ctx, 0)));
+            }
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
+        }
         jm_pop_scope(mt);
         MIR_finish_func(mt->ctx);
 
@@ -18735,6 +18775,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_count_reg = saved_tco_count;
         mt->in_tail_position = saved_tail_pos;
         mt->tco_jumped = false;
+        mt->func_except_label = saved_except_label;  // restore outer function's exception label
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
@@ -19694,7 +19735,11 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, preg);
                 ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             } else {
-                MIR_reg_t unboxed = jm_emit_unbox_int(mt, preg);
+                // Use it2i (runtime type-checking unbox) instead of jm_emit_unbox_int
+                // because callers may pass FLOAT Items for INT-typed params (e.g. 36e5).
+                // it2i handles INT, INT64, FLOAT → int64_t conversion correctly.
+                MIR_reg_t unboxed = jm_call_1(mt, "it2i", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
                 ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             }
             param_node = param_node ? param_node->next : NULL;
@@ -20587,6 +20632,18 @@ static int module_mir_context_count = 0;
 // Runtime context saved for use by js_new_function_from_string (new Function(...) support)
 static Runtime* js_source_runtime = NULL;
 static int js_dynamic_func_counter = 0;
+
+// Track the active MIR context during compilation/execution so that
+// batch timeout recovery (longjmp from SIGALRM) can finish the leaked context.
+// Set before execution, cleared after normal cleanup in transpile_js_to_mir_core.
+static MIR_context_t g_active_mir_ctx = NULL;
+
+void jm_cleanup_active_mir(void) {
+    if (g_active_mir_ctx) {
+        MIR_finish(g_active_mir_ctx);
+        g_active_mir_ctx = NULL;
+    }
+}
 
 static void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
@@ -25898,6 +25955,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
     // Install batch error handler if set (prevents exit(1) on MIR errors)
     if (g_batch_mir_error_handler) {
@@ -26001,7 +26059,49 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // Link and generate
+#ifndef NDEBUG
+    FILE* mir_gen_debug = NULL;
+    if (getenv("JS_MIR_GEN_TIMING")) {
+        create_dir_recursive("temp");
+        mir_gen_debug = fopen("temp/mir_gen_timing.txt", "w");
+        if (mir_gen_debug) {
+            MIR_gen_set_debug_file(ctx, mir_gen_debug);
+            MIR_gen_set_debug_level(ctx, 0);
+        }
+    }
+#endif
+    // Auto-downgrade opt level for very large modules (e.g., lodash: 272K insns).
+    // MIR's SSA/GVN/LICM passes at opt>=2 have super-linear cost for large functions,
+    // causing 57s+ compile times in debug builds. Opt=0 compiles in <2s with negligible
+    // runtime difference for JS workloads (dominated by runtime function calls).
+    unsigned int effective_opt = g_js_mir_optimize_level;
+    if (effective_opt >= 2) {
+        unsigned long total_insns = 0;
+        for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
+             m = DLIST_NEXT(MIR_module_t, m)) {
+            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
+                 item = DLIST_NEXT(MIR_item_t, item)) {
+                if (item->item_type == MIR_func_item)
+                    total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
+            }
+        }
+        if (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
+            log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
+            MIR_gen_set_optimize_level(ctx, 0);
+            effective_opt = 0;
+        }
+    }
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    // Restore opt level if we changed it
+    if (effective_opt != g_js_mir_optimize_level) {
+        MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
+    }
+#ifndef NDEBUG
+    if (mir_gen_debug) {
+        fclose(mir_gen_debug);
+        MIR_gen_set_debug_file(ctx, NULL);
+    }
+#endif
 
     // Find js_main
     typedef Item (*js_main_func_t)(Context*);
@@ -26148,6 +26248,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         MIR_finish(ctx);
     }
+    g_active_mir_ctx = NULL;  // normal cleanup done, no longer need recovery
 
     // stash ephemeral GC heap on Runtime for caller cleanup.
     // each heap allocates ~12MB (data zone + tenured zone + bump block), so

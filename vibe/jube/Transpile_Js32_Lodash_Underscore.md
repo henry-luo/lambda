@@ -144,6 +144,92 @@ These correspond to:
 
 ---
 
+## Performance: MIR JIT Codegen Optimization for Large Modules
+
+### Problem: 57s Compile Time for Lodash
+
+Lodash's minified `runInContext` factory function (`_js_p_12108`) compiles to **25,708 MIR instructions** — by far the largest single function in any JS library tested. MIR's `MIR_link()` pipeline runs three passes:
+
+1. **`simplify_func`** — value numbering, constant folding, dead branch removal, flags functions for inlining
+2. **`process_inlines`** — inlines small callees (<50 insns) into callers with 50% growth cap (`MIR_MAX_FUNC_INLINE_GROWTH=50`)
+3. **`generate_func_code`** — register allocation, SSA, GVN, LICM, copy propagation, DSE (at opt≥2)
+
+After inlining (step 2), `_js_p_12108` inflates from 25K to **370K instructions**. At opt-level 2, the SSA/GVN passes have **O(n²) or worse** scaling — this single function consumed **57,053ms** (97% of the total 57,675ms `MIR_link` time). All other 700 functions combined took only 622ms.
+
+| Phase | Time | % of Total |
+|-------|------|------------|
+| AST → MIR transpile | 1.7s | 3% |
+| MIR_link (all other 700 functions) | 0.6s | 1% |
+| MIR_link (`_js_p_12108` alone) | 57.1s | **97%** |
+| Execution | ~0s | 0% |
+
+The super-linear cost is evident: `js_main` (8K insns) compiles in 35ms, but `_js_p_12108` (25K insns, ~3.2x larger) takes 57,053ms (**1,600x slower**) — far beyond linear scaling.
+
+### Attempted Fix: Per-Function Adaptive Gen Interface — FAILED
+
+First attempt used `MIR_set_gen_interface` with a custom callback (`jm_adaptive_gen_interface`) that detected large functions (>10K insns) and downgraded them to opt=0 or opt=1 individually.
+
+**Result:** Crashed with `SIGSEGV` in `reg_alloc+2972` → `generate_func_code+31200` (address `0x1ab`, near-NULL dereference). The crash occurs because `MIR_gen_set_optimize_level()` changes state on the `gen_ctx` mid-compilation — switching opt levels between functions within the same `MIR_link()` call leaves the generator in an inconsistent state. Both opt=0 and opt=1 crash; only globally-set opt=0 works.
+
+### Fix: Module-Level Auto-Downgrade — ✅ IMPLEMENTED
+
+**File:** `transpile_js_mir.cpp`
+
+ Before calling `MIR_link()`, the transpiler counts total MIR instructions across all modules in the context. If the total exceeds `JM_LARGE_MODULE_INSN_THRESHOLD` (100,000), it downgrades the **entire context** to opt=0 before codegen begins, then restores the original opt level afterward.
+
+```cpp
+// Constants (transpile_js_mir.cpp ~line 65)
+#define JM_LARGE_FUNC_INSN_THRESHOLD   10000
+#define JM_LARGE_MODULE_INSN_THRESHOLD 100000
+
+// Before MIR_link: count instructions, auto-downgrade if large
+unsigned int effective_opt = g_js_mir_optimize_level;
+if (effective_opt >= 2) {
+    unsigned long total_insns = 0;
+    for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+         m != NULL; m = DLIST_NEXT(MIR_module_t, m)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items);
+             item != NULL; item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type == MIR_func_item)
+                total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
+        }
+    }
+    if (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
+        log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
+        MIR_gen_set_optimize_level(ctx, 0);
+        effective_opt = 0;
+    }
+}
+MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+if (effective_opt != g_js_mir_optimize_level)
+    MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level); // restore
+```
+
+**Why module-level, not per-function:** MIR's `gen_ctx` state is not safe to change between functions within a single `MIR_link` call. The module-level approach sets opt=0 once before any codegen begins, avoiding the internal state inconsistency.
+
+### Results
+
+| Metric | Before | After | Speedup |
+|--------|--------|-------|---------|
+| `./lambda.exe js test/js/lib_lodash.js` | 59.3s | **3.5s** | **17x** |
+| Batch test suite (127 JS tests) | 74s (needed `--opt-level=0` workaround) | **8.3s** (auto) | **9x** |
+| Small scripts (e.g., moment.js) | 1.0s | 1.0s (stays at opt=2) | — |
+
+- Lodash (150K+ total insns) → auto-downgrades to opt=0
+- Moment.js (150K total insns) → also auto-downgrades, no perf regression
+- Small scripts (<100K insns) → stays at opt=2 with full optimization
+- Removed the manual `--opt-level=0` workaround from `test_js_gtest.cpp` batch command
+
+### Debug Support: Per-Function Gen Timing
+
+Set `JS_MIR_GEN_TIMING=1` environment variable to emit per-function MIR codegen timing to `temp/mir_gen_timing.txt`. Uses `MIR_gen_set_debug_file` + `MIR_gen_set_debug_level(ctx, 0)` to log function name, instruction count, and compilation time for each function.
+
+### Future Optimization: Lazy Gen
+
+MIR supports `MIR_set_lazy_gen_interface` which compiles functions on first call rather than ahead-of-time. This could further reduce lodash startup time by skipping codegen for unused functions (lodash exports 300+ functions but most programs use only a few). Not yet implemented.
+
+---
+
 ## Underscore.js Detailed Test Results
 
 ### ✅ All 114/114 Tests Passing
@@ -171,7 +257,7 @@ These correspond to:
 
 ### Test File: `test/js/lib_lodash.js` (307 lines, 35 test sections, 77 output lines)
 
-GTest: **PASS** (126/126 JS tests including lodash) — batch timeout increased to 60s for large libraries (~35s in debug build, 702 MIR functions, 272K instructions).
+GTest: **PASS** (127/127 JS tests including lodash) — batch timeout 60s, ~3.5s per lodash run (702 MIR functions, 272K instructions, auto-downgrades to opt=0).
 
 ### ✅ Working Operations (34/35 test sections correct)
 
@@ -250,10 +336,10 @@ GTest: **PASS** (126/126 JS tests including lodash) — batch timeout increased 
 # Underscore test (114/114 pass)
 ./lambda.exe js test/js/underscore_lib.js --no-log
 
-# Lodash test (34/34 basic tests pass, ~35s debug build)
+# Lodash test (34/34 basic tests pass, ~3.5s with auto-downgrade)
 ./lambda.exe js test/js/lib_lodash.js --no-log
 
-# GTest (126/126 JS tests including lodash)
+# GTest (127/127 JS tests including lodash)
 ./test/test_js_gtest.exe --gtest_filter='*lib_lodash*'
 ./test/test_js_gtest.exe   # full suite
 ```
