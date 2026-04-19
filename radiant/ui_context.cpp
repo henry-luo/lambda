@@ -3,6 +3,7 @@
 #include "render.hpp"
 #include "animation.h"
 #include "rdt_video.h"
+#include "webview.h"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -206,6 +207,13 @@ void free_document(DomDocument* doc) {
 
 void ui_context_cleanup(UiContext* uicon) {
     log_debug("cleaning up UI context");
+
+    // destroy all webviews before tearing down the window
+    if (uicon->webview_mgr) {
+        webview_manager_destroy(uicon->webview_mgr);
+        uicon->webview_mgr = nullptr;
+    }
+
     if (uicon->document) {
         free_document(uicon->document);
     }

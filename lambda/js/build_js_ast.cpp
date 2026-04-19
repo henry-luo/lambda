@@ -1918,10 +1918,27 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
     } else if (strcmp(node_type, "export_statement") == 0) {
         return build_js_export_statement(tp, stmt_node);
     } else if (strcmp(node_type, "with_statement") == 0) {
-        // v17: build minimal with-statement node for early error rejection in strict mode
-        JsAstNode* with_stmt = alloc_js_ast_node(tp, JS_AST_NODE_WITH_STATEMENT, stmt_node, sizeof(JsAstNode));
-        with_stmt->type = &TYPE_NULL;
-        return with_stmt;
+        // v17: build with-statement node with object expression and body
+        JsWithStatementNode* with_stmt = (JsWithStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_WITH_STATEMENT, stmt_node, sizeof(JsWithStatementNode));
+        with_stmt->base.type = &TYPE_NULL;
+        with_stmt->object = NULL;
+        with_stmt->body = NULL;
+        // extract object expression (inside parenthesized_expression)
+        TSNode obj_node = ts_node_child_by_field_name(stmt_node, "object", strlen("object"));
+        if (!ts_node_is_null(obj_node)) {
+            // parenthesized_expression wraps the actual expression
+            uint32_t obj_child_count = ts_node_named_child_count(obj_node);
+            if (obj_child_count > 0) {
+                TSNode inner = ts_node_named_child(obj_node, 0);
+                with_stmt->object = build_js_expression(tp, inner);
+            }
+        }
+        // extract body statement
+        TSNode body_node = ts_node_child_by_field_name(stmt_node, "body", strlen("body"));
+        if (!ts_node_is_null(body_node)) {
+            with_stmt->body = build_js_statement(tp, body_node);
+        }
+        return (JsAstNode*)with_stmt;
     } else if (strcmp(node_type, "labeled_statement") == 0) {
         JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_LABELED_STATEMENT, stmt_node, sizeof(JsLabeledStatementNode));
         labeled->base.type = &TYPE_NULL;

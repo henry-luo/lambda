@@ -511,6 +511,38 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->given_width = 300;
         block->blk->given_height = 150;
         break;
+    case HTM_TAG_WEBVIEW: {
+        // webview: replaced element with default 300x150, supports width/height attributes
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        size_t value_len;  const char *value;
+        value = elmt->get_attribute("width");
+        if (value) {
+            value_len = strlen(value);
+            StrView width_view = strview_init(value, value_len);
+            float width = strview_to_int(&width_view);
+            if (width >= 0) {
+                lycon->block.given_width = width;
+                block->blk->given_width = width;
+            }
+        } else {
+            lycon->block.given_width = 300;
+            block->blk->given_width = 300;
+        }
+        value = elmt->get_attribute("height");
+        if (value) {
+            value_len = strlen(value);
+            StrView height_view = strview_init(value, value_len);
+            float height = strview_to_int(&height_view);
+            if (height >= 0) {
+                lycon->block.given_height = height;
+                block->blk->given_height = height;
+            }
+        } else {
+            lycon->block.given_height = 150;
+            block->blk->given_height = 150;
+        }
+        break;
+    }
     case HTM_TAG_AUDIO: {
         // HTML §4.8.9: <audio> without controls is not rendered
         // audio-only playback: create RdtVideo (AVPlayer handles audio files natively)

@@ -9189,15 +9189,14 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
         if (error_count < 20) {
-            void* ret_addr = __builtin_return_address(0);
-            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d ret_addr=%p func_raw=0x%llx",
+            log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d func_raw=0x%llx",
                 get_type_id(func_item), arg_count, get_type_id(this_val),
                 _trace_last_fn_len, _trace_last_fn ? _trace_last_fn : "(null)", _trace_total_calls,
-                ret_addr, (unsigned long long)func_item.item);
+                (unsigned long long)func_item.item);
             error_count++;
         }
         // Log args for context
-        for (int i = 0; i < arg_count && i < 3; i++) {
+        for (int i = 0; i < arg_count && i < 5; i++) {
             log_error("  arg[%d]: type=%d raw=0x%llx", i, get_type_id(args[i]), (unsigned long long)args[i].item);
         }
         Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};

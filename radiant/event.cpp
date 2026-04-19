@@ -3,6 +3,7 @@
 #include "form_control.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
+#include "webview.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -60,8 +61,10 @@ void target_children(EventContext* evcon, View* view) {
     do {
         if (view->is_block()) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->position && block->position->position != CSS_VALUE_STATIC) {
-                // skip absolute/fixed positioned block
+            if (block->position &&
+                (block->position->position == CSS_VALUE_ABSOLUTE ||
+                 block->position->position == CSS_VALUE_FIXED)) {
+                // skip absolute/fixed positioned block (tested via first_abs_child)
             } else {
                 target_block_view(evcon, block);
             }
@@ -142,6 +145,71 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;
         evcon->block.y -= block->scroller->pane->v_scroll_position;
+    }
+
+    // Check if this block is a child-window webview — stop hit-testing here.
+    // In child-window mode, the OS delivers events directly to the native web view.
+    // Radiant should not process events that land inside the webview area.
+    if (block->embed && block->embed->webview &&
+        block->embed->webview->mode == WEBVIEW_MODE_WINDOW) {
+        float bx = evcon->block.x, by = evcon->block.y;
+        MousePositionEvent* mev = &evcon->event.mouse_position;
+        if (bx <= mev->x && mev->x < bx + block->width &&
+            by <= mev->y && mev->y < by + block->height) {
+            log_debug("hit on webview (child-window mode), stopping: %s", block->node_name());
+            evcon->target = (View*)block;
+            evcon->offset_x = mev->x - bx;
+            evcon->offset_y = mev->y - by;
+            goto RETURN;
+        }
+    }
+
+    // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
+    // Set target to the webview block and inject the mouse event.
+    if (block->embed && block->embed->webview &&
+        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+        block->embed->webview->handle) {
+        float bx = evcon->block.x, by = evcon->block.y;
+        MousePositionEvent* mev = &evcon->event.mouse_position;
+        if (bx <= mev->x && mev->x < bx + block->width &&
+            by <= mev->y && mev->y < by + block->height) {
+            log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
+            evcon->target = (View*)block;
+            evcon->offset_x = mev->x - bx;
+            evcon->offset_y = mev->y - by;
+
+            // translate to webview-local coordinates and inject
+            float local_x = mev->x - bx;
+            float local_y = mev->y - by;
+            // mouse type: 2=mousemove for hover, 3=click for press (injected on actual click)
+            webview_layer_platform_inject_mouse(block->embed->webview->handle,
+                2, local_x, local_y, 0, 0);
+            goto RETURN;
+        }
+    }
+
+    // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
+    // Set target to the webview block and inject the mouse event.
+    if (block->embed && block->embed->webview &&
+        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+        block->embed->webview->handle) {
+        float bx = evcon->block.x, by = evcon->block.y;
+        MousePositionEvent* mev = &evcon->event.mouse_position;
+        if (bx <= mev->x && mev->x < bx + block->width &&
+            by <= mev->y && mev->y < by + block->height) {
+            log_debug("hit on webview (layer mode), forwarding event: %s", block->node_name());
+            evcon->target = (View*)block;
+            evcon->offset_x = mev->x - bx;
+            evcon->offset_y = mev->y - by;
+
+            // translate to webview-local coordinates and inject
+            float local_x = mev->x - bx;
+            float local_y = mev->y - by;
+            // mouse type: 2=mousemove for hover, 3=click for press (injected on actual click)
+            webview_layer_platform_inject_mouse(block->embed->webview->handle,
+                2, local_x, local_y, 0, 0);
+            goto RETURN;
+        }
     }
 
     // Check if this block contains an embedded iframe document
@@ -2713,6 +2781,24 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
 
+        // Forward mouse button events to layer-mode webview
+        if (evcon.target && evcon.target->is_element()) {
+            ViewBlock* tblock = (ViewBlock*)evcon.target;
+            if (tblock->embed && tblock->embed->webview &&
+                tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+                tblock->embed->webview->handle) {
+                int mouse_type = (event->type == RDT_EVENT_MOUSE_DOWN) ? 0 : 1;
+                webview_layer_platform_inject_mouse(tblock->embed->webview->handle,
+                    mouse_type, evcon.offset_x, evcon.offset_y,
+                    btn_event->button, btn_event->mods);
+                if (event->type == RDT_EVENT_MOUSE_UP) {
+                    webview_layer_platform_inject_mouse(tblock->embed->webview->handle,
+                        3, evcon.offset_x, evcon.offset_y,
+                        btn_event->button, btn_event->mods);
+                }
+            }
+        }
+
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
 
         // Update active and focus states
@@ -3423,6 +3509,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse scroll event");
         mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
         target_html_doc(&evcon, doc->view_tree);
+
+        // Forward scroll to layer-mode webview
+        if (evcon.target && evcon.target->is_element()) {
+            ViewBlock* tblock = (ViewBlock*)evcon.target;
+            if (tblock->embed && tblock->embed->webview &&
+                tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+                tblock->embed->webview->handle) {
+                webview_layer_platform_inject_scroll(tblock->embed->webview->handle,
+                    scroll->xoffset, scroll->yoffset, evcon.offset_x, evcon.offset_y);
+                break;  // consumed by webview
+            }
+        }
+
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -3458,6 +3557,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         View* focused = focus_get(state);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
+
+        // Forward key events to layer-mode webview if it has focus
+        if (focused && focused->is_element()) {
+            ViewBlock* fblock = (ViewBlock*)focused;
+            if (fblock->embed && fblock->embed->webview &&
+                fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+                fblock->embed->webview->handle) {
+                int key_type = (event->type == RDT_EVENT_KEY_DOWN) ? 0 : 1;
+                webview_layer_platform_inject_key(fblock->embed->webview->handle,
+                    key_type, key_event->key, key_event->mods);
+                break;
+            }
+        }
 
         // Tab navigation
         if (key_event->key == RDT_KEY_TAB) {
@@ -4033,8 +4145,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         break;
     }
     case RDT_EVENT_KEY_UP: {
-        // Key release - typically not needed for text editing
+        // Key release - forward to layer-mode webview if focused
         log_debug("Key up: key=%d", event->key.key);
+        {
+            RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
+            if (state) {
+                View* focused = focus_get(state);
+                if (focused && focused->is_element()) {
+                    ViewBlock* fblock = (ViewBlock*)focused;
+                    if (fblock->embed && fblock->embed->webview &&
+                        fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+                        fblock->embed->webview->handle) {
+                        webview_layer_platform_inject_key(fblock->embed->webview->handle,
+                            1, event->key.key, event->key.mods);
+                    }
+                }
+            }
+        }
         break;
     }
     case RDT_EVENT_TEXT_INPUT: {
@@ -4044,6 +4171,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         View* focused = focus_get(state);
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
+
+        // Forward text input to layer-mode webview if focused
+        if (focused && focused->is_element()) {
+            ViewBlock* fblock = (ViewBlock*)focused;
+            if (fblock->embed && fblock->embed->webview &&
+                fblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
+                fblock->embed->webview->handle) {
+                webview_layer_platform_inject_text(fblock->embed->webview->handle,
+                    text_event->codepoint);
+                break;
+            }
+        }
 
         // capture selection state before dispatch for correct caret adjustment
         bool had_input_selection = false;

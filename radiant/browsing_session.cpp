@@ -3,6 +3,7 @@
 
 #include "view.hpp"
 #include "browsing_session.h"
+#include "webview.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/url.h"
@@ -206,6 +207,11 @@ DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
         radiant_cleanup_network_support(old_doc);
     }
 
+    // destroy all webviews from the old page before loading the new one
+    if (uicon->webview_mgr) {
+        webview_manager_clear(uicon->webview_mgr);
+    }
+
     char* href_copy = mem_strdup(href, MEM_CAT_TEMP);
     DomDocument* new_doc = show_html_doc(entry->url, href_copy, vw, vh);
     mem_free(href_copy);
@@ -247,6 +253,11 @@ DomDocument* session_go_forward(BrowsingSession* session, struct UiContext* uico
     DomDocument* old_doc = uicon->document;
     if (old_doc) {
         radiant_cleanup_network_support(old_doc);
+    }
+
+    // destroy all webviews from the old page before loading the new one
+    if (uicon->webview_mgr) {
+        webview_manager_clear(uicon->webview_mgr);
     }
 
     char* href_copy = mem_strdup(href, MEM_CAT_TEMP);

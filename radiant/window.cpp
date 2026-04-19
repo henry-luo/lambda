@@ -13,6 +13,7 @@
 #include "font_face.h"
 #include "state_store.hpp"
 #include "event_sim.hpp"
+#include "webview.h"
 #include "animation.h"
 #include "browsing_session.h"
 #include "../lambda/network/network_resource_manager.h"
@@ -1021,6 +1022,18 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             // only force full render if nothing else triggered it;
             // otherwise the video-only blit path in render() handles it
             do_redraw = 1;
+        }
+
+        // Webview layer mode: poll dirty webviews, re-snapshot and redraw
+        if (ui_context.webview_mgr && ui_context.document && ui_context.document->view_tree) {
+            if (webview_manager_poll_dirty(&ui_context, ui_context.document->view_tree)) {
+                do_redraw = 1;
+                // mark document dirty so render_html_doc rebuilds the DL
+                // (the post-composite blit needs fresh DL_WEBVIEW_LAYER_PLACEHOLDER items)
+                if (ui_context.document->state) {
+                    ui_context.document->state->is_dirty = true;
+                }
+            }
         }
 
         // only redraw if we need to

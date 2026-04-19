@@ -3594,7 +3594,12 @@ extern "C" Item js_get_prototype_of(Item object) {
     Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
     if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        return js_property_get(obj_ctor, proto_key);
+        Item obj_proto = js_property_get(obj_ctor, proto_key);
+        // if object IS Object.prototype itself, return null (end of chain)
+        if (get_type_id(obj_proto) == LMD_TYPE_MAP && obj_proto.map == object.map) {
+            return ItemNull;
+        }
+        return obj_proto;
     }
     return ItemNull;
 }
@@ -8147,9 +8152,50 @@ extern "C" Item js_get_global_object() {
     return js_get_global_this();
 }
 
+// ============================================================================
+// With-scope stack for 'with' statement support
+// ============================================================================
+#define JS_WITH_STACK_MAX 16
+static Item js_with_stack[JS_WITH_STACK_MAX];
+static int js_with_stack_depth = 0;
+
+extern "C" void js_with_push(Item obj) {
+    if (js_with_stack_depth < JS_WITH_STACK_MAX) {
+        js_with_stack[js_with_stack_depth++] = obj;
+    }
+}
+
+extern "C" void js_with_pop() {
+    if (js_with_stack_depth > 0) {
+        js_with_stack_depth--;
+    }
+}
+
+// Check with-scope stack for a property (most recent scope first)
+static Item js_with_scope_lookup(Item key, bool* found) {
+    *found = false;
+    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+        Item scope_obj = js_with_stack[i];
+        if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+            extern Item js_has_own_property(Item obj, Item key);
+            if (it2b(js_has_own_property(scope_obj, key))) {
+                *found = true;
+                return js_property_get(scope_obj, key);
+            }
+        }
+    }
+    return make_js_undefined();
+}
+
 // js_get_global_property: look up a property on the global object by name string
 // Used as fallback for unresolved identifiers — implements browser-like named access
 extern "C" Item js_get_global_property(Item key) {
+    // Check with-scope stack first
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found);
+        if (found) return result;
+    }
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -8158,6 +8204,12 @@ extern "C" Item js_get_global_property(Item key) {
 // for properties that don't exist on the global object. Used for bare identifier reads
 // (e.g. `x` as opposed to `obj.x`), which per ES spec must throw ReferenceError.
 extern "C" Item js_get_global_property_strict(Item key) {
+    // Check with-scope stack first
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found);
+        if (found) return result;
+    }
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
@@ -8303,7 +8355,18 @@ static Item js_ctor_requires_new() {
     return ItemNull;
 }
 
-// v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
+// v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x), Object(x))
+static Item js_ctor_object_fn(Item arg) { return js_to_object(arg); }
+// v50: Array() called as function — same as new Array() per ES spec
+extern "C" Item js_array_new(int length);
+extern "C" Item js_array_new_from_item(Item arg);
+static Item js_ctor_array_fn(Item arg) {
+    // When called with 0 args, arg is padded to undefined
+    if (arg.item == ITEM_JS_UNDEFINED) {
+        return js_array_new(0);
+    }
+    return js_array_new_from_item(arg);
+}
 static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
 static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
 static Item js_ctor_string_fn(Item arg) {
@@ -8555,6 +8618,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_BOOLEAN) fn->func_ptr = (void*)js_ctor_boolean_fn;
     else if (ctor_id == JS_CTOR_NUMBER) fn->func_ptr = (void*)js_ctor_number_fn;
     else if (ctor_id == JS_CTOR_STRING) fn->func_ptr = (void*)js_ctor_string_fn;
+    else if (ctor_id == JS_CTOR_OBJECT) fn->func_ptr = (void*)js_ctor_object_fn;
+    else if (ctor_id == JS_CTOR_ARRAY) fn->func_ptr = (void*)js_ctor_array_fn;
     else if (ctor_id == JS_CTOR_REGEXP) fn->func_ptr = (void*)js_ctor_regexp_fn;
     else if (ctor_id == JS_CTOR_DATE) fn->func_ptr = (void*)js_ctor_date_fn;
     else if (ctor_id == JS_CTOR_ERROR) fn->func_ptr = (void*)js_ctor_error_fn;

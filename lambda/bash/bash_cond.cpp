@@ -10,6 +10,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 
 #include <cstring>
 #include <cerrno>

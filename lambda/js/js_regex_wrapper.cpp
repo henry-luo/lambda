@@ -53,7 +53,7 @@ static bool inside_char_class(const std::string& pat, size_t pos) {
     int bracket_depth = 0;
     for (size_t i = 0; i < pos; i++) {
         if (pat[i] == '\\' && i + 1 < pat.size()) { i++; continue; }
-        if (pat[i] == '[') bracket_depth++;
+        if (pat[i] == '[' && bracket_depth == 0) bracket_depth++;
         else if (pat[i] == ']' && bracket_depth > 0) bracket_depth--;
     }
     return bracket_depth > 0;
@@ -171,7 +171,8 @@ static int scan_assertions(const std::string& pat,
                 out_infos[count].is_trailing = has_content;
             }
             count++;
-            // don't skip ahead — we want to record position and let the main loop advance
+            // skip past assertion content so inner backrefs aren't recorded separately
+            i = close;
         }
     }
     return count;
@@ -253,6 +254,35 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
                 break;
             }
             case ASSERT_NEG_LOOKAHEAD: {
+                // Check if inner content is just a backreference \N
+                // If so, the lookahead is redundant when used with non-greedy quantifiers
+                // (common JS idiom: (?:(?!\1)[^\\]|\\.)*?\1 for quoted strings)
+                // Simply erase it and mark inner backrefs as consumed.
+                bool inner_is_backref = (info.inner.size() == 2 && info.inner[0] == '\\' &&
+                                         info.inner[1] >= '1' && info.inner[1] <= '9');
+                if (inner_is_backref) {
+                    // Erase (?!\N) entirely — no replacement, no marker group
+                    size_t old_len = info.end_pos - info.start_pos;
+                    result.erase(info.start_pos, old_len);
+                    int delta = -(int)old_len;
+
+                    for (int s = 0; s < synthetic_count; s++) {
+                        if (synthetic[s].position > info.start_pos) {
+                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                        }
+                    }
+                    // Mark any ASSERT_BACKREF entries inside this lookahead range as consumed
+                    // by setting their start_pos to SIZE_MAX so they'll be skipped
+                    for (int k = 0; k < assert_count; k++) {
+                        if (infos[k].kind == ASSERT_BACKREF &&
+                            infos[k].start_pos >= info.start_pos &&
+                            infos[k].start_pos < info.end_pos) {
+                            infos[k].start_pos = SIZE_MAX;
+                        }
+                    }
+                    break;
+                }
+
                 // (?!Y)X or X(?!Y) → insert marker group (), add PF_REJECT_MATCH
                 // The marker group captures the position where the lookahead was
                 std::string replacement = "()";
@@ -298,6 +328,8 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
                 break;
             }
             case ASSERT_BACKREF: {
+                // Skip backrefs consumed by a negative lookahead erasure
+                if (info.start_pos == SIZE_MAX) break;
                 // \N → replace with capture group and add PF_GROUP_EQUALITY
                 int ref_num = info.backref_num;
                 // Replace \N with a capture that can match anything (including empty).

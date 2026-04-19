@@ -278,8 +278,9 @@ enum {
     HTM_TAG_VAR,
     HTM_TAG_VIDEO,
     HTM_TAG_WBR,
+    HTM_TAG_WEBVIEW,
     HTM_TAG_XMP,
-    HTM_TAG__LAST_ENTRY         = 0x00c4
+    HTM_TAG__LAST_ENTRY         = 0x00c5
 };
 
 // radiant specific CSS display values
@@ -1141,6 +1142,7 @@ typedef struct GridProp {
 typedef struct EmbedProp {
     ImageSurface* img;  // image surface
     DomDocument* doc;   // iframe document
+    struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
     FlexProp* flex;
     GridProp* grid;
     CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
@@ -1404,6 +1406,7 @@ typedef struct UiContext {
     DomDocument* document;  // current document
     MouseState mouse_state; // current mouse state
     struct BrowsingSession* browsing_session;  // web browsing session with history
+    struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
