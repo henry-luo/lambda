@@ -850,6 +850,22 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
+        // The transpiler routes .toISOString()/.toString() here unconditionally;
+        // non-Date objects may have their own methods via prototype chain.
+        if (method_id == 8) { // toISOString
+            Item mk = (Item){.item = s2it(heap_create_name("toISOString", 11))};
+            Item fn = js_property_access(date_obj, mk);
+            if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                return js_call_function(fn, date_obj, nullptr, 0);
+            }
+        }
+        if (method_id == 17) { // toString
+            Item mk = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item fn = js_property_access(date_obj, mk);
+            if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                return js_call_function(fn, date_obj, nullptr, 0);
+            }
+        }
         return js_throw_type_error("this is not a Date object");
     }
 
@@ -1025,10 +1041,8 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         if (method_id == 42) { // getTimezoneOffset
             struct tm local_tm; localtime_r(&secs, &local_tm);
-            struct tm utc_tm; gmtime_r(&secs, &utc_tm);
-            time_t local_t = mktime(&local_tm);
-            time_t utc_t = mktime(&utc_tm);
-            int offset_min = (int)((utc_t - local_t) / 60);
+            // tm_gmtoff is seconds east of UTC; getTimezoneOffset returns minutes west of UTC
+            int offset_min = -(int)(local_tm.tm_gmtoff / 60);
             return (Item){.item = i2it(offset_min)};
         }
         if (method_id == 43) { // valueOf — same as getTime
@@ -1075,6 +1089,15 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     if (method_id == 20) { // setTime
         double new_ms = to_double(arg0);
         return store_ms(new_ms);
+    }
+
+    // ES spec: if any required arg is NaN, set [[DateValue]] to NaN
+    if (method_id >= 21 && method_id <= 36) {
+        double v0 = to_double(arg0);
+        if (isnan(v0)) return store_ms(NAN);
+        if (is_present(arg1) && isnan(to_double(arg1))) return store_ms(NAN);
+        if (is_present(arg2) && isnan(to_double(arg2))) return store_ms(NAN);
+        if (is_present(arg3) && isnan(to_double(arg3))) return store_ms(NAN);
     }
 
     // local setters (21-27)

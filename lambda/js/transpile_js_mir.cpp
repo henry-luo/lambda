@@ -4786,6 +4786,7 @@ struct JsParamEvidence {
     int string_evidence;
     bool used_as_container;  // param used as object in arr[i] expression
     bool compared_with_non_numeric;  // param compared with undefined/null/bool via ===
+    bool param_reassigned;  // param is target of plain assignment (e = ...) — initial call-site type may differ
 };
 
 // Walk an AST subtree and accumulate type evidence for parameters.
@@ -5009,6 +5010,13 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
     }
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
+        // P6: Plain assignment to a parameter (e = expr) means the initial call-site
+        // type may differ from the post-assignment type. The native version assumes
+        // the parameter starts as the inferred type, so reassignment is unsafe.
+        if (n->op == JS_OP_ASSIGN) {
+            int li = find_param(n->left);
+            if (li >= 0) evidence[li].param_reassigned = true;
+        }
         // P6: Compound assignments (r -= y, x += 1) → operands are numeric
         if (n->op != JS_OP_ASSIGN) {
             bool is_compound_arith = (n->op == JS_OP_ADD_ASSIGN || n->op == JS_OP_SUB_ASSIGN ||
@@ -5229,6 +5237,11 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
             // parameter used as arr[i] object — must remain boxed Item (not unboxed as int/float)
             // OR: parameter compared with undefined/null/boolean — native unboxing would
             // lose the type distinction (e.g., undefined → 0 looks the same as actual 0)
+            fc->param_types[i] = LMD_TYPE_ANY;
+        } else if (evidence[i].param_reassigned) {
+            // parameter is reassigned (e = expr) — the initial call-site value may be
+            // a different type (e.g., string passed to IIFE, reassigned via parseInt).
+            // Native version assumes param starts as inferred type, which is unsafe.
             fc->param_types[i] = LMD_TYPE_ANY;
         } else if (evidence[i].float_evidence > 0) {
             fc->param_types[i] = LMD_TYPE_FLOAT;
@@ -10348,14 +10361,15 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    // new Date().getTime() → js_date_now() (pattern: NewExpression(Date).getTime())
+    // new Date().getTime() → js_date_now() (pattern: NewExpression(Date).getTime(), no args only)
     if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         JsMemberNode* m = (JsMemberNode*)call->callee;
         if (!m->computed && m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER &&
             m->object && m->object->node_type == JS_AST_NODE_NEW_EXPRESSION) {
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
             JsCallNode* new_call = (JsCallNode*)m->object;
-            if (new_call->callee && new_call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (new_call->callee && new_call->callee->node_type == JS_AST_NODE_IDENTIFIER &&
+                new_call->arguments == NULL) {
                 JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
                 if (ctor->name && ctor->name->len == 4 && strncmp(ctor->name->chars, "Date", 4) == 0 &&
                     prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "getTime", 7) == 0) {
@@ -18443,6 +18457,8 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_label_t saved_tco_label = mt->tco_label;
         MIR_reg_t saved_tco_count = mt->tco_count_reg;
         bool saved_tail_pos = mt->in_tail_position;
+        // Save exception label — must not leak from outer function into native version
+        MIR_label_t saved_except_label = mt->func_except_label;
 
         mt->current_func_item = native_item;
         mt->current_func = native_func;
@@ -18456,6 +18472,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_func = NULL;
         mt->in_tail_position = false;
         mt->tco_jumped = false;
+        mt->func_except_label = 0;    // reset — native func needs its own exception label
 
         jm_push_scope(mt);
 
@@ -18625,6 +18642,19 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
     finish_native:
+        // Exception landing pad for native function (return 0/0.0 on exception)
+        if (mt->func_except_label) {
+            jm_emit_label(mt, mt->func_except_label);
+            MIR_reg_t exc_ret = jm_new_reg(mt, "exc_ret", native_ret_type);
+            if (native_ret_type == MIR_T_D) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, exc_ret), MIR_new_double_op(mt->ctx, 0.0)));
+            } else {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, exc_ret), MIR_new_int_op(mt->ctx, 0)));
+            }
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
+        }
         jm_pop_scope(mt);
         MIR_finish_func(mt->ctx);
 
@@ -18642,6 +18672,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_count_reg = saved_tco_count;
         mt->in_tail_position = saved_tail_pos;
         mt->tco_jumped = false;
+        mt->func_except_label = saved_except_label;  // restore outer function's exception label
 
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
@@ -19601,7 +19632,11 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, preg);
                 ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             } else {
-                MIR_reg_t unboxed = jm_emit_unbox_int(mt, preg);
+                // Use it2i (runtime type-checking unbox) instead of jm_emit_unbox_int
+                // because callers may pass FLOAT Items for INT-typed params (e.g. 36e5).
+                // it2i handles INT, INT64, FLOAT → int64_t conversion correctly.
+                MIR_reg_t unboxed = jm_call_1(mt, "it2i", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
                 ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             }
             param_node = param_node ? param_node->next : NULL;

@@ -8848,7 +8848,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_date_parse(arg0);
     case JS_BUILTIN_DATE_UTC: {
         // Date.UTC takes up to 7 args — pack into array
-        Item arr = js_array_new(arg_count);
+        Item arr = js_array_new(0);
         for (int i = 0; i < arg_count; i++) js_array_push(arr, args[i]);
         return js_date_utc(arr);
     }
@@ -12495,6 +12495,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                     if (advance <= offset) advance = offset + 1;
                     offset = advance;
                 }
+                // ES spec: return null if no matches found
+                if (result.array->length == 0) return ItemNull;
                 return result;
             }
         }
