@@ -507,6 +507,7 @@ enum MapKind {
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
     MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
+    MAP_KIND_PROXY       = 9,  // ES6 Proxy object
 };
 
 // Array and List struct defintions needed for for-loop

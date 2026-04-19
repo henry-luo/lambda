@@ -72,6 +72,9 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
 extern "C" Item js_get_current_this(void) { return js_current_this; }
+// Proxy receiver: when proxy get/set forwarding to target, the receiver (proxy) is saved here.
+// Getter/setter invocations check this to use the proxy as 'this' instead of the target.
+static Item js_proxy_receiver = {0};
 // TRACE: track last called function name for debugging
 static const char* _trace_last_fn = "(none)";
 static int _trace_last_fn_len = 6;
@@ -1439,6 +1442,12 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         // "object": null, map (non-class), array, element, or other non-function
         if (type == LMD_TYPE_NULL) return 1;
         if (type == LMD_TYPE_MAP) {
+            // Proxy wrapping callable → "function", not "object"
+            if (js_is_proxy(value)) {
+                Item t = js_typeof(value);
+                String* ts = it2s(t);
+                return (ts && ts->len == 6 && memcmp(ts->chars, "object", 6) == 0) ? 1 : 0;
+            }
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 0;  // class objects are "function"
@@ -1464,6 +1473,12 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         // "function"
         if (type == LMD_TYPE_FUNC) return 1;
         if (type == LMD_TYPE_MAP) {
+            // Proxy wrapping callable → "function"
+            if (js_is_proxy(value)) {
+                Item t = js_typeof(value);
+                String* ts = it2s(t);
+                return (ts && ts->len == 8 && memcmp(ts->chars, "function", 8) == 0) ? 1 : 0;
+            }
             bool own_ip = false;
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 1;
@@ -2297,6 +2312,26 @@ extern "C" Item js_typeof(Item value) {
         result = "function";
         break;
     case LMD_TYPE_MAP: {
+        // Proxy: typeof is "function" if target is callable
+        if (js_is_proxy(value)) {
+            Item target = js_proxy_get_target(value);
+            TypeId tt = get_type_id(target);
+            if (tt == LMD_TYPE_FUNC) {
+                result = "function";
+                goto done;
+            }
+            if (js_is_proxy(target)) {
+                // Recursive: typeof of nested proxy
+                Item inner_typeof = js_typeof(target);
+                String* its = it2s(inner_typeof);
+                if (its && its->len == 8 && memcmp(its->chars, "function", 8) == 0) {
+                    result = "function";
+                    goto done;
+                }
+            }
+            result = "object";
+            goto done;
+        }
         // v18h: class objects (MAPs with __instance_proto__) should return "function"
         // Use direct property lookup instead of shape walking for GC safety
         bool own_ip = false;
@@ -2695,6 +2730,8 @@ enum JsBuiltinId {
     JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF,
     // Iterator protocol: [Symbol.iterator]() { return this; }
     JS_BUILTIN_ITER_IDENTITY, // returns this_val (for iterators that are their own iterable)
+    // Proxy static methods
+    JS_BUILTIN_PROXY_REVOCABLE,
     JS_BUILTIN_MAX
 };
 
@@ -2736,6 +2773,725 @@ extern "C" Item js_new_object() {
     return (Item){.map = m};
 }
 
+// =============================================================================
+// ES6 Proxy
+// =============================================================================
+
+// Helper macros: JsProxyData stores target/handler as uint64_t for C header compat
+#define PD_TARGET(pd) ((Item){.item = (pd)->target})
+#define PD_HANDLER(pd) ((Item){.item = (pd)->handler})
+
+extern "C" bool js_is_proxy(Item obj) {
+    return get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PROXY;
+}
+
+extern "C" JsProxyData* js_get_proxy_data(Item obj) {
+    if (!js_is_proxy(obj)) return NULL;
+    return (JsProxyData*)obj.map->data;
+}
+
+extern "C" Item js_proxy_get_target(Item obj) {
+    int depth = 0;
+    while (js_is_proxy(obj) && depth < 32) {
+        JsProxyData* pd = js_get_proxy_data(obj);
+        if (!pd || pd->revoked) return ItemNull;
+        obj = PD_TARGET(pd);
+        depth++;
+    }
+    return obj;
+}
+
+// helper: check if object is extensible (returns C bool)
+static bool js_is_extensible(Item obj) {
+    return it2b(js_to_boolean(js_object_is_extensible(obj)));
+}
+
+// helper: look up a trap function on the handler, returns ItemNull if not found
+static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_len) {
+    if (pd->revoked) {
+        js_throw_value(js_new_error_with_name(
+            (Item){.item = s2it(heap_create_name("TypeError", 9))},
+            (Item){.item = s2it(heap_create_name("Cannot perform operation on a revoked proxy", 44))}));
+        return ItemNull;
+    }
+    Item handler_item = PD_HANDLER(pd);
+    if (get_type_id(handler_item) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item trap = js_map_get_fast(handler_item.map, trap_name, trap_len, &found);
+    if (!found || trap.item == ItemNull.item || get_type_id(trap) == LMD_TYPE_UNDEFINED) return ItemNull;
+    return trap;
+}
+
+extern "C" Item js_proxy_new(Item target, Item handler) {
+    // ES2020 §26.2.1.1: both target and handler must be objects
+    TypeId tt = get_type_id(target);
+    if (tt != LMD_TYPE_MAP && tt != LMD_TYPE_ARRAY && tt != LMD_TYPE_FUNC && tt != LMD_TYPE_ELEMENT) {
+        return js_throw_type_error("Cannot create proxy with a non-object as target");
+    }
+    TypeId ht = get_type_id(handler);
+    if (ht != LMD_TYPE_MAP && ht != LMD_TYPE_ARRAY && ht != LMD_TYPE_FUNC && ht != LMD_TYPE_ELEMENT) {
+        return js_throw_type_error("Cannot create proxy with a non-object as handler");
+    }
+
+    JsProxyData* pd = (JsProxyData*)mem_alloc(sizeof(JsProxyData), MEM_CAT_JS_RUNTIME);
+    pd->target = target.item;
+    pd->handler = handler.item;
+    pd->revoked = false;
+
+    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_PROXY;
+    m->type = &EmptyMap;
+    m->data = pd;
+    m->data_cap = 0;
+
+    return (Item){.map = m};
+}
+
+// Proxy.revocable(target, handler) → { proxy, revoke }
+extern "C" Item js_proxy_revocable(Item target, Item handler) {
+    Item proxy = js_proxy_new(target, handler);
+    if (js_exception_pending) return ItemNull;
+
+    JsProxyData* pd = js_get_proxy_data(proxy);
+
+    // create a fresh revoke function — each call to Proxy.revocable needs its own
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;
+    fn->param_count = 0;
+    fn->formal_length = 0;
+    fn->builtin_id = -3;  // sentinel: proxy revoke function
+    fn->name = heap_create_name("", 0);
+    fn->prototype = ItemNull;
+    // store proxy data pointer in env[0]
+    fn->env = (Item*)pool_calloc(js_input->pool, sizeof(Item));
+    fn->env[0] = (Item){.item = (uint64_t)(uintptr_t)pd};
+    fn->env_size = 1;
+
+    Item revoke_fn = {.function = (Function*)fn};
+
+    // build result object { proxy, revoke }
+    Item result = js_new_object();
+    js_property_set(result, (Item){.item = s2it(heap_create_name("proxy", 5))}, proxy);
+    js_property_set(result, (Item){.item = s2it(heap_create_name("revoke", 6))}, revoke_fn);
+    return result;
+}
+
+// Proxy [[Get]](key, receiver)
+static Item js_proxy_trap_get(Item proxy, Item key) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return make_js_undefined();
+    Item trap = js_proxy_get_trap(pd, "get", 3);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        // no trap — forward to target with receiver for getter this-binding
+        // If js_proxy_receiver is already set (e.g. from prototype chain lookup),
+        // preserve it as the correct receiver; otherwise use the proxy itself
+        Item prev_receiver = js_proxy_receiver;
+        if (!js_proxy_receiver.item) {
+            js_proxy_receiver = proxy;
+        }
+        Item result = js_property_get(PD_TARGET(pd), key);
+        js_proxy_receiver = prev_receiver;
+        return result;
+    }
+    // call trap(target, property, receiver)
+    Item args[3] = { PD_TARGET(pd), key, proxy };
+    Item trap_result = js_call_function(trap, PD_HANDLER(pd), args, 3);
+    if (js_exception_pending) return ItemNull;
+    // ES2020 §9.5.8 invariant checks
+    Item target = PD_TARGET(pd);
+    Item target_desc = js_object_get_own_property_descriptor(target, key);
+    if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+        bool conf_found = false;
+        Item conf = js_map_get_fast(target_desc.map, "configurable", 12, &conf_found);
+        bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+        if (!configurable) {
+            // check if data property
+            bool wr_found = false;
+            Item wr = js_map_get_fast(target_desc.map, "writable", 8, &wr_found);
+            if (wr_found && !it2b(js_to_boolean(wr))) {
+                // non-configurable non-writable data: trap result must match target value
+                bool val_found = false;
+                Item tval = js_map_get_fast(target_desc.map, "value", 5, &val_found);
+                if (val_found) {
+                    extern Item js_strict_equal(Item a, Item b);
+                    if (!it2b(js_strict_equal(trap_result, tval))) {
+                        return js_throw_type_error("'get' on proxy: property is non-configurable and non-writable on the target, but the trap returned a different value");
+                    }
+                }
+            }
+            // check if accessor with undefined getter
+            bool get_found = false;
+            Item getter = js_map_get_fast(target_desc.map, "get", 3, &get_found);
+            if (get_found && (getter.item == ItemNull.item || get_type_id(getter) == LMD_TYPE_UNDEFINED)) {
+                if (trap_result.item != ItemNull.item && get_type_id(trap_result) != LMD_TYPE_UNDEFINED) {
+                    return js_throw_type_error("'get' on proxy: property is a non-configurable accessor with undefined getter, but the trap returned a truthy value");
+                }
+            }
+        }
+    }
+    return trap_result;
+}
+
+// Proxy [[Set]](key, value, receiver)
+static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return value;
+    Item trap = js_proxy_get_trap(pd, "set", 3);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        // no trap — forward to target with receiver for setter this-binding
+        // If js_proxy_receiver is already set (e.g. from prototype chain lookup),
+        // preserve it as the correct receiver; otherwise use the proxy itself
+        Item prev_receiver = js_proxy_receiver;
+        if (!js_proxy_receiver.item) {
+            js_proxy_receiver = proxy;
+        }
+        Item result = js_property_set(PD_TARGET(pd), key, value);
+        js_proxy_receiver = prev_receiver;
+        return result;
+    }
+    // call trap(target, property, value, receiver)
+    Item args[4] = { PD_TARGET(pd), key, value, proxy };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 4);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    if (!bool_result) {
+        // ES2020 §9.5.9 step 11: If booleanTrapResult is false, return false.
+        // Don't throw — the caller (Reflect.set returns false, assignment in strict mode throws)
+        return (Item){.item = b2it(false)};
+    }
+    // ES2020 §9.5.9 invariant checks
+    Item target = PD_TARGET(pd);
+    Item target_desc = js_object_get_own_property_descriptor(target, key);
+    if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+        bool conf_found = false;
+        Item conf = js_map_get_fast(target_desc.map, "configurable", 12, &conf_found);
+        bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+        if (!configurable) {
+            // data property: check writable + value match
+            bool wr_found = false;
+            Item wr = js_map_get_fast(target_desc.map, "writable", 8, &wr_found);
+            if (wr_found && !it2b(js_to_boolean(wr))) {
+                bool val_found = false;
+                Item tval = js_map_get_fast(target_desc.map, "value", 5, &val_found);
+                if (val_found) {
+                    extern Item js_strict_equal(Item a, Item b);
+                    if (!it2b(js_strict_equal(value, tval))) {
+                        return js_throw_type_error("'set' on proxy: trap returned truish for property which is non-configurable and non-writable on the target");
+                    }
+                }
+            }
+            // accessor with undefined setter
+            bool set_found = false;
+            Item setter = js_map_get_fast(target_desc.map, "set", 3, &set_found);
+            if (set_found && (setter.item == ItemNull.item || get_type_id(setter) == LMD_TYPE_UNDEFINED)) {
+                return js_throw_type_error("'set' on proxy: trap returned truish for property which has only a getter on the target");
+            }
+        }
+    }
+    return value;
+}
+
+// Proxy [[Has]](key)
+extern "C" Item js_proxy_trap_has(Item proxy, Item key) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return (Item){.item = b2it(false)};
+    Item trap = js_proxy_get_trap(pd, "has", 3);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        // no trap — forward to target using js_in
+        return js_in(key, PD_TARGET(pd));
+    }
+    // call trap(target, property)
+    Item args[2] = { PD_TARGET(pd), key };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    // ES2020 §9.5.7 invariant checks
+    if (!bool_result) {
+        Item target = PD_TARGET(pd);
+        Item target_desc = js_object_get_own_property_descriptor(target, key);
+        if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+            // target has own property — check if non-configurable
+            bool conf_found = false;
+            Item conf = js_map_get_fast(target_desc.map, "configurable", 12, &conf_found);
+            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            if (!configurable) {
+                return js_throw_type_error("'has' on proxy: trap returned falsish for property which exists as non-configurable on the target");
+            }
+            // check extensibility
+            bool extensible = it2b(js_to_boolean(js_object_is_extensible(target)));
+            if (!extensible) {
+                return js_throw_type_error("'has' on proxy: trap returned falsish for property on a non-extensible target");
+            }
+        }
+    }
+    return (Item){.item = b2it(bool_result)};
+}
+
+// Proxy [[Delete]](key)
+extern "C" Item js_proxy_trap_delete(Item proxy, Item key) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return (Item){.item = b2it(false)};
+    Item trap = js_proxy_get_trap(pd, "deleteProperty", 14);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_delete_property(PD_TARGET(pd), key);
+    }
+    Item args[2] = { PD_TARGET(pd), key };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    if (bool_result) {
+        // ES2020 §9.5.10 invariant checks
+        Item target = PD_TARGET(pd);
+        Item target_desc = js_object_get_own_property_descriptor(target, key);
+        if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+            bool conf_found = false;
+            Item conf = js_map_get_fast(target_desc.map, "configurable", 12, &conf_found);
+            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            if (!configurable) {
+                return js_throw_type_error("'deleteProperty' on proxy: trap returned truish for property which is non-configurable on the target");
+            }
+            // non-extensible target: can't delete existing property
+            if (!js_is_extensible(target)) {
+                return js_throw_type_error("'deleteProperty' on proxy: trap returned truish for property on a non-extensible target");
+            }
+        }
+    }
+    return (Item){.item = b2it(bool_result)};
+}
+
+// Proxy [[OwnKeys]]()
+extern "C" Item js_proxy_trap_own_keys(Item proxy) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return js_array_new(0);
+    Item trap = js_proxy_get_trap(pd, "ownKeys", 7);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_reflect_own_keys(PD_TARGET(pd));
+    }
+    Item args[1] = { PD_TARGET(pd) };
+    Item trap_result = js_call_function(trap, PD_HANDLER(pd), args, 1);
+    if (js_exception_pending) return ItemNull;
+    
+    // ES2020 §9.5.11 invariant checks
+    // trap result must be a List (array)
+    if (get_type_id(trap_result) != LMD_TYPE_ARRAY) {
+        return js_throw_type_error("'ownKeys' on proxy: trap result is not an Array");
+    }
+    
+    // Each element must be a String or Symbol
+    int len = js_array_length(trap_result);
+    for (int i = 0; i < len; i++) {
+        Item elem = js_array_get_int(trap_result, i);
+        TypeId tid = get_type_id(elem);
+        if (tid != LMD_TYPE_STRING && tid != LMD_TYPE_SYMBOL) {
+            return js_throw_type_error("'ownKeys' on proxy: trap result must only contain Strings and Symbols");
+        }
+    }
+    
+    // Check for duplicates
+    for (int i = 0; i < len; i++) {
+        Item a = js_array_get_int(trap_result, i);
+        for (int j = i + 1; j < len; j++) {
+            Item b = js_array_get_int(trap_result, j);
+            extern Item js_strict_equal(Item a, Item b);
+            if (it2b(js_strict_equal(a, b))) {
+                return js_throw_type_error("'ownKeys' on proxy: trap result must not contain duplicate entries");
+            }
+        }
+    }
+    
+    // If target is not extensible, must include all target own keys and no extras
+    Item target = PD_TARGET(pd);
+    if (!js_is_extensible(target)) {
+        Item target_keys = js_reflect_own_keys(target);
+        int target_len = js_array_length(target_keys);
+        // Every target key must be in trap result
+        for (int i = 0; i < target_len; i++) {
+            Item tk = js_array_get_int(target_keys, i);
+            bool found = false;
+            for (int j = 0; j < len; j++) {
+                extern Item js_strict_equal(Item a, Item b);
+                if (it2b(js_strict_equal(tk, js_array_get_int(trap_result, j)))) { found = true; break; }
+            }
+            if (!found) {
+                return js_throw_type_error("'ownKeys' on proxy: trap result did not include all non-extensible target's own keys");
+            }
+        }
+        // No extra keys allowed
+        if (len > target_len) {
+            return js_throw_type_error("'ownKeys' on proxy: trap returned extra keys for non-extensible target");
+        }
+    } else {
+        // Must include all non-configurable keys
+        Item target_keys = js_reflect_own_keys(target);
+        int target_len = js_array_length(target_keys);
+        for (int i = 0; i < target_len; i++) {
+            Item tk = js_array_get_int(target_keys, i);
+            Item td = js_object_get_own_property_descriptor(target, tk);
+            if (get_type_id(td) == LMD_TYPE_MAP) {
+                bool conf_found = false;
+                Item conf = js_map_get_fast(td.map, "configurable", 12, &conf_found);
+                if (conf_found && !it2b(js_to_boolean(conf))) {
+                    // non-configurable — must be in trap result
+                    bool found = false;
+                    for (int j = 0; j < len; j++) {
+                        extern Item js_strict_equal(Item a, Item b);
+                        if (it2b(js_strict_equal(tk, js_array_get_int(trap_result, j)))) { found = true; break; }
+                    }
+                    if (!found) {
+                        return js_throw_type_error("'ownKeys' on proxy: trap result did not include non-configurable key");
+                    }
+                }
+            }
+        }
+    }
+    
+    return trap_result;
+}
+
+// Proxy [[GetOwnProperty]](key)
+extern "C" Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return make_js_undefined();
+    Item trap = js_proxy_get_trap(pd, "getOwnPropertyDescriptor", 24);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_object_get_own_property_descriptor(PD_TARGET(pd), key);
+    }
+    Item args[2] = { PD_TARGET(pd), key };
+    Item trap_result = js_call_function(trap, PD_HANDLER(pd), args, 2);
+    if (js_exception_pending) return ItemNull;
+    
+    // ES2020 §9.5.5 invariant checks
+    Item target = PD_TARGET(pd);
+    Item target_desc = js_object_get_own_property_descriptor(target, key);
+    
+    // If trap returns undefined
+    if (trap_result.item == ItemNull.item || get_type_id(trap_result) == LMD_TYPE_UNDEFINED) {
+        if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+            // target has this property
+            bool conf_found = false;
+            Item conf = js_map_get_fast(target_desc.map, "configurable", 12, &conf_found);
+            bool configurable = conf_found ? it2b(js_to_boolean(conf)) : true;
+            if (!configurable) {
+                return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned undefined for property which is non-configurable on the target");
+            }
+            if (!js_is_extensible(target)) {
+                return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned undefined for property which exists on the non-extensible target");
+            }
+        }
+        return make_js_undefined();
+    }
+    
+    // trap result must be an Object
+    if (get_type_id(trap_result) != LMD_TYPE_MAP) {
+        return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap must return an object or undefined");
+    }
+    
+    // Check that the returned descriptor is valid
+    // If target property is non-configurable, result must also be non-configurable
+    if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+        bool td_conf_found = false;
+        Item td_conf = js_map_get_fast(target_desc.map, "configurable", 12, &td_conf_found);
+        bool target_configurable = td_conf_found ? it2b(js_to_boolean(td_conf)) : true;
+        
+        bool r_conf_found = false;
+        Item r_conf = js_map_get_fast(trap_result.map, "configurable", 12, &r_conf_found);
+        bool result_configurable = r_conf_found ? it2b(js_to_boolean(r_conf)) : true;
+        
+        if (!target_configurable) {
+            if (result_configurable) {
+                return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned configurable descriptor for non-configurable property on target");
+            }
+            // non-configurable non-writable: result must also be non-writable
+            bool td_wr_found = false;
+            Item td_wr = js_map_get_fast(target_desc.map, "writable", 8, &td_wr_found);
+            if (td_wr_found && !it2b(js_to_boolean(td_wr))) {
+                bool r_wr_found = false;
+                Item r_wr = js_map_get_fast(trap_result.map, "writable", 8, &r_wr_found);
+                if (r_wr_found && it2b(js_to_boolean(r_wr))) {
+                    return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned writable descriptor for non-configurable non-writable property on target");
+                }
+            }
+            // non-configurable + writable target: result must not be non-writable
+            if (td_wr_found && it2b(js_to_boolean(td_wr))) {
+                bool r_wr_found = false;
+                Item r_wr = js_map_get_fast(trap_result.map, "writable", 8, &r_wr_found);
+                if (r_wr_found && !it2b(js_to_boolean(r_wr))) {
+                    return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-writable descriptor for non-configurable writable property on target");
+                }
+            }
+        }
+        
+        if (!result_configurable && target_configurable) {
+            return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-configurable descriptor for configurable property on target");
+        }
+    } else {
+        // target doesn't have property
+        if (!js_is_extensible(target)) {
+            return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned a descriptor for property on a non-extensible target that does not exist on target");
+        }
+        bool r_conf_found = false;
+        Item r_conf = js_map_get_fast(trap_result.map, "configurable", 12, &r_conf_found);
+        bool result_configurable = r_conf_found ? it2b(js_to_boolean(r_conf)) : true;
+        if (!result_configurable) {
+            return js_throw_type_error("'getOwnPropertyDescriptor' on proxy: trap returned non-configurable descriptor for property that does not exist on target");
+        }
+    }
+    
+    return trap_result;
+}
+
+// Proxy [[DefineOwnProperty]](key, desc)
+extern "C" Item js_proxy_trap_define_property(Item proxy, Item key, Item desc) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return (Item){.item = b2it(false)};
+    Item trap = js_proxy_get_trap(pd, "defineProperty", 14);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_object_define_property(PD_TARGET(pd), key, desc);
+    }
+    Item args[3] = { PD_TARGET(pd), key, desc };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 3);
+    if (!it2b(js_to_boolean(result))) return (Item){.item = b2it(false)};
+
+    // ES2020 §9.5.6 invariant checks
+    Item target = PD_TARGET(pd);
+    Item target_desc = js_object_get_own_property_descriptor(target, key);
+
+    // Check extensibility
+    bool extensible = it2b(js_to_boolean(js_object_is_extensible(target)));
+
+    if (target_desc.item == ItemNull.item || get_type_id(target_desc) == LMD_TYPE_UNDEFINED) {
+        // target doesn't have this property
+        if (!extensible) {
+            return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining property on a non-extensible target");
+        }
+        // ES2020 §9.5.6 step 19b: if settingConfigFalse is true, throw TypeError
+        if (get_type_id(desc) == LMD_TYPE_MAP) {
+            bool d_conf_found = false;
+            Item d_conf = js_map_get_fast(desc.map, "configurable", 12, &d_conf_found);
+            if (d_conf_found && !it2b(js_to_boolean(d_conf))) {
+                return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property on a target that does not have it");
+            }
+        }
+    } else {
+        // target has this property — check compatibility
+        // If target desc is non-configurable, the new desc must be compatible
+        if (get_type_id(target_desc) == LMD_TYPE_MAP) {
+            bool td_conf_found = false;
+            Item td_configurable = js_map_get_fast(target_desc.map, "configurable", 12, &td_conf_found);
+            bool target_configurable = td_conf_found ? it2b(js_to_boolean(td_configurable)) : true;
+
+            if (!target_configurable) {
+                // Desc must not change configurable to true
+                if (get_type_id(desc) == LMD_TYPE_MAP) {
+                    bool d_conf_found = false;
+                    Item d_configurable = js_map_get_fast(desc.map, "configurable", 12, &d_conf_found);
+                    if (d_conf_found && it2b(js_to_boolean(d_configurable))) {
+                        return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property which is already non-configurable on the target");
+                    }
+                }
+            }
+            // ES2020 §9.5.6 step 20b: settingConfigFalse + target configurable → throw
+            if (target_configurable) {
+                if (get_type_id(desc) == LMD_TYPE_MAP) {
+                    bool d_conf_found = false;
+                    Item d_conf = js_map_get_fast(desc.map, "configurable", 12, &d_conf_found);
+                    if (d_conf_found && !it2b(js_to_boolean(d_conf))) {
+                        return js_throw_type_error("'defineProperty' on proxy: trap returned truish for defining non-configurable property but target property is configurable");
+                    }
+                }
+            }
+            if (!target_configurable) {
+                bool td_writable_found = false;
+                Item td_writable = js_map_get_fast(target_desc.map, "writable", 8, &td_writable_found);
+                bool target_writable = td_writable_found ? it2b(js_to_boolean(td_writable)) : true;
+
+                if (get_type_id(desc) == LMD_TYPE_MAP) {
+                    // Check if trying to change value of non-configurable non-writable property
+                    if (!target_writable) {
+                        bool d_val_found = false;
+                        Item d_value = js_map_get_fast(desc.map, "value", 5, &d_val_found);
+                        if (d_val_found) {
+                            bool td_val_found = false;
+                            Item td_value = js_map_get_fast(target_desc.map, "value", 5, &td_val_found);
+                            if (td_val_found) {
+                                extern Item js_strict_equal(Item a, Item b);
+                                if (!it2b(js_strict_equal(d_value, td_value))) {
+                                    return js_throw_type_error("'defineProperty' on proxy: trap returned truish for property which is non-configurable and non-writable on the target");
+                                }
+                            }
+                        }
+                        bool d_wr_found = false;
+                        Item d_writable = js_map_get_fast(desc.map, "writable", 8, &d_wr_found);
+                        if (d_wr_found && it2b(js_to_boolean(d_writable))) {
+                            return js_throw_type_error("'defineProperty' on proxy: trap returned truish for property which is non-configurable and non-writable on the target");
+                        }
+                    }
+                    // ES2020 §9.5.6 step 20c: non-configurable + writable → desc.writable false throws
+                    if (target_writable) {
+                        bool d_wr_found = false;
+                        Item d_writable = js_map_get_fast(desc.map, "writable", 8, &d_wr_found);
+                        if (d_wr_found && !it2b(js_to_boolean(d_writable))) {
+                            return js_throw_type_error("'defineProperty' on proxy: trap returned truish for making non-configurable writable property non-writable");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return (Item){.item = b2it(true)};
+}
+
+// Proxy [[GetPrototypeOf]]()
+extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return ItemNull;
+    Item trap = js_proxy_get_trap(pd, "getPrototypeOf", 14);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_get_prototype_of(PD_TARGET(pd));
+    }
+    Item args[1] = { PD_TARGET(pd) };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 1);
+    if (js_exception_pending) return ItemNull;
+    // ES2020 §9.5.1 invariant: result must be Object or null
+    TypeId rt = get_type_id(result);
+    if (rt != LMD_TYPE_MAP && result.item != ItemNull.item && rt != LMD_TYPE_NULL) {
+        return js_throw_type_error("'getPrototypeOf' on proxy: trap returned neither object nor null");
+    }
+    // If target is not extensible, result must match target's prototype
+    if (!js_is_extensible(PD_TARGET(pd))) {
+        Item target_proto = js_get_prototype_of(PD_TARGET(pd));
+        extern Item js_strict_equal(Item a, Item b);
+        if (!it2b(js_strict_equal(result, target_proto))) {
+            return js_throw_type_error("'getPrototypeOf' on proxy: proxy target is non-extensible but the trap did not return its actual prototype");
+        }
+    }
+    return result;
+}
+
+// Proxy [[SetPrototypeOf]](proto)
+extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return (Item){.item = b2it(false)};
+    Item trap = js_proxy_get_trap(pd, "setPrototypeOf", 14);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        js_set_prototype(PD_TARGET(pd), proto);
+        return (Item){.item = b2it(true)};
+    }
+    Item args[2] = { PD_TARGET(pd), proto };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    // ES2020 §9.5.2 invariant: if target is not extensible, proto must match target's prototype
+    if (bool_result && !js_is_extensible(PD_TARGET(pd))) {
+        Item target_proto = js_get_prototype_of(PD_TARGET(pd));
+        extern Item js_strict_equal(Item a, Item b);
+        if (!it2b(js_strict_equal(proto, target_proto))) {
+            return js_throw_type_error("'setPrototypeOf' on proxy: trap returned truish for setting a new prototype on a non-extensible target");
+        }
+    }
+    return (Item){.item = b2it(bool_result)};
+}
+
+// Proxy [[IsExtensible]]()
+extern "C" Item js_proxy_trap_is_extensible(Item proxy) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return (Item){.item = b2it(false)};
+    Item trap = js_proxy_get_trap(pd, "isExtensible", 12);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_object_is_extensible(PD_TARGET(pd));
+    }
+    Item args[1] = { PD_TARGET(pd) };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 1);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    // ES2020 §9.5.3 invariant: must match target's actual extensibility
+    bool target_extensible = js_is_extensible(PD_TARGET(pd));
+    if (bool_result != target_extensible) {
+        return js_throw_type_error("'isExtensible' on proxy: trap result does not reflect extensibility of proxy target");
+    }
+    return (Item){.item = b2it(bool_result)};
+}
+
+// Proxy [[PreventExtensions]]()
+extern "C" Item js_proxy_trap_prevent_extensions(Item proxy) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return ItemNull;
+    Item trap = js_proxy_get_trap(pd, "preventExtensions", 17);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_object_prevent_extensions(PD_TARGET(pd));
+    }
+    Item args[1] = { PD_TARGET(pd) };
+    Item result = js_call_function(trap, PD_HANDLER(pd), args, 1);
+    if (js_exception_pending) return ItemNull;
+    bool bool_result = it2b(js_to_boolean(result));
+    // ES2020 §9.5.4 invariant: if trap returns true, target must actually be non-extensible
+    if (bool_result) {
+        if (js_is_extensible(PD_TARGET(pd))) {
+            return js_throw_type_error("'preventExtensions' on proxy: trap returned truish but the proxy target is extensible");
+        }
+    }
+    return (Item){.item = b2it(bool_result)};
+}
+
+// Proxy [[Call]](thisArg, args)
+extern "C" Item js_proxy_trap_apply(Item proxy, Item this_val, Item* args, int arg_count) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return ItemNull;
+    Item trap = js_proxy_get_trap(pd, "apply", 5);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        return js_call_function(PD_TARGET(pd), this_val, args, arg_count);
+    }
+    // build args array
+    Item args_array = js_array_new(0);
+    for (int i = 0; i < arg_count; i++) {
+        js_array_push(args_array, args[i]);
+    }
+    Item trap_args[3] = { PD_TARGET(pd), this_val, args_array };
+    return js_call_function(trap, PD_HANDLER(pd), trap_args, 3);
+}
+
+// Proxy [[Construct]](args, newTarget)
+extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, Item new_target) {
+    JsProxyData* pd = js_get_proxy_data(proxy);
+    if (!pd) return ItemNull;
+    Item trap = js_proxy_get_trap(pd, "construct", 9);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) {
+        // forward to target's [[Construct]] — if target is also a proxy, recurse
+        Item target = PD_TARGET(pd);
+        if (js_is_proxy(target)) {
+            return js_proxy_trap_construct(target, args, arg_count, new_target.item != ItemNull.item ? new_target : proxy);
+        }
+        return js_new_from_class_object(target, args, arg_count);
+    }
+    // build args array
+    Item args_array = js_array_new(0);
+    for (int i = 0; i < arg_count; i++) {
+        js_array_push(args_array, args[i]);
+    }
+    Item trap_args[3] = { PD_TARGET(pd), args_array, new_target.item != ItemNull.item ? new_target : proxy };
+    Item result = js_call_function(trap, PD_HANDLER(pd), trap_args, 3);
+    if (get_type_id(result) != LMD_TYPE_MAP && get_type_id(result) != LMD_TYPE_ARRAY &&
+        get_type_id(result) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("'construct' on proxy: trap returned non-object");
+    }
+    return result;
+}
+
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
 extern "C" Item js_constructor_create_object(Item callee) {
     Item obj = js_new_object();
@@ -2769,6 +3525,11 @@ extern "C" Item js_constructor_create_object(Item callee) {
 // Dynamic class instantiation: new Type() where Type is a runtime variable.
 // Handles both function constructors and class objects (MAPs with __ctor__).
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
+    // Proxy [[Construct]] trap
+    if (js_is_proxy(callee)) {
+        return js_proxy_trap_construct(callee, args, argc, callee);
+    }
+
     // Set pending new.target (will be picked up by js_call_function)
     js_pending_new_target = callee;
     js_has_pending_new_target = true;
@@ -3520,6 +4281,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                     }
                 }
                 return make_js_undefined();
+            case MAP_KIND_PROXY:
+                return js_proxy_trap_get(object, key);
             }
         }
         // Regular Lambda map (including JS objects)
@@ -3606,8 +4369,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                 bool gk_found = false;
                 Item getter = js_map_get_fast(object.map, getter_key, (int)strlen(getter_key), &gk_found);
                 if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    // Invoke getter with this = object (0 args)
-                    return js_call_function(getter, object, NULL, 0);
+                    // Invoke getter with this = receiver (proxy if forwarding, else object)
+                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                    return js_call_function(getter, this_val, NULL, 0);
                 }
             }
         }
@@ -3626,7 +4390,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
                 Item getter = js_prototype_lookup(object, gk);
                 if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    return js_call_function(getter, object, NULL, 0);
+                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                    return js_call_function(getter, this_val, NULL, 0);
                 }
             }
         }
@@ -3943,8 +4708,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - global builtins (builtin_id == -2): parseInt, Math.abs, etc.
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
                 // - arrow functions
+                // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
-                    (fn->flags & JS_FUNC_FLAG_ARROW)) return make_js_undefined();
+                    (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
                     heap_register_gc_root(&fn->prototype.item);
@@ -4763,6 +5530,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     value = js_to_string(value);
                 }
                 break;  // fall through to regular property set
+            case MAP_KIND_PROXY:
+                return js_proxy_trap_set(object, key, value);
             default:
                 break;  // typed arrays fall through to regular set
             }
@@ -4785,7 +5554,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
                     _trace_call_id++;
                     Item args[1] = { value };
-                    js_call_function(setter, object, args, 1);
+                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                    js_call_function(setter, this_val, args, 1);
                     return value;
                 }
             }
@@ -5838,6 +6608,11 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
         if (prop_len == 6 && strncmp(prop_name, "isView", 6) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_ARRAYBUFFER_ISVIEW, "isView", 1);
     }
+    // Proxy static methods
+    if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) {
+        if (prop_len == 9 && strncmp(prop_name, "revocable", 9) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_PROXY_REVOCABLE, "revocable", 2);
+    }
     // Handle .prototype on any constructor — delegate to the constructor's property access
     if (prop_len == 9 && strncmp(prop_name, "prototype", 9) == 0) {
         Item ctor_name_item = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
@@ -5994,6 +6769,9 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     static const method_entry arraybuffer_methods[] = {
         {"isView",6}, {NULL,0}
     };
+    static const method_entry proxy_methods[] = {
+        {"revocable",9}, {NULL,0}
+    };
 
     const method_entry* table = NULL;
     if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) table = object_methods;
@@ -6004,6 +6782,7 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     else if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) table = number_methods;
     else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) table = map_methods;
     else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) table = arraybuffer_methods;
+    else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) table = proxy_methods;
     if (!table) return;
 
     JsFunction* fn = (JsFunction*)ctor_item.function;
@@ -6563,6 +7342,11 @@ extern "C" Item js_parseFloat(Item str_item);
 
 // HasProperty: check own + prototype chain (ES spec [[HasProperty]])
 static bool js_has_property(Item obj, Item key) {
+    // Proxy [[HasProperty]] trap
+    if (js_is_proxy(obj)) {
+        Item result = js_proxy_trap_has(obj, key);
+        return js_is_truthy(result);
+    }
     // String primitives: character indices 0..length-1 are always present
     if (get_type_id(obj) == LMD_TYPE_STRING) {
         String* s = it2s(obj);
@@ -6645,6 +7429,19 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_OBJ_HAS_OWN_PROPERTY:
         return js_has_own_property(this_val, arg0);
     case JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE: {
+        // Proxy: check GOPD trap result for enumerable
+        if (js_is_proxy(this_val)) {
+            Item desc = js_proxy_trap_get_own_property_descriptor(this_val, arg0);
+            if (js_exception_pending) return (Item){.item = ITEM_FALSE};
+            if (desc.item == ItemNull.item || get_type_id(desc) == LMD_TYPE_UNDEFINED)
+                return (Item){.item = ITEM_FALSE};
+            if (get_type_id(desc) == LMD_TYPE_MAP) {
+                bool found = false;
+                Item e = js_map_get_fast(desc.map, "enumerable", 10, &found);
+                return (Item){.item = b2it(found && it2b(js_to_boolean(e)))};
+            }
+            return (Item){.item = ITEM_TRUE};
+        }
         // Check if the property exists and is enumerable
         // v27: Handle arrays — check __ne_ marker from companion map
         if (get_type_id(this_val) == LMD_TYPE_ARRAY) {
@@ -7476,10 +8273,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         switch (builtin_id) {
         case JS_BUILTIN_OBJECT_DEFINE_PROPERTY:
+            if (js_is_proxy(arg0)) {
+                js_proxy_trap_define_property(arg0, arg1, arg2);
+                return arg0;
+            }
             return js_object_define_property(arg0, arg1, arg2);
         case JS_BUILTIN_OBJECT_DEFINE_PROPERTIES:
             return js_object_define_properties(arg0, arg1);
         case JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR:
+            if (js_is_proxy(arg0)) return js_proxy_trap_get_own_property_descriptor(arg0, arg1);
             return js_object_get_own_property_descriptor(arg0, arg1);
         case JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS:
             return js_object_get_own_property_descriptors(arg0);
@@ -7502,12 +8304,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         case JS_BUILTIN_OBJECT_IS_SEALED:
             return js_object_is_sealed(arg0);
         case JS_BUILTIN_OBJECT_PREVENT_EXTENSIONS:
+            if (js_is_proxy(arg0)) { js_proxy_trap_prevent_extensions(arg0); return arg0; }
             return js_object_prevent_extensions(arg0);
         case JS_BUILTIN_OBJECT_IS_EXTENSIBLE:
+            if (js_is_proxy(arg0)) return js_proxy_trap_is_extensible(arg0);
             return js_object_is_extensible(arg0);
         case JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF:
+            if (js_is_proxy(arg0)) return js_proxy_trap_get_prototype_of(arg0);
             return js_get_prototype_of(arg0);
         case JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF:
+            if (js_is_proxy(arg0)) { js_proxy_trap_set_prototype_of(arg0, arg1); return arg0; }
             js_set_prototype(arg0, arg1);
             return arg0;
         default: return ItemNull;
@@ -7589,6 +8395,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     // Iterator identity: [Symbol.iterator]() { return this; }
     case JS_BUILTIN_ITER_IDENTITY: {
         return this_val;
+    }
+    case JS_BUILTIN_PROXY_REVOCABLE: {
+        return js_proxy_revocable(arg0, arg1);
     }
     // String iterator
     case JS_BUILTIN_STRING_ITER: {
@@ -8360,6 +9169,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        // Proxy [[Call]] trap
+        if (js_is_proxy(func_item)) {
+            return js_proxy_trap_apply(func_item, this_val, args, arg_count);
+        }
         // Support objects with .call method (e.g. Sizzle's push polyfill)
         if (get_type_id(func_item) == LMD_TYPE_MAP) {
             bool found = false;
@@ -8398,6 +9211,16 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
+
+    // Proxy revoke function: builtin_id == -3, env[0] holds JsProxyData*
+    if (fn && fn->builtin_id == -3) {
+        if (fn->env && fn->env_size >= 1) {
+            JsProxyData* pd = (JsProxyData*)(uintptr_t)fn->env[0].item;
+            if (pd) pd->revoked = true;
+        }
+        return make_js_undefined();
+    }
+
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         // TypedArray stub methods: validate this before returning
         if (fn && (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
@@ -13769,6 +14592,11 @@ static const int PROTO_KEY_LEN = 9;
 
 // Set the prototype of an object (stores as __proto__ property on Map)
 extern "C" void js_set_prototype(Item object, Item prototype) {
+    // Proxy [[SetPrototypeOf]] trap
+    if (js_is_proxy(object)) {
+        js_proxy_trap_set_prototype_of(object, prototype);
+        return;
+    }
     if (get_type_id(object) != LMD_TYPE_MAP) return;
     if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != ItemNull.item) return;
     // v16: Prevent circular prototype chains (ES spec §9.1.2)
@@ -13953,6 +14781,17 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
         key_len = (int)s->len;
     }
     while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+        // Proxy in prototype chain: forward through proxy [[Get]] trap
+        // Set proxy_receiver to the original object so getter this-binding is correct
+        if (js_is_proxy(proto)) {
+            Item saved_receiver = js_proxy_receiver;
+            if (!js_proxy_receiver.item) {
+                js_proxy_receiver = object;
+            }
+            Item result = js_proxy_trap_get(proto, property);
+            js_proxy_receiver = saved_receiver;
+            return result;
+        }
         Item result;
         if (key_str) {
             result = js_map_get_fast(proto.map, key_str, key_len);

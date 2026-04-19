@@ -627,6 +627,40 @@ bool js_is_map_instance(Item obj);
 bool js_is_set_instance(Item obj);
 
 // =============================================================================
+// ES6 Proxy
+// =============================================================================
+
+// Proxy internal data stored in Map.data when map_kind == MAP_KIND_PROXY
+typedef struct JsProxyData {
+    uint64_t target;   // [[ProxyTarget]] — Item stored as uint64_t for C/C++ header compat
+    uint64_t handler;  // [[ProxyHandler]] — Item stored as uint64_t for C/C++ header compat
+    bool revoked;      // true after Proxy.revocable().revoke() called
+} JsProxyData;
+
+Item js_proxy_new(Item target, Item handler);
+Item js_proxy_revocable(Item target, Item handler);
+
+// Check if an Item is a Proxy
+bool js_is_proxy(Item obj);
+// Get proxy data (returns NULL if not a proxy)
+JsProxyData* js_get_proxy_data(Item obj);
+// Get the ultimate non-proxy target (unwrap nested proxies)
+Item js_proxy_get_target(Item obj);
+
+// Proxy trap dispatch functions (called from js_globals.cpp)
+Item js_proxy_trap_has(Item proxy, Item key);
+Item js_proxy_trap_delete(Item proxy, Item key);
+Item js_proxy_trap_own_keys(Item proxy);
+Item js_proxy_trap_get_own_property_descriptor(Item proxy, Item key);
+Item js_proxy_trap_define_property(Item proxy, Item key, Item desc);
+Item js_proxy_trap_get_prototype_of(Item proxy);
+Item js_proxy_trap_set_prototype_of(Item proxy, Item proto);
+Item js_proxy_trap_is_extensible(Item proxy);
+Item js_proxy_trap_prevent_extensions(Item proxy);
+Item js_proxy_trap_apply(Item proxy, Item this_val, Item* args, int arg_count);
+Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, Item new_target);
+
+// =============================================================================
 // v14: Event Loop & Timers
 // =============================================================================
 

@@ -9873,6 +9873,17 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, items_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb_arg));
             }
+            // Proxy.revocable(target, handler)
+            if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Proxy", 5) == 0 &&
+                prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "revocable", 9) == 0) {
+                JsAstNode* a1 = call->arguments;
+                JsAstNode* a2 = a1 ? a1->next : NULL;
+                MIR_reg_t target_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
+                MIR_reg_t handler_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
+                return jm_call_2(mt, "js_proxy_revocable", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, target_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, handler_arg));
+            }
             // Object.getPrototypeOf(obj)
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
                 prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "getPrototypeOf", 14) == 0) {
@@ -16201,10 +16212,14 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_call_0(mt, "js_writable_stream_new", MIR_T_I64);
     }
 
-    // new Proxy(target, handler) — pass-through: return target as-is
+    // new Proxy(target, handler) — create proxy with handler traps
     if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) {
-        if (first_arg) return first_arg;
-        return jm_emit_null(mt);
+        MIR_reg_t target_arg = first_arg ? first_arg : jm_emit_null(mt);
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        MIR_reg_t handler_arg = arg2 ? jm_transpile_box_item(mt, arg2) : jm_emit_null(mt);
+        return jm_call_2(mt, "js_proxy_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, target_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, handler_arg));
     }
 
     // User-defined class instantiation: new ClassName(args)

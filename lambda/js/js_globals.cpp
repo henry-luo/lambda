@@ -3254,6 +3254,10 @@ extern "C" Item js_in(Item key, Item object) {
         && type != LMD_TYPE_ELEMENT) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
+    // Proxy [[HasProperty]] trap
+    if (js_is_proxy(object)) {
+        return js_proxy_trap_has(object, key);
+    }
     if (type == LMD_TYPE_MAP) {
         // Check for symbol keys FIRST (before any numeric coercion)
         // Symbol items are encoded as negative ints <= -JS_SYMBOL_BASE
@@ -3277,6 +3281,9 @@ extern "C" Item js_in(Item key, Item object) {
             Item proto = js_get_prototype(object);
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                if (js_is_proxy(proto)) {
+                    return js_proxy_trap_has(proto, key);
+                }
                 bool found = false;
                 Item pval = js_map_get_fast_ext(proto.map, sym_buf, sym_len, &found);
                 if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
@@ -3325,6 +3332,10 @@ extern "C" Item js_in(Item key, Item object) {
             Item proto = js_get_prototype(object);
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                // if prototype is a proxy, delegate to its [[HasProperty]] trap
+                if (js_is_proxy(proto)) {
+                    return js_proxy_trap_has(proto, key);
+                }
                 bool found = false;
                 Item pval = js_map_get_fast_ext(proto.map, key_str, key_len, &found);
                 if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
@@ -3352,6 +3363,9 @@ extern "C" Item js_in(Item key, Item object) {
                 Item proto = js_get_prototype(object);
                 int depth = 0;
                 while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                    if (js_is_proxy(proto)) {
+                        return js_proxy_trap_has(proto, key);
+                    }
                     if (js_map_has_builtin_method(proto.map, ks->chars, (int)ks->len))
                         return (Item){.item = b2it(true)};
                     proto = js_get_prototype(proto);
@@ -3462,6 +3476,10 @@ extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
 extern "C" Item js_get_typed_array_base();
 
 extern "C" Item js_get_prototype_of(Item object) {
+    // Proxy [[GetPrototypeOf]] trap
+    if (js_is_proxy(object)) {
+        return js_proxy_trap_get_prototype_of(object);
+    }
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
@@ -3616,6 +3634,11 @@ struct JsFunctionLayout {
 };
 
 static bool js_func_is_constructor(Item func_item) {
+    // Proxy: a proxy is constructable only if its target is constructable
+    if (js_is_proxy(func_item)) {
+        Item target = js_proxy_get_target(func_item);
+        return js_func_is_constructor(target);
+    }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
@@ -3647,7 +3670,7 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     }
     // Validate newTarget is a constructor (if provided and not undefined/null)
     TypeId nt_type = get_type_id(new_target);
-    if (nt_type == LMD_TYPE_FUNC) {
+    if (nt_type == LMD_TYPE_FUNC || js_is_proxy(new_target)) {
         if (!js_func_is_constructor(new_target)) {
             Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
             Item msg = (Item){.item = s2it(heap_create_name("newTarget is not a constructor"))};
@@ -3671,6 +3694,11 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     }
     // create new object inheriting from target's (or newTarget's) prototype
     Item proto_source = (nt_type == LMD_TYPE_FUNC) ? new_target : target;
+    // For proxy targets, delegate to [[Construct]] trap
+    if (js_is_proxy(target)) {
+        return js_proxy_trap_construct(target, args, argc, 
+            (nt_type == LMD_TYPE_FUNC || js_is_proxy(new_target)) ? new_target : target);
+    }
     Item new_obj = js_constructor_create_object(proto_source);
     // Set new.target so that js_ctor_requires_new allows the call through
     extern void js_set_new_target(Item target);
@@ -3687,6 +3715,10 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
 
 // Reflect.ownKeys(obj) — returns array of all own property keys (strings + symbols)
 extern "C" Item js_reflect_own_keys(Item obj) {
+    // Proxy [[OwnKeys]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_own_keys(obj);
+    }
     // get string keys via getOwnPropertyNames
     Item names = js_object_get_own_property_names(obj);
     // get symbol keys via getOwnPropertySymbols
@@ -3705,12 +3737,22 @@ extern "C" Item js_reflect_own_keys(Item obj) {
 
 // Reflect.set(obj, key, value) — returns boolean
 extern "C" Item js_reflect_set(Item obj, Item key, Item value) {
-    js_property_set(obj, key, value);
+    Item result = js_property_set(obj, key, value);
+    // For proxy objects, [[Set]] returns a boolean (false means trap returned falsish)
+    if (js_is_proxy(obj) && result.item == (uint64_t)b2it(false)) {
+        return (Item){.item = b2it(false)};
+    }
     return (Item){.item = b2it(true)};
 }
 
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
+    if (js_is_proxy(obj)) {
+        extern Item js_proxy_trap_define_property(Item proxy, Item key, Item desc);
+        Item result = js_proxy_trap_define_property(obj, key, desc);
+        if (get_type_id(result) == LMD_TYPE_BOOL) return result;
+        return (Item){.item = b2it(it2b(js_to_boolean(result)))};
+    }
     js_object_define_property(obj, key, desc);
     return (Item){.item = b2it(true)};
 }
@@ -3722,18 +3764,44 @@ extern "C" Item js_reflect_delete_property(Item obj, Item key) {
 
 // Reflect.setPrototypeOf(obj, proto) — returns boolean
 extern "C" Item js_reflect_set_prototype_of(Item obj, Item proto) {
+    if (js_is_proxy(obj)) {
+        extern Item js_proxy_trap_set_prototype_of(Item proxy, Item proto);
+        return js_proxy_trap_set_prototype_of(obj, proto);
+    }
     js_set_prototype(obj, proto);
     return (Item){.item = b2it(true)};
 }
 
 // Reflect.preventExtensions(obj) — returns boolean
 extern "C" Item js_reflect_prevent_extensions(Item obj) {
+    if (js_is_proxy(obj)) {
+        extern Item js_proxy_trap_prevent_extensions(Item proxy);
+        Item result = js_proxy_trap_prevent_extensions(obj);
+        if (get_type_id(result) == LMD_TYPE_BOOL) return result;
+        return (Item){.item = b2it(it2b(js_to_boolean(result)))};
+    }
     js_object_prevent_extensions(obj);
     return (Item){.item = b2it(true)};
 }
 
 // Reflect.apply(target, thisArg, argsList) — call target with thisArg and args
 extern "C" Item js_reflect_apply(Item target, Item this_arg, Item args_array) {
+    // Proxy wrapping a callable: forward through apply trap
+    if (js_is_proxy(target)) {
+        int argc = 0;
+        Item* args = NULL;
+        if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+            argc = (int)js_array_length(args_array);
+            if (argc > 0) {
+                args = (Item*)alloca(argc * sizeof(Item));
+                for (int i = 0; i < argc; i++) {
+                    Item idx = {.item = i2it(i)};
+                    args[i] = js_array_get(args_array, idx);
+                }
+            }
+        }
+        return js_proxy_trap_apply(target, this_arg, args, argc);
+    }
     if (get_type_id(target) != LMD_TYPE_FUNC) {
         Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
         Item em = (Item){.item = s2it(heap_create_name("Reflect.apply requires a function"))};
@@ -3780,6 +3848,10 @@ struct JsFuncProps {
 };
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
+    // Proxy [[GetOwnProperty]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_get_own_property_descriptor(obj, name);
+    }
     // v20: GOPD should accept primitives (ES spec uses ToObject internally)
     // Only null/undefined throw TypeError
     TypeId type = get_type_id(obj);
@@ -4293,6 +4365,10 @@ static Item js_defprop_get_marker(Item obj, const char* key, int keylen, bool* f
 // =============================================================================
 
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) {
+    // Proxy [[DefineOwnProperty]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_define_property(obj, name, descriptor);
+    }
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
 
@@ -4369,6 +4445,10 @@ extern "C" Item js_alert(Item msg) {
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
+    // Proxy: forward through ownKeys trap (which handles undefined trap by forwarding to target)
+    if (js_is_proxy(object)) {
+        return js_proxy_trap_own_keys(object);
+    }
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
@@ -4601,6 +4681,55 @@ static int js_index_entry_cmp(const void* a, const void* b) {
 }
 
 extern "C" Item js_object_keys(Item object) {
+    // Proxy [[OwnKeys]] trap — returns enumerable string keys
+    if (js_is_proxy(object)) {
+        Item all_keys = js_proxy_trap_own_keys(object);
+        if (js_check_exception()) return js_array_new(0);
+        // Sort keys per OrdinaryOwnPropertyKeys: numeric indices first (ascending), then strings in order
+        if (get_type_id(all_keys) != LMD_TYPE_ARRAY) return all_keys;
+        Array* src = all_keys.array;
+        int total = src->length;
+        if (total <= 1) return all_keys;
+
+        int idx_cap = total;
+        int64_t* idx_vals = (int64_t*)alloca(idx_cap * sizeof(int64_t));
+        Item* idx_items = (Item*)alloca(idx_cap * sizeof(Item));
+        int idx_count = 0;
+        Item* str_items = (Item*)alloca(total * sizeof(Item));
+        int str_count = 0;
+
+        for (int i = 0; i < total; i++) {
+            Item k = src->items[i];
+            if (get_type_id(k) != LMD_TYPE_STRING) { str_items[str_count++] = k; continue; }
+            String* ks = it2s(k);
+            if (!ks) { str_items[str_count++] = k; continue; }
+            int64_t idx = js_parse_array_index(ks->chars, (int)ks->len);
+            if (idx >= 0) {
+                idx_vals[idx_count] = idx;
+                idx_items[idx_count] = k;
+                idx_count++;
+            } else {
+                str_items[str_count++] = k;
+            }
+        }
+        // Sort index keys numerically
+        for (int i = 1; i < idx_count; i++) {
+            int64_t iv = idx_vals[i];
+            Item ii = idx_items[i];
+            int j = i - 1;
+            while (j >= 0 && idx_vals[j] > iv) {
+                idx_vals[j + 1] = idx_vals[j];
+                idx_items[j + 1] = idx_items[j];
+                j--;
+            }
+            idx_vals[j + 1] = iv;
+            idx_items[j + 1] = ii;
+        }
+        Item result = js_array_new(0);
+        for (int i = 0; i < idx_count; i++) js_array_push(result, idx_items[i]);
+        for (int i = 0; i < str_count; i++) js_array_push(result, str_items[i]);
+        return result;
+    }
     // ES6: ToObject for primitives
     TypeId ot = get_type_id(object);
     if (ot == LMD_TYPE_STRING) {
@@ -4938,6 +5067,11 @@ extern "C" Item js_for_in_keys(Item object) {
 
     if (type != LMD_TYPE_MAP) {
         return js_array_new(0);
+    }
+
+    // Proxy: forward for-in to target (enumerate own + inherited enumerable keys)
+    if (js_is_proxy(object)) {
+        return js_for_in_keys(js_proxy_get_target(object));
     }
 
     // walk prototype chain collecting enumerable string keys
@@ -6257,6 +6391,12 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
 // =============================================================================
 
 extern "C" Item js_has_own_property(Item obj, Item key) {
+    // Proxy: forward to getOwnPropertyDescriptor trap
+    if (js_is_proxy(obj)) {
+        Item desc = js_proxy_trap_get_own_property_descriptor(obj, key);
+        if (js_check_exception()) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(desc.item != ItemNull.item && get_type_id(desc) != LMD_TYPE_UNDEFINED)};
+    }
     // v23: handle array objects — numeric indices and "length"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Item k = js_to_string(key);
@@ -6599,6 +6739,10 @@ extern "C" Item js_object_is_sealed(Item obj) {
 // =============================================================================
 
 extern "C" Item js_object_prevent_extensions(Item obj) {
+    // Proxy [[PreventExtensions]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_prevent_extensions(obj);
+    }
     // ES6: non-objects return the argument
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT) return obj;
@@ -6608,6 +6752,10 @@ extern "C" Item js_object_prevent_extensions(Item obj) {
 }
 
 extern "C" Item js_object_is_extensible(Item obj) {
+    // Proxy [[IsExtensible]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_is_extensible(obj);
+    }
     // ES6: non-objects are not extensible
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT)
@@ -7288,6 +7436,10 @@ extern "C" Item js_json_stringify(Item value) {
 // =============================================================================
 
 extern "C" Item js_delete_property(Item obj, Item key) {
+    // Proxy [[Delete]] trap
+    if (js_is_proxy(obj)) {
+        return js_proxy_trap_delete(obj, key);
+    }
     // v23: Handle function property deletion (name, length, prototype, custom)
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
         JsFuncProps* fn = (JsFuncProps*)obj.function;
@@ -7925,6 +8077,7 @@ extern "C" Item js_get_global_this() {
             {"Int16Array", 10}, {"Uint16Array", 11},
             {"Int32Array", 10}, {"Uint32Array", 11},
             {"Float32Array", 12}, {"Float64Array", 12},
+            {"Proxy", 5},
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -8115,6 +8268,7 @@ enum JsConstructorId {
     JS_CTOR_FLOAT32ARRAY,
     JS_CTOR_FLOAT64ARRAY,
     JS_CTOR_AGGREGATE_ERROR,
+    JS_CTOR_PROXY,
     JS_CTOR_MAX
 };
 
@@ -8413,6 +8567,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
+             ctor_id == JS_CTOR_PROXY ||
              (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY))
         fn->func_ptr = (void*)js_ctor_requires_new;
     else fn->func_ptr = (void*)js_ctor_placeholder;
@@ -8475,6 +8630,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
         {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
         {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
+        {"Proxy", 5, JS_CTOR_PROXY, 2},
         {NULL, 0, 0, 0}
     };
 
