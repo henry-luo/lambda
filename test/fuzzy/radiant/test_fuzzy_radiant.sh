@@ -31,6 +31,7 @@ SEED_DIR="$PROJECT_ROOT/test/layout/data"
 TEMP_DIR="$PROJECT_ROOT/temp/radiant_fuzz"
 CRASH_DIR="$SCRIPT_DIR/results/crashes"
 TIMEOUT_DIR="$SCRIPT_DIR/results/timeouts"
+SLOW_DIR="$SCRIPT_DIR/results/slow"
 BADJSON_DIR="$SCRIPT_DIR/results/badjson"
 
 # Defaults
@@ -44,6 +45,7 @@ MUTATE_ONLY=0
 GENERATE_ONLY=0
 VERBOSE=0
 RANDOM_SEED=""
+STRESS=0
 
 # Colors
 RED='\033[0;31m'
@@ -66,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --generate-only) GENERATE_ONLY=1; shift ;;
         --verbose|-v)    VERBOSE=1; shift ;;
         --seed=*)        RANDOM_SEED="${1#*=}"; shift ;;
+        --stress)        STRESS=1; shift ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -80,6 +83,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --generate-only        Only run generation-based fuzzing"
             echo "  --verbose|-v           Show individual test results"
             echo "  --seed=N               Random seed for reproducibility"
+            echo "  --stress               Stress mode: 200 gen, 10 mut, 200 seeds, 5s timeout"
             exit 0
             ;;
         *)
@@ -88,6 +92,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Apply stress preset (overridable by explicit args before --stress)
+if [[ "$STRESS" -eq 1 ]]; then
+    GEN_COUNT=200
+    MUT_COUNT=10
+    MUT_SEEDS=200
+    TIMEOUT_SEC=5
+fi
 
 # Check prerequisites
 if [[ ! -f "$LAMBDA_EXE" ]]; then
@@ -103,13 +115,24 @@ fi
 
 # Create directories
 mkdir -p "$TEMP_DIR/gen" "$TEMP_DIR/mut" "$TEMP_DIR/out"
-mkdir -p "$CRASH_DIR" "$TIMEOUT_DIR" "$BADJSON_DIR"
+mkdir -p "$CRASH_DIR" "$TIMEOUT_DIR" "$SLOW_DIR" "$BADJSON_DIR"
+
+# Marker file to identify timeout files from this session
+RUN_MARKER="$TEMP_DIR/.run_marker"
+touch "$RUN_MARKER"
+
+# Retry timeout for slow-test detection (6x the normal timeout, minimum 30s)
+RETRY_TIMEOUT=$((TIMEOUT_SEC * 6))
+if [[ $RETRY_TIMEOUT -lt 30 ]]; then
+    RETRY_TIMEOUT=30
+fi
 
 # Statistics
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_CRASHED=0
 TESTS_TIMEOUT=0
+TESTS_SLOW=0
 TESTS_BADJSON=0
 TESTS_ERROR=0
 ROUND=0
@@ -250,6 +273,7 @@ print_progress() {
         "run=$TESTS_RUN pass=$TESTS_PASSED" \
         "${RED}crash=$TESTS_CRASHED${NC}" \
         "${YELLOW}timeout=$TESTS_TIMEOUT${NC}" \
+        "slow=$TESTS_SLOW" \
         "badjson=$TESTS_BADJSON error=$TESTS_ERROR"
 }
 
@@ -341,6 +365,67 @@ while true; do
 done
 
 # ---------------------------------------------------------------------------
+# Retry timeouts with longer limit to distinguish slow from truly hanging
+# ---------------------------------------------------------------------------
+TIMEOUT_FILES=()
+while IFS= read -r -d '' f; do
+    TIMEOUT_FILES+=("$f")
+done < <(find "$TIMEOUT_DIR" -name 'timeout_*.html' -newer "$RUN_MARKER" -print0 2>/dev/null)
+
+if [[ ${#TIMEOUT_FILES[@]} -gt 0 ]]; then
+    echo ""
+    echo -e "${CYAN}Retrying ${#TIMEOUT_FILES[@]} timeout file(s) with ${RETRY_TIMEOUT}s limit...${NC}"
+    for tf in "${TIMEOUT_FILES[@]}"; do
+        local_basename=$(basename "$tf")
+        local_size=$(wc -c < "$tf" | tr -d ' ')
+        echo -n "  $local_basename (${local_size}B): "
+        local_start=$(date +%s)
+        local_rc=0
+        timeout "$RETRY_TIMEOUT" "$LAMBDA_EXE" layout "$tf" --no-log \
+            >/dev/null 2>/dev/null || local_rc=$?
+        local_end=$(date +%s)
+        local_elapsed=$((local_end - local_start))
+
+        case $local_rc in
+            0|1)
+                # Completed (0=success, 1=handled error) — reclassify as slow
+                TESTS_TIMEOUT=$((TESTS_TIMEOUT - 1))
+                TESTS_SLOW=$((TESTS_SLOW + 1))
+                local_ts=$(date +%Y%m%d_%H%M%S)
+                mv "$tf" "$SLOW_DIR/slow_${local_ts}_${TESTS_SLOW}.html"
+                echo -e "${GREEN}PASS${NC} in ${local_elapsed}s → reclassified as ${YELLOW}SLOW${NC}"
+                ;;
+            124|137)
+                echo -e "${RED}TIMEOUT${NC} at ${RETRY_TIMEOUT}s (likely hanging)"
+                ;;
+            134|136|138|139)
+                # Crashed on retry — reclassify
+                TESTS_TIMEOUT=$((TESTS_TIMEOUT - 1))
+                TESTS_CRASHED=$((TESTS_CRASHED + 1))
+                local_ts=$(date +%Y%m%d_%H%M%S)
+                local_sig="SIG$local_rc"
+                case $local_rc in
+                    134) local_sig="SIGABRT" ;;
+                    136) local_sig="SIGFPE" ;;
+                    138) local_sig="SIGBUS" ;;
+                    139) local_sig="SIGSEGV" ;;
+                esac
+                mv "$tf" "$CRASH_DIR/crash_${local_sig}_${local_ts}_retry.html"
+                echo -e "${RED}CRASH ($local_sig)${NC} in ${local_elapsed}s → reclassified as CRASH"
+                ;;
+            *)
+                # Other error exit — treat as slow (handled error)
+                TESTS_TIMEOUT=$((TESTS_TIMEOUT - 1))
+                TESTS_SLOW=$((TESTS_SLOW + 1))
+                local_ts=$(date +%Y%m%d_%H%M%S)
+                mv "$tf" "$SLOW_DIR/slow_${local_ts}_${TESTS_SLOW}.html"
+                echo -e "${GREEN}OK (error $local_rc)${NC} in ${local_elapsed}s → reclassified as ${YELLOW}SLOW${NC}"
+                ;;
+        esac
+    done
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 END_TIME=$(date +%s)
@@ -354,6 +439,7 @@ echo "  Duration:       ${TOTAL_ELAPSED}s (${ROUND} rounds)"
 echo "  Total tests:    $TESTS_RUN"
 echo -e "  Passed:         ${GREEN}$TESTS_PASSED${NC}"
 echo -e "  Crashes:        ${RED}$TESTS_CRASHED${NC}"
+echo -e "  Slow:           ${YELLOW}$TESTS_SLOW${NC}"
 echo -e "  Timeouts:       ${YELLOW}$TESTS_TIMEOUT${NC}"
 echo -e "  Bad JSON:       ${YELLOW}$TESTS_BADJSON${NC}"
 echo "  Handled errors: $TESTS_ERROR"
@@ -366,8 +452,15 @@ if [[ $TESTS_CRASHED -gt 0 ]]; then
     echo ""
 fi
 
+if [[ $TESTS_SLOW -gt 0 ]]; then
+    echo -e "${YELLOW}Slow test files saved to:${NC}"
+    echo "  $SLOW_DIR/"
+    ls -1 "$SLOW_DIR/" 2>/dev/null | tail -10
+    echo ""
+fi
+
 if [[ $TESTS_TIMEOUT -gt 0 ]]; then
-    echo -e "${YELLOW}Timeout-causing files saved to:${NC}"
+    echo -e "${YELLOW}Timeout-causing files (still hanging after ${RETRY_TIMEOUT}s retry):${NC}"
     echo "  $TIMEOUT_DIR/"
     ls -1 "$TIMEOUT_DIR/" 2>/dev/null | tail -10
     echo ""
