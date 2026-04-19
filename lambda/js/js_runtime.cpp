@@ -15516,6 +15516,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         Item arr = js_array_new(0);
         for (int safety = 0; safety < 100000; safety++) {
             Item result = js_generator_next(iterable, make_js_undefined());
+            if (js_exception_pending) return ItemNull;
             // Extract .done and .value from result
             String* done_key = heap_create_name("done", 4);
             Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
@@ -15605,6 +15606,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         Item iter_factory = js_property_get(iterable, iter_factory_key);
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             // if [Symbol.iterator]() returned an array directly, use it as-is
             if (get_type_id(iterator) == LMD_TYPE_ARRAY) return iterator;
             // drain the iterator (generator or object with next())
@@ -15612,6 +15614,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 Item arr = js_array_new(0);
                 for (int safety = 0; safety < 100000; safety++) {
                     Item result = js_generator_next(iterator, make_js_undefined());
+                    if (js_exception_pending) return ItemNull;
                     String* done_key = heap_create_name("done", 4);
                     Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
                     if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
@@ -15629,6 +15632,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                     Item arr = js_array_new(0);
                     for (int safety = 0; safety < 100000; safety++) {
                         Item result = js_call_function(next_fn2, iterator, NULL, 0);
+                        if (js_exception_pending) return ItemNull;
                         String* done_key = heap_create_name("done", 4);
                         Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
                         if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
@@ -15647,6 +15651,7 @@ extern "C" Item js_iterable_to_array(Item iterable) {
             Item arr = js_array_new(0);
             for (int safety = 0; safety < 100000; safety++) {
                 Item result = js_call_function(next_fn, iterable, NULL, 0);
+                if (js_exception_pending) return ItemNull;
                 String* done_key = heap_create_name("done", 4);
                 Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
                 if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;

@@ -7391,6 +7391,11 @@ static void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_no
         src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
     }
+    // If iterable-to-array threw (e.g., iterator .next() error), skip destructuring
+    MIR_reg_t arr_exc_chk = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_label_t skip_arr_destr = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_arr_destr),
+        MIR_new_reg_op(mt->ctx, arr_exc_chk)));
     int idx = 0;
     JsAstNode* elem = pattern->elements;
     while (elem) {
@@ -7418,6 +7423,7 @@ static void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_no
         idx++;
         elem = elem->next;
     }
+    jm_emit_label(mt, skip_arr_destr);
 }
 
 // Handle object destructuring pattern: extract properties by key from src
@@ -15855,6 +15861,13 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     jm_push_loop_labels(mt, l_update, l_end);
 
     jm_emit_label(mt, l_test);
+
+    // If exception pending (e.g., from init destructuring or loop body), exit loop
+    {
+        MIR_reg_t for_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, for_exc)));
+    }
 
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
