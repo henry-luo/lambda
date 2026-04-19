@@ -7537,6 +7537,10 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 // output — the OS catches stack overflow at the hardware/MMU level with zero overhead.
 
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
+    // Define C2MIR runtime marker and declare memcpy before embedding lambda.h
+    // C2MIR doesn't support __builtin_memcpy, so we use memcpy with explicit declaration
+    strbuf_append_str(tp->code_buf, "#define LAMBDA_C2MIR_RUNTIME 1\n"
+                                     "extern void *memcpy(void *dest, const void *src, size_t n);\n");
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // Phase 2: No stack check code emitted — signal handler handles overflow
     // all (nested) function definitions need to be hoisted to global level

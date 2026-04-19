@@ -2799,6 +2799,8 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
 
 static BashAstNode* build_arith_expression(BashTranspiler* tp, TSNode node) {
     const char* node_type = ts_node_type(node);
+    StrView dbg_src = bash_node_source(tp, node);
+    log_debug("bash arith: node_type=%s src='%.*s'", node_type, (int)(dbg_src.length > 60 ? 60 : dbg_src.length), dbg_src.str);
 
     // handle leaf types directly (when called recursively on binary_expression operands)
     if (strcmp(node_type, "number") == 0) {

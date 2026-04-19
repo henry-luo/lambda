@@ -507,6 +507,7 @@ enum MapKind {
     MAP_KIND_ITERATOR    = 6,  // Synthetic iterator (array, string, typed array)
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
     MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
+    MAP_KIND_PROXY       = 9,  // ES6 Proxy object
 };
 
 // Array and List struct defintions needed for for-loop
@@ -767,8 +768,15 @@ inline uint64_t b2it(uint8_t bool_val) {
 
 // Float16/Float32 packing into NUM_SIZED Items
 // float32: store IEEE 754 binary32 bit pattern in low 32 bits
+// C2MIR: import from native runtime (C2MIR has issues with float in inline functions)
+// Native: use __builtin_memcpy for type-safe bit conversion
+#if defined(LAMBDA_C2MIR_RUNTIME)
+extern uint32_t f32_to_bits(float f);
+extern float bits_to_f32(uint32_t u);
+#else
 static inline uint32_t f32_to_bits(float f) { uint32_t u; __builtin_memcpy(&u, &f, 4); return u; }
 static inline float bits_to_f32(uint32_t u) { float f; __builtin_memcpy(&f, &u, 4); return f; }
+#endif
 #define f32_to_item(v) NUM_SIZED_PACK(NUM_FLOAT32, f32_to_bits((float)(v)))
 
 // float16: software conversion (IEEE 754 binary16)

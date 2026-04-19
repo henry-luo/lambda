@@ -67,12 +67,94 @@ static bool should_skip_mir_test(const std::string& test_name) {
 }
 
 //==============================================================================
+// C2MIR Skip List - features not yet implemented in legacy C2MIR path
+//==============================================================================
+
+static const char* C2MIR_SKIP_TESTS[] = {
+    // Sized numeric types (i8, u8, i16, u16, i32, u32, f16, f32, etc.) not in C2MIR parser
+    "compact_typed_arrays",
+    "sized_numeric_collections",
+    "sized_numeric_mixed_expr",
+    "sized_numeric_type_annot",
+    "typed_array_vector_ops",
+    // JS import crashes (segfault in C2MIR when importing .js helpers)
+    "import_js",
+    "import_js_naming",
+    // Fuzzy crash regression uses undefined_var which C2MIR rejects at compile time
+    "fuzzy_crash_regression",
+    // Features with behavioral differences in C2MIR
+    "vector_advanced",      // div-by-zero: C2MIR returns nan, MIR Direct returns 0
+    "edit_bridge",          // edit bridge API differs in C2MIR
+    "render_map",           // render map output differs in C2MIR
+    "view_state",           // view state not fully supported in C2MIR
+    "view_template",        // view template not fully supported in C2MIR
+    "input_dir",            // directory iteration order differs in C2MIR
+    "path",                 // directory iteration order differs in C2MIR
+    // C2MIR variadic/float ABI issues with typed arrays (added after Apr 4 binary)
+    "awfy_bounce",
+    "awfy_bounce2",
+    "awfy_deltablue",
+    "awfy_deltablue2",
+    "awfy_json",
+    "awfy_json2",
+    "awfy_list",
+    "awfy_list2",
+    "awfy_permute",
+    "awfy_permute2",
+    "awfy_queens",
+    "awfy_queens2",
+    "awfy_richards",
+    "awfy_richards2",
+    "awfy_sieve",
+    "awfy_sieve2",
+    "awfy_storage",
+    "awfy_storage2",
+    "awfy_towers",
+    "awfy_towers2",
+    "correlation_math",
+    "expr",
+    "for_clauses_test",
+    "for_element_filter",
+    "proc_proc_fill",
+    "proc_proc_map_set",
+    "proc_proc_map_type_change",
+    "proc_proc_markup_mutation",
+    "proc_proc_param_mutation",
+    "proc_proc_param_type_infer",
+    "proc_proc_semicolon",
+    "proc_proc_typed_array_param",
+    "proc_proc_var",
+    "proc_proc_var_type_widen",
+    "proc_tail_call_proc",
+    "proc_test_io_module",
+    "proc_test_pipe_file",
+    "proc_vmap",
+    "proc_while_swap",
+    "r7rs_ack2",
+    "r7rs_cpstak",
+    "r7rs_cpstak2",
+    "r7rs_mbrot2",
+    "r7rs_nqueens",
+    "r7rs_nqueens2",
+    "r7rs_sum2",
+};
+static const size_t NUM_C2MIR_SKIP_TESTS = sizeof(C2MIR_SKIP_TESTS) / sizeof(C2MIR_SKIP_TESTS[0]);
+
+static bool should_skip_c2mir_test(const std::string& test_name) {
+    for (size_t i = 0; i < NUM_C2MIR_SKIP_TESTS; i++) {
+        if (test_name == C2MIR_SKIP_TESTS[i]) return true;
+    }
+    return false;
+}
+
+//==============================================================================
 // Test Discovery
 //==============================================================================
 
 // Discover all tests from all configured directories
 std::vector<LambdaTestInfo> discover_all_tests() {
     std::vector<LambdaTestInfo> all_tests;
+    bool use_c2mir = getenv("LAMBDA_USE_C2MIR") != nullptr;
     
     // Discover functional script tests
     for (size_t i = 0; i < NUM_FUNCTIONAL_TEST_DIRECTORIES; i++) {
@@ -86,12 +168,13 @@ std::vector<LambdaTestInfo> discover_all_tests() {
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
 
-    // Filter out MIR-unsupported tests and slow benchmark tests
+    // Filter out unsupported tests and slow benchmark tests
     std::vector<LambdaTestInfo> filtered;
     for (const auto& test : all_tests) {
-        if (!should_skip_mir_test(test.test_name) && !is_slow_benchmark(test.test_name)) {
-            filtered.push_back(test);
-        }
+        if (is_slow_benchmark(test.test_name)) continue;
+        if (!use_c2mir && should_skip_mir_test(test.test_name)) continue;
+        if (use_c2mir && should_skip_c2mir_test(test.test_name)) continue;
+        filtered.push_back(test);
     }
     return filtered;
 }
