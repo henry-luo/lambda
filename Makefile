@@ -1498,17 +1498,17 @@ test-fuzzy-extended: build
 # Radiant Layout Engine Fuzzy Testing
 # Generates adversarial HTML/CSS and tests layout robustness
 
-# Quick radiant fuzz (2 minutes)
+# Quick radiant fuzz (2 minutes, stress mode)
 fuzz-radiant-quick: build
-	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes)..."
+	@echo "Running Radiant layout fuzzy tests (quick: 2 minutes, stress mode)..."
 	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=120
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=120 --stress
 
 # Full radiant fuzz (default 5 minutes, override with duration=N)
 fuzz-radiant: build
 	@echo "Running Radiant layout fuzzy tests..."
 	@chmod +x test/fuzzy/radiant/test_fuzzy_radiant.sh
-	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300)
+	@./test/fuzzy/radiant/test_fuzzy_radiant.sh --duration=$(or $(duration),300) --stress
 
 # Lambda JS Engine Fuzzy Testing
 # Generates and mutates JavaScript programs to test JS engine robustness

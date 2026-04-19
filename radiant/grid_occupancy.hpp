@@ -357,6 +357,18 @@ private:
         size_t new_row_count = old_row_count + req_negative_rows + req_positive_rows;
         size_t new_col_count = old_col_count + req_negative_cols + req_positive_cols;
 
+        // guard against excessive grid sizes from extreme span values
+        const size_t MAX_OCCUPANCY_CELLS = 1000000; // 1M cells max
+        if (new_row_count * new_col_count > MAX_OCCUPANCY_CELLS) {
+            if (new_row_count > 1000) new_row_count = 1000;
+            if (new_col_count > 1000) new_col_count = 1000;
+            // recalculate positive expansion to fit the clamped size
+            req_positive_rows = static_cast<int16_t>(new_row_count > old_row_count + req_negative_rows
+                ? new_row_count - old_row_count - req_negative_rows : 0);
+            req_positive_cols = static_cast<int16_t>(new_col_count > old_col_count + req_negative_cols
+                ? new_col_count - old_col_count - req_negative_cols : 0);
+        }
+
         // Create new data array
         std::vector<CellOccupancyState> new_data(new_row_count * new_col_count, CellOccupancyState::Unoccupied);
 

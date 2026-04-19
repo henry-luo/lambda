@@ -11,6 +11,9 @@
 #include <strings.h>  // for strcasecmp
 #include <cmath>
 
+// maximum grid span or repeat count to prevent excessive allocation
+#define MAX_GRID_SPAN 1000
+
 // Forward declaration for CSS variable lookup
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
 
@@ -2108,6 +2111,10 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
         }
     } else if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
         repeat_count = (int)count_val->data.number.value;
+        if (repeat_count > MAX_GRID_SPAN) {
+            log_debug("[CSS] repeat(%d, ...) clamped to %d", repeat_count, MAX_GRID_SPAN);
+            repeat_count = MAX_GRID_SPAN;
+        }
         log_debug("[CSS] repeat(%d, ...) detected", repeat_count);
     }
 
@@ -2248,6 +2255,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                 if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
                     // Fixed repeat count - expand
                     int repeat_count = (int)count_val->data.number.value;
+                    if (repeat_count > MAX_GRID_SPAN) repeat_count = MAX_GRID_SPAN;
                     int track_vals = val->data.function->arg_count - 1;
                     total_tracks += repeat_count * (track_vals > 0 ? track_vals : 1);
                 } else {
@@ -2269,6 +2277,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
             if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
                 if (i + 1 < count && values[i + 1] && values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
                     int repeat_count = (int)values[i + 1]->data.number.value;
+                    if (repeat_count > MAX_GRID_SPAN) repeat_count = MAX_GRID_SPAN;
                     int track_values = 0;
                     for (int j = i + 2; j < count; j++) {
                         CssValue* tv = values[j];
@@ -2326,6 +2335,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                 } else if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
                     // Fixed repeat count - expand inline
                     int repeat_count = (int)count_val->data.number.value;
+                    if (repeat_count > MAX_GRID_SPAN) repeat_count = MAX_GRID_SPAN;
                     for (int r = 0; r < repeat_count && track_list->track_count < track_list->allocated_tracks; r++) {
                         for (int a = 1; a < val->data.function->arg_count && track_list->track_count < track_list->allocated_tracks; a++) {
                             GridTrackSize* ts = parse_css_value_to_track_size(val->data.function->args[a]);
@@ -2391,6 +2401,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     continue;
                 }
                 int repeat_count = (int)values[i]->data.number.value;
+                if (repeat_count > MAX_GRID_SPAN) repeat_count = MAX_GRID_SPAN;
                 i++; // Move past count
 
                 const CssValue* repeat_tracks[16];
@@ -8951,7 +8962,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         CssFunction* func = v->data.function;
                         if (strcmp(func->name, "span") == 0 && func->arg_count > 0 &&
                             func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
-                            *line = -(int)func->args[0]->data.number.value;
+                            int span_val = (int)func->args[0]->data.number.value;
+                            if (span_val > MAX_GRID_SPAN) {
+                                log_debug("[CSS] grid span %d clamped to %d", span_val, MAX_GRID_SPAN);
+                                span_val = MAX_GRID_SPAN;
+                            }
+                            *line = -span_val;
                             *has_explicit = true;
                             *is_span = true;
                         }
