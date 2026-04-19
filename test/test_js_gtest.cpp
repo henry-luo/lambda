@@ -316,9 +316,9 @@ static void run_js_sub_batch(
 
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js-test-batch --timeout=60 --opt-level=0 < \"%s\"", manifest_path);
+    snprintf(command, sizeof(command), "lambda.exe js-test-batch --timeout=60 < \"%s\"", manifest_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --timeout=60 --opt-level=0 < \"%s\"", manifest_path);
+    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --timeout=60 < \"%s\"", manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");

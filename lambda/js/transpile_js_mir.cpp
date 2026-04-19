@@ -61,6 +61,16 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+// Adaptive gen interface: large functions (>N insns) compile at opt=1 to avoid
+// O(n²) SSA/GVN cost, while small functions get full optimization.
+// Threshold: 10K MIR insns → functions above this use opt=1.
+#define JM_LARGE_FUNC_INSN_THRESHOLD 10000
+
+// Threshold for total MIR instructions in a module. Modules above this
+// (e.g., lodash with 272K insns) use opt=0 for the entire context because
+// MIR's SSA/GVN passes have super-linear cost for very large functions.
+#define JM_LARGE_MODULE_INSN_THRESHOLD 100000
+
 
 
 // POC: MIR interpreter mode — set from mir.c
@@ -26036,7 +26046,49 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // Link and generate
+#ifndef NDEBUG
+    FILE* mir_gen_debug = NULL;
+    if (getenv("JS_MIR_GEN_TIMING")) {
+        create_dir_recursive("temp");
+        mir_gen_debug = fopen("temp/mir_gen_timing.txt", "w");
+        if (mir_gen_debug) {
+            MIR_gen_set_debug_file(ctx, mir_gen_debug);
+            MIR_gen_set_debug_level(ctx, 0);
+        }
+    }
+#endif
+    // Auto-downgrade opt level for very large modules (e.g., lodash: 272K insns).
+    // MIR's SSA/GVN/LICM passes at opt>=2 have super-linear cost for large functions,
+    // causing 57s+ compile times in debug builds. Opt=0 compiles in <2s with negligible
+    // runtime difference for JS workloads (dominated by runtime function calls).
+    unsigned int effective_opt = g_js_mir_optimize_level;
+    if (effective_opt >= 2) {
+        unsigned long total_insns = 0;
+        for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
+             m = DLIST_NEXT(MIR_module_t, m)) {
+            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
+                 item = DLIST_NEXT(MIR_item_t, item)) {
+                if (item->item_type == MIR_func_item)
+                    total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
+            }
+        }
+        if (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
+            log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
+            MIR_gen_set_optimize_level(ctx, 0);
+            effective_opt = 0;
+        }
+    }
     MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    // Restore opt level if we changed it
+    if (effective_opt != g_js_mir_optimize_level) {
+        MIR_gen_set_optimize_level(ctx, g_js_mir_optimize_level);
+    }
+#ifndef NDEBUG
+    if (mir_gen_debug) {
+        fclose(mir_gen_debug);
+        MIR_gen_set_debug_file(ctx, NULL);
+    }
+#endif
 
     // Find js_main
     typedef Item (*js_main_func_t)(Context*);
