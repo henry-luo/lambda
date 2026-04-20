@@ -11044,6 +11044,76 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 return (Item){.item = ITEM_FALSE};
             }
+            if (method->len == 8 && strncmp(method->chars, "findLast", 8) == 0) {
+                if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("callback is not a function");
+                    return ItemNull;
+                }
+                Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
+                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+                int len = ta->length;
+                for (int i = len - 1; i >= 0; i--) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
+                    if (js_exception_pending) return ItemNull;
+                    if (js_is_truthy(result)) return elem;
+                }
+                return make_js_undefined();
+            }
+            if (method->len == 13 && strncmp(method->chars, "findLastIndex", 13) == 0) {
+                if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("callback is not a function");
+                    return ItemNull;
+                }
+                Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
+                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+                int len = ta->length;
+                for (int i = len - 1; i >= 0; i--) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
+                    if (js_exception_pending) return ItemNull;
+                    if (js_is_truthy(result)) return (Item){.item = i2it(i)};
+                }
+                return (Item){.item = i2it(-1)};
+            }
+            if (method->len == 11 && strncmp(method->chars, "reduceRight", 11) == 0) {
+                if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("callback is not a function");
+                    return ItemNull;
+                }
+                Item callback = args[0];
+                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+                int len = ta->length;
+                int start_idx;
+                Item acc;
+                if (argc > 1) {
+                    acc = args[1];
+                    start_idx = len - 1;
+                } else if (len > 0) {
+                    acc = js_typed_array_get(obj, (Item){.item = i2it(len - 1)});
+                    start_idx = len - 2;
+                } else {
+                    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
+                    Item error = js_new_error_with_name(type_name, msg_item);
+                    js_throw_value(error);
+                    return ItemNull;
+                }
+                for (int i = start_idx; i >= 0; i--) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[4] = {acc, elem, idx_item, obj};
+                    acc = js_call_function(callback, make_js_undefined(), fn_args, 4);
+                    if (js_exception_pending) return ItemNull;
+                }
+                return acc;
+            }
             if (method->len == 4 && strncmp(method->chars, "join", 4) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
