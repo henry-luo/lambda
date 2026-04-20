@@ -302,7 +302,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
 
 void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      RdtStrokeCap cap, RdtStrokeJoin join,
-                     const float* dash_array, int dash_count,
+                     const float* dash_array, int dash_count, float dash_phase,
                      const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* impl = vec->impl;
@@ -333,7 +333,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 
     // dash pattern
     if (dash_array && dash_count > 0) {
-        tvg_shape_set_stroke_dash(shape, dash_array, dash_count, 0);
+        tvg_shape_set_stroke_dash(shape, dash_array, dash_count, dash_phase);
     }
 
     apply_transform(shape, transform);

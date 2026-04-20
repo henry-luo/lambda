@@ -428,13 +428,13 @@ static void render_error_state(ImageSurface* surface,
     RdtPath* xp = rdt_path_new();
     rdt_path_move_to(xp, ccx - s, ccy - s);
     rdt_path_line_to(xp, ccx + s, ccy + s);
-    rdt_stroke_path(&vec, xp, x_color, stroke_w, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+    rdt_stroke_path(&vec, xp, x_color, stroke_w, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, 0, NULL);
     rdt_path_free(xp);
 
     RdtPath* xp2 = rdt_path_new();
     rdt_path_move_to(xp2, ccx + s, ccy - s);
     rdt_path_line_to(xp2, ccx - s, ccy + s);
-    rdt_stroke_path(&vec, xp2, x_color, stroke_w, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, NULL);
+    rdt_stroke_path(&vec, xp2, x_color, stroke_w, RDT_CAP_ROUND, RDT_JOIN_ROUND, NULL, 0, 0, NULL);
     rdt_path_free(xp2);
 
     rdt_vector_destroy(&vec);

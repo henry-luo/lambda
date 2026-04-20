@@ -134,7 +134,7 @@ void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
 
 void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
-                    const float* dash_array, int dash_count,
+                    const float* dash_array, int dash_count, float dash_phase,
                     const RdtMatrix* transform) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_STROKE_PATH;
@@ -145,6 +145,7 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
     item->stroke_path.join = join;
     item->stroke_path.dash_array = dl_copy_dashes(dl, dash_array, dash_count);
     item->stroke_path.dash_count = dash_count;
+    item->stroke_path.dash_phase = dash_phase;
     item->stroke_path.has_transform = (transform != nullptr);
     if (transform) item->stroke_path.transform = *transform;
 }
@@ -599,7 +600,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_STROKE_PATH: {
             DlStrokePath* r = &item->stroke_path;
             rdt_stroke_path(vec, r->path, r->color, r->width, r->cap, r->join,
-                            r->dash_array, r->dash_count,
+                            r->dash_array, r->dash_count, r->dash_phase,
                             r->has_transform ? &r->transform : nullptr);
             break;
         }

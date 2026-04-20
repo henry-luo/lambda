@@ -281,7 +281,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
 
 void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      RdtStrokeCap cap, RdtStrokeJoin join,
-                     const float* dash_array, int dash_count,
+                     const float* dash_array, int dash_count, float dash_phase,
                      const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* cg = vec->impl;
@@ -321,7 +321,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
         CGFloat cg_dash[16];
         int n = dash_count > 16 ? 16 : dash_count;
         for (int i = 0; i < n; i++) cg_dash[i] = dash_array[i];
-        CGContextSetLineDash(cg->ctx, 0, cg_dash, n);
+        CGContextSetLineDash(cg->ctx, (CGFloat)dash_phase, cg_dash, n);
     }
 
     CGContextAddPath(cg->ctx, p->cg);

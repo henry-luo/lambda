@@ -39,7 +39,7 @@ static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color col
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
-    if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, xform);
+    if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
     else svg_stroke_path(ctx, path, color, width, cap, join, dash, dash_count, xform);
 }
 static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
