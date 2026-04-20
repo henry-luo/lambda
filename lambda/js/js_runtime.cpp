@@ -4863,8 +4863,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                 bool pm_found = false;
                 Item pm_val = js_map_get_fast_ext(fn->properties_map.map, str_key->chars, (int)str_key->len, &pm_found);
                 if (pm_found) {
-                    if (js_is_deleted_sentinel(pm_val)) return make_js_undefined();
-                    return pm_val;
+                    // v91: For "prototype" key, DELETED_SENTINEL means "fall through to fn->prototype field"
+                    // because js_property_set stores a sentinel when prototype is set to a MAP
+                    // (to clear any previous non-MAP entry in properties_map).
+                    if (js_is_deleted_sentinel(pm_val)) {
+                        if (!(str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0))
+                            return make_js_undefined();
+                        // else: fall through to fn->prototype check below
+                    } else {
+                        return pm_val;
+                    }
                 }
                 // Check for accessor descriptor (__get_<propName>) in properties_map
                 if (str_key->len < 128) {
