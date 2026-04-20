@@ -3134,7 +3134,13 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         // v20: Get Func.prototype via property access (handles both Function and JsFunction)
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         Item func_proto = js_property_get(right, proto_key);
-        if (func_proto.item != ItemNull.item && get_type_id(func_proto) == LMD_TYPE_MAP) {
+        // ES spec 7.3.19 step 6: If Type(P) is not Object, throw TypeError
+        TypeId fp_type = get_type_id(func_proto);
+        if (fp_type != LMD_TYPE_MAP && fp_type != LMD_TYPE_ARRAY && fp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("Function has non-object prototype in instanceof check");
+            return (Item){.item = b2it(false)};
+        }
+        if (func_proto.item != ItemNull.item && fp_type == LMD_TYPE_MAP) {
             // Walk left's __proto__ chain looking for func_proto (identity check)
             // Use js_get_prototype_of for each step (handles arrays, functions, builtins)
             Item obj = js_get_prototype_of(left);
