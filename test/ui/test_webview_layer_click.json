@@ -5,6 +5,8 @@
   "events": [
     {"type": "log", "message": "=== webview layer click test ==="},
     {"type": "wait", "ms": 1500},
+    {"type": "assert_count", "target": {"selector": "webview"}, "count": 1},
+    {"type": "assert_visible", "target": {"selector": "webview"}, "visible": true},
     {"type": "log", "message": "Clicking center of webview area at button (332, 370)"},
     {"type": "click", "x": 332, "y": 370},
     {"type": "wait", "ms": 500},
