@@ -37,7 +37,6 @@
     "README-WASM-JS.md"
   ],
   "dependencies": {
-    "esbuild": "^0.27.4",
     "jsdom": "^26.0.0",
     "puppeteer": "^24.36.0",
     "tree-sitter-cli": "^0.26.7",
@@ -50,5 +49,13 @@
   "bugs": {
     "url": "https://github.com/henry-luo/lambda/issues"
   },
-  "homepage": "https://github.com/henry-luo/lambda#readme"
+  "homepage": "https://github.com/henry-luo/lambda#readme",
+  "devDependencies": {
+    "@babel/cli": "^7.28.6",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
+    "babel-loader": "^10.1.1",
+    "esbuild": "^0.28.0",
+    "joi": "^17.13.3"
+  }
 }

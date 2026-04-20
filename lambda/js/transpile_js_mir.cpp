@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cstdio>
 #include "../../lib/mem.h"
+#include "../lambda-stack.h"
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
 #else
@@ -164,6 +165,7 @@ struct JsFuncCollected {
     bool has_rest_param;            // true if last param is ...rest
     bool uses_arguments;            // v18q: true if function body references 'arguments'
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
+    bool is_reassigned;              // function name is an assignment target somewhere in the module
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -9256,28 +9258,39 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     // require(specifier) — CJS module loading
+    // Only intercept if 'require' is NOT a local variable/parameter (e.g. webpack factories
+    // pass their own require function as a parameter named 'require')
     if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* callee_id = (JsIdentifierNode*)call->callee;
         if (callee_id->name && callee_id->name->len == 7 &&
             memcmp(callee_id->name->chars, "require", 7) == 0 && arg_count == 1) {
-            JsAstNode* arg = call->arguments;
-            if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
-                JsLiteralNode* lit = (JsLiteralNode*)arg;
-                if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
-                    // resolve the module path at transpile time
-                    char resolved[512];
-                    jm_resolve_module_path(mt->filename ? mt->filename : ".",
-                        lit->value.string_value->chars, (int)lit->value.string_value->len,
-                        resolved, sizeof(resolved));
-                    MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
-                    return jm_call_1(mt, "js_require", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
-                }
+            // Check if 'require' is a local/module variable (skip CJS interception if so)
+            bool require_is_local = (jm_find_var(mt, "_js_require") != NULL);
+            if (!require_is_local && mt->module_consts) {
+                JsModuleConstEntry mclookup;
+                snprintf(mclookup.name, sizeof(mclookup.name), "_js_require");
+                require_is_local = (hashmap_get(mt->module_consts, &mclookup) != NULL);
             }
-            // dynamic require(expr) — resolve at runtime
-            MIR_reg_t spec = jm_transpile_box_item(mt, call->arguments);
-            return jm_call_1(mt, "js_require", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+            if (!require_is_local) {
+                JsAstNode* arg = call->arguments;
+                if (arg && arg->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* lit = (JsLiteralNode*)arg;
+                    if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                        // resolve the module path at transpile time
+                        char resolved[512];
+                        jm_resolve_module_path(mt->filename ? mt->filename : ".",
+                            lit->value.string_value->chars, (int)lit->value.string_value->len,
+                            resolved, sizeof(resolved));
+                        MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
+                        return jm_call_1(mt, "js_require", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+                    }
+                }
+                // dynamic require(expr) — resolve at runtime
+                MIR_reg_t spec = jm_transpile_box_item(mt, call->arguments);
+                return jm_call_1(mt, "js_require", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+            }
         }
     }
 
@@ -11525,6 +11538,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (direct_has_spread) fc = NULL;  // nullify so we fall through to fallback
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
             if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
+            if (fc && fc->is_reassigned) fc = NULL;   // function name is reassigned — use dynamic dispatch
 
             if (fc && (fc->func_item || fc->native_func_item) && fc->capture_count == 0) {
                 // Phase 4: Check if we can call the native version
@@ -22371,6 +22385,28 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         hashmap_free(implicit_globals);
     }
 
+    // Detect function declarations that self-reassign (Babel _typeof pattern etc.).
+    // Only mark a function as reassigned if its OWN body contains an assignment
+    // to its own name. This avoids false positives from unrelated short-named
+    // variables across webpack modules.
+    {
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            if (!fn || !fn->name || !fn->body) continue;
+            char name[128];
+            snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+            struct hashmap* self_assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_func_assignments(fn->body, self_assigned);
+            if (jm_name_set_has(self_assigned, name)) {
+                mt->func_entries[fi].is_reassigned = true;
+                log_debug("js-mir: function '%.*s' is self-reassigned — skipping direct call optimization",
+                    (int)fn->name->len, fn->name->chars);
+            }
+            hashmap_free(self_assigned);
+        }
+    }
+
     // Add top-level function declarations as module-level identifiers
     {
         JsAstNode* s = program->body;
@@ -23650,7 +23686,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
-                    jm_set_var(mt, vname, var_reg);
+                    // For reassigned functions, do NOT create a local register;
+                    // all reads must go through js_get_module_var to see updates
+                    // from self-reassignment inside the function body.
+                    if (!fc->is_reassigned)
+                        jm_set_var(mt, vname, var_reg);
                     // Persist function object as module var so it survives after
                     // js_main returns and is accessible by eval()/new Function()
                     {
@@ -25215,9 +25255,14 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     strbuf_append_str(sb, "(function(");
 
     // params are args[0..argc-2], body is args[argc-1]
+    // per spec, each argument is converted to string via ToString()
     for (int i = 0; i < argc - 1; i++) {
         if (i > 0) strbuf_append_str(sb, ",");
         String* ps = it2s(args[i]);
+        if (!ps) {
+            Item str_item = js_to_string(args[i]);
+            ps = it2s(str_item);
+        }
         if (ps && ps->len > 0) {
             strbuf_append_str_n(sb, ps->chars, (int)ps->len);
         }
@@ -25226,6 +25271,10 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 
     // body
     String* body = (argc > 0) ? it2s(args[argc - 1]) : NULL;
+    if (!body && argc > 0) {
+        Item str_item = js_to_string(args[argc - 1]);
+        body = it2s(str_item);
+    }
     if (body && body->len > 0) {
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
@@ -26346,7 +26395,23 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
-    Item result = js_main((Context*)context);
+    Item result;
+#if defined(__APPLE__) || defined(__linux__)
+    if (sigsetjmp(_lambda_recovery_point, 1)) {
+#elif defined(_WIN32)
+    if (setjmp(_lambda_recovery_point)) {
+#else
+    if (0) {
+#endif
+        // Stack overflow was caught — signal handler siglongjmp'd here
+        log_error("js-mir: recovered from stack overflow via signal handler");
+        _lambda_stack_overflow_flag = false;
+        result = (Item){.item = ITEM_ERROR};
+        // Report the error so it shows up as an uncaught exception
+        js_throw_range_error("Maximum call stack size exceeded");
+    } else {
+        result = js_main((Context*)context);
+    }
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
 
     // v14: drain the event loop while JIT module is still alive
