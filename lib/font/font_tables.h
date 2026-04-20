@@ -21,6 +21,9 @@
 extern "C" {
 #endif
 
+// forward declaration for GPOS parsed data
+typedef struct GposTable GposTable;
+
 // ============================================================================
 // Parsed table structures
 // ============================================================================
@@ -165,6 +168,7 @@ typedef struct FontTables {
     KernTable*  kern;
     FvarTable*  fvar;
     NameTable*  name;
+    GposTable*  gpos;
 
     // parse flags (to avoid re-parsing on NULL result)
     uint32_t parsed_flags;
@@ -184,6 +188,7 @@ typedef struct FontTables {
 #define FT_PARSED_KERN  (1u << 7)
 #define FT_PARSED_FVAR  (1u << 8)
 #define FT_PARSED_NAME  (1u << 9)
+#define FT_PARSED_GPOS  (1u << 10)
 
 // ============================================================================
 // Public API
@@ -214,6 +219,7 @@ HmtxTable*  font_tables_get_hmtx(FontTables* tables);
 KernTable*  font_tables_get_kern(FontTables* tables);
 FvarTable*  font_tables_get_fvar(FontTables* tables);
 NameTable*  font_tables_get_name(FontTables* tables);
+GposTable*  font_tables_get_gpos(FontTables* tables);
 
 // ============================================================================
 // Lookup functions

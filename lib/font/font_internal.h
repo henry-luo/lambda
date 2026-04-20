@@ -22,7 +22,12 @@
 #include "../arraylist.h"
 #include "../log.h"
 
-#ifndef __APPLE__
+// FreeType is only used on Windows. macOS uses CoreText, Linux uses ThorVG+FontTables.
+#if defined(_WIN32)
+#define LAMBDA_HAS_FREETYPE 1
+#endif
+
+#ifdef LAMBDA_HAS_FREETYPE
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
@@ -68,8 +73,8 @@ FontFormat font_detect_format_ext(const char* path);
 // ============================================================================
 
 struct FontHandle {
-#ifndef __APPLE__
-    FT_Face     ft_face;                // FreeType face object
+#ifdef LAMBDA_HAS_FREETYPE
+    FT_Face     ft_face;                // FreeType face object (Windows only)
 #endif
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
@@ -253,8 +258,8 @@ struct FontContext {
     bool            owns_pool;          // true if we created the pool
     bool            owns_arena;         // true if we created the arena
 
-    // FreeType
-#ifndef __APPLE__
+    // FreeType (Windows only)
+#ifdef LAMBDA_HAS_FREETYPE
     FT_Library      ft_library;
     struct FT_MemoryRec_   ft_memory;          // custom allocator routing to pool
 #endif
@@ -443,7 +448,7 @@ FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
 FontHandle*         font_load_memory_internal(FontContext* ctx, const uint8_t* data,
                                               size_t len, int face_index, float size_px,
                                               float physical_size, FontWeight weight, FontSlant slant);
-#ifndef __APPLE__
+#ifdef LAMBDA_HAS_FREETYPE
 void                font_select_best_fixed_size(FT_Face face, int target_ppem);
 #endif
 

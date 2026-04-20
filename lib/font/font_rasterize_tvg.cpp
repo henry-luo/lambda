@@ -16,6 +16,8 @@
  * Copyright (c) 2026 Lambda Script Project
  */
 
+#ifndef __APPLE__  // ThorVG rasterizer: Linux + Windows only (macOS uses CoreText)
+
 #include "font_glyf.h"
 #include "font_cbdt.h"
 #include "font_colr.h"
@@ -532,3 +534,5 @@ extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tab
 
     return bmp;
 }
+
+#endif // !__APPLE__

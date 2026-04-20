@@ -1310,18 +1310,21 @@ extern "C" Item js_to_string(Item value) {
         {
             bool ts_callable = false;
             Item ts_fn = ItemNull;
-            // Check own first, then prototype chain
+            // Check own first (direct property), then prototype chain
             bool own_ts = false;
             ts_fn = js_map_get_fast(value.map, "toString", 8, &own_ts);
             bool ts_found = own_ts;
             if (!own_ts) {
+                // v90: Use js_property_get to handle getter-defined toString (e.g., {get toString() {...}})
                 Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                ts_fn = js_prototype_lookup(value, ts_key);
-                if (ts_fn.item != ItemNull.item) ts_found = true;
+                ts_fn = js_property_get(value, ts_key);
+                if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
+                if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) != LMD_TYPE_UNDEFINED) ts_found = true;
             }
             if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                 ts_callable = true;
                 Item result = js_call_function(ts_fn, value, NULL, 0);
+                if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                 TypeId rt = get_type_id(result);
                 if (rt == LMD_TYPE_STRING) return result;
                 if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_string(result);
@@ -1331,12 +1334,15 @@ extern "C" Item js_to_string(Item value) {
             // If toString wasn't found, prototype chain isn't set up — use default "[object Object]"
             if (ts_found) {
                 bool vo_callable = false;
-                bool found_vo = false;
-                Item vo_fn = js_map_get_fast(value.map, "valueOf", 7, &found_vo);
-                if (!found_vo) vo_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
+                // v90: Use js_property_get for valueOf to handle getter-defined valueOf
+                // (e.g., {toString: null, get valueOf() { throw ... }})
+                Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
+                Item vo_fn = js_property_get(value, vo_key);
+                if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                 if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
                     vo_callable = true;
                     Item result = js_call_function(vo_fn, value, NULL, 0);
+                    if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
                     TypeId rt = get_type_id(result);
                     if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_string(result);
                 }
@@ -2301,6 +2307,30 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
 // =============================================================================
 // Unary Operators
 // =============================================================================
+
+// v90: BigInt(value) — ES2020 BigInt constructor (called as function, not with new)
+// Calls ToPrimitive(value, "number") to handle valueOf/toString on objects.
+// Since this engine represents BigInt as int64, we truncate to integer.
+extern "C" Item js_bigint_constructor(Item value) {
+    // Step 2: ToPrimitive with hint "number" — this calls valueOf/toString on objects
+    // and propagates any exceptions from user-defined valueOf/toString methods.
+    Item prim = js_to_number(value);
+    if (js_check_exception()) return ItemNull;
+    // Step 3: If result is a Number, it must be an integer (no fraction)
+    TypeId pt = get_type_id(prim);
+    if (pt == LMD_TYPE_FLOAT) {
+        double d = it2d(prim);
+        if (d != d || d == INFINITY || d == -INFINITY || d != (double)(int64_t)d) {
+            js_throw_type_error("Cannot convert non-integer to BigInt");
+            return ItemNull;
+        }
+        return (Item){.item = i2it((int64_t)d)};
+    }
+    if (pt == LMD_TYPE_INT) return prim;
+    // NaN / other → TypeError
+    js_throw_type_error("Cannot convert value to BigInt");
+    return ItemNull;
+}
 
 extern "C" Item js_unary_plus(Item operand) {
     // ES spec: ToNumber(Symbol) throws TypeError
