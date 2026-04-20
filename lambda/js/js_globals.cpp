@@ -3525,6 +3525,8 @@ extern "C" Item js_object_create(Item proto) {
 // Forward declarations for %TypedArray% intrinsic (defined later in file)
 extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
 extern "C" Item js_get_typed_array_base();
+extern "C" Item js_func_get_custom_proto(Item func);
+extern "C" Item js_array_get_custom_proto(Item arr);
 
 extern "C" Item js_get_prototype_of(Item object) {
     // Proxy [[GetPrototypeOf]] trap
@@ -3546,8 +3548,10 @@ extern "C" Item js_get_prototype_of(Item object) {
         return js_property_get(ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
     }
     if (!js_require_object_type(object, "getPrototypeOf")) return ItemNull;
-    // v18g: Arrays → return Array.prototype
+    // v18g: Arrays → return Array.prototype (or custom if set via Object.setPrototypeOf)
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        Item custom_proto = js_array_get_custom_proto(object);
+        if (custom_proto.item != ItemNull.item) return custom_proto;
         Item arr_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Array", 5))});
         if (get_type_id(arr_ctor) == LMD_TYPE_FUNC) {
             Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
@@ -3557,6 +3561,9 @@ extern "C" Item js_get_prototype_of(Item object) {
     }
     // Functions → return Function.prototype (or Error for NativeError constructors)
     if (get_type_id(object) == LMD_TYPE_FUNC) {
+        // Check for custom __proto__ set via Object.setPrototypeOf
+        Item custom_proto = js_func_get_custom_proto(object);
+        if (custom_proto.item != ItemNull.item) return custom_proto;
         // v82d: NativeError constructors have [[Prototype]] = Error (not Function.prototype)
         // Check .name property to see if it's a NativeError constructor
         Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
@@ -4947,8 +4954,6 @@ extern "C" Item js_object_keys(Item object) {
         int len = (int)e->name->length;
         bool skip = false;
         if (len >= 2 && s[0] == '_' && s[1] == '_') {
-            skip = true;
-        } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
             skip = true;
         }
         if (!skip) {

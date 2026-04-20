@@ -2862,6 +2862,10 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
             anon->font->font_weight = parent->font->font_weight;
             anon->font->font_variant = parent->font->font_variant;
             anon->font->text_deco = parent->font->text_deco;
+            anon->font->text_deco_color = parent->font->text_deco_color;
+            anon->font->text_deco_style = parent->font->text_deco_style;
+            anon->font->text_deco_thickness = parent->font->text_deco_thickness;
+            anon->font->text_underline_offset = parent->font->text_underline_offset;
             anon->font->letter_spacing = parent->font->letter_spacing;
             anon->font->word_spacing = parent->font->word_spacing;
             // Derived fields (space_width, ascender, descender, font_height,
@@ -9045,6 +9049,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         table_wrapper->font->font_weight = inherit_font->font_weight;
                         table_wrapper->font->font_variant = inherit_font->font_variant;
                         table_wrapper->font->text_deco = inherit_font->text_deco;
+                        table_wrapper->font->text_deco_color = inherit_font->text_deco_color;
+                        table_wrapper->font->text_deco_style = inherit_font->text_deco_style;
+                        table_wrapper->font->text_deco_thickness = inherit_font->text_deco_thickness;
+                        table_wrapper->font->text_underline_offset = inherit_font->text_underline_offset;
                         table_wrapper->font->letter_spacing = inherit_font->letter_spacing;
                         table_wrapper->font->word_spacing = inherit_font->word_spacing;
                         // Derived fields left zero/NULL from pool_calloc
@@ -9092,6 +9100,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         row_wrapper->font->font_weight = table_wrapper->font->font_weight;
                         row_wrapper->font->font_variant = table_wrapper->font->font_variant;
                         row_wrapper->font->text_deco = table_wrapper->font->text_deco;
+                        row_wrapper->font->text_deco_color = table_wrapper->font->text_deco_color;
+                        row_wrapper->font->text_deco_style = table_wrapper->font->text_deco_style;
+                        row_wrapper->font->text_deco_thickness = table_wrapper->font->text_deco_thickness;
+                        row_wrapper->font->text_underline_offset = table_wrapper->font->text_underline_offset;
                         row_wrapper->font->letter_spacing = table_wrapper->font->letter_spacing;
                         row_wrapper->font->word_spacing = table_wrapper->font->word_spacing;
                     }

@@ -1,0 +1,56 @@
+PASS: compile static text
+PASS: compile simple variable
+PASS: compile variable in text
+PASS: compile multiple variables
+PASS: escapeExpression escapes &
+PASS: escapeExpression escapes <
+PASS: escapeExpression escapes quotes
+PASS: compile escapes HTML by default
+PASS: triple braces bypass escaping
+PASS: SafeString not escaped
+PASS: registerHelper simple
+PASS: helper with multiple args
+PASS: helper with hash arguments
+PASS: if block true
+PASS: if block false
+PASS: if/else block
+PASS: unless block
+PASS: each with array
+PASS: each with @index
+PASS: each with object
+PASS: each with else
+PASS: with block changes context
+PASS: dot-separated path
+PASS: deeply nested path
+PASS: comments not rendered
+PASS: long comments not rendered
+PASS: registerPartial and use
+PASS: inline partials
+PASS: precompile returns string
+PASS: precompile+template roundtrip
+PASS: whitespace control ~
+PASS: literal true in helper
+PASS: literal string in helper
+PASS: literal number in helper
+PASS: this reference
+PASS: parent context ../
+PASS: custom block helper
+PASS: custom block helper with else
+PASS: subexpression
+PASS: each @first and @last
+PASS: Handlebars.parse returns AST
+PASS: Handlebars.VERSION exists
+PASS: Handlebars.log exists
+PASS: Handlebars.create returns new instance
+PASS: compile with noEscape option
+PASS: compile with strict mode
+PASS: undefined variable renders empty
+PASS: null variable renders empty
+PASS: 0 renders as string
+PASS: each @key on array
+PASS: complex template with multiple features
+PASS: nested each blocks
+PASS: helper returning SafeString
+PASS: lookup helper
+
+=== Results: 54 passed, 0 failed out of 54 ===

@@ -5086,18 +5086,28 @@ void fn_map_set(Item map_item, Item key, Item value) {
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE ||
                     value_type == LMD_TYPE_UNDEFINED || value_type == LMD_TYPE_BOOL);
                 if (old_is_ptr && new_is_ptr) {
-                    map_field_decrement_ref(field_ptr, field_type);
-                    map_field_store(field_ptr, value, value_type);
-                    // Update the ShapeEntry type so GC can properly trace
-                    // container pointers stored in formerly-NULL fields.
-                    // IMPORTANT: Don't downgrade to NULL when field was a container,
-                    // because the ShapeEntry is SHARED across all instances of the class.
-                    // If we set it to NULL, GC would skip tracing container pointers
-                    // in other instances that still hold live arrays/maps/etc.
-                    if (value_type != LMD_TYPE_NULL) {
-                        entry->type = type_info[value_type].type;
+                    // safety: only do in-place update when byte sizes match.
+                    // shaped (constructor) objects always use 8-byte slots, but
+                    // regular map_put objects use type_info byte sizes which
+                    // differ for UNDEFINED(1)/BOOL(1) vs pointer types(8).
+                    int old_bsz = type_info[field_type].byte_size;
+                    int new_bsz = type_info[value_type].byte_size;
+                    if (old_bsz != new_bsz) {
+                        // fall through to map_rebuild_for_type_change
+                    } else {
+                        map_field_decrement_ref(field_ptr, field_type);
+                        map_field_store(field_ptr, value, value_type);
+                        // Update the ShapeEntry type so GC can properly trace
+                        // container pointers stored in formerly-NULL fields.
+                        // IMPORTANT: Don't downgrade to NULL when field was a container,
+                        // because the ShapeEntry is SHARED across all instances of the class.
+                        // If we set it to NULL, GC would skip tracing container pointers
+                        // in other instances that still hold live arrays/maps/etc.
+                        if (value_type != LMD_TYPE_NULL) {
+                            entry->type = type_info[value_type].type;
+                        }
+                        return;
                     }
-                    return;
                 }
             }
 

@@ -1574,21 +1574,17 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
         }
     }
 
-    // SVG text y is the baseline; ThorVG positions from the top of the text box.
-    // Adjust by approximate ascent (~80% of font size for typical Latin fonts).
-    float ascent = font_size_px * 0.8f;
-    float adjusted_y = y - ascent;
-
     // apply horizontal anchor (SVG text-anchor: start=0, middle=0.5, end=1)
     if (anchor_x > 0.0f) {
         tvg_text_align(tvg_text, anchor_x, 0.0f);
     }
 
-    // position the text
-    tvg_paint_translate(tvg_text, x, adjusted_y);
+    // NOTE: do NOT call tvg_paint_translate here — it would be overwritten
+    // by tvg_paint_set_transform in rdt_picture_draw. The caller composes
+    // text position into the drawing transform matrix instead.
 
-    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f -> adj %.1f) size=%.1fpx (%.1fpt) color=rgb(%d,%d,%d)",
-              text, x, y, adjusted_y, font_size_px, font_size_pt, fill_color.r, fill_color.g, fill_color.b);
+    log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1fpx (%.1fpt) color=rgb(%d,%d,%d)",
+              text, x, y, font_size_px, font_size_pt, fill_color.r, fill_color.g, fill_color.b);
 
     return tvg_text;
 }
@@ -1669,11 +1665,17 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     }
 
     // helper lambda to wrap and draw a ThorVG text paint
-    auto draw_text_paint = [&](Tvg_Paint tvg_text) {
+    // text position (tx, ty) is composed into the transform since
+    // tvg_paint_set_transform in rdt_picture_draw overwrites any prior tvg_paint_translate
+    auto draw_text_paint = [&](Tvg_Paint tvg_text, float tx, float ty, float fs_px) {
         if (!tvg_text) return;
+        float ascent = fs_px * 0.8f;
+        float adj_y = ty - ascent;
+        RdtMatrix pos = rdt_matrix_translate(tx, adj_y);
+        RdtMatrix final_m = rdt_matrix_multiply(&m, &pos);
         RdtPicture* pic = rdt_picture_take_tvg_paint(tvg_text, 0, 0);
         if (pic) {
-            svg_draw_picture(ctx, pic, 255, &m);
+            svg_draw_picture(ctx, pic, 255, &final_m);
         }
     };
 
@@ -1685,7 +1687,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                                                   font_path, font_name, font_size, default_fill,
                                                   anchor_x);
             mem_free((void*)text_content);
-            draw_text_paint(text);
+            draw_text_paint(text, base_x, base_y, font_size);
         }
         mem_free(font_path);
         return;
@@ -1709,7 +1711,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
                                                               font_path, font_name, font_size, default_fill);
                     if (text_obj) {
-                        draw_text_paint(text_obj);
+                        draw_text_paint(text_obj, cur_x, cur_y, font_size);
                         cur_x += estimate_text_width(text_copy, font_size);
                     }
                     mem_free(text_copy);
@@ -1755,7 +1757,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
                                                               font_path, font_name, tspan_font_size, fill);
                     if (text_obj) {
-                        draw_text_paint(text_obj);
+                        draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
                         cur_x += estimate_text_width(text_content, tspan_font_size);
                     }
                     mem_free((void*)text_content);

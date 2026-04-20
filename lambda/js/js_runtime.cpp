@@ -309,7 +309,6 @@ extern "C" void js_require_object_coercible(Item value) {
 extern "C" void js_throw_value(Item value) {
     js_exception_pending = true;
     js_exception_value = value;
-    log_debug("js: throw_value called, exception pending");
     // Capture exception message into static buffer while context is alive
     js_exception_msg_buf[0] = '\0';
     if (get_type_id(value) == LMD_TYPE_MAP) {
@@ -374,6 +373,8 @@ extern "C" void js_throw_const_assign(const char* name, int name_len) {
 
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
+// forward declaration for array custom prototype check
+extern "C" Item js_array_get_custom_proto(Item arr);
 // forward declarations for module namespace cache resets
 extern "C" void js_child_process_reset();
 extern "C" void js_fs_reset();
@@ -3586,6 +3587,24 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             const char* n = fn->name->chars;
             int nl = (int)fn->name->len;
 
+            // For bound functions (e.g. Array.bind(null, a, b, c)), strip "bound " prefix
+            // and merge bound_args with args for constructor dispatch
+            Item* eff_args = args;
+            int eff_argc = argc;
+            Item* merged_buf = NULL;
+            if (nl > 6 && strncmp(n, "bound ", 6) == 0) {
+                n += 6;
+                nl -= 6;
+                // merge bound_args + args
+                if (fn->bound_args && fn->bound_argc > 0) {
+                    eff_argc = fn->bound_argc + argc;
+                    merged_buf = (Item*)alloca(eff_argc * sizeof(Item));
+                    for (int i = 0; i < fn->bound_argc; i++) merged_buf[i] = fn->bound_args[i];
+                    for (int i = 0; i < argc; i++) merged_buf[fn->bound_argc + i] = args ? args[i] : ItemNull;
+                    eff_args = merged_buf;
+                }
+            }
+
             // TypedArray constructors
             int ta_type = -1;
             if      (nl == 9  && strncmp(n, "Int8Array", 9) == 0)           ta_type = JS_TYPED_INT8;
@@ -3694,7 +3713,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item tn = (Item){.item = s2it(heap_create_name(n, nl))};
-                Item msg = (argc > 0 && args) ? args[0] : make_js_undefined();
+                Item msg = (eff_argc > 0 && eff_args) ? eff_args[0] : make_js_undefined();
                 return js_new_error_with_name(tn, msg);
             }
             // AggregateError(errors, message)
@@ -3710,10 +3729,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 5 && strncmp(n, "Array", 5) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc == 0) return js_array_new(0);
-                if (argc == 1) return js_array_new_from_item(args[0]);
-                Item arr = js_array_new(argc);
-                for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
+                if (eff_argc == 0) return js_array_new(0);
+                if (eff_argc == 1) return js_array_new_from_item(eff_args[0]);
+                Item arr = js_array_new(0);
+                for (int i = 0; i < eff_argc; i++) js_array_push(arr, eff_args[i]);
                 return arr;
             }
 
@@ -3834,7 +3853,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         js_has_pending_new_target = false;
         TypeId ct = get_type_id(callee);
         void* ret_addr = __builtin_return_address(0);
-        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx)", (int)ct, argc, ret_addr, (unsigned long long)callee.item);
+        log_error("js_construct: not a constructor (callee type=%d, argc=%d, ret_addr=%p, callee_raw=0x%llx, last_fn=%.*s, total_calls=%d)",
+            (int)ct, argc, ret_addr, (unsigned long long)callee.item,
+            _trace_last_fn_len, _trace_last_fn,
+            _trace_total_calls);
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
         js_throw_value(js_new_error_with_name(tn, msg));
@@ -4606,14 +4628,6 @@ extern "C" Item js_property_get(Item object, Item key) {
             // Check Object.prototype methods (applies to all objects)
             builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
             if (builtin.item != ItemNull.item) return builtin;
-            // Default: check Array before String (for Array.prototype and array-like objects)
-            builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, str_key->len);
-            if (builtin.item != ItemNull.item) return builtin;
-            builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
-            if (builtin.item != ItemNull.item) return builtin;
-            // Also check Function methods (for Function.prototype)
-            builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, str_key->len);
-            if (builtin.item != ItemNull.item) return builtin;
             // v18c: .constructor fallback — return appropriate constructor when not found
             if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
                 // Check if object has __class_name__ to determine its type
@@ -4705,6 +4719,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // Check Object.prototype methods (toString, hasOwnProperty, etc.)
                 builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
                 if (builtin.item != ItemNull.item) return builtin;
+                // Walk custom prototype chain if array has custom __proto__
+                if (object.array->extra != 0) {
+                    Item custom_proto = js_array_get_custom_proto(object);
+                    if (custom_proto.item != ItemNull.item) {
+                        return js_property_get(custom_proto, key);
+                    }
+                }
                 return make_js_undefined();
             }
         }
@@ -5849,7 +5870,7 @@ extern "C" Item js_property_access(Item object, Item key) {
             String* sk = it2s(key);
             // TRACE: log first accesses on undefined for Box2D debugging
             static int y_trace = 0;
-            if (y_trace < 2 && sk) {
+            if (y_trace < 10 && sk) {
                 log_error("TRACE undef .%.*s — last 8 accesses (obj_type→result_type):", (int)sk->len, sk->chars);
                 for (int ri = 8; ri >= 1; ri--) {
                     int idx = (_ring_idx - ri + 8) % 8;
@@ -6742,6 +6763,13 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
             return js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_FROM, "from", 1);
         if (prop_len == 2 && strncmp(prop_name, "of", 2) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_TYPED_ARRAY_OF, "of", 0);
+    }
+    // Symbol static methods
+    if (ctor_len == 6 && strncmp(ctor_name, "Symbol", 6) == 0) {
+        if (prop_len == 3 && strncmp(prop_name, "for", 3) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_FOR, "for", 1);
+        if (prop_len == 6 && strncmp(prop_name, "keyFor", 6) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_SYMBOL_KEY_FOR, "keyFor", 1);
     }
     // Handle .prototype on any constructor — delegate to the constructor's property access
     if (prop_len == 9 && strncmp(prop_name, "prototype", 9) == 0) {
@@ -8106,8 +8134,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             this_type == LMD_TYPE_NULL) {
             Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
             char msg[128];
-            snprintf(msg, sizeof(msg), "Cannot read properties of %s",
-                this_val.item == ITEM_JS_UNDEFINED ? "undefined" : "null");
+            snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%s')",
+                this_val.item == ITEM_JS_UNDEFINED ? "undefined" : "null", name);
             Item msg_item = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
             Item error = js_new_error_with_name(type_name, msg_item);
             js_throw_value(error);
@@ -9560,6 +9588,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return make_js_undefined();
     }
 
+    // v84: Function constructor called as regular function (e.g. Function.apply)
+    // ES spec §20.2.1.1: Function(...) is equivalent to new Function(...)
+    if (fn && fn->name && fn->name->len == 8 && strncmp(fn->name->chars, "Function", 8) == 0
+        && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
+        return js_new_function_from_string(args, arg_count);
+    }
+
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         // TypedArray stub methods: validate this before returning
         if (fn && (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) {
@@ -9604,7 +9639,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
 
     // v11: handle bound functions — use bound this and prepend bound args
     if (fn->bound_args || fn->bound_this.item) {
-        Item effective_this = fn->bound_this.item ? fn->bound_this : this_val;
+        // ES spec: when called via 'new', bound_this is ignored — use the new object (this_val)
+        Item effective_this;
+        if (js_has_pending_new_target) {
+            effective_this = this_val; // 'new' call: use newly created object
+        } else {
+            effective_this = fn->bound_this.item ? fn->bound_this : this_val;
+        }
         int total_argc = fn->bound_argc + arg_count;
         Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
         for (int i = 0; i < fn->bound_argc; i++) {
@@ -9735,7 +9776,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->formal_length = orig->formal_length; // preserve formal_length from original
     bound->env = orig->env;
     bound->env_size = orig->env_size;
-    bound->prototype = ItemNull;
+    bound->prototype = orig->prototype; // ES spec: bound functions use target's prototype for [[Construct]]
     bound->builtin_id = orig->builtin_id;
     bound->bound_this = bound_this;
     // Set name to "bound <original_name>" per ES spec
@@ -15359,7 +15400,27 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         js_proxy_trap_set_prototype_of(object, prototype);
         return;
     }
-    if (get_type_id(object) != LMD_TYPE_MAP) return;
+    TypeId ot = get_type_id(object);
+    // Handle functions: store __proto__ in properties_map
+    if (ot == LMD_TYPE_FUNC) {
+        if (get_type_id(prototype) != LMD_TYPE_MAP && get_type_id(prototype) != LMD_TYPE_FUNC &&
+            prototype.item != ItemNull.item) return;
+        JsFunction* fn = (JsFunction*)object.function;
+        if (fn->properties_map.item == 0) {
+            fn->properties_map = js_new_object();
+            heap_register_gc_root(&fn->properties_map.item);
+        }
+        Item key = js_get_proto_key();
+        js_property_set(fn->properties_map, key, prototype);
+        return;
+    }
+    // Handle arrays: store __proto__ in companion map (arr->extra)
+    if (ot == LMD_TYPE_ARRAY) {
+        Item key = js_get_proto_key();
+        js_property_set(object, key, prototype);
+        return;
+    }
+    if (ot != LMD_TYPE_MAP) return;
     if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != ItemNull.item) return;
     // v16: Prevent circular prototype chains (ES spec §9.1.2)
     if (get_type_id(prototype) == LMD_TYPE_MAP) {
@@ -15377,6 +15438,33 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     // P10d: use interned __proto__ key
     Item key = js_get_proto_key();
     js_property_set(object, key, prototype);
+}
+
+// Check if a function has a custom __proto__ set via Object.setPrototypeOf
+extern "C" Item js_func_get_custom_proto(Item func) {
+    if (get_type_id(func) != LMD_TYPE_FUNC) return ItemNull;
+    JsFunction* fn = (JsFunction*)func.function;
+    if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+        bool found = false;
+        Item pk = js_get_proto_key();
+        String* pks = it2s(pk);
+        Item result = js_map_get_fast_ext(fn->properties_map.map, pks->chars, (int)pks->len, &found);
+        if (found) return result;
+    }
+    return ItemNull;
+}
+
+// Check if an array has a custom __proto__ set via Object.setPrototypeOf
+extern "C" Item js_array_get_custom_proto(Item arr) {
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return ItemNull;
+    if (arr.array->extra == 0) return ItemNull;
+    Map* pm = (Map*)(uintptr_t)arr.array->extra;
+    bool found = false;
+    Item pk = js_get_proto_key();
+    String* pks = it2s(pk);
+    Item result = js_map_get_fast_ext(pm, pks->chars, (int)pks->len, &found);
+    if (found) return result;
+    return ItemNull;
 }
 
 // helper: set __proto__ on a wrapper object to the constructor's prototype

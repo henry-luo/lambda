@@ -492,14 +492,27 @@ void rdt_clip_restore_depth(int saved_depth) {
 }
 
 // Apply active clip masks to a shape (called before tvg_push_draw_remove)
+// Multiple clips are composed as intersection by nesting masks: the innermost
+// mask is masked by the next outer one, and finally applied to the shape.
 static void apply_clip_masks(Tvg_Paint shape) {
-    for (int i = 0; i < s_clip_depth; i++) {
+    if (s_clip_depth <= 0) return;
+
+    // Build a single composed mask from all clip entries.
+    // Start from the outermost clip (index 0) and nest inward.
+    Tvg_Paint composed = create_clip_mask(s_clip_stack[0].path,
+        s_clip_stack[0].has_transform ? &s_clip_stack[0].transform : nullptr);
+
+    for (int i = 1; i < s_clip_depth; i++) {
         ClipEntry* entry = &s_clip_stack[i];
         if (!entry->path) continue;
-        Tvg_Paint mask = create_clip_mask(entry->path,
+        Tvg_Paint inner = create_clip_mask(entry->path,
             entry->has_transform ? &entry->transform : nullptr);
-        tvg_paint_set_mask_method(shape, mask, TVG_MASK_METHOD_ALPHA);
+        // mask the inner clip by the composed (outer) clip → intersection
+        tvg_paint_set_mask_method(inner, composed, TVG_MASK_METHOD_ALPHA);
+        composed = inner;
     }
+
+    tvg_paint_set_mask_method(shape, composed, TVG_MASK_METHOD_ALPHA);
 }
 
 // Clip-aware version of tvg_push_draw_remove

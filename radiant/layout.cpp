@@ -672,6 +672,14 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                         dom_elem->font->font_variant = lycon->font.style->font_variant;
                     if (dom_elem->font->text_deco == 0)
                         dom_elem->font->text_deco = lycon->font.style->text_deco;
+                    if (dom_elem->font->text_deco_color.a == 0 && lycon->font.style->text_deco_color.a > 0)
+                        dom_elem->font->text_deco_color = lycon->font.style->text_deco_color;
+                    if (dom_elem->font->text_deco_style == 0 && lycon->font.style->text_deco_style != 0)
+                        dom_elem->font->text_deco_style = lycon->font.style->text_deco_style;
+                    if (dom_elem->font->text_deco_thickness == 0 && lycon->font.style->text_deco_thickness > 0)
+                        dom_elem->font->text_deco_thickness = lycon->font.style->text_deco_thickness;
+                    if (dom_elem->font->text_underline_offset == 0 && lycon->font.style->text_underline_offset != 0)
+                        dom_elem->font->text_underline_offset = lycon->font.style->text_underline_offset;
                     if (dom_elem->font->letter_spacing == 0)
                         dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
                     if (dom_elem->font->word_spacing == 0)
