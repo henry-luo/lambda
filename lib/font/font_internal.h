@@ -108,6 +108,9 @@ struct FontHandle {
     // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
     // Created from raw font data for all fonts on macOS.
     void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
+#else
+    // ThorVG rasterization context (Linux/WASM — replaces FreeType rendering)
+    void* tvg_raster_ctx;  // TvgRasterCtx*, void* to avoid ThorVG headers
 #endif
 
     // back-pointer to owning context (for pool access)
@@ -420,6 +423,17 @@ bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepo
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
                                               GlyphRenderMode mode, float bitmap_scale,
                                               float pixel_ratio, Arena* arena);
+#else
+// font_rasterize_tvg.cpp — ThorVG glyph rasterization (Linux/WASM)
+void*               font_rasterize_tvg_create(void);
+void                font_rasterize_tvg_destroy(void* tvg_ctx);
+bool                font_rasterize_tvg_metrics(FontTables* tables, uint32_t codepoint,
+                                                float size_px, float bitmap_scale,
+                                                GlyphInfo* out);
+GlyphBitmap*        font_rasterize_tvg_render(void* tvg_ctx, FontTables* tables,
+                                               uint32_t codepoint, float size_px,
+                                               float bitmap_scale, float pixel_ratio,
+                                               Arena* arena);
 #endif
 
 // font_loader.c

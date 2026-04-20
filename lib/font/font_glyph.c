@@ -475,6 +475,33 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 }
 #else
 
+    // ThorVG rasterization path (preferred on Linux/WASM)
+    if (handle->tvg_raster_ctx && handle->tables) {
+        float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
+        GlyphBitmap* bmp = font_rasterize_tvg_render(handle->tvg_raster_ctx, handle->tables,
+                                                      codepoint, handle->size_px,
+                                                      handle->bitmap_scale, pixel_ratio,
+                                                      ctx->glyph_arena);
+        if (bmp && (bmp->buffer || bmp->width == 0)) {
+            // insert into bitmap cache
+            if (bmp_cache) {
+                int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+                if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
+                    hashmap_clear(bmp_cache, false);
+                }
+                BitmapCacheEntry entry = {
+                    .codepoint = codepoint,
+                    .mode      = mode,
+                    .handle    = handle,
+                    .bitmap    = *bmp,
+                };
+                hashmap_set(bmp_cache, &entry);
+            }
+            return bmp;
+        }
+    }
+
+    // FreeType fallback path
     FT_Face face = handle->ft_face;
     FT_UInt char_index = 0;
     if (handle->tables) {
@@ -602,6 +629,40 @@ static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_I
     if (err) return NULL;
     return fill_loaded_glyph_from_slot(face->glyph, h->bitmap_scale);
 }
+
+// try loading a glyph via ThorVG rasterization (Linux/WASM).
+// Returns LoadedGlyph* on success, NULL on failure (falls back to FreeType).
+static LoadedGlyph* try_load_from_handle_tvg(FontHandle* h, uint32_t codepoint) {
+    if (!h || !h->tvg_raster_ctx || !h->tables || !h->ctx) return NULL;
+
+    float pixel_ratio = (h->ctx->config.pixel_ratio > 0)
+                            ? h->ctx->config.pixel_ratio : 1.0f;
+
+    // get metrics (advance in CSS pixels)
+    GlyphInfo info = {0};
+    if (!font_rasterize_tvg_metrics(h->tables, codepoint, h->size_px, h->bitmap_scale, &info))
+        return NULL;
+
+    // render bitmap at physical resolution
+    GlyphBitmap* bmp = font_rasterize_tvg_render(h->tvg_raster_ctx, h->tables, codepoint,
+                                                   h->size_px, h->bitmap_scale,
+                                                   pixel_ratio, h->ctx->glyph_arena);
+
+    memset(&s_loaded_glyph, 0, sizeof(s_loaded_glyph));
+
+    if (bmp) {
+        s_loaded_glyph.bitmap = *bmp;
+    } else {
+        // zero-size glyph (space etc) — no bitmap
+        s_loaded_glyph.bitmap.bitmap_scale = h->bitmap_scale;
+    }
+
+    // advance: tvg_metrics returns CSS pixels, font_load_glyph expects physical pixels
+    s_loaded_glyph.advance_x = info.advance_x * pixel_ratio;
+    s_loaded_glyph.advance_y = 0;
+
+    return &s_loaded_glyph;
+}
 #endif // !__APPLE__
 
 #ifdef __APPLE__
@@ -707,7 +768,17 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         }
     }
 #else
-    // Non-macOS: FreeType primary path
+    // Non-macOS: ThorVG primary path, FreeType fallback
+    if (handle->tvg_raster_ctx && handle->tables) {
+        result = try_load_from_handle_tvg(handle, codepoint);
+        if (result) {
+            fill_loaded_glyph_font_metrics(handle);
+            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            return result;
+        }
+    }
+
+    // FreeType fallback
     FT_Int32 load_flags = for_rendering
         ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
         : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
@@ -730,7 +801,12 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
             result = try_load_from_handle_ct(fallback, codepoint);
         }
 #else
-        result = try_load_from_handle(fallback, codepoint, load_flags);
+        if (fallback->tvg_raster_ctx && fallback->tables) {
+            result = try_load_from_handle_tvg(fallback, codepoint);
+        }
+        if (!result) {
+            result = try_load_from_handle(fallback, codepoint, load_flags);
+        }
 #endif
         if (result) {
             // populate metrics from the fallback font, not the primary
