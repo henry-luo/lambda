@@ -1,0 +1,80 @@
+T1 isEmail valid: true
+T2 isEmail invalid: false
+T3 isURL valid: true
+T4 isURL invalid: false
+T5 isIP v4: true
+T6 isIP v6: true
+T7 isIP invalid: false
+T8 isInt valid: true
+T9 isInt invalid: false
+T10 isFloat valid: true
+T11 isFloat invalid: false
+T12 isAlpha: true
+T13 isAlpha fail: false
+T14 isAlphanumeric: true
+T15 isAlphanumeric fail: false
+T16 isNumeric: true
+T17 isNumeric fail: false
+T18 isBoolean true: true
+T19 isBoolean false: true
+T20 isBoolean fail: false
+T21 isJSON valid: true
+T22 isJSON invalid: false
+T23 isUUID: true
+T24 isUUID fail: false
+T25 isHexColor: true
+T26 isHexColor fail: false
+T27 isMD5: true
+T28 isBase64: true
+T29 isBase64 fail: false
+T30 isHexadecimal: true
+T31 isHexadecimal fail: false
+T32 isJWT: true
+T33 isJWT fail: false
+T34 trim: hello
+T35 ltrim: hello
+T36 rtrim: hello
+T37 escape: &lt;script&gt;
+T38 unescape: <script>
+T39 blacklist: 123
+T40 whitelist: abc
+T41 isPort: true
+T42 isPort fail: false
+T43 isDivisibleBy: true
+T44 isDecimal: true
+T45 isDecimal fail: false
+T46 isLowercase: true
+T47 isLowercase fail: false
+T48 isUppercase: true
+T49 isUppercase fail: false
+T50 isEmpty: true
+T51 isEmpty fail: false
+T52 contains: true
+T53 contains fail: false
+T54 equals: true
+T55 equals fail: false
+T56 isLength: true
+T57 isLength fail: false
+T58 isByteLength: true
+T59 matches: true
+T60 matches fail: false
+T61 isCreditCard: true
+T62 isCreditCard fail: false
+T63 isISBN 10: true
+T64 isSemVer: true
+T65 isSemVer fail: false
+T66 isDate: true
+T67 isDate fail: false
+T68 isISO8601: false
+T69 isRFC3339: true
+T70 isSlug: true
+T71 isSlug fail: false
+T72 isMACAddress: true
+T73 isAscii: true
+T74 isAscii fail: false
+T75 toInt: 42
+T76 toFloat: 3.14
+T77 toBoolean: true
+T78 toBoolean false: false
+T79 toDate: true
+T80 normalizeEmail: foo@bar.com

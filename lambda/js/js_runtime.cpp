@@ -1536,7 +1536,9 @@ extern "C" int64_t js_lt_raw(Item left, Item right) {
         if (isnan(l) || isnan(r)) return 0;
         return l < r ? 1 : 0;
     }
-    return (int64_t)it2b(js_less_than(left, right));
+    Item result = js_less_than(left, right);
+    if (result.item == ITEM_JS_UNDEFINED) return 0; // NaN comparison
+    return (int64_t)it2b(result);
 }
 
 extern "C" int64_t js_gt_raw(Item left, Item right) {
@@ -1544,11 +1546,17 @@ extern "C" int64_t js_gt_raw(Item left, Item right) {
 }
 
 extern "C" int64_t js_le_raw(Item left, Item right) {
-    return js_gt_raw(left, right) ? 0 : 1;
+    // a <= b is !(b < a), but NaN must return false
+    Item gt = js_less_than(right, left);
+    if (gt.item == ITEM_JS_UNDEFINED) return 0;
+    return it2b(gt) ? 0 : 1;
 }
 
 extern "C" int64_t js_ge_raw(Item left, Item right) {
-    return js_lt_raw(left, right) ? 0 : 1;
+    // a >= b is !(a < b), but NaN must return false
+    Item lt = js_less_than(left, right);
+    if (lt.item == ITEM_JS_UNDEFINED) return 0;
+    return it2b(lt) ? 0 : 1;
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
@@ -2165,13 +2173,14 @@ extern "C" Item js_less_than(Item left, Item right) {
     double l = js_get_number(left);
     double r = js_get_number(right);
     if (isnan(l) || isnan(r)) {
-        return (Item){.item = b2it(false)};
+        return (Item){.item = ITEM_JS_UNDEFINED}; // per spec: Abstract Relational Comparison returns undefined for NaN
     }
     return (Item){.item = b2it(l < r)};
 }
 
 extern "C" Item js_less_equal(Item left, Item right) {
     Item gt = js_greater_than(left, right);
+    if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(gt))};
 }
 
@@ -2181,6 +2190,7 @@ extern "C" Item js_greater_than(Item left, Item right) {
 
 extern "C" Item js_greater_equal(Item left, Item right) {
     Item lt = js_less_than(left, right);
+    if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(lt))};
 }
 
@@ -2494,6 +2504,7 @@ enum JsBuiltinId {
     JS_BUILTIN_FUNC_APPLY,
     JS_BUILTIN_FUNC_BIND,
     JS_BUILTIN_FUNC_TO_STRING,
+    JS_BUILTIN_FUNC_HAS_INSTANCE,
     // String.prototype
     JS_BUILTIN_STR_CHAR_AT,
     JS_BUILTIN_STR_CHAR_CODE_AT,
@@ -2764,6 +2775,7 @@ enum JsBuiltinId {
     // TypedArray static methods
     JS_BUILTIN_TYPED_ARRAY_FROM,
     JS_BUILTIN_TYPED_ARRAY_OF,
+    JS_BUILTIN_REGEXP_COMPILE,       // RegExp.prototype.compile (Annex B)
     JS_BUILTIN_MAX
 };
 
@@ -4601,6 +4613,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
                         if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
+                        if (str_key->len == 7 && strncmp(str_key->chars, "compile", 7) == 0)
+                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
                         // v83: Symbol-keyed methods
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_7", 7) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_MATCH, "[Symbol.match]", 1);
@@ -5093,6 +5107,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 {"exec", 4, JS_BUILTIN_REGEXP_EXEC, 1},
                                 {"test", 4, JS_BUILTIN_REGEXP_TEST, 1},
                                 {"toString", 8, JS_BUILTIN_REGEXP_TO_STRING, 0},
+                                {"compile", 7, JS_BUILTIN_REGEXP_COMPILE, 2},
                                 {NULL, 0, 0, 0}
                             };
                             for (int mi = 0; methods[mi].name; mi++) {
@@ -5338,6 +5353,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                 Item result = map_get(fn->properties_map.map, key);
                 if (result.item != ItemNull.item) return result;
+            }
+            // Function.prototype[@@hasInstance] — default OrdinaryHasInstance
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_3", 7) == 0) {
+                return js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
             }
             // ES6+ §16: Function.prototype.caller and .arguments are poison pill accessors
             // that throw TypeError (%ThrowTypeError%) when accessed.
@@ -7308,6 +7327,7 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
 }
 
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
+extern "C" Item js_ordinary_has_instance(Item, Item);
 
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
@@ -8250,6 +8270,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(result)};
         }
         return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+    }
+    case JS_BUILTIN_FUNC_HAS_INSTANCE: {
+        // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
+        return js_ordinary_has_instance(arg0, this_val);
     }
 
     // String.prototype methods - delegate to js_string_method
@@ -9252,6 +9276,85 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_regexp_symbol_search(this_val, arg0);
     case JS_BUILTIN_REGEXP_SYMBOL_SPLIT:
         return js_regexp_symbol_split(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
+
+    // Annex B: RegExp.prototype.compile(pattern, flags)
+    case JS_BUILTIN_REGEXP_COMPILE: {
+        if (get_type_id(this_val) != LMD_TYPE_MAP) {
+            js_throw_type_error("RegExp.prototype.compile called on incompatible receiver");
+            return make_js_undefined();
+        }
+        // ES B.2.5.1 step 3: If pattern is a RegExp and flags is not undefined, throw TypeError
+        if (get_type_id(arg0) == LMD_TYPE_MAP) {
+            bool has_rd = false;
+            js_map_get_fast(arg0.map, "__rd", 4, &has_rd);
+            if (has_rd && arg_count >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+                js_throw_type_error("RegExp.prototype.compile: cannot supply flags when pattern is a RegExp");
+                return make_js_undefined();
+            }
+        }
+        // Step 5: RegExpInitialize(O, P, F)
+        // Extract pattern and flags strings
+        const char* pattern = "";
+        int pattern_len = 0;
+        const char* flags_str = "";
+        int flags_len = 0;
+        if (get_type_id(arg0) == LMD_TYPE_MAP) {
+            bool has_rd = false;
+            js_map_get_fast(arg0.map, "__rd", 4, &has_rd);
+            if (has_rd) {
+                // pattern is a RegExp — use its source and flags
+                bool own_src = false;
+                Item src_val = js_map_get_fast(arg0.map, "source", 6, &own_src);
+                if (own_src && get_type_id(src_val) == LMD_TYPE_STRING) {
+                    pattern = it2s(src_val)->chars; pattern_len = (int)it2s(src_val)->len;
+                }
+                bool own_fl = false;
+                Item fl_val = js_map_get_fast(arg0.map, "flags", 5, &own_fl);
+                if (own_fl && get_type_id(fl_val) == LMD_TYPE_STRING) {
+                    flags_str = it2s(fl_val)->chars; flags_len = (int)it2s(fl_val)->len;
+                }
+            } else {
+                Item s = js_to_string(arg0);
+                if (js_exception_pending) return make_js_undefined();
+                if (get_type_id(s) == LMD_TYPE_STRING) {
+                    pattern = it2s(s)->chars; pattern_len = (int)it2s(s)->len;
+                }
+            }
+        } else if (get_type_id(arg0) != LMD_TYPE_UNDEFINED) {
+            Item s = js_to_string(arg0);
+            if (js_exception_pending) return make_js_undefined();
+            if (get_type_id(s) == LMD_TYPE_STRING) {
+                pattern = it2s(s)->chars; pattern_len = (int)it2s(s)->len;
+            }
+        }
+        // flags: step 4 — if flags is undefined, use empty string; else ToString(flags)
+        if (arg_count >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            Item f = js_to_string(args[1]);
+            if (js_exception_pending) return make_js_undefined();
+            if (get_type_id(f) == LMD_TYPE_STRING) {
+                flags_str = it2s(f)->chars; flags_len = (int)it2s(f)->len;
+            }
+        }
+        // Create new regex and copy its internal data to this_val
+        Item new_regex = js_create_regex(pattern, pattern_len, flags_str, flags_len);
+        if (new_regex.item == ItemNull.item || js_exception_pending) return make_js_undefined();
+        // Copy __rd, source, flags, and flag properties from new_regex to this_val
+        Item rd_key = (Item){.item = s2it(heap_create_name("__rd", 4))};
+        js_property_set(this_val, rd_key, js_property_get(new_regex, rd_key));
+        Item source_key = (Item){.item = s2it(heap_create_name("source", 6))};
+        js_property_set(this_val, source_key, js_property_get(new_regex, source_key));
+        Item flags_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+        js_property_set(this_val, flags_key, js_property_get(new_regex, flags_key));
+        static const char* flag_props[] = {"global", "ignoreCase", "multiline", "dotAll", "unicode", "sticky", NULL};
+        for (int fp = 0; flag_props[fp]; fp++) {
+            Item fk = (Item){.item = s2it(heap_create_name(flag_props[fp]))};
+            js_property_set(this_val, fk, js_property_get(new_regex, fk));
+        }
+        // Reset lastIndex to 0
+        Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
+        return this_val;
+    }
 
     // v55: Set/Map keys/values/entries — return proper iterator objects
     case JS_BUILTIN_SET_VALUES:   // Set.prototype.values() / Set.prototype[@@iterator]()
@@ -14193,12 +14296,13 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // sort
     if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        Array* src = arr.array;
-        // Per spec: if comparefn is defined and not undefined, it must be callable
+        // Per spec §23.1.3.27 step 1: if comparefn is defined and not undefined, it must be callable
+        // This check must happen BEFORE accessing this.length (step 2)
         if (argc >= 1 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
             return js_throw_not_callable("comparefn");
         }
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* src = arr.array;
         // ES spec: partition — move holes and undefineds to end, sort only defined non-hole values
         int len = src->length;
         int num_defined = 0;
@@ -14359,6 +14463,39 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // splice(start, deleteCount, ...items) — mutating
     if (method->len == 6 && strncmp(method->chars, "splice", 6) == 0) {
+        // Generic splice on non-Array: ES §23.1.3.29 — Set(O, "length", ...) throws for getter-only
+        if (get_type_id(cb_this) == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
+            // cb_this is the original non-Array Map; arr is the array-like conversion
+            Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+            Item len_val = js_property_get(cb_this, len_key);
+            if (js_exception_pending) return make_js_undefined();
+            double old_len = js_get_number(len_val);
+            if (js_exception_pending) return make_js_undefined();
+            if (isnan(old_len) || old_len < 0) old_len = 0;
+            double start_d = argc > 0 ? js_get_number(args[0]) : 0;
+            if (start_d < 0) { start_d = old_len + start_d; if (start_d < 0) start_d = 0; }
+            if (start_d > old_len) start_d = old_len;
+            double dc_d = argc > 1 ? js_get_number(args[1]) : (old_len - start_d);
+            if (dc_d < 0) dc_d = 0;
+            if (dc_d > old_len - start_d) dc_d = old_len - start_d;
+            int insert_count = argc > 2 ? argc - 2 : 0;
+            double new_len = old_len + (double)insert_count - dc_d;
+            // Check if length is accessor (getter-only) → Set throws TypeError per ES spec
+            Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
+            Item getter = js_property_get(cb_this, getter_key);
+            if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
+                Item setter_key = (Item){.item = s2it(heap_create_name("__set_length", 12))};
+                Item setter = js_property_get(cb_this, setter_key);
+                if (setter.item == ItemNull.item || get_type_id(setter) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("Cannot set property length of object which has only a getter");
+                    return make_js_undefined();
+                }
+            }
+            // Check non-writable length
+            js_property_set(cb_this, len_key, (Item){.item = i2it((int64_t)new_len)});
+            if (js_exception_pending) return make_js_undefined();
+            return js_array_new(0);
+        }
         if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
         Array* a = arr.array;
         double start_d = argc > 0 ? js_get_number(args[0]) : 0;
@@ -14509,7 +14646,27 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // unshift(...items) — prepend items, return new length
     if (method->len == 7 && strncmp(method->chars, "unshift", 7) == 0) {
-        if (arr_type != LMD_TYPE_ARRAY || argc < 1) return (Item){.item = i2it(arr_type == LMD_TYPE_ARRAY ? arr.array->length : 0)};
+        // Generic unshift on non-Array: ES §23.1.3.33
+        if (get_type_id(cb_this) == LMD_TYPE_MAP && arr_type == LMD_TYPE_ARRAY) {
+            // cb_this is the original non-Array Map; arr is the array-like conversion
+            Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+            Item len_val = js_property_get(cb_this, len_key);
+            if (js_exception_pending) return make_js_undefined();
+            // Use js_to_number (not js_get_number) for proper ToPrimitive with TypeError
+            Item num_item = js_to_number(len_val);
+            if (js_exception_pending) return make_js_undefined();
+            double old_len = js_get_number(num_item);
+            if (isnan(old_len) || old_len < 0) old_len = 0;
+            int64_t len = (int64_t)old_len;
+            if (len < 0) len = 0;
+            int64_t new_len = len + (int64_t)argc;
+            // Set new length on original object
+            js_property_set(cb_this, len_key, (Item){.item = i2it(new_len)});
+            if (js_exception_pending) return make_js_undefined();
+            return (Item){.item = i2it(new_len)};
+        }
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
+        if (argc < 1) return (Item){.item = i2it(arr.array->length)};
         Array* a = arr.array;
         int old_len = a->length;
         int new_len = old_len + argc;
