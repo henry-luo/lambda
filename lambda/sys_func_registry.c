@@ -1306,6 +1306,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},
     {"js_get_reflect_object_value", FPTR(js_get_reflect_object_value)},
+    {"js_get_262_object_value", FPTR(js_get_262_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
     {"js_is_document_proxy", FPTR(js_is_document_proxy)},
     {"js_document_proxy_method", FPTR(js_document_proxy_method)},

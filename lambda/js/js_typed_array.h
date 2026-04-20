@@ -32,6 +32,7 @@ typedef enum JsTypedArrayType {
 typedef struct JsArrayBuffer {
     void* data;         // heap-allocated byte buffer
     int byte_length;    // total bytes
+    bool detached;      // true after ArrayBuffer has been detached
 } JsArrayBuffer;
 
 // DataView: structured access into an ArrayBuffer
@@ -77,6 +78,8 @@ int  js_arraybuffer_byte_length(Item val);
 Item js_arraybuffer_slice(Item val, int begin, int end);
 bool js_arraybuffer_is_view(Item val);
 Item js_arraybuffer_is_view_item(Item val);
+void js_arraybuffer_detach(Item val);
+bool js_arraybuffer_is_detached(Item val);
 
 // DataView operations
 Item js_dataview_new(Item buffer, int byte_offset, int byte_length);
