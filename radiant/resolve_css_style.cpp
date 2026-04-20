@@ -8302,6 +8302,19 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_FONT_KERNING: {
+            log_debug("[CSS] Processing font-kerning property");
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_NORMAL || val == CSS_VALUE_AUTO) {
+                    span->font->font_kerning = val;
+                    log_debug("[CSS] font-kerning: %s", css_enum_info(val)->name);
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_LETTER_SPACING: {
             log_debug("[CSS] Processing letter-spacing property");
             if (!span->font) { span->font = alloc_font_prop(lycon); }

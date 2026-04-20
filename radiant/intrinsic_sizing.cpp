@@ -154,6 +154,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     uint32_t prev_codepoint = 0;
     const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
     bool has_kerning = fm ? fm->has_kerning : false;
+    if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
     const unsigned char* str = (const unsigned char*)text;
     bool is_word_start = true;  // for text-transform: capitalize
     bool after_zwj = false;     // track ZWJ for emoji sequence composition
@@ -451,6 +452,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
     bool has_font = lycon->font.font_handle != nullptr;
     const FontMetrics* fm2 = has_font ? font_get_metrics(lycon->font.font_handle) : NULL;
     bool has_kerning = fm2 ? fm2->has_kerning : false;
+    if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
     uint32_t prev_glyph = 0;
     uint32_t prev_codepoint = 0;
     bool is_word_start = true;

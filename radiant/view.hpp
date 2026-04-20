@@ -393,6 +393,7 @@ struct FontProp {
     CssEnum font_style;
     CssEnum font_weight;
     CssEnum font_variant;  // CSS font-variant (normal, small-caps)
+    CssEnum font_kerning;  // CSS font-kerning (auto/normal/none, 0 = auto)
     CssEnum text_deco; // CSS text decoration
     int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
