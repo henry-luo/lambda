@@ -1532,7 +1532,9 @@ extern "C" int64_t js_lt_raw(Item left, Item right) {
         if (isnan(l) || isnan(r)) return 0;
         return l < r ? 1 : 0;
     }
-    return (int64_t)it2b(js_less_than(left, right));
+    Item result = js_less_than(left, right);
+    if (result.item == ITEM_JS_UNDEFINED) return 0; // NaN comparison
+    return (int64_t)it2b(result);
 }
 
 extern "C" int64_t js_gt_raw(Item left, Item right) {
@@ -1540,11 +1542,17 @@ extern "C" int64_t js_gt_raw(Item left, Item right) {
 }
 
 extern "C" int64_t js_le_raw(Item left, Item right) {
-    return js_gt_raw(left, right) ? 0 : 1;
+    // a <= b is !(b < a), but NaN must return false
+    Item gt = js_less_than(right, left);
+    if (gt.item == ITEM_JS_UNDEFINED) return 0;
+    return it2b(gt) ? 0 : 1;
 }
 
 extern "C" int64_t js_ge_raw(Item left, Item right) {
-    return js_lt_raw(left, right) ? 0 : 1;
+    // a >= b is !(a < b), but NaN must return false
+    Item lt = js_less_than(left, right);
+    if (lt.item == ITEM_JS_UNDEFINED) return 0;
+    return it2b(lt) ? 0 : 1;
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
@@ -2161,13 +2169,14 @@ extern "C" Item js_less_than(Item left, Item right) {
     double l = js_get_number(left);
     double r = js_get_number(right);
     if (isnan(l) || isnan(r)) {
-        return (Item){.item = b2it(false)};
+        return (Item){.item = ITEM_JS_UNDEFINED}; // per spec: Abstract Relational Comparison returns undefined for NaN
     }
     return (Item){.item = b2it(l < r)};
 }
 
 extern "C" Item js_less_equal(Item left, Item right) {
     Item gt = js_greater_than(left, right);
+    if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(gt))};
 }
 
@@ -2177,6 +2186,7 @@ extern "C" Item js_greater_than(Item left, Item right) {
 
 extern "C" Item js_greater_equal(Item left, Item right) {
     Item lt = js_less_than(left, right);
+    if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(lt))};
 }
 
@@ -2490,6 +2500,7 @@ enum JsBuiltinId {
     JS_BUILTIN_FUNC_APPLY,
     JS_BUILTIN_FUNC_BIND,
     JS_BUILTIN_FUNC_TO_STRING,
+    JS_BUILTIN_FUNC_HAS_INSTANCE,
     // String.prototype
     JS_BUILTIN_STR_CHAR_AT,
     JS_BUILTIN_STR_CHAR_CODE_AT,
@@ -5323,6 +5334,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item result = map_get(fn->properties_map.map, key);
                 if (result.item != ItemNull.item) return result;
             }
+            // Function.prototype[@@hasInstance] — default OrdinaryHasInstance
+            if (str_key->len == 7 && strncmp(str_key->chars, "__sym_3", 7) == 0) {
+                return js_get_or_create_builtin(JS_BUILTIN_FUNC_HAS_INSTANCE, "[Symbol.hasInstance]", 1);
+            }
             // ES6+ §16: Function.prototype.caller and .arguments are poison pill accessors
             // that throw TypeError (%ThrowTypeError%) when accessed.
             if ((str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0) ||
@@ -7235,6 +7250,7 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
 }
 
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
+extern "C" Item js_ordinary_has_instance(Item, Item);
 
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
@@ -8158,6 +8174,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return (Item){.item = s2it(result)};
         }
         return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+    }
+    case JS_BUILTIN_FUNC_HAS_INSTANCE: {
+        // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
+        return js_ordinary_has_instance(arg0, this_val);
     }
 
     // String.prototype methods - delegate to js_string_method
