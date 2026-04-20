@@ -4836,6 +4836,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (js_is_deleted_sentinel(pm_val)) return make_js_undefined();
                     return pm_val;
                 }
+                // Check for accessor descriptor (__get_<propName>) in properties_map
+                if (str_key->len < 128) {
+                    char getter_key[256];
+                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+                    bool gk_found = false;
+                    Item getter = js_map_get_fast_ext(fn->properties_map.map, getter_key, (int)strlen(getter_key), &gk_found);
+                    if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                        return js_call_function(getter, object, NULL, 0);
+                    }
+                }
             }
             // v83: __proto__ for function objects → return Function.prototype
             if (str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0) {
@@ -9764,6 +9774,19 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name && fn->name->len == 8 && strncmp(fn->name->chars, "Function", 8) == 0
         && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
         return js_new_function_from_string(args, arg_count);
+    }
+    // v90: GeneratorFunction / AsyncGeneratorFunction constructor — creates generator-flagged function
+    if (fn && fn->name && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
+        bool is_gen_ctor = (fn->name->len == 17 && strncmp(fn->name->chars, "GeneratorFunction", 17) == 0);
+        bool is_async_gen_ctor = (fn->name->len == 22 && strncmp(fn->name->chars, "AsyncGeneratorFunction", 22) == 0);
+        if (is_gen_ctor || is_async_gen_ctor) {
+            Item result = js_new_function_from_string(args, arg_count);
+            if (get_type_id(result) == LMD_TYPE_FUNC) {
+                JsFunction* rfn = (JsFunction*)result.function;
+                rfn->flags |= JS_FUNC_FLAG_GENERATOR;
+            }
+            return result;
+        }
     }
 
     if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {

@@ -17036,6 +17036,10 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         if (decl->kind == JS_VAR_LET || decl->kind == JS_VAR_CONST)
             is_let_const_loop = true;
     }
+    // v90: Also detect let/const via fo->kind when left is IDENTIFIER (e.g., for (let p in x))
+    if (!is_let_const_loop && (fo->kind == 1 || fo->kind == 2)) {
+        is_let_const_loop = true;
+    }
     if (var_name) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
