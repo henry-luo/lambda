@@ -18,6 +18,10 @@
 #include <cstdio>
 #include "../../lib/mem.h"
 
+extern "C" {
+    const TSLanguage* tree_sitter_typescript(void);
+}
+
 // ============================================================================
 // TS transpiler creation — uses unified JsTranspiler with TS mode
 // ============================================================================
@@ -31,6 +35,12 @@ static TsTranspiler* ts_transpiler_create(Runtime* runtime) {
     // use the unified JS transpiler, then configure for TS mode
     TsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) return NULL;
+
+    // Re-set parser language to TypeScript (js_transpiler_create defaults to JavaScript)
+    const TSLanguage* ts_lang = tree_sitter_typescript();
+    if (ts_lang) {
+        ts_parser_set_language(tp->parser, ts_lang);
+    }
 
     tp->strict_js = false;           // allow TS syntax
     tp->strict_mode = true;          // TS always implies strict mode
