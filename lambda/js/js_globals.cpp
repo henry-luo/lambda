@@ -3545,6 +3545,68 @@ extern "C" Item js_get_typed_array_base();
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_array_get_custom_proto(Item arr);
 
+// v90: GeneratorFunction.prototype singleton — returned by Object.getPrototypeOf for generator functions.
+// Its .constructor creates generator-flagged functions (non-constructable via 'new').
+static Item js_generator_function_proto_cache = {0};
+static Item js_async_generator_function_proto_cache = {0};
+
+extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" void js_mark_generator_func(Item fn_item);
+
+static Item js_gen_func_ctor_placeholder(Item* args, int argc) {
+    (void)args; (void)argc;
+    return ItemNull;
+}
+
+// Partial layout to access flags field (full JsFunctionLayout defined below)
+struct JsFuncFlagsAccess {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+    Item properties_map;
+    uint8_t flags;
+};
+#define JS_FUNC_FLAG_GENERATOR_EARLY 1
+
+static Item js_get_generator_function_prototype(bool is_async) {
+    Item* cache = is_async ? &js_async_generator_function_proto_cache : &js_generator_function_proto_cache;
+    if (cache->item != 0) return *cache;
+
+    // Create a MAP to serve as GeneratorFunction.prototype (or AsyncGeneratorFunction.prototype)
+    Item proto = js_object_create(ItemNull);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+
+    // Create the constructor function
+    const char* ctor_name = is_async ? "AsyncGeneratorFunction" : "GeneratorFunction";
+    Item ctor_fn = js_new_function((void*)js_gen_func_ctor_placeholder, 1);
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
+        fn->name = heap_create_name(ctor_name, strlen(ctor_name));
+    }
+
+    // Set .constructor on the prototype
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    js_property_set(proto, ctor_key, ctor_fn);
+
+    // v90: Set the constructor's .prototype field to the proto MAP so
+    // Object.getOwnPropertyDescriptor returns the correct value.
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* cfn = (JsFuncFlagsAccess*)ctor_fn.function;
+        cfn->prototype = proto;
+    }
+
+    *cache = proto;
+    return proto;
+}
+
 extern "C" Item js_get_prototype_of(Item object) {
     // Proxy [[GetPrototypeOf]] trap
     if (js_is_proxy(object)) {
@@ -3601,6 +3663,13 @@ extern "C" Item js_get_prototype_of(Item object) {
             // TypedArray constructors → [[Prototype]] = %TypedArray%
             if (js_is_typed_array_ctor_name(n->chars, (int)n->len)) {
                 return js_get_typed_array_base();
+            }
+        }
+        // v90: Generator functions → return GeneratorFunction.prototype
+        {
+            JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)object.function;
+            if (fn->flags & JS_FUNC_FLAG_GENERATOR_EARLY) {
+                return js_get_generator_function_prototype(false);
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -4041,6 +4110,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
                     (el == 4 && strncmp(en, "Date", 4) == 0) ||
                     (el == 8 && strncmp(en, "Function", 8) == 0) ||
+                    (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
+                    (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
                     js_is_typed_array_ctor_name(en, el);
             }
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
@@ -7072,6 +7143,8 @@ extern Input* js_input;
 
 extern "C" Item js_json_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
+    // v90: Check for exception from ToPrimitive (e.g., getter-defined valueOf/toString that throws)
+    if (js_check_exception()) return ItemNull;
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
         // empty string is not valid JSON

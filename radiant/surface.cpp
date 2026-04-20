@@ -487,8 +487,8 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
 
 // Bilinear interpolation helper function (for upscaling or 1:1)
 static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
-    int x1 = (int)src_x;
-    int y1 = (int)src_y;
+    int x1 = (int)floorf(src_x);
+    int y1 = (int)floorf(src_y);
     int x2 = x1 + 1;
     int y2 = y1 + 1;
 
@@ -498,8 +498,8 @@ static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y
     x2 = std::max(0, std::min(x2, src->width - 1));
     y2 = std::max(0, std::min(y2, src->height - 1));
 
-    float fx = src_x - (int)src_x;
-    float fy = src_y - (int)src_y;
+    float fx = src_x - floorf(src_x);
+    float fy = src_y - floorf(src_y);
 
     // get the four surrounding pixels
     uint32_t* p11 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x1 * 4);
@@ -633,8 +633,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
                 src_color = area_average(src, box_x0, box_y0, box_x1, box_y1);
             }
             else if (scale_mode == SCALE_MODE_LINEAR) {
-                // Bilinear interpolation (for upscaling or near-1:1)
-                src_color = bilinear_interpolate(src, src_x, src_y);
+                // Bilinear interpolation with pixel-center alignment for correct upscale
+                float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
+                float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
+                src_color = bilinear_interpolate(src, bx, by);
             }
             else { // Nearest neighbor scaling (default)
                 int int_src_x = (int)(src_x + 0.5f);  // round to nearest

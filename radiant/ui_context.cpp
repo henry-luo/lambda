@@ -50,9 +50,23 @@ int ui_context_init(UiContext* uicon, bool headless) {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
     if (headless) {
-        // Headless mode: no window creation
-        log_info("Running in headless mode (no window)");
-        uicon->window = NULL;
+        // Headless mode: create a hidden GLFW window so that native subsystems
+        // (e.g. WKWebView) that require a parent window still function.
+        #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+        #endif
+        if (!glfwInit()) {
+            fprintf(stderr, "Error: Could not initialize GLFW for headless mode.\n");
+            return EXIT_FAILURE;
+        }
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
+        uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
+        if (!uicon->window) {
+            log_error("Headless: could not create hidden GLFW window, falling back to NULL window");
+            uicon->window = NULL;
+        } else {
+            log_info("Running in headless mode (hidden GLFW window)");
+        }
         uicon->pixel_ratio = 1.0;  // Default pixel ratio for headless
         uicon->window_width = window_width;
         uicon->window_height = window_height;

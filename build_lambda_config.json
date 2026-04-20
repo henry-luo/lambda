@@ -1189,7 +1189,8 @@
         "macos": {
             "exclude_source_files": [
                 "lib/clock_compat.c",
-                "radiant/radiant.cpp"
+                "radiant/radiant.cpp",
+                "radiant/rdt_video_stub.cpp"
             ],
             "additional_source_files": [
             ],
@@ -1802,6 +1803,18 @@
                         "additional_sources": [
                             "radiant/rdt_video_stub.cpp"
                         ],
+                        "macos": {
+                            "additional_sources": [
+                                "radiant/rdt_video_avf.mm"
+                            ],
+                            "libraries": [
+                                "CoreFoundation",
+                                "AVFoundation",
+                                "CoreMedia",
+                                "CoreVideo",
+                                "Cocoa"
+                            ]
+                        },
                         "binary": "test_video_gtest.exe",
                         "icon": "🎬"
                     },
@@ -1864,6 +1877,9 @@
                             "zlib",
                             "gomp"
                         ],
+                        "macos": {
+                            "exclude_libraries": ["gomp"]
+                        },
                         "additional_sources": [
                             "radiant/animation.cpp",
                             "radiant/lottie_player.cpp"

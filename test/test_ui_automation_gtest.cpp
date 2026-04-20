@@ -68,6 +68,7 @@ struct UiTestInfo {
     std::string html_path;   // e.g. "test/ui/test_click_text.html"
     std::string json_path;   // e.g. "test/ui/test_click_text.json"
     std::string test_name;   // e.g. "test_click_text"
+    bool skip_headless;      // requires native GUI window (e.g. WKWebView tests)
 
     friend std::ostream& operator<<(std::ostream& os, const UiTestInfo& info) {
         return os << info.test_name;
@@ -108,6 +109,25 @@ static std::string extract_html_from_json(const std::string& json_path) {
     return result;
 }
 
+// Check if a JSON event file has "skip_headless": true.
+// These tests require a native GUI window (e.g. WKWebView) and cannot run headless.
+static bool extract_skip_headless_from_json(const std::string& json_path) {
+    FILE* f = fopen(json_path.c_str(), "r");
+    if (!f) return false;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    const char* key = strstr(buf, "\"skip_headless\"");
+    if (!key) return false;
+    key += 15;
+    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+    if (*key != ':') return false;
+    key++;
+    while (*key == ' ' || *key == '\t' || *key == '\n' || *key == '\r') key++;
+    return strncmp(key, "true", 4) == 0;
+}
+
 // Discover all *.json files in test/ui/.
 // For each JSON the HTML target is resolved in order:
 //   1. "html" field inside the JSON (can reference any path, e.g. a baseline file)
@@ -138,6 +158,7 @@ static std::vector<UiTestInfo> discover_ui_tests() {
         info.html_path = html_path;
         info.json_path = json_path;
         info.test_name = base;
+        info.skip_headless = extract_skip_headless_from_json(json_path);
         tests.push_back(info);
     } while (FindNextFileA(h, &fd));
     FindClose(h);
@@ -166,6 +187,7 @@ static std::vector<UiTestInfo> discover_ui_tests() {
         info.html_path = html_path;
         info.json_path = json_path;
         info.test_name = base;
+        info.skip_headless = extract_skip_headless_from_json(json_path);
         tests.push_back(info);
     }
     closedir(dir);
@@ -300,6 +322,10 @@ TEST_P(UIAutomationTest, RunTest) {
     const UiTestInfo& info = g_ui_tests[idx];
 
     SCOPED_TRACE("UI test: " + info.test_name);
+
+    if (info.skip_headless) {
+        GTEST_SKIP() << info.test_name << " requires native GUI window (skip_headless=true)";
+    }
 
     const UiTestResult& result = g_ui_results[idx];
 
