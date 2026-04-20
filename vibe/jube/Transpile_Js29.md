@@ -2,7 +2,7 @@
 
 ## Overview
 
-Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,599** failing tests (out of 34,094 in-scope). Current pass rate: **71.9%** (24,495 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
+Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,215** failing tests (out of 34,094 in-scope). Current pass rate: **73.0%** (24,879 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
 
 The analysis identifies **8 structural gaps** and **5 incremental enhancement areas**, organized into tiers by impact and dependency order.
 
@@ -234,6 +234,32 @@ Baseline: 24,256 → **24,495** stable (+239 net new passing tests; partial-pass
 **Partially completed:**
 - **1.3** TypedArray species + detached checks — **Partial** (detach infrastructure done, species not yet)
 
+**2026-06-11 Update — TypedArray species constructor (+121 tests):**
+
+Baseline: 24,495 → **24,616** stable (+121 net new passing tests)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| TypedArray species constructor pattern | `js_runtime.cpp` | +121 | `js_typed_array_species_create` for map/filter/slice/subarray; detach validation in every iteration method |
+
+**Completed items:**
+- **1.3** TypedArray species + detached checks — **Done**
+
+**2026-06-22 Update — Object.defineProperty non-writable bypass + defineProperties error stop (+263 tests):**
+
+Baseline: 24,616 → **24,879** stable (+263 net new passing tests; 6 batch-flaky tests removed)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| defineProperty: bypass `__nw_` for configurable properties | `js_globals.cpp` | +260 | `ValidateAndApplyPropertyDescriptor` temporarily clears `__nw_` marker before `js_property_set`, restores after; only for truly non-writable (truthy marker value) |
+| `js_array_set` non-writable check: value not just presence | `js_runtime.cpp` | (counted above) | Changed `nw_found` presence check to `nw_found && js_is_truthy(nw_val)` to match MAP path behavior |
+| defineProperties: stop on first exception | `js_globals.cpp` | +3 | Added `js_check_exception()` + `break` after each `js_object_define_property` call in loop |
+
+**Key bugs found and fixed:**
+- **defineProperty value not updated for non-writable + configurable**: ES2020 §9.1.6.3 allows `Object.defineProperty` to update the value of a non-writable but configurable property. The engine's `js_property_set` enforced the `__nw_` (non-writable) marker and silently rejected the write. Fix: in `ValidateAndApplyPropertyDescriptor`, temporarily clear the `__nw_` marker before calling `js_property_set`, then restore it. Only clears when marker is truthy (truly non-writable), preventing false restoration when marker is `false` (writable).
+- **`js_array_set` non-writable guard checked presence not value**: The array element write path (`js_array_set`) checked `if (nw_found)` (presence only), while the MAP path checked `if (nw_found && js_is_truthy(nw_val))`. When the `__nw_` marker was temporarily set to `false` during defineProperty, arrays still rejected the write. Fixed to check value like MAP path.
+- **defineProperties continued after TypeError**: `Object.defineProperties({property: ..., property1: ...})` didn't stop on first error. If `property` threw TypeError (non-configurable + non-writable), `property1` (configurable + non-writable) would still get updated via the new bypass. Fix: break loop on `js_check_exception()`.
+
 ---
 
 ## 1. Current Compliance Snapshot
@@ -249,7 +275,7 @@ Skipped by harness:       7,663
   - unsupported features: 1,508   (Temporal, WeakRef, etc.)
 In scope (batchable):    34,094
 
-Currently passing:       24,495  (71.9%)   ← updated 2026-04-20 (stable: 0 regressions)
+Currently passing:       24,879  (73.0%)   ← updated 2026-06-22 (stable: 0 regressions)
 Partial-pass (batch-flaky):   3  (pass individually, flaky in batch mode — removed from baseline)
 Failing:                  9,599  (28.1%)
 ```
@@ -609,7 +635,9 @@ Edge cases and advanced features.
 | Exception propagation fix (iterators) | 24,212 | 71.0% | +800 |
 | Date setter + TypedArray thisArg | 24,256 | 71.1% | +844 |
 | Comparisons + species + Symbol protocols + BigInt + more | 24,495 | 71.9% | +1,083 |
-| **Current baseline** | **24,495** | **71.9%** | **+1,083** |
+| TypedArray species constructor | 24,616 | 72.2% | +1,204 |
+| Object.defineProperty non-writable bypass + defineProperties error stop | 24,879 | 73.0% | +1,467 |
+| **Current baseline** | **24,879** | **73.0%** | **+1,467** |
 | After Tier 1 remaining | ~25,200 | ~74% | +1,800 |
 | After Tier 2 remaining | ~25,800 | ~76% | +2,400 |
 | After Tier 3 remaining | ~26,100 | ~77% | +2,700 |

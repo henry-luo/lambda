@@ -290,10 +290,47 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     if (it2b(js_in(value_key, descriptor))) {
         // data property descriptor: set value directly
         Item value = js_property_get(descriptor, value_key);
+        // defineProperty must bypass __nw_ (non-writable) guard in js_property_set.
+        // The writable+configurable validation was already done above for non-configurable
+        // properties; for configurable properties, value changes are always allowed.
+        // Temporarily clear __nw_ marker before setting, then restore it.
+        bool had_nw = false;
+        if (!is_new_property) {
+            Item ns_tmp = js_to_string(name);
+            if (get_type_id(ns_tmp) == LMD_TYPE_STRING) {
+                String* ns = it2s(ns_tmp);
+                if (ns && ns->len > 0 && ns->len < 200) {
+                    char nw_buf[256];
+                    snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)ns->len, ns->chars);
+                    Item nw_k = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
+                    if (js_defprop_has_marker(obj, nw_k)) {
+                        bool nw_found_tmp = false;
+                        Item nw_val = js_defprop_get_marker(obj, nw_buf, (int)strlen(nw_buf), &nw_found_tmp);
+                        had_nw = nw_found_tmp && js_is_truthy(nw_val);
+                    }
+                    if (had_nw) {
+                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
+                    }
+                }
+            }
+        }
         if (get_type_id(obj) == LMD_TYPE_FUNC) {
             js_func_init_property(obj, name, value);
         } else {
             js_property_set(obj, name, value);
+        }
+        // Restore __nw_ marker if it was set
+        if (had_nw) {
+            Item ns_tmp = js_to_string(name);
+            if (get_type_id(ns_tmp) == LMD_TYPE_STRING) {
+                String* ns = it2s(ns_tmp);
+                if (ns && ns->len > 0 && ns->len < 200) {
+                    char nw_buf[256];
+                    snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)ns->len, ns->chars);
+                    Item nw_k = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
+                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
+                }
+            }
         }
         // v18m: when converting accessor→data, remove accessor markers
         Item name_str_conv = js_to_string(name);
@@ -4570,6 +4607,7 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         Item key = keys.array->items[i];
         Item desc = js_property_get(props, key);
         js_object_define_property(obj, key, desc);
+        if (js_check_exception()) break; // stop on first error (ES2020 §19.1.2.3.1)
     }
     return obj;
 }
