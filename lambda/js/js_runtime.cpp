@@ -2442,6 +2442,10 @@ enum JsBuiltinId {
     JS_BUILTIN_OBJ_VALUE_OF,
     JS_BUILTIN_OBJ_IS_PROTOTYPE_OF,
     JS_BUILTIN_OBJ_TO_LOCALE_STRING,
+    JS_BUILTIN_OBJ_DEFINE_GETTER,
+    JS_BUILTIN_OBJ_DEFINE_SETTER,
+    JS_BUILTIN_OBJ_LOOKUP_GETTER,
+    JS_BUILTIN_OBJ_LOOKUP_SETTER,
     // Array.prototype
     JS_BUILTIN_ARR_PUSH,
     JS_BUILTIN_ARR_POP,
@@ -5185,6 +5189,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
                                 {"isPrototypeOf", 13, JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, 1},
                                 {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
+                                {"__defineGetter__", 16, JS_BUILTIN_OBJ_DEFINE_GETTER, 2},
+                                {"__defineSetter__", 16, JS_BUILTIN_OBJ_DEFINE_SETTER, 2},
+                                {"__lookupGetter__", 16, JS_BUILTIN_OBJ_LOOKUP_GETTER, 1},
+                                {"__lookupSetter__", 16, JS_BUILTIN_OBJ_LOOKUP_SETTER, 1},
                                 {NULL, 0, 0, 0}
                             };
                             for (int mi = 0; methods[mi].name; mi++) {
@@ -6903,6 +6911,14 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, "isPrototypeOf", 1);
     if (len == 14 && strncmp(name, "toLocaleString", 14) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_LOCALE_STRING, "toLocaleString", 0);
+    if (len == 16 && strncmp(name, "__defineGetter__", 16) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_DEFINE_GETTER, "__defineGetter__", 2);
+    if (len == 16 && strncmp(name, "__defineSetter__", 16) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_DEFINE_SETTER, "__defineSetter__", 2);
+    if (len == 16 && strncmp(name, "__lookupGetter__", 16) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_LOOKUP_GETTER, "__lookupGetter__", 1);
+    if (len == 16 && strncmp(name, "__lookupSetter__", 16) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_LOOKUP_SETTER, "__lookupSetter__", 1);
 
     // Function.prototype methods
     if (type == LMD_TYPE_FUNC) {
@@ -7497,6 +7513,7 @@ extern "C" Item js_json_parse(Item str_item);
 extern "C" Item js_json_parse_full(Item str_item, Item reviver);
 extern "C" Item js_json_stringify(Item value);
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space);
+extern "C" Item js_get_prototype(Item object);
 
 // Dispatch a built-in method call by builtin_id
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
@@ -7860,6 +7877,54 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
         }
         return js_to_string(this_val);
+    }
+
+    // Annex B: Object.prototype.__defineGetter__/__defineSetter__/__lookupGetter__/__lookupSetter__
+    case JS_BUILTIN_OBJ_DEFINE_GETTER:
+    case JS_BUILTIN_OBJ_DEFINE_SETTER: {
+        // __defineGetter__(prop, fn) / __defineSetter__(prop, fn)
+        if (get_type_id(arg1) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("getter/setter must be a function");
+        }
+        Item obj = js_to_object(this_val);
+        Item key = js_to_string(arg0);
+        Item desc = js_object_create(ItemNull);
+        Item conf_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+        Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+        js_property_set(desc, conf_key, (Item){.item = ITEM_TRUE});
+        js_property_set(desc, enum_key, (Item){.item = ITEM_TRUE});
+        if (builtin_id == JS_BUILTIN_OBJ_DEFINE_GETTER) {
+            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+            js_property_set(desc, get_key, arg1);
+        } else {
+            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+            js_property_set(desc, set_key, arg1);
+        }
+        js_object_define_property(obj, key, desc);
+        return make_js_undefined();
+    }
+    case JS_BUILTIN_OBJ_LOOKUP_GETTER:
+    case JS_BUILTIN_OBJ_LOOKUP_SETTER: {
+        // __lookupGetter__(prop) / __lookupSetter__(prop)
+        extern Item js_object_get_own_property_descriptor(Item obj, Item name);
+        Item key = js_to_string(arg0);
+        Item obj = js_to_object(this_val);
+        const char* field = (builtin_id == JS_BUILTIN_OBJ_LOOKUP_GETTER) ? "get" : "set";
+        int field_len = 3;
+        for (int depth = 0; depth < 64; depth++) {
+            if (obj.item == ItemNull.item || get_type_id(obj) == LMD_TYPE_UNDEFINED) break;
+            Item desc = js_object_get_own_property_descriptor(obj, key);
+            if (desc.item != ItemNull.item && get_type_id(desc) != LMD_TYPE_UNDEFINED) {
+                if (get_type_id(desc) == LMD_TYPE_MAP) {
+                    bool found = false;
+                    Item val = js_map_get_fast(desc.map, field, field_len, &found);
+                    if (found) return val;
+                }
+                return make_js_undefined();
+            }
+            obj = js_get_prototype(obj);
+        }
+        return make_js_undefined();
     }
 
     // Array.prototype methods - delegate to js_map_method which handles arrays
@@ -10118,7 +10183,7 @@ static JsRegexData* js_get_regex_data(Item obj) {
 
 extern "C" Item js_regex_test(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
-    if (!rd) return (Item){.item = b2it(BOOL_FALSE)};
+    if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
     // v46: convert argument to string
     TypeId tid = get_type_id(str);
     if (tid != LMD_TYPE_STRING) {
@@ -10139,7 +10204,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
 
 extern "C" Item js_regex_exec(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
-    if (!rd) return ItemNull;
+    if (!rd) return js_throw_type_error("Method RegExp.prototype.exec called on incompatible receiver");
     // v46: convert argument to string (handles new String(), numbers, etc.)
     TypeId tid = get_type_id(str);
     if (tid != LMD_TYPE_STRING) {
@@ -10846,6 +10911,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 3 && strncmp(method->chars, "map", 3) == 0) {
                 if (argc < 1) return obj;
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 Item result = js_typed_array_new((int)ta->element_type, len);
@@ -10853,7 +10919,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item mapped = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item mapped = js_call_function(callback, this_arg, fn_args, 3);
                     js_typed_array_set(result, (Item){.item = i2it(i)}, mapped);
                 }
                 return result;
@@ -10885,13 +10951,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
                 if (argc < 1) return ItemNull;
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    js_call_function(callback, this_arg, fn_args, 3);
                 }
                 return make_js_undefined();
             }
@@ -10921,13 +10988,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
                 if (argc < 1) return make_js_undefined();
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
                     if (js_is_truthy(result)) return elem;
                 }
                 return make_js_undefined();
@@ -10935,13 +11003,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 9 && strncmp(method->chars, "findIndex", 9) == 0) {
                 if (argc < 1) return (Item){.item = i2it(-1)};
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
                     if (js_is_truthy(result)) return (Item){.item = i2it(i)};
                 }
                 return (Item){.item = i2it(-1)};
@@ -10949,13 +11018,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 5 && strncmp(method->chars, "every", 5) == 0) {
                 if (argc < 1) return (Item){.item = ITEM_TRUE};
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
                     if (!js_is_truthy(result)) return (Item){.item = ITEM_FALSE};
                 }
                 return (Item){.item = ITEM_TRUE};
@@ -10963,13 +11033,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 4 && strncmp(method->chars, "some", 4) == 0) {
                 if (argc < 1) return (Item){.item = ITEM_FALSE};
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 for (int i = 0; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
                     if (js_is_truthy(result)) return (Item){.item = ITEM_TRUE};
                 }
                 return (Item){.item = ITEM_FALSE};
@@ -11007,6 +11078,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
                 if (argc < 1) return js_typed_array_new((int)(js_get_typed_array_ptr(obj.map))->element_type, 0);
                 Item callback = args[0];
+                Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = ta->length;
                 // collect matching elements first
@@ -11016,7 +11088,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    Item result = js_call_function(callback, this_arg, fn_args, 3);
                     if (js_is_truthy(result)) temp[count++] = elem;
                 }
                 Item result = js_typed_array_new((int)ta->element_type, count);
