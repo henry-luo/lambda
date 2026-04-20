@@ -7143,6 +7143,8 @@ extern Input* js_input;
 
 extern "C" Item js_json_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
+    // v90: Check for exception from ToPrimitive (e.g., getter-defined valueOf/toString that throws)
+    if (js_check_exception()) return ItemNull;
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
         // empty string is not valid JSON
