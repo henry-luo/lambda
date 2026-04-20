@@ -1,6 +1,7 @@
 #ifndef RADIANT_LOTTIE_PLAYER_H
 #define RADIANT_LOTTIE_PLAYER_H
 
+#include <stdint.h>
 #include "../lib/mempool.h"
 #include "animation.h"
 
