@@ -80,6 +80,7 @@ extern "C" int g_mir_interp_mode;
 // External declarations for parallel module compilation
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
+    const TSLanguage* tree_sitter_javascript(void);
     void ensure_jit_imports_initialized(void);
 }
 
@@ -8528,6 +8529,29 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
         MIR_reg_t src = jm_transpile_box_item(mt, asgn->right);
         // v20: use recursive destructuring helper
         jm_emit_array_destructure(mt, asgn->left, src);
+        // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
+        if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
+            JsFuncCollected* se_fc = mt->current_fc;
+            struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_pattern_names(asgn->left, se_names);
+            size_t si = 0; void* sitem;
+            while (hashmap_iter(se_names, &si, &sitem)) {
+                JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
+                for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
+                    if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
+                        JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                        if (ve) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                                MIR_new_reg_op(mt->ctx, ve->reg)));
+                        }
+                        break;
+                    }
+                }
+            }
+            hashmap_free(se_names);
+        }
         return src;
     }
 
@@ -8537,6 +8561,29 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
         MIR_reg_t src = jm_transpile_box_item(mt, asgn->right);
         // v20: use recursive destructuring helper
         jm_emit_object_destructure(mt, asgn->left, src);
+        // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
+        if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
+            JsFuncCollected* se_fc = mt->current_fc;
+            struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_pattern_names(asgn->left, se_names);
+            size_t si = 0; void* sitem;
+            while (hashmap_iter(se_names, &si, &sitem)) {
+                JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
+                for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
+                    if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
+                        JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                        if (ve) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                                MIR_new_reg_op(mt->ctx, ve->reg)));
+                        }
+                        break;
+                    }
+                }
+            }
+            hashmap_free(se_names);
+        }
         return src;
     }
 
@@ -15385,6 +15432,30 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 // v20: array destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_array_destructure(mt, d->id, src);
+                // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
+                if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
+                    JsFuncCollected* se_fc = mt->current_fc;
+                    struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                    jm_collect_pattern_names(d->id, se_names);
+                    size_t si = 0; void* sitem;
+                    while (hashmap_iter(se_names, &si, &sitem)) {
+                        JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
+                        for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
+                            if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
+                                JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                                if (ve) {
+                                    MIR_reg_t val = ve->reg;
+                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                                        MIR_new_reg_op(mt->ctx, val)));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    hashmap_free(se_names);
+                }
                 // writeback destructured bindings to module vars
                 if ((mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
                     struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
@@ -15411,6 +15482,34 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 // v20: object destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_object_destructure(mt, d->id, src);
+                // v28: Write destructured bindings to scope_env for closure capture.
+                // Unlike jm_scope_env_mark_and_writeback, we do NOT set in_scope_env=true
+                // on the variable because that would cause jm_scope_env_reload_vars to
+                // reload the variable from scope_env after calls — but inner blocks may
+                // shadow the variable name and overwrite the scope_env slot.
+                if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
+                    JsFuncCollected* se_fc = mt->current_fc;
+                    struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                    jm_collect_pattern_names(d->id, se_names);
+                    size_t si = 0; void* sitem;
+                    while (hashmap_iter(se_names, &si, &sitem)) {
+                        JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
+                        for (int se_s = 0; se_s < se_fc->scope_env_count; se_s++) {
+                            if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
+                                JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                                if (ve) {
+                                    MIR_reg_t val = ve->reg;
+                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                                        MIR_new_reg_op(mt->ctx, val)));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    hashmap_free(se_names);
+                }
                 // writeback destructured bindings to module vars
                 if ((mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
                     struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
@@ -16241,6 +16340,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) is_builtin = true;
     // Buffer constructor (deprecated new Buffer(size/string/array))
     else if (ctor_len == 6 && strncmp(ctor_name, "Buffer", 6) == 0) { is_buffer = true; is_builtin = true; }
+    // OffscreenCanvas constructor (Canvas text measurement)
+    else if (ctor_len == 15 && strncmp(ctor_name, "OffscreenCanvas", 15) == 0) is_builtin = true;
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -16493,6 +16594,18 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         MIR_reg_t enc_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
         return jm_call_1(mt, "js_text_decoder_new", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, enc_arg));
+    }
+
+    // OffscreenCanvas(width, height)
+    if (ctor_len == 15 && strncmp(ctor_name, "OffscreenCanvas", 15) == 0) {
+        MIR_reg_t w_arg = first_arg ? first_arg : jm_box_int_const(mt, 300);
+        MIR_reg_t h_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) h_arg = jm_transpile_box_item(mt, arg2);
+        else h_arg = jm_box_int_const(mt, 150);
+        return jm_call_2(mt, "js_offscreen_canvas_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, w_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, h_arg));
     }
 
     // Phase 3: new WeakMap() / new WeakSet()
@@ -17031,17 +17144,15 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Create loop variable (for simple case) or temp var (for destructuring)
     MIR_reg_t loop_var;
     bool is_let_const_loop = false;
-    if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
-        if (decl->kind == JS_VAR_LET || decl->kind == JS_VAR_CONST)
-            is_let_const_loop = true;
+    if (fo->kind == 1 || fo->kind == 2) {  // 1=let, 2=const (from fo->kind, not fo->left type)
+        is_let_const_loop = true;
     }
     if (var_name) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", var_len, var_name);
         loop_var = jm_new_reg(mt, vname, MIR_T_I64);
         jm_set_var(mt, vname, loop_var);
-        // Mark let/const loop variables so Annex B skip condition works
+        // Mark let/const loop variables so closure per-iteration binding works
         if (is_let_const_loop) {
             JsMirVarEntry* ve = jm_find_var(mt, vname);
             if (ve) ve->is_let_const = true;
@@ -17200,6 +17311,13 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
 
+        // Write-back loop variable to scope_env for closure capture
+        if (var_name) {
+            char wb_vname[128];
+            snprintf(wb_vname, sizeof(wb_vname), "_js_%.*s", var_len, var_name);
+            jm_scope_env_mark_and_writeback(mt, wb_vname, loop_var);
+        }
+
         if (destr_pattern) jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
         if (obj_destr_pattern) jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
 
@@ -17322,6 +17440,13 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Assign current value to loop variable
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, step_result)));
+
+    // Write-back loop variable to scope_env for closure capture
+    if (var_name) {
+        char wb_vname[128];
+        snprintf(wb_vname, sizeof(wb_vname), "_js_%.*s", var_len, var_name);
+        jm_scope_env_mark_and_writeback(mt, wb_vname, loop_var);
+    }
 
     // Destructure element into individual variables if array pattern
     if (destr_pattern) {
@@ -22735,36 +22860,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_name_hash, jm_name_cmp, NULL, NULL);
 
         // Add top-level variable declarations and function names from program body
-        JsAstNode* s = program->body;
-        while (s) {
-            if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-                JsFunctionNode* fnd = (JsFunctionNode*)s;
-                if (fnd->name) {
-                    char name[128];
-                    snprintf(name, sizeof(name), "_js_%.*s", (int)fnd->name->len, fnd->name->chars);
-                    jm_name_set_add(all_names, name);
-                }
-                // NOTE: Do NOT add function params/locals to all_names — they are
-                // function-scoped, not module-scoped. The per-function ancestor chain
-                // walk (below) will add ancestor function locals properly.
+        // Use jm_collect_body_locals to also capture variables from for-of/for-in
+        // loops, try/catch blocks, etc. at the top level
+        {
+            JsAstNode* s = program->body;
+            while (s) {
+                jm_collect_body_locals(s, all_names);
+                s = s->next;
             }
-            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
-                JsAstNode* d = v->declarations;
-                while (d) {
-                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
-                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
-                            JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
-                            char vname[128];
-                            snprintf(vname, sizeof(vname), "_js_%.*s", (int)vid->name->len, vid->name->chars);
-                            jm_name_set_add(all_names, vname);
-                        }
-                    }
-                    d = d->next;
-                }
-            }
-            s = s->next;
         }
 
         // Add class method params and locals (for closures nested inside methods)
@@ -24924,7 +25027,7 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
 
     // create JS parser for discovery
     TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_typescript());
+    ts_parser_set_language(parser, tree_sitter_javascript());
 
     // initialize graph with main script as sentinel (index 0, not compiled here)
     int capacity = 16;

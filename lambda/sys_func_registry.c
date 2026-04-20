@@ -1558,6 +1558,8 @@ JitImport jit_runtime_imports[] = {
     {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
     {"js_text_decoder_new", FPTR(js_text_decoder_new)},
     {"js_text_decoder_decode", FPTR(js_text_decoder_decode)},
+    // OffscreenCanvas (Canvas text measurement via lib/font)
+    {"js_offscreen_canvas_new", FPTR(js_offscreen_canvas_new)},
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
     {"js_weakset_new", FPTR(js_weakset_new)},
