@@ -719,6 +719,18 @@ Item js_native_sha256(Item data, Item offset, Item length);
 Item js_native_sha384(Item data, Item offset, Item length);
 Item js_native_sha512(Item data, Item offset, Item length);
 
+// =============================================================================
+// OffscreenCanvas / CanvasRenderingContext2D (js_canvas.cpp)
+// =============================================================================
+
+Item js_offscreen_canvas_new(Item width, Item height);
+Item js_canvas_get_context(Item canvas);
+void js_canvas_ctx_set_font(Item ctx_obj, Item font_val);
+Item js_canvas_measure_text(Item ctx_obj, Item text);
+bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args, int argc, Item* result);
+bool js_canvas_property_set_intercept(Item obj, Item key, Item value);
+void js_canvas_cleanup(void);
+
 #ifdef __cplusplus
 }
 #endif

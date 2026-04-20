@@ -183,10 +183,9 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
 
     // Initialize Tree-sitter parser
     tp->parser = ts_parser_new();
-    const TSLanguage* lang = tree_sitter_typescript();
+    const TSLanguage* lang = tree_sitter_javascript();
     if (!lang) {
-        // TypeScript parser not yet generated; fall back to JavaScript
-        lang = tree_sitter_javascript();
+        lang = tree_sitter_typescript();
     }
     ts_parser_set_language(tp->parser, lang);
 
@@ -256,6 +255,52 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
 
     // Check for syntax errors
     if (ts_node_has_error(root)) {
+        // Recursively find the deepest error node
+        TSNode current = root;
+        for (int depth = 0; depth < 50; depth++) {
+            bool found_error_child = false;
+            uint32_t cc = ts_node_child_count(current);
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode child = ts_node_child(current, i);
+                if (ts_node_is_missing(child)) {
+                    TSPoint s = ts_node_start_point(child);
+                    log_error("  [depth %d] MISSING node '%s' at line %u:%u",
+                        depth, ts_node_type(child), s.row + 1, s.column);
+                } else if (strcmp(ts_node_type(child), "ERROR") == 0) {
+                    TSPoint s = ts_node_start_point(child);
+                    TSPoint e = ts_node_end_point(child);
+                    log_error("  [depth %d] ERROR node at line %u:%u - %u:%u",
+                        depth, s.row + 1, s.column, e.row + 1, e.column);
+                    // Print source around the error
+                    uint32_t start_byte = ts_node_start_byte(child);
+                    uint32_t end_byte = ts_node_end_byte(child);
+                    uint32_t show_start = start_byte > 50 ? start_byte - 50 : 0;
+                    uint32_t show_end = end_byte + 50 < length ? end_byte + 50 : (uint32_t)length;
+                    char snippet[256];
+                    uint32_t snip_len = show_end - show_start;
+                    if (snip_len > 255) snip_len = 255;
+                    memcpy(snippet, source + show_start, snip_len);
+                    snippet[snip_len] = '\0';
+                    // Replace newlines with spaces for readability
+                    for (uint32_t k = 0; k < snip_len; k++) {
+                        if (snippet[k] == '\n' || snippet[k] == '\r') snippet[k] = ' ';
+                    }
+                    log_error("  source: ...%s...", snippet);
+                    current = child;
+                    found_error_child = true;
+                    break;
+                } else if (ts_node_has_error(child)) {
+                    TSPoint s = ts_node_start_point(child);
+                    TSPoint e = ts_node_end_point(child);
+                    log_error("  [depth %d] node '%s' has error, line %u:%u - %u:%u",
+                        depth, ts_node_type(child), s.row + 1, s.column, e.row + 1, e.column);
+                    current = child;
+                    found_error_child = true;
+                    break;
+                }
+            }
+            if (!found_error_child) break;
+        }
         log_error("JavaScript source has syntax errors");
         return false;
     }
