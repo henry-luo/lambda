@@ -6839,12 +6839,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!has_explicit_table_width) {
         // Try to get container width from parent element first
         float container_width = 0;
+        bool margins_already_subtracted = false;
 
         // CSS 2.1 §9.5 + §17.5.2.2: For auto-width tables inside a BFC that avoids
         // floats, use lycon->block.content_width which already accounts for float
         // avoidance width reduction computed by layout_block().
+        // Note: lycon->block.content_width already has the table's margins subtracted
+        // (computed in layout_block.cpp as parent_content - margins - border - padding).
         if (lycon->block.content_width > 0) {
             container_width = lycon->block.content_width;
+            margins_already_subtracted = true;
             log_debug("Container width from lycon content_width (BFC float avoidance): %.1fpx", container_width);
         }
 
@@ -6873,18 +6877,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             container_width = lycon->available_space.width.to_px_or_zero();
         }
 
-        // Subtract table margins
-        float margin_left = 0, margin_right = 0;
-        if (table->bound) {
-            margin_left = table->bound->margin.left;
-            margin_right = table->bound->margin.right;
+        // Subtract table margins only if not already accounted for
+        if (!margins_already_subtracted) {
+            float margin_left = 0, margin_right = 0;
+            if (table->bound) {
+                margin_left = table->bound->margin.left;
+                margin_right = table->bound->margin.right;
+            }
+            container_width -= margin_left + margin_right;
+            log_debug("Auto table width constraint: container=%.1fpx (after subtracting margins %.1f+%.1f)",
+                     container_width, margin_left, margin_right);
         }
 
-        max_available_width = container_width - margin_left - margin_right;
+        max_available_width = container_width;
         if (max_available_width < 0) max_available_width = 0;
 
-        log_debug("Auto table width constraint: container=%.1fpx, margin_left=%.1fpx, margin_right=%.1fpx, max_available=%.1fpx",
-                 container_width, margin_left, margin_right, max_available_width);
+        log_debug("Auto table max available width: %.1fpx", max_available_width);
 
         // Constrain preferred width to available space
         // But never go below minimum content width (table will overflow)

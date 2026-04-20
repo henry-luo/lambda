@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRecentTests: () => ipcRenderer.invoke('get-recent-tests'),
   addRecentTest: (testInfo) => ipcRenderer.invoke('add-recent-test', testInfo),
 
+  // Render test APIs
+  loadRenderTests: () => ipcRenderer.invoke('load-render-tests'),
+  runRenderTest: (testName, renderDir) => ipcRenderer.invoke('run-render-test', testName, renderDir),
+  getRenderTestImages: (testName, renderDir) => ipcRenderer.invoke('get-render-test-images', testName, renderDir),
+
   // Terminal output listener
   onTerminalOutput: (callback) => {
     ipcRenderer.on('terminal-output', (event, data) => callback(data));

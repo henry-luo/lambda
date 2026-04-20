@@ -122,3 +122,90 @@
 .right-panel {
   min-width: 200px;
 }
+
+/* ─── Render Comparison Panel ──────────────────────────────────────── */
+
+.render-comparison {
+  display: flex;
+  height: 100%;
+  background: #ffffff;
+}
+
+.render-image-container {
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+}
+
+.render-image {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.diff-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.diff-badge.pass {
+  background: #d4edda;
+  color: #155724;
+}
+.diff-badge.warn {
+  background: #fff3cd;
+  color: #856404;
+}
+.diff-badge.fail {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* ─── Pixel Diff Viewer (Bottom Tab) ──────────────────────────────── */
+
+.pixel-diff-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e1e;
+}
+
+.pixel-diff-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.pixel-diff-stats .diff-detail {
+  font-size: 12px;
+  color: #888;
+}
+
+.pixel-diff-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.pixel-diff-content .render-image {
+  max-height: 100%;
+}
+
+.pixel-diff-content .empty-state {
+  color: #888;
+  font-size: 13px;
+}
