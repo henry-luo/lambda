@@ -260,12 +260,19 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     // Add text decoration (skip _UNDEF which means no decoration set)
     if (ctx->font.style->text_deco != CSS_VALUE_NONE && ctx->font.style->text_deco != CSS_VALUE__UNDEF) {
-        if (ctx->font.style->text_deco == CSS_VALUE_UNDERLINE) {
-            strbuf_append_str(ctx->svg_content, " text-decoration=\"underline\"");
-        } else if (ctx->font.style->text_deco == CSS_VALUE_OVERLINE) {
-            strbuf_append_str(ctx->svg_content, " text-decoration=\"overline\"");
-        } else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
-            strbuf_append_str(ctx->svg_content, " text-decoration=\"line-through\"");
+        const char* deco_line = nullptr;
+        if (ctx->font.style->text_deco == CSS_VALUE_UNDERLINE) deco_line = "underline";
+        else if (ctx->font.style->text_deco == CSS_VALUE_OVERLINE) deco_line = "overline";
+        else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) deco_line = "line-through";
+        if (deco_line) {
+            if (ctx->font.style->text_deco_color.a > 0) {
+                Color c = ctx->font.style->text_deco_color;
+                strbuf_append_format(ctx->svg_content,
+                    " style=\"text-decoration: %s; text-decoration-color: rgb(%d,%d,%d);\"",
+                    deco_line, c.r, c.g, c.b);
+            } else {
+                strbuf_append_format(ctx->svg_content, " text-decoration=\"%s\"", deco_line);
+            }
         }
     }
 
