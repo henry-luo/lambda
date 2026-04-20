@@ -6,12 +6,13 @@
  *
  * Supported tables:
  *   head, hhea, maxp, OS/2, post, cmap (format 4, 12), hmtx, kern (format 0),
- *   fvar, name
+ *   fvar, name, GPOS (PairPos via font_gpos.c)
  *
  * Copyright (c) 2025-2026 Lambda Script Project
  */
 
 #include "font_tables.h"
+#include "font_gpos.h"
 #include "../mempool.h"
 #include "../utf.h"
 #include "../log.h"
@@ -163,6 +164,7 @@ void font_tables_close(FontTables* tables, void* pool_ptr) {
         if (tables->fvar->axes) pool_free(pool, tables->fvar->axes);
         pool_free(pool, tables->fvar);
     }
+    if (tables->gpos) pool_free(pool, tables->gpos);
     if (tables->dirs) pool_free(pool, tables->dirs);
     pool_free(pool, tables);
 }
@@ -939,6 +941,15 @@ NameTable* font_tables_get_name(FontTables* tables) {
 
     tables->name = n;
     return n;
+}
+
+GposTable* font_tables_get_gpos(FontTables* tables) {
+    if (!tables) return NULL;
+    if (tables->parsed_flags & FT_PARSED_GPOS) return tables->gpos;
+    tables->parsed_flags |= FT_PARSED_GPOS;
+
+    tables->gpos = font_gpos_parse(tables, tables->pool);
+    return tables->gpos;
 }
 
 // ============================================================================

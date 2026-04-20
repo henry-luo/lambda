@@ -990,7 +990,6 @@
                 "lib/clock_compat.c"
             ],
             "includes": [
-                "/usr/include/freetype2",
                 "/usr/include",
                 "/usr/include/libpng16"
             ],
@@ -1092,12 +1091,6 @@
                 {
                     "name": "bzip2",
                     "lib": "-lbz2",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "freetype",
-                    "include": "/usr/include/freetype2",
-                    "lib": "-lfreetype",
                     "link": "dynamic"
                 },
                 {
