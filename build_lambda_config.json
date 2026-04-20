@@ -1196,7 +1196,8 @@
         "macos": {
             "exclude_source_files": [
                 "lib/clock_compat.c",
-                "radiant/radiant.cpp"
+                "radiant/radiant.cpp",
+                "radiant/rdt_video_stub.cpp"
             ],
             "additional_source_files": [
             ],
