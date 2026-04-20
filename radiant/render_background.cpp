@@ -1,5 +1,6 @@
 #include "render_background.hpp"
 #include "render_border.hpp"
+#include "display_list.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -1037,14 +1038,19 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         rdt_path_free(clip_path);
 
         // Apply software box blur if blur radius > 0
-        if (s->blur_radius > 0 && rdcon->ui_context->surface) {
+        if (s->blur_radius > 0) {
             float blur_px = s->blur_radius;
             // Blur region must cover the shadow plus the blur extent
             int br_x = (int)floorf(shadow_x - blur_px);
             int br_y = (int)floorf(shadow_y - blur_px);
             int br_w = (int)ceilf(shadow_w + blur_px * 2);
             int br_h = (int)ceilf(shadow_h + blur_px * 2);
-            box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            if (rdcon->dl) {
+                // display-list path: defer blur to replay (after the shadow fill is rasterised)
+                dl_box_blur_region(rdcon->dl, br_x, br_y, br_w, br_h, blur_px);
+            } else if (rdcon->ui_context->surface) {
+                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            }
             log_debug("[BOX-SHADOW] Applied 3-pass box blur radius=%.1f on region (%d,%d,%d,%d)",
                       blur_px, br_x, br_y, br_w, br_h);
         }
@@ -1214,13 +1220,17 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         rdt_path_free(clip_path);
 
         // Apply software box blur if blur radius > 0
-        if (s->blur_radius > 0 && rdcon->ui_context->surface) {
+        if (s->blur_radius > 0) {
             float blur_px = s->blur_radius;
             int br_x = (int)floorf(rect.x);
             int br_y = (int)floorf(rect.y);
             int br_w = (int)ceilf(rect.width);
             int br_h = (int)ceilf(rect.height);
-            box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            if (rdcon->dl) {
+                dl_box_blur_region(rdcon->dl, br_x, br_y, br_w, br_h, blur_px);
+            } else if (rdcon->ui_context->surface) {
+                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            }
             log_debug("[BOX-SHADOW INSET] Applied box blur radius=%.1f on region (%d,%d,%d,%d)",
                       blur_px, br_x, br_y, br_w, br_h);
         }
@@ -1341,7 +1351,13 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* ti
     rc_draw_picture(rdcon, pic, 255, &m);
     rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
-    rdt_picture_free(pic);
+    // In display-list mode, rc_draw_picture transfers ownership to the DL;
+    // in immediate mode, rdt_picture_draw consumes pic->paint (sets it to nullptr).
+    // Either way, free the wrapper struct (DL only stores the pointer it received).
+    if (!rdcon->dl) {
+        rdt_picture_free(pic);
+    }
+    // DL mode: pic is now owned by the display list, freed during dl_clear()
 }
 
 /**

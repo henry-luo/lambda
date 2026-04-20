@@ -76,6 +76,9 @@ void dl_clear(DisplayList* dl) {
             case DL_PUSH_CLIP:
                 rdt_path_free(item->push_clip.path);
                 break;
+            case DL_DRAW_PICTURE:
+                rdt_picture_free(item->draw_picture.picture);
+                break;
             default:
                 break;
         }
@@ -220,7 +223,7 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_PICTURE;
-    item->draw_picture.picture = picture;  // borrowed
+    item->draw_picture.picture = picture;  // ownership transferred to display list
     item->draw_picture.opacity = opacity;
     item->draw_picture.has_transform = (transform != nullptr);
     if (transform) item->draw_picture.transform = *transform;
@@ -349,6 +352,18 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
     item->apply_filter.h = h;
     item->apply_filter.filter = filter;
     item->apply_filter.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
+}
+
+void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_BOX_BLUR_REGION;
+    item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
+    item->bounds[2] = (float)rw; item->bounds[3] = (float)rh;
+    item->box_blur_region.rx = rx;
+    item->box_blur_region.ry = ry;
+    item->box_blur_region.rw = rw;
+    item->box_blur_region.rh = rh;
+    item->box_blur_region.blur_radius = blur_radius;
 }
 
 void dl_video_placeholder(DisplayList* dl, void* video,
@@ -809,6 +824,12 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                 bound.bottom = std::min(bound.bottom, dirty_union.bottom);
             }
             apply_css_filters(scratch, surface, (FilterProp*)r->filter, &rect, &bound);
+            break;
+        }
+
+        case DL_BOX_BLUR_REGION: {
+            DlBoxBlurRegion* r = &item->box_blur_region;
+            box_blur_region(scratch, surface, r->rx, r->ry, r->rw, r->rh, r->blur_radius);
             break;
         }
 

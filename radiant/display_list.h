@@ -48,6 +48,8 @@ typedef enum {
     DL_VIDEO_PLACEHOLDER,
     // webview layer placeholder (rect + clip; actual blit is post-composite)
     DL_WEBVIEW_LAYER_PLACEHOLDER,
+    // box-shadow blur (deferred so it runs after the shadow fill is rasterised)
+    DL_BOX_BLUR_REGION,
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -126,7 +128,7 @@ typedef struct {
 } DlDrawGlyph;
 
 typedef struct {
-    RdtPicture* picture;     // borrowed — caller manages lifetime
+    RdtPicture* picture;     // owned — display list frees on clear
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
@@ -189,6 +191,12 @@ typedef struct {
     Bound clip;              // rectangular clip bounds at recording time
 } DlApplyFilter;
 
+// Box blur on a pixel region (for box-shadow blur deferred to replay)
+typedef struct {
+    int rx, ry, rw, rh;      // pixel region to blur
+    float blur_radius;        // CSS blur radius in pixels
+} DlBoxBlurRegion;
+
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
 // The actual video frame pixels are blitted after tile compositing in the render loop.
 typedef struct {
@@ -232,6 +240,7 @@ typedef struct DisplayItem {
         DlSaveBackdrop       save_backdrop;
         DlApplyBlendMode     apply_blend_mode;
         DlApplyFilter        apply_filter;
+        DlBoxBlurRegion      box_blur_region;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
     };
@@ -329,6 +338,8 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip);
+
+void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius);
 
 // Video placeholder (rect + clip only; actual blit is post-composite)
 void dl_video_placeholder(DisplayList* dl, void* video,

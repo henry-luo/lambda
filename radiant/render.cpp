@@ -1405,11 +1405,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         dx += thickness * 2.0f;
                     }
                 } else if (deco_style == CSS_VALUE_DOUBLE) {
-                    // Double line: two lines at 1/3 thickness with 1/3 gap
-                    float line_t = fmaxf(1.0f, thickness / 3.0f);
+                    // Double line: two lines with visible gap between them
+                    // Ensure minimum 3px total height so both lines + gap are visible
+                    float total_h = fmaxf(thickness, 3.0f);
+                    float line_t = fmaxf(1.0f, total_h / 3.0f);
                     Rect top_line = {rect.x, rect.y, rect.width, line_t};
                     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &top_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-                    Rect bot_line = {rect.x, rect.y + thickness - line_t, rect.width, line_t};
+                    Rect bot_line = {rect.x, rect.y + total_h - line_t, rect.width, line_t};
                     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                 } else if (deco_style == CSS_VALUE_WAVY) {
                     // Wavy line using RdtVector path

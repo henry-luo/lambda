@@ -761,6 +761,15 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             break;
         }
 
+        case DL_BOX_BLUR_REGION: {
+            DlBoxBlurRegion* r = &item->box_blur_region;
+            // adjust coordinates relative to tile origin
+            int rx = r->rx - (int)tile_x;
+            int ry = r->ry - (int)tile_y;
+            box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
+            break;
+        }
+
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
             break;
