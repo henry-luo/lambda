@@ -1,7 +1,7 @@
 {
-    "name": "layout-devtool",
-    "version": "0.1.0",
-    "description": "Electron-based development tool for testing Lambda HTML/CSS layout engine",
+    "name": "devtool",
+    "version": "0.2.0",
+    "description": "Electron-based development tool for testing Lambda layout and rendering",
     "main": "main.js",
     "scripts": {
         "dev": "vite",
@@ -23,6 +23,8 @@
     "license": "MIT",
     "dependencies": {
         "electron": "^28.0.0",
+        "pixelmatch": "^5.3.0",
+        "pngjs": "^7.0.0",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
         "xterm": "^5.3.0",
@@ -39,8 +41,8 @@
         "wait-on": "^7.2.0"
     },
     "build": {
-        "appId": "com.lambda.layout-devtool",
-        "productName": "Layout DevTool",
+        "appId": "com.lambda.devtool",
+        "productName": "DevTool",
         "directories": {
             "output": "dist"
         },

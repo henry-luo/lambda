@@ -8,8 +8,12 @@
 #define KAPPA 0.5522847498f
 
 // ---------------------------------------------------------------------------
-// Color helpers
+// Color helpers — Chrome-compatible 3D border color computation
+// Chrome: DarkenColor() multiplies RGB by 2/3, LightenColor() blends 1/3 toward white
 // ---------------------------------------------------------------------------
+
+static constexpr float BORDER_DARKEN_FACTOR  = 2.0f / 3.0f;
+static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
 static inline Color color_darken(Color c, float factor) {
     Color out;
@@ -34,8 +38,8 @@ static inline Color color_lighten(Color c, float factor) {
 //           outset → top+left lighter (lit), bottom+right dark (shadowed)
 static void inset_outset_side_colors(Color base, CssEnum style,
     Color* out_top, Color* out_right, Color* out_bottom, Color* out_left) {
-    Color dark  = color_darken(base, 0.5f);
-    Color light = color_lighten(base, 0.35f);
+    Color dark  = color_darken(base, BORDER_DARKEN_FACTOR);
+    Color light = color_lighten(base, BORDER_LIGHTEN_FACTOR);
     if (style == CSS_VALUE_INSET) {
         if (out_top) *out_top = dark;
         if (out_left) *out_left = dark;
@@ -267,10 +271,19 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 
         } else if (st == CSS_VALUE_GROOVE || st == CSS_VALUE_RIDGE) {
             float hw = w / 2.0f;
-            Color dark  = color_darken(c, 0.5f);
-            Color light = color_lighten(c, 0.35f);
-            Color outer_c = (st == CSS_VALUE_GROOVE) ? dark : light;
-            Color inner_c = (st == CSS_VALUE_GROOVE) ? light : dark;
+            // Chrome groove: dark = color × 0.5, light = original color (unchanged)
+            Color dark = color_darken(c, 0.5f);
+            // CSS groove: top/left outer=dark, inner=original; bottom/right outer=original, inner=dark
+            // CSS ridge: opposite of groove
+            bool is_top_left = (side == 0 || side == 3);
+            Color outer_c, inner_c;
+            if (st == CSS_VALUE_GROOVE) {
+                outer_c = is_top_left ? dark : c;
+                inner_c = is_top_left ? c : dark;
+            } else {
+                outer_c = is_top_left ? c : dark;
+                inner_c = is_top_left ? dark : c;
+            }
             // Outer half
             switch (side) {
                 case 0: SideDraw::top(rdcon, rect, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, outer_c); break;
@@ -297,8 +310,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
         } else if (st == CSS_VALUE_INSET || st == CSS_VALUE_OUTSET) {
             // inset: top/left dark, bottom/right light
             // outset: top/left light, bottom/right dark
-            Color dark  = color_darken(c, 0.5f);
-            Color light = color_lighten(c, 0.35f);
+            Color dark  = color_darken(c, BORDER_DARKEN_FACTOR);
+            Color light = color_lighten(c, BORDER_LIGHTEN_FACTOR);
             Color side_c;
             if (st == CSS_VALUE_INSET)
                 side_c = (side == 0 || side == 3) ? dark : light;
@@ -574,7 +587,13 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                           border->right_color.c == border->bottom_color.c &&
                           border->bottom_color.c == border->left_color.c);
 
-    if (uniform_width && uniform_style && uniform_color && border->width.top > 0 &&
+    // Groove/ridge need per-side color variation (top/left vs bottom/right),
+    // so they must always use per-side rendering even when uniform.
+    bool needs_per_side = (border->top_style == CSS_VALUE_GROOVE ||
+                           border->top_style == CSS_VALUE_RIDGE);
+
+    if (uniform_width && uniform_style && uniform_color && !needs_per_side &&
+        border->width.top > 0 &&
         border->top_style != CSS_VALUE_NONE && border->top_style != CSS_VALUE_HIDDEN) {
 
         CssEnum style = border->top_style;
@@ -610,22 +629,12 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
             float half_w = w / 2.0f;
 
-            uint8_t dark_r = (uint8_t)(c.r * 0.5f);
-            uint8_t dark_g = (uint8_t)(c.g * 0.5f);
-            uint8_t dark_b = (uint8_t)(c.b * 0.5f);
-            uint8_t light_r = (uint8_t)min(255.0f, c.r * 1.5f);
-            uint8_t light_g = (uint8_t)min(255.0f, c.g * 1.5f);
-            uint8_t light_b = (uint8_t)min(255.0f, c.b * 1.5f);
+            Color dark_c  = color_darken(c, BORDER_DARKEN_FACTOR);
+            Color light_c = color_lighten(c, BORDER_LIGHTEN_FACTOR);
 
             bool groove = (style == CSS_VALUE_GROOVE);
-            Color outer_c, inner_c;
-            if (groove) {
-                outer_c.r = dark_r;  outer_c.g = dark_g;  outer_c.b = dark_b;  outer_c.a = c.a;
-                inner_c.r = light_r; inner_c.g = light_g; inner_c.b = light_b; inner_c.a = c.a;
-            } else {
-                outer_c.r = light_r; outer_c.g = light_g; outer_c.b = light_b; outer_c.a = c.a;
-                inner_c.r = dark_r;  inner_c.g = dark_g;  inner_c.b = dark_b;  inner_c.a = c.a;
-            }
+            Color outer_c = groove ? dark_c : light_c;
+            Color inner_c = groove ? light_c : dark_c;
 
             // Outer half
             RdtPath* outer = build_rounded_border_path(rect, border);

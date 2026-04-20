@@ -1978,27 +1978,35 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 
         if (use_resolved) {
             // Render collapsed borders using resolved border data (table cells)
-            // Scale border widths from CSS pixels to physical pixels
+            // CSS 2.1 §17.6.2: Collapsed borders are centered on the cell edges.
+            // Since cells are positioned half-border inward, we must shift borders
+            // outward by half their width to center them on the cell edge.
             if (resolved_left && resolved_left->style != CSS_VALUE_NONE && resolved_left->color.a) {
+                float bw = resolved_left->width * s;
                 Rect border_rect = rect;
-                border_rect.width = resolved_left->width * s;
+                border_rect.x = rect.x - bw / 2.0f;
+                border_rect.width = bw;
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, resolved_left->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_right && resolved_right->style != CSS_VALUE_NONE && resolved_right->color.a) {
+                float bw = resolved_right->width * s;
                 Rect border_rect = rect;
-                border_rect.x = rect.x + rect.width - resolved_right->width * s;
-                border_rect.width = resolved_right->width * s;
+                border_rect.x = rect.x + rect.width - bw / 2.0f;
+                border_rect.width = bw;
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, resolved_right->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_top && resolved_top->style != CSS_VALUE_NONE && resolved_top->color.a) {
+                float bw = resolved_top->width * s;
                 Rect border_rect = rect;
-                border_rect.height = resolved_top->width * s;
+                border_rect.y = rect.y - bw / 2.0f;
+                border_rect.height = bw;
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, resolved_top->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
             if (resolved_bottom && resolved_bottom->style != CSS_VALUE_NONE && resolved_bottom->color.a) {
+                float bw = resolved_bottom->width * s;
                 Rect border_rect = rect;
-                border_rect.y = rect.y + rect.height - resolved_bottom->width * s;
-                border_rect.height = resolved_bottom->width * s;
+                border_rect.y = rect.y + rect.height - bw / 2.0f;
+                border_rect.height = bw;
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, resolved_bottom->color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         } else {

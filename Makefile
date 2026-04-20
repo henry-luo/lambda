@@ -2341,14 +2341,14 @@ compare-layout: build
 	fi; \
 	node test/layout/compare-layout.js $$OPTS
 
-# layout-devtool: Launch the Layout DevTool Electron app
-# Usage: make layout-devtool
-layout-devtool:
-	@echo "🚀 Launching Layout DevTool..."
-	@if [ -d "utils/layout-devtool" ]; then \
-		cd utils/layout-devtool && npm run electron:dev; \
+# devtool: Launch the DevTool Electron app
+# Usage: make devtool
+devtool:
+	@echo "🚀 Launching DevTool..."
+	@if [ -d "utils/devtool" ]; then \
+		cd utils/devtool && npm run electron:dev; \
 	else \
-		echo "❌ Error: Layout DevTool not found at utils/layout-devtool"; \
+		echo "❌ Error: DevTool not found at utils/devtool"; \
 		exit 1; \
 	fi
 
