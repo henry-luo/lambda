@@ -6693,8 +6693,8 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)idx);
         bool nw_found = false;
-        js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
-        if (nw_found) {
+        Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
+        if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
     }
