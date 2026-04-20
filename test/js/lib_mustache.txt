@@ -1,0 +1,3 @@
+MUSTACHE_LOAD_OK
+51/51 tests passed
+MUSTACHE_DONE

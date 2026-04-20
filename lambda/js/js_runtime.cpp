@@ -7210,6 +7210,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
 
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+
     // Builtin functions have no func_ptr — dispatch by builtin_id
     if (fn->builtin_id > 0) {
         // TypedArray method validation: if accessed via %TypedArray%.prototype, this must be a TypedArray
