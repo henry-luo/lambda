@@ -13476,11 +13476,16 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env.
-        // Don't share in loop bodies — let closures need per-iteration value copies.
-        // Exception: generators always use scope_env because all variables are
-        // hoisted to gen_env (no per-iteration let bindings in state machines).
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0
-                              && (mt->loop_depth == 0 || mt->in_generator));
+        // Share scope env so var-scoped closures can persist mutations to outer
+        // variables.  But in loops, if any captured variable is let/const, we must
+        // NOT share — let/const need per-iteration binding semantics.
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        if (use_scope_env && mt->loop_depth > 0) {
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (cv && cv->is_let_const) { use_scope_env = false; break; }
+            }
+        }
         if (use_scope_env) {
             fn_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,
                 MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
@@ -13602,7 +13607,13 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && (mt->loop_depth == 0 || mt->in_generator));
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        if (use_scope_env && mt->loop_depth > 0) {
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (cv && cv->is_let_const) { use_scope_env = false; break; }
+            }
+        }
         if (use_scope_env) {
             mt->last_closure_env_reg = mt->scope_env_reg;
             mt->last_closure_capture_count = fc->capture_count;

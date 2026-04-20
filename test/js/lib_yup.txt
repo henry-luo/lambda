@@ -1,0 +1,55 @@
+T1 string basic: hello
+T2 number basic: 42
+T3 boolean: true
+T4 required valid: world
+T5 required empty: ValidationError
+T6 required undef: ValidationError
+T7 num required: ValidationError
+T8 min: ValidationError
+T9 max: ValidationError
+T10 min valid: hello
+T11 num min: ValidationError
+T12 num max: ValidationError
+T13 positive: ValidationError
+T14 negative: ValidationError
+T15 integer: ValidationError
+T16 email: ValidationError
+T17 email valid: test@example.com
+T18 url: ValidationError
+T19 matches: hello
+T20 matches fail: ValidationError
+T21 oneOf valid: red
+T22 oneOf fail: ValidationError
+T23 notOneOf: ValidationError
+T24 truncate: 3
+T25 round floor: ValidationError
+T26 object valid: Alice 25
+T27 object fail: ValidationError
+T28 array: 1,2,3
+T29 array min: ValidationError
+T30 isValidSync: true false false
+T31 cast: 42 number
+T32 trim: [hello]
+T33 lowercase: hello
+T34 uppercase: HELLO
+T35 nullable: null
+T36 nonNullable: ValidationError
+T37 default: fallback
+T38 length: ValidationError
+T39 length valid: hello
+T40 VE props: ValidationError path= type=required errors=1
+T41 multi errors: 2
+T42 defined: ValidationError
+T43 number oneOf: true
+T44 lessThan: ValidationError
+T45 moreThan: ValidationError
+T46 isTrue: ValidationError
+T47 isFalse: ValidationError
+T48 describe: type=string optional=false tests=3
+T49 isType: true false false
+T50 shape: true
+T51 array of fail: ValidationError
+T52 ensure: []
+T53 noUnknown: passed
+T54 strip: {"name":"Alice"}
+T55 compact: [1,2,3]

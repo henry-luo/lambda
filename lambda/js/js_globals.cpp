@@ -3076,7 +3076,18 @@ struct JsFuncName {
     String* name;
 };
 
+static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
+
 extern "C" Item js_instanceof(Item left, Item right) {
+    return js_instanceof_impl(left, right, false);
+}
+
+// OrdinaryHasInstance — same as instanceof but skips Symbol.hasInstance check
+extern "C" Item js_ordinary_has_instance(Item left, Item right) {
+    return js_instanceof_impl(left, right, true);
+}
+
+static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     // right should be a constructor (a class). We check if left's prototype chain
     // contains right's prototype. For our implementation, we check if right has
     // a __class_name__ marker that matches any __class_name__ in left's proto chain.
@@ -3090,7 +3101,7 @@ extern "C" Item js_instanceof(Item left, Item right) {
 
     // v16: Check for Symbol.hasInstance on the right-hand constructor FIRST (before type check)
     // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
-    {
+    if (!skip_symbol) {
         if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_FUNC) {
             // look for __sym_3 (Symbol.hasInstance = ID 3) via property_get (handles both MAP and FUNC)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
