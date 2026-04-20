@@ -8,8 +8,12 @@
 #define KAPPA 0.5522847498f
 
 // ---------------------------------------------------------------------------
-// Color helpers
+// Color helpers — Chrome-compatible 3D border color computation
+// Chrome: DarkenColor() multiplies RGB by 2/3, LightenColor() blends 1/3 toward white
 // ---------------------------------------------------------------------------
+
+static constexpr float BORDER_DARKEN_FACTOR  = 2.0f / 3.0f;
+static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
 static inline Color color_darken(Color c, float factor) {
     Color out;
@@ -34,8 +38,8 @@ static inline Color color_lighten(Color c, float factor) {
 //           outset → top+left lighter (lit), bottom+right dark (shadowed)
 static void inset_outset_side_colors(Color base, CssEnum style,
     Color* out_top, Color* out_right, Color* out_bottom, Color* out_left) {
-    Color dark  = color_darken(base, 0.5f);
-    Color light = color_lighten(base, 0.35f);
+    Color dark  = color_darken(base, BORDER_DARKEN_FACTOR);
+    Color light = color_lighten(base, BORDER_LIGHTEN_FACTOR);
     if (style == CSS_VALUE_INSET) {
         if (out_top) *out_top = dark;
         if (out_left) *out_left = dark;
@@ -124,6 +128,10 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
 /**
  * Render each border side independently using trapezoid fills.
  */
+
+// Forward declaration (defined later in file)
+static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap);
+
 static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp* border) {
     float x = rect.x, y = rect.y, W = rect.width, H = rect.height;
     float bwt = border->width.top, bwr = border->width.right;
@@ -267,10 +275,19 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 
         } else if (st == CSS_VALUE_GROOVE || st == CSS_VALUE_RIDGE) {
             float hw = w / 2.0f;
-            Color dark  = color_darken(c, 0.5f);
-            Color light = color_lighten(c, 0.35f);
-            Color outer_c = (st == CSS_VALUE_GROOVE) ? dark : light;
-            Color inner_c = (st == CSS_VALUE_GROOVE) ? light : dark;
+            // Chrome groove: dark = color × 0.5, light = original color (unchanged)
+            Color dark = color_darken(c, 0.5f);
+            // CSS groove: top/left outer=dark, inner=original; bottom/right outer=original, inner=dark
+            // CSS ridge: opposite of groove
+            bool is_top_left = (side == 0 || side == 3);
+            Color outer_c, inner_c;
+            if (st == CSS_VALUE_GROOVE) {
+                outer_c = is_top_left ? dark : c;
+                inner_c = is_top_left ? c : dark;
+            } else {
+                outer_c = is_top_left ? c : dark;
+                inner_c = is_top_left ? dark : c;
+            }
             // Outer half
             switch (side) {
                 case 0: SideDraw::top(rdcon, rect, hw, bwr > 0 ? hw : 0, bwl > 0 ? hw : 0, outer_c); break;
@@ -297,8 +314,8 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
         } else if (st == CSS_VALUE_INSET || st == CSS_VALUE_OUTSET) {
             // inset: top/left dark, bottom/right light
             // outset: top/left light, bottom/right dark
-            Color dark  = color_darken(c, 0.5f);
-            Color light = color_lighten(c, 0.35f);
+            Color dark  = color_darken(c, BORDER_DARKEN_FACTOR);
+            Color light = color_lighten(c, BORDER_LIGHTEN_FACTOR);
             Color side_c;
             if (st == CSS_VALUE_INSET)
                 side_c = (side == 0 || side == 3) ? dark : light;
@@ -311,8 +328,45 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                 case 3: SideDraw::left(rdcon, rect, w, bwt, bwb, side_c); break;
             }
 
+        } else if (st == CSS_VALUE_DASHED || st == CSS_VALUE_DOTTED) {
+            // Dashed/dotted: stroke a line along the center of each side
+            float dash[2];
+            RdtStrokeCap cap;
+            int dash_count = get_dash_pattern(st, w, dash, &cap);
+            float half_w = w / 2.0f;
+            const RdtMatrix* xform = get_transform(rdcon);
+
+            RdtPath* clip = create_border_clip_path(rdcon);
+            rc_push_clip(rdcon, clip, NULL);
+
+            RdtPath* p = rdt_path_new();
+            switch (side) {
+                case 0: // top
+                    rdt_path_move_to(p, x, y + half_w);
+                    rdt_path_line_to(p, x + W, y + half_w);
+                    break;
+                case 1: // right
+                    rdt_path_move_to(p, x + W - half_w, y);
+                    rdt_path_line_to(p, x + W - half_w, y + H);
+                    break;
+                case 2: // bottom
+                    rdt_path_move_to(p, x, y + H - half_w);
+                    rdt_path_line_to(p, x + W, y + H - half_w);
+                    break;
+                case 3: // left
+                    rdt_path_move_to(p, x + half_w, y);
+                    rdt_path_line_to(p, x + half_w, y + H);
+                    break;
+            }
+            rc_stroke_path(rdcon, p, c, w, cap, RDT_JOIN_MITER,
+                            dash, dash_count, xform, half_w);
+            rdt_path_free(p);
+
+            rc_pop_clip(rdcon);
+            rdt_path_free(clip);
+
         } else {
-            // solid / dashed / dotted — render as filled trapezoid (ignore dash for non-uniform)
+            // solid — render as filled trapezoid
             switch (side) {
                 case 0: SideDraw::top(rdcon, rect, w, bwr, bwl, c); break;
                 case 1: SideDraw::right(rdcon, rect, w, bwt, bwb, c); break;
@@ -541,13 +595,15 @@ static RdtPath* build_rounded_border_path(Rect rect, BorderProp* border) {
  */
 static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap) {
     if (style == CSS_VALUE_DOTTED) {
-        out_dash[0] = width;
+        // Zero-length dash with round cap produces a circle of diameter = stroke_width.
+        // Gap = 2*width so visual gap (gap - width due to caps) = width.
+        out_dash[0] = 0;
         out_dash[1] = width * 2;
         *out_cap = RDT_CAP_ROUND;
         return 2;
     } else if (style == CSS_VALUE_DASHED) {
-        out_dash[0] = width * 3;
-        out_dash[1] = width * 3;
+        out_dash[0] = width * 2;
+        out_dash[1] = width;
         *out_cap = RDT_CAP_BUTT;
         return 2;
     }
@@ -574,7 +630,13 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                           border->right_color.c == border->bottom_color.c &&
                           border->bottom_color.c == border->left_color.c);
 
-    if (uniform_width && uniform_style && uniform_color && border->width.top > 0 &&
+    // Groove/ridge need per-side color variation (top/left vs bottom/right),
+    // so they must always use per-side rendering even when uniform.
+    bool needs_per_side = (border->top_style == CSS_VALUE_GROOVE ||
+                           border->top_style == CSS_VALUE_RIDGE);
+
+    if (uniform_width && uniform_style && uniform_color && !needs_per_side &&
+        border->width.top > 0 &&
         border->top_style != CSS_VALUE_NONE && border->top_style != CSS_VALUE_HIDDEN) {
 
         CssEnum style = border->top_style;
@@ -584,24 +646,36 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         RdtPath* clip = create_border_clip_path(rdcon);
         rc_push_clip(rdcon, clip, NULL);
 
+        // Stroke-based border rendering: the path must be inset by half the stroke
+        // width from the border-box outer edge so that the stroke (which extends
+        // equally in both directions from the path) fills exactly the border area.
+        // CSS borders occupy [outer_edge, outer_edge + border_width] inward.
+
         if (style == CSS_VALUE_DOUBLE && w >= 3) {
             float line_w = floorf(w / 3.0f);
             if (line_w < 1) line_w = 1;
+            float half_lw = line_w / 2.0f;
 
-            // Outer border
-            RdtPath* outer = build_rounded_border_path(rect, border);
+            // Outer border: path centered at half_lw from outer edge
+            Corner orig_r = border->radius;
+            Rect outer_rect = {rect.x + half_lw, rect.y + half_lw,
+                               rect.width - line_w, rect.height - line_w};
+            border->radius.top_left = max(0.0f, orig_r.top_left - half_lw);
+            border->radius.top_right = max(0.0f, orig_r.top_right - half_lw);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_lw);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_lw);
+            RdtPath* outer = build_rounded_border_path(outer_rect, border);
             rc_stroke_path(rdcon, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
-            // Inner border (inset by w - line_w)
-            float inset = w - line_w;
-            Rect inner_rect = {rect.x + inset, rect.y + inset,
-                               rect.width - inset * 2, rect.height - inset * 2};
-            Corner orig_r = border->radius;
-            border->radius.top_left = max(0.0f, orig_r.top_left - inset);
-            border->radius.top_right = max(0.0f, orig_r.top_right - inset);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inset);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
+            // Inner border: path centered at (w - half_lw) from outer edge
+            float inner_inset = w - half_lw;
+            Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
+                               rect.width - inner_inset * 2, rect.height - inner_inset * 2};
+            border->radius.top_left = max(0.0f, orig_r.top_left - inner_inset);
+            border->radius.top_right = max(0.0f, orig_r.top_right - inner_inset);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inner_inset);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inner_inset);
             RdtPath* inner = build_rounded_border_path(inner_rect, border);
             border->radius = orig_r;
             rc_stroke_path(rdcon, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
@@ -609,38 +683,35 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
             float half_w = w / 2.0f;
+            float quarter_w = w / 4.0f;
 
-            uint8_t dark_r = (uint8_t)(c.r * 0.5f);
-            uint8_t dark_g = (uint8_t)(c.g * 0.5f);
-            uint8_t dark_b = (uint8_t)(c.b * 0.5f);
-            uint8_t light_r = (uint8_t)min(255.0f, c.r * 1.5f);
-            uint8_t light_g = (uint8_t)min(255.0f, c.g * 1.5f);
-            uint8_t light_b = (uint8_t)min(255.0f, c.b * 1.5f);
+            Color dark_c  = color_darken(c, BORDER_DARKEN_FACTOR);
+            Color light_c = color_lighten(c, BORDER_LIGHTEN_FACTOR);
 
             bool groove = (style == CSS_VALUE_GROOVE);
-            Color outer_c, inner_c;
-            if (groove) {
-                outer_c.r = dark_r;  outer_c.g = dark_g;  outer_c.b = dark_b;  outer_c.a = c.a;
-                inner_c.r = light_r; inner_c.g = light_g; inner_c.b = light_b; inner_c.a = c.a;
-            } else {
-                outer_c.r = light_r; outer_c.g = light_g; outer_c.b = light_b; outer_c.a = c.a;
-                inner_c.r = dark_r;  inner_c.g = dark_g;  inner_c.b = dark_b;  inner_c.a = c.a;
-            }
+            Color outer_c = groove ? dark_c : light_c;
+            Color inner_c = groove ? light_c : dark_c;
 
-            // Outer half
-            RdtPath* outer = build_rounded_border_path(rect, border);
+            // Outer half: stroke width=half_w, path centered at quarter_w from outer edge
+            Corner orig_r = border->radius;
+            Rect outer_rect = {rect.x + quarter_w, rect.y + quarter_w,
+                               rect.width - half_w, rect.height - half_w};
+            border->radius.top_left = max(0.0f, orig_r.top_left - quarter_w);
+            border->radius.top_right = max(0.0f, orig_r.top_right - quarter_w);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - quarter_w);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - quarter_w);
+            RdtPath* outer = build_rounded_border_path(outer_rect, border);
             rc_stroke_path(rdcon, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
-            // Inner half
-            float inset = half_w;
-            Rect inner_rect = {rect.x + inset, rect.y + inset,
-                               rect.width - inset * 2, rect.height - inset * 2};
-            Corner orig_r = border->radius;
-            border->radius.top_left = max(0.0f, orig_r.top_left - inset);
-            border->radius.top_right = max(0.0f, orig_r.top_right - inset);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inset);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
+            // Inner half: stroke width=half_w, path centered at 3*quarter_w from outer edge
+            float inner_inset = quarter_w * 3.0f;
+            Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
+                               rect.width - inner_inset * 2, rect.height - inner_inset * 2};
+            border->radius.top_left = max(0.0f, orig_r.top_left - inner_inset);
+            border->radius.top_right = max(0.0f, orig_r.top_right - inner_inset);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inner_inset);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inner_inset);
             RdtPath* inner = build_rounded_border_path(inner_rect, border);
             border->radius = orig_r;
             rc_stroke_path(rdcon, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
@@ -659,19 +730,42 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                 render_inset_outset_trapezoid(rdcon, rect, w, w, w, w, tl_color, br_color);
                 return;
             } else {
-                RdtPath* shape = build_rounded_border_path(rect, border);
+                // Inset path by w/2 for centered stroke
+                float half_w = w / 2.0f;
+                Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
+                                    rect.width - w, rect.height - w};
+                Corner orig_r = border->radius;
+                border->radius.top_left = max(0.0f, orig_r.top_left - half_w);
+                border->radius.top_right = max(0.0f, orig_r.top_right - half_w);
+                border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_w);
+                border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_w);
+                RdtPath* shape = build_rounded_border_path(stroke_rect, border);
+                border->radius = orig_r;
                 rc_stroke_path(rdcon, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
                 rdt_path_free(shape);
             }
 
         } else {
             // Default: solid, dotted, dashed
-            RdtPath* shape = build_rounded_border_path(rect, border);
+            // Inset path by w/2 for centered stroke
+            float half_w = w / 2.0f;
+            Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
+                                rect.width - w, rect.height - w};
+            Corner orig_r = border->radius;
+            border->radius.top_left = max(0.0f, orig_r.top_left - half_w);
+            border->radius.top_right = max(0.0f, orig_r.top_right - half_w);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_w);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_w);
+            RdtPath* shape = build_rounded_border_path(stroke_rect, border);
+            border->radius = orig_r;
             float dash[2];
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(style, w, dash, &cap);
+            // Dash phase = w/2 to align dashes with border-box outer edge
+            // (the path is inset by w/2, so we advance the pattern by w/2)
+            float phase = (dash_count > 0) ? half_w : 0;
             rc_stroke_path(rdcon, shape, c, w, cap, RDT_JOIN_MITER,
-                            dash_count > 0 ? dash : NULL, dash_count, xform);
+                            dash_count > 0 ? dash : NULL, dash_count, xform, phase);
             rdt_path_free(shape);
         }
 

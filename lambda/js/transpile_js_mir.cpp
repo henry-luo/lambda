@@ -11290,6 +11290,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_to_boolean", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+            // v90: BigInt(val) — ES2020 BigInt constructor (as function call)
+            if (nl == 6 && strncmp(n, "BigInt", 6) == 0 && !jm_find_var(mt, "_js_BigInt")) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_bigint_constructor", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
             // Object(val) — ToObject conversion
             if (nl == 6 && strncmp(n, "Object", 6) == 0 && call->arguments) {
                 MIR_reg_t val = jm_transpile_box_item(mt, call->arguments);
@@ -17145,6 +17151,10 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t loop_var;
     bool is_let_const_loop = false;
     if (fo->kind == 1 || fo->kind == 2) {  // 1=let, 2=const (from fo->kind, not fo->left type)
+        is_let_const_loop = true;
+    }
+    // v90: Also detect let/const via fo->kind when left is IDENTIFIER (e.g., for (let p in x))
+    if (!is_let_const_loop && (fo->kind == 1 || fo->kind == 2)) {
         is_let_const_loop = true;
     }
     if (var_name) {

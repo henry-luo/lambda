@@ -502,7 +502,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_STROKE_PATH: {
             DlStrokePath* r = &item->stroke_path;
             rdt_stroke_path(vec, r->path, r->color, r->width, r->cap, r->join,
-                            r->dash_array, r->dash_count,
+                            r->dash_array, r->dash_count, r->dash_phase,
                             r->has_transform ? &r->transform : nullptr);
             items_drawn++;
             break;

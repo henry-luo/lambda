@@ -42,6 +42,9 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
 
+// v90: BigInt constructor (js_runtime.cpp)
+extern Item js_bigint_constructor(Item value);
+
 // view/edit template apply
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
@@ -1196,6 +1199,7 @@ JitImport jit_runtime_imports[] = {
     {"js_unsigned_right_shift", FPTR(js_unsigned_right_shift)},
     {"js_unary_plus", FPTR(js_unary_plus)},
     {"js_unary_minus", FPTR(js_unary_minus)},
+    {"js_bigint_constructor", FPTR(js_bigint_constructor)},
     {"js_typeof", FPTR(js_typeof)},
     {"js_typeof_is", FPTR(js_typeof_is)},
     {"js_lt_raw", FPTR(js_lt_raw)},

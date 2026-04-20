@@ -6,6 +6,11 @@
     "events": [
         {"type": "log", "message": "=== Webview Form Test Start ==="},
         {"type": "wait", "ms": 1500},
+
+        {"type": "log", "message": "--- Assert webview element exists and is visible ---"},
+        {"type": "assert_count", "target": {"selector": "webview"}, "count": 1},
+        {"type": "assert_visible", "target": {"selector": "webview"}, "visible": true},
+
         {"type": "log", "message": "--- Waiting for webview load ---"},
 
         {"type": "log", "message": "--- Scroll host page down to see webview ---"},

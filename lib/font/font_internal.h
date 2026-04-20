@@ -22,7 +22,12 @@
 #include "../arraylist.h"
 #include "../log.h"
 
-#ifndef __APPLE__
+// FreeType is only used on Windows. macOS uses CoreText, Linux uses ThorVG+FontTables.
+#if defined(_WIN32)
+#define LAMBDA_HAS_FREETYPE 1
+#endif
+
+#ifdef LAMBDA_HAS_FREETYPE
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
@@ -68,8 +73,8 @@ FontFormat font_detect_format_ext(const char* path);
 // ============================================================================
 
 struct FontHandle {
-#ifndef __APPLE__
-    FT_Face     ft_face;                // FreeType face object
+#ifdef LAMBDA_HAS_FREETYPE
+    FT_Face     ft_face;                // FreeType face object (Windows only)
 #endif
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
@@ -108,6 +113,9 @@ struct FontHandle {
     // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
     // Created from raw font data for all fonts on macOS.
     void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
+#else
+    // ThorVG rasterization context (Linux/WASM — replaces FreeType rendering)
+    void* tvg_raster_ctx;  // TvgRasterCtx*, void* to avoid ThorVG headers
 #endif
 
     // back-pointer to owning context (for pool access)
@@ -250,8 +258,8 @@ struct FontContext {
     bool            owns_pool;          // true if we created the pool
     bool            owns_arena;         // true if we created the arena
 
-    // FreeType
-#ifndef __APPLE__
+    // FreeType (Windows only)
+#ifdef LAMBDA_HAS_FREETYPE
     FT_Library      ft_library;
     struct FT_MemoryRec_   ft_memory;          // custom allocator routing to pool
 #endif
@@ -420,6 +428,17 @@ bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepo
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
                                               GlyphRenderMode mode, float bitmap_scale,
                                               float pixel_ratio, Arena* arena);
+#else
+// font_rasterize_tvg.cpp — ThorVG glyph rasterization (Linux/WASM)
+void*               font_rasterize_tvg_create(void);
+void                font_rasterize_tvg_destroy(void* tvg_ctx);
+bool                font_rasterize_tvg_metrics(FontTables* tables, uint32_t codepoint,
+                                                float size_px, float bitmap_scale,
+                                                GlyphInfo* out);
+GlyphBitmap*        font_rasterize_tvg_render(void* tvg_ctx, FontTables* tables,
+                                               uint32_t codepoint, float size_px,
+                                               float bitmap_scale, float pixel_ratio,
+                                               Arena* arena);
 #endif
 
 // font_loader.c
@@ -429,7 +448,7 @@ FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
 FontHandle*         font_load_memory_internal(FontContext* ctx, const uint8_t* data,
                                               size_t len, int face_index, float size_px,
                                               float physical_size, FontWeight weight, FontSlant slant);
-#ifndef __APPLE__
+#ifdef LAMBDA_HAS_FREETYPE
 void                font_select_best_fixed_size(FT_Face face, int target_ppem);
 #endif
 
