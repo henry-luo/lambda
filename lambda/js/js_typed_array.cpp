@@ -37,8 +37,8 @@ static int typed_array_element_size(JsTypedArrayType type) {
 extern "C" const char* js_typed_array_type_name(Item val) {
     if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
     Map* m = val.map;
-    if (!m || m->type != (void*)&js_typed_array_type_marker) return NULL;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!m || m->map_kind != MAP_KIND_TYPED_ARRAY) return NULL;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
     if (!ta) return NULL;
     switch (ta->element_type) {
     case JS_TYPED_INT8:          return "Int8Array";
@@ -197,7 +197,21 @@ extern "C" bool js_is_typed_array(Item val) {
     TypeId type = get_type_id(val);
     if (type != LMD_TYPE_MAP) return false;
     Map* m = val.map;
-    return m && m->type == (void*)&js_typed_array_type_marker;
+    return m && m->map_kind == MAP_KIND_TYPED_ARRAY;
+}
+
+// Get the JsTypedArray* from a Map, handling both original and upgraded layouts.
+// Original: m->data holds JsTypedArray* directly (data_cap == 0).
+// Upgraded: JsTypedArray* is stored as __ta__ int64 property (after first user property write).
+extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
+    if (m->data_cap == 0)
+        return (JsTypedArray*)m->data;
+    // upgraded: retrieve from __ta__ internal property
+    bool found = false;
+    extern Item js_map_get_fast_ext(Map*, const char*, int, bool*);
+    Item ta_val = js_map_get_fast_ext(m, "__ta__", 6, &found);
+    if (found) return (JsTypedArray*)(uintptr_t)it2i(ta_val);
+    return NULL;
 }
 
 // Create a standalone typed array (owns its buffer)
@@ -280,9 +294,9 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
 
     if (js_is_typed_array(source)) {
         // Copy from another typed array
-        JsTypedArray* src = (JsTypedArray*)source.map->data;
+        JsTypedArray* src = js_get_typed_array_ptr(source.map);
         Item result = js_typed_array_new(type_id, src->length);
-        JsTypedArray* dst = (JsTypedArray*)result.map->data;
+        JsTypedArray* dst = js_get_typed_array_ptr(result.map);
         if (src->element_type == (JsTypedArrayType)type_id) {
             // fast path: same type → memcpy
             int elem_size = typed_array_element_size(src->element_type);
@@ -345,7 +359,7 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
 
     Map* m = ta_item.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
 
     if (idx < 0 || idx >= ta->length) return (Item){.item = ITEM_NULL};
@@ -383,7 +397,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
 
     Map* m = ta_item.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
     int idx = (int)it2i(index);
 
     if (idx < 0 || idx >= ta->length) return (Item){.item = ITEM_NULL};
@@ -428,7 +442,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
 extern "C" int js_typed_array_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     Map* m = ta_item.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
     return ta->length;
 }
 
@@ -436,7 +450,7 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     if (!js_is_typed_array(ta_item)) return ta_item;
 
     Map* m = ta_item.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
 
     if (start < 0) start = ta->length + start;
     if (start < 0) start = 0;
@@ -513,11 +527,11 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
 // .set(source [, offset]) — bulk copy from another array/typed array
 extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
-    JsTypedArray* dst = (JsTypedArray*)ta_item.map->data;
+    JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
     if (offset < 0) offset = 0;
 
     if (js_is_typed_array(source)) {
-        JsTypedArray* src = (JsTypedArray*)source.map->data;
+        JsTypedArray* src = js_get_typed_array_ptr(source.map);
         int copy_len = src->length;
         if (offset + copy_len > dst->length) copy_len = dst->length - offset;
         if (copy_len <= 0) return (Item){.item = ITEM_NULL};
@@ -550,7 +564,7 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
 // .slice(begin, end) — creates a copy
 extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
-    JsTypedArray* ta = (JsTypedArray*)ta_item.map->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
     if (start < 0) start = ta->length + start;
     if (end < 0) end = ta->length + end;
@@ -560,7 +574,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
 
     int new_length = end - start;
     Item result = js_typed_array_new((int)ta->element_type, new_length);
-    JsTypedArray* rta = (JsTypedArray*)result.map->data;
+    JsTypedArray* rta = js_get_typed_array_ptr(result.map);
     int elem_size = typed_array_element_size(ta->element_type);
     memcpy(rta->data, (char*)ta->data + start * elem_size, new_length * elem_size);
     return result;
@@ -569,7 +583,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
 // .subarray(begin, end) — creates a view (shares buffer)
 extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
-    JsTypedArray* ta = (JsTypedArray*)ta_item.map->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
     if (start < 0) start = ta->length + start;
     if (end < 0) end = ta->length + end;
@@ -591,6 +605,7 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end) {
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_TYPED_ARRAY;
     m->type = (void*)&js_typed_array_type_marker;
     m->data = sub;
     m->data_cap = 0;

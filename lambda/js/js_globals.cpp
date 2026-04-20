@@ -10,6 +10,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_dom_events.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
@@ -850,6 +851,15 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
+        // The transpiler routes .toISOString() here unconditionally;
+        // non-Date objects may have their own methods via prototype chain.
+        if (method_id == 8) { // toISOString
+            Item mk = (Item){.item = s2it(heap_create_name("toISOString", 11))};
+            Item fn = js_property_access(date_obj, mk);
+            if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                return js_call_function(fn, date_obj, nullptr, 0);
+            }
+        }
         return js_throw_type_error("this is not a Date object");
     }
 
@@ -1025,10 +1035,8 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
         if (method_id == 42) { // getTimezoneOffset
             struct tm local_tm; localtime_r(&secs, &local_tm);
-            struct tm utc_tm; gmtime_r(&secs, &utc_tm);
-            time_t local_t = mktime(&local_tm);
-            time_t utc_t = mktime(&utc_tm);
-            int offset_min = (int)((utc_t - local_t) / 60);
+            // tm_gmtoff is seconds east of UTC; getTimezoneOffset returns minutes west of UTC
+            int offset_min = -(int)(local_tm.tm_gmtoff / 60);
             return (Item){.item = i2it(offset_min)};
         }
         if (method_id == 43) { // valueOf — same as getTime
@@ -1073,99 +1081,141 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     }
 
     if (method_id == 20) { // setTime
-        double new_ms = to_double(arg0);
+        Item num = js_to_number(arg0);
+        if (js_check_exception()) return ItemNull;
+        double new_ms = to_double(num);
         return store_ms(new_ms);
     }
 
-    // local setters (21-27)
-    if (method_id >= 21 && method_id <= 27) {
-        time_t secs = (time_t)(ms / 1000.0);
-        int old_millis = (int)(ms - (double)secs * 1000.0);
-        if (old_millis < 0) old_millis += 1000;
-        struct tm tm;
-        localtime_r(&secs, &tm);
+    // Date setters (methods 21-36): local (21-27) and UTC (30-36)
+    // ES spec: call ToNumber on all present arguments first (left-to-right, for side effects),
+    // then check NaN on date/args, then compute. This ensures valueOf/toString side effects
+    // and Symbol TypeError throws happen in the correct order.
+    if (method_id >= 21 && method_id <= 36) {
+        Item n0 = js_to_number(arg0);
+        if (js_check_exception()) return ItemNull;
+        double v0 = to_double(n0);
 
-        switch (method_id) {
-            case 21: // setFullYear(year [, month, date])
-                tm.tm_year = (int)to_double(arg0) - 1900;
-                if (is_present(arg1)) tm.tm_mon = (int)to_double(arg1);
-                if (is_present(arg2)) tm.tm_mday = (int)to_double(arg2);
-                break;
-            case 22: // setMonth(month [, date])
-                tm.tm_mon = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_mday = (int)to_double(arg1);
-                break;
-            case 23: // setDate(date)
-                tm.tm_mday = (int)to_double(arg0);
-                break;
-            case 24: // setHours(hour [, min, sec, ms])
-                tm.tm_hour = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_min = (int)to_double(arg1);
-                if (is_present(arg2)) tm.tm_sec = (int)to_double(arg2);
-                if (is_present(arg3)) old_millis = (int)to_double(arg3);
-                break;
-            case 25: // setMinutes(min [, sec, ms])
-                tm.tm_min = (int)to_double(arg0);
-                if (is_present(arg1)) tm.tm_sec = (int)to_double(arg1);
-                if (is_present(arg2)) old_millis = (int)to_double(arg2);
-                break;
-            case 26: // setSeconds(sec [, ms])
-                tm.tm_sec = (int)to_double(arg0);
-                if (is_present(arg1)) old_millis = (int)to_double(arg1);
-                break;
-            case 27: // setMilliseconds(ms)
-                old_millis = (int)to_double(arg0);
-                break;
+        double v1 = NAN;
+        if (is_present(arg1)) {
+            Item n1 = js_to_number(arg1);
+            if (js_check_exception()) return ItemNull;
+            v1 = to_double(n1);
         }
-        tm.tm_isdst = -1;
-        time_t new_secs = mktime(&tm);
-        double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
-        return store_ms(new_ms);
-    }
-
-    // UTC setters (30-36)
-    if (method_id >= 30 && method_id <= 36) {
-        time_t secs = (time_t)(ms / 1000.0);
-        int old_millis = (int)(ms - (double)secs * 1000.0);
-        if (old_millis < 0) old_millis += 1000;
-        struct tm utc;
-        gmtime_r(&secs, &utc);
-
-        switch (method_id) {
-            case 30: // setUTCFullYear(year [, month, date])
-                utc.tm_year = (int)to_double(arg0) - 1900;
-                if (is_present(arg1)) utc.tm_mon = (int)to_double(arg1);
-                if (is_present(arg2)) utc.tm_mday = (int)to_double(arg2);
-                break;
-            case 31: // setUTCMonth(month [, date])
-                utc.tm_mon = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_mday = (int)to_double(arg1);
-                break;
-            case 32: // setUTCDate(date)
-                utc.tm_mday = (int)to_double(arg0);
-                break;
-            case 33: // setUTCHours(hour [, min, sec, ms])
-                utc.tm_hour = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_min = (int)to_double(arg1);
-                if (is_present(arg2)) utc.tm_sec = (int)to_double(arg2);
-                if (is_present(arg3)) old_millis = (int)to_double(arg3);
-                break;
-            case 34: // setUTCMinutes(min [, sec, ms])
-                utc.tm_min = (int)to_double(arg0);
-                if (is_present(arg1)) utc.tm_sec = (int)to_double(arg1);
-                if (is_present(arg2)) old_millis = (int)to_double(arg2);
-                break;
-            case 35: // setUTCSeconds(sec [, ms])
-                utc.tm_sec = (int)to_double(arg0);
-                if (is_present(arg1)) old_millis = (int)to_double(arg1);
-                break;
-            case 36: // setUTCMilliseconds(ms)
-                old_millis = (int)to_double(arg0);
-                break;
+        double v2 = NAN;
+        if (is_present(arg2)) {
+            Item n2 = js_to_number(arg2);
+            if (js_check_exception()) return ItemNull;
+            v2 = to_double(n2);
         }
-        time_t new_secs = timegm(&utc);
-        double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
-        return store_ms(new_ms);
+        double v3 = NAN;
+        if (is_present(arg3)) {
+            Item n3 = js_to_number(arg3);
+            if (js_check_exception()) return ItemNull;
+            v3 = to_double(n3);
+        }
+
+        // ES spec: if any required arg is NaN, result is NaN
+        if (isnan(v0)) return store_ms(NAN);
+        if (is_present(arg1) && isnan(v1)) return store_ms(NAN);
+        if (is_present(arg2) && isnan(v2)) return store_ms(NAN);
+        if (is_present(arg3) && isnan(v3)) return store_ms(NAN);
+
+        // ES spec: setFullYear/setUTCFullYear — if date is NaN, use +0
+        if ((method_id == 21 || method_id == 30) && isnan(ms)) ms = 0.0;
+        // all other setters: if date is NaN, result is NaN
+        if (isnan(ms)) return store_ms(NAN);
+
+        // local setters (21-27)
+        if (method_id >= 21 && method_id <= 27) {
+            time_t secs = (time_t)(ms / 1000.0);
+            int old_millis = (int)(ms - (double)secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm tm;
+            localtime_r(&secs, &tm);
+
+            switch (method_id) {
+                case 21: // setFullYear(year [, month, date])
+                    tm.tm_year = (int)v0 - 1900;
+                    if (is_present(arg1)) tm.tm_mon = (int)v1;
+                    if (is_present(arg2)) tm.tm_mday = (int)v2;
+                    break;
+                case 22: // setMonth(month [, date])
+                    tm.tm_mon = (int)v0;
+                    if (is_present(arg1)) tm.tm_mday = (int)v1;
+                    break;
+                case 23: // setDate(date)
+                    tm.tm_mday = (int)v0;
+                    break;
+                case 24: // setHours(hour [, min, sec, ms])
+                    tm.tm_hour = (int)v0;
+                    if (is_present(arg1)) tm.tm_min = (int)v1;
+                    if (is_present(arg2)) tm.tm_sec = (int)v2;
+                    if (is_present(arg3)) old_millis = (int)v3;
+                    break;
+                case 25: // setMinutes(min [, sec, ms])
+                    tm.tm_min = (int)v0;
+                    if (is_present(arg1)) tm.tm_sec = (int)v1;
+                    if (is_present(arg2)) old_millis = (int)v2;
+                    break;
+                case 26: // setSeconds(sec [, ms])
+                    tm.tm_sec = (int)v0;
+                    if (is_present(arg1)) old_millis = (int)v1;
+                    break;
+                case 27: // setMilliseconds(ms)
+                    old_millis = (int)v0;
+                    break;
+            }
+            tm.tm_isdst = -1;
+            time_t new_secs = mktime(&tm);
+            double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
+            return store_ms(new_ms);
+        }
+
+        // UTC setters (30-36)
+        if (method_id >= 30 && method_id <= 36) {
+            time_t secs = (time_t)(ms / 1000.0);
+            int old_millis = (int)(ms - (double)secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm utc;
+            gmtime_r(&secs, &utc);
+
+            switch (method_id) {
+                case 30: // setUTCFullYear(year [, month, date])
+                    utc.tm_year = (int)v0 - 1900;
+                    if (is_present(arg1)) utc.tm_mon = (int)v1;
+                    if (is_present(arg2)) utc.tm_mday = (int)v2;
+                    break;
+                case 31: // setUTCMonth(month [, date])
+                    utc.tm_mon = (int)v0;
+                    if (is_present(arg1)) utc.tm_mday = (int)v1;
+                    break;
+                case 32: // setUTCDate(date)
+                    utc.tm_mday = (int)v0;
+                    break;
+                case 33: // setUTCHours(hour [, min, sec, ms])
+                    utc.tm_hour = (int)v0;
+                    if (is_present(arg1)) utc.tm_min = (int)v1;
+                    if (is_present(arg2)) utc.tm_sec = (int)v2;
+                    if (is_present(arg3)) old_millis = (int)v3;
+                    break;
+                case 34: // setUTCMinutes(min [, sec, ms])
+                    utc.tm_min = (int)v0;
+                    if (is_present(arg1)) utc.tm_sec = (int)v1;
+                    if (is_present(arg2)) old_millis = (int)v2;
+                    break;
+                case 35: // setUTCSeconds(sec [, ms])
+                    utc.tm_sec = (int)v0;
+                    if (is_present(arg1)) old_millis = (int)v1;
+                    break;
+                case 36: // setUTCMilliseconds(ms)
+                    old_millis = (int)v0;
+                    break;
+            }
+            time_t new_secs = timegm(&utc);
+            double new_ms = (double)new_secs * 1000.0 + (double)old_millis;
+            return store_ms(new_ms);
+        }
     }
 
     return ItemNull;
@@ -1836,14 +1886,15 @@ static Item structured_clone_impl(Item value, int depth) {
 
     // typed array: copy buffer
     extern bool js_is_typed_array(Item item);
+    extern JsTypedArray* js_get_typed_array_ptr(Map* m);
     if (js_is_typed_array(value)) {
         Map* m = value.map;
-        JsTypedArray* ta = (JsTypedArray*)m->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(m);
         if (ta && ta->data && ta->byte_length > 0) {
             extern Item js_typed_array_new(int element_type, int length);
             Item clone = js_typed_array_new(ta->element_type, ta->byte_length);
             Map* cm = clone.map;
-            JsTypedArray* cta = (JsTypedArray*)cm->data;
+            JsTypedArray* cta = js_get_typed_array_ptr(cm);
             if (cta && cta->data) {
                 memcpy(cta->data, ta->data, ta->byte_length);
             }
@@ -2740,7 +2791,7 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
 
     // Handle TypedArray (Uint8Array, Int32Array, etc.)
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(arr_item.map);
         int len = ta->length;
         if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
         char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
@@ -3178,7 +3229,7 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 
         // TypedArray types
         if (js_is_typed_array(left)) {
-            JsTypedArray* ta = (JsTypedArray*)left.map->data;
+            JsTypedArray* ta = js_get_typed_array_ptr(left.map);
             if (rn->len == 10 && strncmp(rn->chars, "Uint8Array", 10) == 0)
                 return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8)};
             if (rn->len == 17 && strncmp(rn->chars, "Uint8ClampedArray", 17) == 0)
@@ -4431,6 +4482,11 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
 // =============================================================================
 
 extern "C" Item js_array_is_array(Item value) {
+    // ES spec §7.2.2: unwrap Proxy recursively
+    if (js_is_proxy(value)) {
+        value = js_proxy_get_target(value);
+        if (value.item == ItemNull.item) return (Item){.item = ITEM_FALSE}; // revoked proxy
+    }
     TypeId type = get_type_id(value);
     return (Item){.item = (type == LMD_TYPE_ARRAY) ? ITEM_TRUE : ITEM_FALSE};
 }
@@ -6883,7 +6939,7 @@ extern "C" Item js_array_from(Item iterable) {
     }
     // TypedArray: convert each element to a JS number in a regular array
     if (js_is_typed_array(iterable)) {
-        JsTypedArray* ta = (JsTypedArray*)iterable.map->data;
+        JsTypedArray* ta = js_get_typed_array_ptr(iterable.map);
         int len = ta->length;
         Item result = js_array_new(0);
         for (int i = 0; i < len; i++) {
@@ -8038,6 +8094,9 @@ extern "C" void js_globals_batch_reset() {
     js_process_object = (Item){.item = ITEM_NULL};
     js_process_argc_raw = 0;
     js_process_argv_raw = NULL;
+    // reset with-statement scope stack — stale Items become dangling after heap reset
+    extern void js_with_batch_reset(void);
+    js_with_batch_reset();
 }
 
 // forward declaration for populating globalThis with constructors
@@ -8083,6 +8142,7 @@ extern "C" Item js_get_global_this() {
             {"Int32Array", 10}, {"Uint32Array", 11},
             {"Float32Array", 12}, {"Float64Array", 12},
             {"Proxy", 5},
+            {"Event", 5}, {"CustomEvent", 11},
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -8143,6 +8203,31 @@ extern "C" Item js_get_global_this() {
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
+
+        // DOM: Node constants (Node.ELEMENT_NODE, etc.)
+        {
+            Item node_obj = js_new_object();
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ELEMENT_NODE", 12))}, (Item){.item = i2it(1)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ATTRIBUTE_NODE", 14))}, (Item){.item = i2it(2)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("TEXT_NODE", 9))}, (Item){.item = i2it(3)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("CDATA_SECTION_NODE", 18))}, (Item){.item = i2it(4)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("COMMENT_NODE", 12))}, (Item){.item = i2it(8)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_NODE", 13))}, (Item){.item = i2it(9)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_TYPE_NODE", 18))}, (Item){.item = i2it(10)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_FRAGMENT_NODE", 22))}, (Item){.item = i2it(11)});
+            // document position bitmask
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_DISCONNECTED", 30))}, (Item){.item = i2it(1)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_PRECEDING", 27))}, (Item){.item = i2it(2)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_FOLLOWING", 27))}, (Item){.item = i2it(4)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINS", 26))}, (Item){.item = i2it(8)});
+            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINED_BY", 30))}, (Item){.item = i2it(16)});
+            // make Node also usable as a prototype-like check (Node.prototype = Node for typeof == 'function' checks)
+            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Node", 4))}, node_obj);
+        }
+
+        // DOM: window.innerWidth / innerHeight (headless defaults)
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerWidth", 10))}, (Item){.item = i2it(1024)});
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerHeight", 11))}, (Item){.item = i2it(768)});
     }
     return js_global_this_obj;
 }
@@ -8159,6 +8244,11 @@ extern "C" Item js_get_global_object() {
 static Item js_with_stack[JS_WITH_STACK_MAX];
 static int js_with_stack_depth = 0;
 
+extern "C" void js_with_batch_reset(void) {
+    js_with_stack_depth = 0;
+    memset(js_with_stack, 0, sizeof(js_with_stack));
+}
+
 extern "C" void js_with_push(Item obj) {
     if (js_with_stack_depth < JS_WITH_STACK_MAX) {
         js_with_stack[js_with_stack_depth++] = obj;
@@ -8171,14 +8261,41 @@ extern "C" void js_with_pop() {
     }
 }
 
+extern "C" int js_with_save_depth() {
+    return js_with_stack_depth;
+}
+
+extern "C" void js_with_restore_depth(int depth) {
+    js_with_stack_depth = depth;
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found) {
+    extern int js_check_exception(void);
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack[i];
         if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
             extern Item js_has_own_property(Item obj, Item key);
             if (it2b(js_has_own_property(scope_obj, key))) {
+                // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
+                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))}; // Symbol.unscopables
+                Item unscopables = js_property_get(scope_obj, unscopables_sym);
+                if (js_check_exception()) {
+                    *found = true;
+                    return ItemNull; // getter threw — propagate
+                }
+                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
+                    Item blocked = js_property_get(unscopables, key);
+                    if (js_check_exception()) {
+                        *found = true;
+                        return ItemNull;
+                    }
+                    extern bool js_is_truthy(Item value);
+                    if (js_is_truthy(blocked)) {
+                        continue; // binding is blocked by @@unscopables
+                    }
+                }
                 *found = true;
                 return js_property_get(scope_obj, key);
             }
@@ -8228,6 +8345,26 @@ extern "C" Item js_get_global_property_strict(Item key) {
         }
     }
     return result;
+}
+
+// js_set_global_property: write a property to the global object by name string
+// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
+extern "C" void js_set_global_property(Item key, Item value) {
+    // Check with-scope stack first — assignments inside 'with' resolve to scope object
+    if (js_with_stack_depth > 0) {
+        for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+            Item scope_obj = js_with_stack[i];
+            if (get_type_id(scope_obj) == LMD_TYPE_MAP) {
+                extern Item js_has_own_property(Item obj, Item key);
+                if (it2b(js_has_own_property(scope_obj, key))) {
+                    js_property_set(scope_obj, key, value);
+                    return;
+                }
+            }
+        }
+    }
+    Item global = js_get_global_this();
+    js_property_set(global, key, value);
 }
 
 // v48: Return a function wrapper for global builtins (parseInt, parseFloat, etc.)
@@ -8321,6 +8458,8 @@ enum JsConstructorId {
     JS_CTOR_FLOAT64ARRAY,
     JS_CTOR_AGGREGATE_ERROR,
     JS_CTOR_PROXY,
+    JS_CTOR_EVENT,
+    JS_CTOR_CUSTOM_EVENT,
     JS_CTOR_MAX
 };
 
@@ -8418,6 +8557,16 @@ static Item js_ctor_uri_error_fn(Item msg) {
 static Item js_ctor_eval_error_fn(Item msg) {
     Item tn = (Item){.item = s2it(heap_create_name("EvalError", 9))};
     return js_new_error_with_name(tn, msg);
+}
+
+// Event(type, options) / CustomEvent(type, options) — called without 'new'
+static Item js_ctor_event_fn(Item type_arg) {
+    const char* type = fn_to_cstr(type_arg);
+    return js_create_event(type ? type : "", false, false);
+}
+static Item js_ctor_custom_event_fn(Item type_arg) {
+    const char* type = fn_to_cstr(type_arg);
+    return js_create_custom_event(type ? type : "", false, false, ItemNull);
 }
 
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
@@ -8629,6 +8778,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_SYNTAX_ERROR) fn->func_ptr = (void*)js_ctor_syntax_error_fn;
     else if (ctor_id == JS_CTOR_URI_ERROR) fn->func_ptr = (void*)js_ctor_uri_error_fn;
     else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
+    else if (ctor_id == JS_CTOR_EVENT) fn->func_ptr = (void*)js_ctor_event_fn;
+    else if (ctor_id == JS_CTOR_CUSTOM_EVENT) fn->func_ptr = (void*)js_ctor_custom_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
@@ -8696,6 +8847,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
         {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
         {"Proxy", 5, JS_CTOR_PROXY, 2},
+        {"Event", 5, JS_CTOR_EVENT, 1},
+        {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 1},
         {NULL, 0, 0, 0}
     };
 

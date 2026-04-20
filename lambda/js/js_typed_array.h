@@ -63,6 +63,7 @@ Item js_typed_array_set(Item ta, Item index, Item value);
 int  js_typed_array_length(Item ta);
 Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
+JsTypedArray* js_get_typed_array_ptr(Map* m);
 Item js_typed_array_subarray(Item ta, int start, int end);
 Item js_typed_array_slice(Item ta, int start, int end);
 Item js_typed_array_set_from(Item ta, Item source, int offset);

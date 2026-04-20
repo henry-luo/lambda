@@ -776,6 +776,9 @@ extern void js_set_strict_mode(int64_t strict);
 // with-statement scope support (js_globals.cpp)
 extern void js_with_push(Item obj);
 extern void js_with_pop(void);
+extern int js_with_save_depth(void);
+extern void js_with_restore_depth(int depth);
+extern void js_set_global_property(Item key, Item value);
 
 // Object.groupBy / Map.groupBy (ES2024)
 extern Item js_object_group_by(Item items, Item callback);
@@ -1476,6 +1479,9 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
     {"js_with_push", FPTR(js_with_push)},
     {"js_with_pop", FPTR(js_with_pop)},
+    {"js_with_save_depth", FPTR(js_with_save_depth)},
+    {"js_with_restore_depth", FPTR(js_with_restore_depth)},
+    {"js_set_global_property", FPTR(js_set_global_property)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
