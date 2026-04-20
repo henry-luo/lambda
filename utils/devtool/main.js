@@ -11,7 +11,7 @@ class LayoutDevTool {
     this.testDataDir = path.join(this.projectRoot, 'test/layout/data');
     this.referenceDir = path.join(this.projectRoot, 'test/layout/reference');
     this.lambdaExe = path.join(this.projectRoot, 'lambda.exe');
-    this.recentTests = []; // Track recent test history
+    this.recentTests = [];
 
     console.log('LayoutDevTool initialized:');
     console.log('  __dirname:', __dirname);
@@ -129,6 +129,21 @@ class LayoutDevTool {
       if (this.mainWindow) {
         this.mainWindow.webContents.send('terminal-output', data);
       }
+    });
+
+    // Load render test list
+    ipcMain.handle('load-render-tests', async () => {
+      return await this.loadRenderTests();
+    });
+
+    // Run a render test (re-capture radiant snapshot + compute diff)
+    ipcMain.handle('run-render-test', async (event, testName, renderDir) => {
+      return await this.runRenderTest(testName, renderDir);
+    });
+
+    // Get render test images (reference, output, diff)
+    ipcMain.handle('get-render-test-images', async (event, testName, renderDir) => {
+      return await this.getRenderTestImages(testName, renderDir);
     });
   }
 
@@ -452,6 +467,121 @@ class LayoutDevTool {
         reject(error);
       });
     });
+  }
+
+  async loadRenderTests() {
+    // Return directory-grouped structure: [{ dir: 'page', tests: ['bg_color_01', ...] }, ...]
+    const renderRoot = path.join(this.projectRoot, 'test/render');
+    const result = [];
+    try {
+      const entries = await fs.readdir(renderRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+        const dirPath = path.join(renderRoot, entry.name);
+        try {
+          const files = await fs.readdir(dirPath);
+          const htmlTests = files
+            .filter(f => f.endsWith('.html') && !f.startsWith('.'))
+            .map(f => f.replace(/\.html$/, ''))
+            .sort();
+          if (htmlTests.length > 0) {
+            result.push({ dir: entry.name, tests: htmlTests });
+          }
+        } catch {}
+      }
+    } catch (error) {
+      console.error('Failed to load render tests:', error);
+    }
+    return result.sort((a, b) => a.dir.localeCompare(b.dir));
+  }
+
+  async getRenderTestImages(testName, renderDir = 'page') {
+    const result = { reference: null, output: null, diff: null };
+    const renderRoot = path.join(this.projectRoot, 'test/render');
+    const refPath = path.join(renderRoot, 'reference', `${testName}.png`);
+    const outPath = path.join(renderRoot, 'output', `${testName}.png`);
+    const diffPath = path.join(renderRoot, 'diff', `${testName}.png`);
+    const ts = Date.now();
+    try { await fs.access(refPath); result.reference = `file://${refPath}?t=${ts}`; } catch {}
+    try { await fs.access(outPath); result.output = `file://${outPath}?t=${ts}`; } catch {}
+    try { await fs.access(diffPath); result.diff = `file://${diffPath}?t=${ts}`; } catch {}
+    return result;
+  }
+
+  async runRenderTest(testName, renderDir = 'page') {
+    const renderRoot = path.join(this.projectRoot, 'test/render');
+    const htmlFile = path.join(renderRoot, renderDir, `${testName}.html`);
+    const outputPng = path.join(renderRoot, 'output', `${testName}.png`);
+    const refPng = path.join(renderRoot, 'reference', `${testName}.png`);
+    const diffPng = path.join(renderRoot, 'diff', `${testName}.png`);
+
+    await fs.mkdir(path.join(renderRoot, 'output'), { recursive: true });
+    await fs.mkdir(path.join(renderRoot, 'diff'), { recursive: true });
+
+    // Render with lambda.exe
+    const renderResult = await new Promise((resolve, reject) => {
+      const args = ['render', htmlFile, '-o', outputPng,
+        '-vw', '100', '-vh', '100', '--pixel-ratio', '1'];
+      const proc = spawn(this.lambdaExe, args, { cwd: this.projectRoot });
+      let stderr = '';
+      proc.stdout.on('data', (data) => {
+        this.mainWindow?.webContents.send('terminal-output', data.toString());
+      });
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+        this.mainWindow?.webContents.send('terminal-output', data.toString());
+      });
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Render failed (exit ${code}): ${stderr.trim()}`));
+      });
+      proc.on('error', reject);
+    });
+
+    // Compute diff using pixelmatch
+    let mismatchPercent = 0;
+    let mismatchedPixels = 0;
+    let totalPixels = 0;
+    let hasRef = false;
+    try {
+      await fs.access(refPng);
+      hasRef = true;
+    } catch {}
+
+    if (hasRef) {
+      try {
+        const PNG = require('pngjs').PNG;
+        const pixelmatchModule = require('pixelmatch');
+        const pixelmatch = pixelmatchModule.default || pixelmatchModule;
+        const refBuf = await fs.readFile(refPng);
+        const outBuf = await fs.readFile(outputPng);
+        const refImg = PNG.sync.read(refBuf);
+        const outImg = PNG.sync.read(outBuf);
+        if (refImg.width === outImg.width && refImg.height === outImg.height) {
+          const { width, height } = refImg;
+          const diff = new PNG({ width, height });
+          mismatchedPixels = pixelmatch(
+            refImg.data, outImg.data, diff.data, width, height,
+            { threshold: 0.1, includeAA: false }
+          );
+          totalPixels = width * height;
+          mismatchPercent = (mismatchedPixels / totalPixels) * 100;
+          await fs.writeFile(diffPng, PNG.sync.write(diff));
+        }
+      } catch (e) {
+        console.error('Diff computation failed:', e);
+      }
+    }
+
+    const ts = Date.now();
+    return {
+      mismatchPercent,
+      mismatchedPixels,
+      totalPixels,
+      reference: hasRef ? `file://${refPng}?t=${ts}` : null,
+      output: `file://${outputPng}?t=${ts}`,
+      diff: hasRef ? `file://${diffPng}?t=${ts}` : null
+    };
   }
 
   initialize() {

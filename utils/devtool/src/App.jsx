@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import TestTree from './components/TestTree';
 import ComparisonPanel from './components/ComparisonPanel';
+import RenderComparisonPanel from './components/RenderComparisonPanel';
 import BottomPanel from './components/BottomPanel';
 
 function App() {
@@ -13,9 +14,10 @@ function App() {
   const [lambdaPixelRatio, setLambdaPixelRatio] = useState(1);
   const [recentTests, setRecentTests] = useState([]);
   const [showRecentTests, setShowRecentTests] = useState(false);
-  const [viewportPreset, setViewportPreset] = useState('desktop'); // desktop, tablet, mobile, custom
+  const [viewportPreset, setViewportPreset] = useState('desktop');
   const terminalRef = useRef(null);
   const comparisonPanelRef = useRef(null);
+  const renderPanelRef = useRef(null);
   const isDraggingLeftRef = useRef(false);
   const isDraggingBottomRef = useRef(false);
 
@@ -79,6 +81,39 @@ function App() {
   const handleRunTest = async () => {
     if (!selectedTest || isRunning) return;
 
+    // Render test flow
+    if (selectedTest.testType === 'render') {
+      setIsRunning(true);
+      terminalRef.current?.clear();
+      terminalRef.current?.writeln(`Running render test: ${selectedTest.testFile}`);
+      terminalRef.current?.writeln('');
+      try {
+        const result = await window.electronAPI.runRenderTest(selectedTest.testFile, selectedTest.renderDir);
+        terminalRef.current?.writeln('');
+        if (result.mismatchPercent !== undefined) {
+          const pct = result.mismatchPercent.toFixed(2);
+          if (result.mismatchPercent <= 1.0) {
+            terminalRef.current?.writeln(`\x1b[32m✓ PASS  ${pct}% diff\x1b[0m`);
+          } else {
+            terminalRef.current?.writeln(`\x1b[31m✗ FAIL  ${pct}% diff\x1b[0m`);
+          }
+        }
+        // Update both the top panel images and the bottom Pixel Diff tab
+        if (renderPanelRef.current?.handleRunResult) {
+          renderPanelRef.current.handleRunResult(result);
+        }
+        terminalRef.current?.updatePixelDiff(result);
+        terminalRef.current?.showPixelDiff();
+      } catch (error) {
+        console.error('Render test error:', error);
+        terminalRef.current?.writeln(`\x1b[31mError: ${error.message}\x1b[0m`);
+      } finally {
+        setIsRunning(false);
+      }
+      return;
+    }
+
+    // Layout test flow
     console.log('Running test:', selectedTest);
     setIsRunning(true);
     setLambdaRenderPath(null);
@@ -227,6 +262,7 @@ function App() {
           <span className="menu-item">Help</span>
         </div>
         <div className="toolbar">
+          {selectedTest?.testType !== 'render' && (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
             <label style={{ fontSize: '13px', color: '#ccc' }}>Viewport:</label>
             <select 
@@ -246,6 +282,7 @@ function App() {
               <option value="mobile">{viewportPresets.mobile.label}</option>
             </select>
           </div>
+          )}
           <button
             className="btn btn-primary"
             onClick={handleRunTest}
@@ -309,13 +346,24 @@ function App() {
 
         <div className="right-content">
           <div className="top-panel">
-            <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} lambdaPixelRatio={lambdaPixelRatio} />
+            {selectedTest?.testType === 'render' ? (
+              <RenderComparisonPanel
+                ref={renderPanelRef}
+                test={selectedTest}
+                isRunning={isRunning}
+              />
+            ) : (
+              <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} lambdaPixelRatio={lambdaPixelRatio} />
+            )}
           </div>
           <div className="resize-handle-horizontal" onMouseDown={handleBottomMouseDown} />
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
             <BottomPanel
               ref={terminalRef}
-              testPath={selectedTest ? `test/layout/data/${selectedTest.category}/${selectedTest.testFile}` : null}
+              testPath={selectedTest?.testType === 'render'
+                ? `test/render/${selectedTest.renderDir || 'page'}/${selectedTest.testFile}.html`
+                : selectedTest ? `test/layout/data/${selectedTest.category}/${selectedTest.testFile}` : null}
+              renderTest={selectedTest?.testType === 'render' ? selectedTest : null}
             />
           </div>
         </div>

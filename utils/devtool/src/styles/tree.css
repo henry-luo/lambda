@@ -67,6 +67,34 @@
   margin-bottom: 2px;
 }
 
+/* Section (top-level grouping: Render Tests, Layout Tests) */
+.section {
+  margin-bottom: 4px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+  gap: 6px;
+  background: #eef2f7;
+  border-bottom: 1px solid #dde3ea;
+}
+
+.section-header:hover {
+  background: #e0e7ef;
+}
+
+.section-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
 .category-header {
   display: flex;
   align-items: center;
