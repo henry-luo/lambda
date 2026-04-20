@@ -158,6 +158,14 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
         }
     }
 
+    // create ThorVG rasterization context (preferred rasterizer on Linux)
+    if (handle->tables) {
+        handle->tvg_raster_ctx = font_rasterize_tvg_create();
+        if (!handle->tvg_raster_ctx) {
+            log_debug("font_loader: tvg_raster_ctx creation failed (non-fatal, FreeType fallback)");
+        }
+    }
+
     // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
     handle->bitmap_scale = 1.0f;
     if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&

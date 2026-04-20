@@ -511,6 +511,11 @@ void font_handle_release(FontHandle* handle) {
             FT_Done_Face(handle->ft_face);
             handle->ft_face = NULL;
         }
+        // destroy ThorVG rasterization context
+        if (handle->tvg_raster_ctx) {
+            font_rasterize_tvg_destroy(handle->tvg_raster_ctx);
+            handle->tvg_raster_ctx = NULL;
+        }
 #endif
         // destroy FontTables (pool-allocated — skip during bulk destroy)
         if (handle->tables && handle->ctx && !bulk_destroy) {
