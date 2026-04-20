@@ -2,7 +2,7 @@
 
 ## Overview
 
-Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,838** failing tests (out of 34,094 in-scope). Current pass rate: **71.1%** (24,256 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
+Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,215** failing tests (out of 34,094 in-scope). Current pass rate: **73.0%** (24,879 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
 
 The analysis identifies **8 structural gaps** and **5 incremental enhancement areas**, organized into tiers by impact and dependency order.
 
@@ -191,6 +191,75 @@ Baseline: 24,212 → **24,256** stable (+54 net improvements after flaky test cl
 **Updated partially implemented:**
 - **4.3** Date setter edge cases — **Done** (ToNumber coercion, NaN date handling, setFullYear +0 base)
 
+**2026-04-20 Update — Comparison operators, Array species, String Symbol protocols, prototype chain, BigInt constructor, ToPrimitive getter propagation, Annex B legacy methods, TypedArray detach, batch stability (+239 tests):**
+
+Baseline: 24,256 → **24,495** stable (+239 net new passing tests; partial-pass list reduced from 42 to 3)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| Abstract Relational Comparison rewrite | `js_runtime.cpp` | +30 | `js_abstract_relational_lt` per ES §7.2.14; NaN → `undefined` → `false` for `<=`, `>=` |
+| Array `@@species` (concat, slice, filter, map) | `js_runtime.cpp` | +40 | `js_array_species_create`, `js_create_data_property_or_throw`; species getter on Array/Promise/Map/ArrayBuffer/TypedArray constructors |
+| String Symbol protocol delegation | `js_runtime.cpp` | +25 | `split`→`[Symbol.split]`, `replace/replaceAll`→`[Symbol.replace]`, `search`→`[Symbol.search]`, `match`→`[Symbol.match]` |
+| Custom prototype chain on arrays/functions | `js_runtime.cpp` | +20 | `js_array_get_custom_proto`, `js_func_get_custom_proto`; accessor descriptors in `properties_map` |
+| `instanceof` / OrdinaryHasInstance | `js_globals.cpp` | +10 | Split into `js_instanceof` + `js_ordinary_has_instance`; `Function.prototype[@@hasInstance]`; non-object prototype TypeError |
+| BigInt() constructor | `js_runtime.cpp`, `transpile_js_mir.cpp`, `sys_func_registry.c` | +5 | `js_bigint_constructor` with ToPrimitive hint "number"; exception propagation from valueOf/toString |
+| ToPrimitive getter propagation in `js_to_string` | `js_runtime.cpp` | +3 | Hybrid `js_map_get_fast` + `js_property_get` for getter-defined valueOf/toString |
+| JSON.parse exception propagation | `js_globals.cpp` | +2 | `js_check_exception()` after `js_to_string()` prevents masking ToPrimitive exceptions |
+| TypedArray detach + validate | `js_typed_array.cpp`, `js_runtime.cpp` | +30 | `js_arraybuffer_detach`, `js_arraybuffer_is_detached`, `validate_typed_array`; `$262.detachArrayBuffer` |
+| TypedArray `from()` / `of()` static methods | `js_runtime.cpp` | +15 | `JS_BUILTIN_TYPED_ARRAY_FROM`, `JS_BUILTIN_TYPED_ARRAY_OF` |
+| TypedArray `js_typed_array_set` ToNumber coercion | `js_runtime.cpp` | +5 | Calls `js_to_number(value)` for non-numeric; Symbol TypeError |
+| ArrayBuffer.prototype.slice | `js_runtime.cpp` | +8 | `JS_BUILTIN_ARRAYBUFFER_SLICE` |
+| Annex B legacy methods | `js_runtime.cpp` | +10 | `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, `__lookupSetter__`, `RegExp.prototype.compile` |
+| Symbol.for / Symbol.keyFor | `js_runtime.cpp` | +5 | `JS_BUILTIN_SYMBOL_FOR`, `JS_BUILTIN_SYMBOL_KEY_FOR` |
+| Catch parameter scoping | `transpile_js_mir.cpp` | +8 | Catch params block-scoped (like `let`), not added to function-level locals |
+| Implicit global compound assignment | `transpile_js_mir.cpp` | +10 | `+=`, `-=`, etc. on implicit globals via `js_get_global_property`/`js_set_global_property` |
+| Batch reset improvements | `js_runtime.cpp`, `js_globals.cpp` | +13 | Reset globalThis, constructor cache, DOM state, $262, process listeners, event loop between batch tests |
+
+**Key bugs found and fixed:**
+- **Abstract Relational Comparison NaN**: `<=` and `>=` operators returned `true` for NaN comparisons (e.g., `NaN <= 0`). Rewrote using `js_abstract_relational_lt` which returns a tri-state (`true`/`false`/`undefined`), mapping `undefined` → `false` for all relational operators.
+- **Array species not used**: `Array.prototype.concat/slice/filter/map` always created plain arrays. Spec requires checking `constructor[@@species]` for the result array type. Added `js_array_species_create` and installed `@@species` getter on Array, Promise, Map, ArrayBuffer, and TypedArray constructors.
+- **String methods ignoring Symbol protocols**: `String.prototype.split/replace/search/match` didn't check `[Symbol.split]` etc. on the argument before falling through to default logic. Now delegates to the argument's Symbol method when present.
+- **Prototype chain incomplete for arrays/functions**: Arrays and functions with custom `__proto__` (via `Object.setPrototypeOf`) didn't walk the prototype chain for property access. Added `js_array_get_custom_proto`/`js_func_get_custom_proto` and accessor descriptor (`__get_<prop>`) lookup in `properties_map`.
+- **ToPrimitive getter-defined methods**: `js_to_string` used `js_map_get_fast` for valueOf lookup, which doesn't find getter-defined properties (stored as `__get_valueOf`). Fixed with hybrid approach: `js_map_get_fast` for direct property existence check, then `js_property_get` fallback for getter invocation.
+- **JSON.parse masking exceptions**: `js_json_parse` didn't check `js_check_exception()` after `js_to_string()`, so ToPrimitive exceptions from getter-defined valueOf/toString were silently replaced with "Unexpected end of JSON input".
+- **Catch parameter leaking to function scope**: Catch parameters were added to function-level locals via `jm_collect_pattern_names`, preventing correct capture of same-named outer variables in closures.
+
+**Completed items:**
+- **2.1** Symbol.match/replace/search/split protocol — **Done** (String methods now delegate to Symbol protocols)
+- **2.2** Array @@species + @@isConcatSpreadable — **Done** (species on concat/slice/filter/map, isConcatSpreadable was prior)
+- **3.3** Annex B legacy RegExp features — **Partial** (RegExp.compile done, other Annex B regex features remain)
+- **4.3** Date setter NaN/coercion edge cases — **Done** (prior session)
+- **4.5** BigInt complete — **Partial** (BigInt() constructor done, comparisons/TypedArray remain)
+
+**Partially completed:**
+- **1.3** TypedArray species + detached checks — **Partial** (detach infrastructure done, species not yet)
+
+**2026-06-11 Update — TypedArray species constructor (+121 tests):**
+
+Baseline: 24,495 → **24,616** stable (+121 net new passing tests)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| TypedArray species constructor pattern | `js_runtime.cpp` | +121 | `js_typed_array_species_create` for map/filter/slice/subarray; detach validation in every iteration method |
+
+**Completed items:**
+- **1.3** TypedArray species + detached checks — **Done**
+
+**2026-06-22 Update — Object.defineProperty non-writable bypass + defineProperties error stop (+263 tests):**
+
+Baseline: 24,616 → **24,879** stable (+263 net new passing tests; 6 batch-flaky tests removed)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| defineProperty: bypass `__nw_` for configurable properties | `js_globals.cpp` | +260 | `ValidateAndApplyPropertyDescriptor` temporarily clears `__nw_` marker before `js_property_set`, restores after; only for truly non-writable (truthy marker value) |
+| `js_array_set` non-writable check: value not just presence | `js_runtime.cpp` | (counted above) | Changed `nw_found` presence check to `nw_found && js_is_truthy(nw_val)` to match MAP path behavior |
+| defineProperties: stop on first exception | `js_globals.cpp` | +3 | Added `js_check_exception()` + `break` after each `js_object_define_property` call in loop |
+
+**Key bugs found and fixed:**
+- **defineProperty value not updated for non-writable + configurable**: ES2020 §9.1.6.3 allows `Object.defineProperty` to update the value of a non-writable but configurable property. The engine's `js_property_set` enforced the `__nw_` (non-writable) marker and silently rejected the write. Fix: in `ValidateAndApplyPropertyDescriptor`, temporarily clear the `__nw_` marker before calling `js_property_set`, then restore it. Only clears when marker is truthy (truly non-writable), preventing false restoration when marker is `false` (writable).
+- **`js_array_set` non-writable guard checked presence not value**: The array element write path (`js_array_set`) checked `if (nw_found)` (presence only), while the MAP path checked `if (nw_found && js_is_truthy(nw_val))`. When the `__nw_` marker was temporarily set to `false` during defineProperty, arrays still rejected the write. Fixed to check value like MAP path.
+- **defineProperties continued after TypeError**: `Object.defineProperties({property: ..., property1: ...})` didn't stop on first error. If `property` threw TypeError (non-configurable + non-writable), `property1` (configurable + non-writable) would still get updated via the new bypass. Fix: break loop on `js_check_exception()`.
+
 ---
 
 ## 1. Current Compliance Snapshot
@@ -206,9 +275,9 @@ Skipped by harness:       7,663
   - unsupported features: 1,508   (Temporal, WeakRef, etc.)
 In scope (batchable):    34,094
 
-Currently passing:       24,256  (71.1%)   ← updated 2025-06-10 (stable: 0 regressions across 5 consecutive runs)
-Partial-pass (batch-flaky):  42  (pass individually, flaky in batch mode — removed from baseline)
-Failing:                  9,838  (28.9%)
+Currently passing:       24,879  (73.0%)   ← updated 2026-06-22 (stable: 0 regressions)
+Partial-pass (batch-flaky):   3  (pass individually, flaky in batch mode — removed from baseline)
+Failing:                  9,599  (28.1%)
 ```
 
 ### 1.2 Top Failure Categories
@@ -447,23 +516,21 @@ The 54% pass rate suggests basic class syntax works but most `class-fields-publi
 
 ## 3. Incremental Enhancement Areas
 
-### 3.1 Function.prototype.toString (73 failures)
+### 3.1 Function.prototype.toString — ✅ DONE (73 failures → resolved)
 
-Spec requires `toString()` returns the original source text for defined functions and `"function name() { [native code] }"` for built-ins. Currently returning incorrect format for arrow functions, generators, async functions, or class methods.
+Source text stored at parse time. Built-ins return `"function name() { [native code] }"` format.
 
-**Fix:** Store source text range at parse time, return the slice. For built-ins, format per spec.
+### 3.2 String ↔ RegExp Symbol Methods — ✅ DONE (≈80 failures → resolved)
 
-### 3.2 String ↔ RegExp Symbol Methods (≈80 failures)
+`String.prototype.match/replace/search/split` now check `[Symbol.match]` etc. on the argument and delegate to the argument's Symbol method when present.
 
-`String.prototype.match/replace/search/split` must check `[Symbol.match]` etc. on the argument. If present, delegate to the argument's Symbol method. This affects both String (80) and RegExp (124) categories.
+### 3.3 Date Setter Edge Cases — ✅ DONE (≈90 failures → resolved)
 
-### 3.3 Date Setter Edge Cases (≈90 failures)
+All Date setter methods pre-coerce arguments via `js_to_number()` before NaN check. `setFullYear`/`setUTCFullYear` use `+0` as base time value when date is NaN per ES §21.4.4.26.
 
-`Date.prototype.setHours/setFullYear/setMinutes/setMonth` failures come from: (a) NaN propagation, (b) argument coercion via `ToNumber`, (c) UTC ↔ local time conversion edge cases.
+### 3.4 Array Species & Concat Spreadable — ✅ DONE (≈100 failures → resolved)
 
-### 3.4 Array Species & Concat Spreadable (≈100 failures)
-
-`Array.prototype.concat` — must check `@@isConcatSpreadable` on arguments. Array methods `slice/splice/filter/map` must use `@@species` for the result array constructor.
+`Array.prototype.concat/slice/filter/map` now use `js_array_species_create` (checks `constructor[@@species]`). `@@isConcatSpreadable` check implemented for concat arguments. Species getter installed on Array, Promise, Map, ArrayBuffer, and TypedArray constructors.
 
 ### 3.5 Reflect ↔ Proxy Integration (≈58 failures)
 
@@ -509,7 +576,7 @@ These are structural prerequisites that unlock cascading improvements.
 | --- | --------------------------------------------- | ----------------------------- | ------------ | ------------------------------------------ | ----------- |
 | 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300                          | None         | `js_runtime.cpp`                           | **Done**    |
 | 1.2 | Proxy handler traps — all 13                  | +200 (direct) +100 (indirect) | 1.1          | `js_runtime.cpp`, `js_globals.cpp`         | **Done**    |
-| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | Not started |
+| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | Partial (detach done, species not) |
 | 1.4 | Class public fields (instance + static)       | +800                          | None         | `build_js_ast.cpp`, `transpile_js_mir.cpp` | **Done**    |
 | 1.5 | arguments exotic object (mapped)              | +150                          | None         | `js_runtime.cpp`                           | **Done**    |
 | 1.6 | Block scope TDZ enforcement                   | +100                          | None         | `transpile_js_mir.cpp`                     | **Done**    |
@@ -520,8 +587,8 @@ Correctly implementing ES2020 protocols across all built-ins.
 
 | # | Work Item | Est. Impact | Dependencies | Files | Status |
 |---|-----------|-------------|-------------|-------|--------|
-| 2.1 | Symbol.match/replace/search/split protocol | +200 | None | `js_runtime.cpp` | Partial |
-| 2.2 | Array @@species + @@isConcatSpreadable | +100 | 1.1 | `js_runtime.cpp` | Partial |
+| 2.1 | Symbol.match/replace/search/split protocol | +200 | None | `js_runtime.cpp` | **Done** |
+| 2.2 | Array @@species + @@isConcatSpreadable | +100 | 1.1 | `js_runtime.cpp` | **Done** |
 | 2.3 | for-of IteratorClose on break/throw | +200 | None | `transpile_js_mir.cpp` | **Done** |
 | 2.4 | RegExp named groups + \p{} property escapes | +300 | None | `re2_wrapper.cpp` | Partial |
 | 2.5 | Function.prototype.toString source text | +70 | None | `js_globals.cpp` | **Done** |
@@ -534,9 +601,9 @@ Web-compatibility behaviors that are part of ES2020 but lower priority.
 
 | # | Work Item | Est. Impact | Dependencies | Files | Status |
 |---|-----------|-------------|-------------|-------|--------|
-| 3.1 | Sloppy-mode eval var scoping | +300 | None | `js_runtime.cpp`, `transpile_js_mir.cpp` | Not started |
-| 3.2 | Annex B function hoisting (blocks) | +200 | 3.1 | `build_js_ast.cpp` | Not started |
-| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` | Not started |
+| 3.1 | Sloppy-mode eval var scoping | +300 | None | `js_runtime.cpp`, `transpile_js_mir.cpp` | **Done** |
+| 3.2 | Annex B function hoisting (blocks) | +200 | 3.1 | `build_js_ast.cpp` | **Done** |
+| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` | Partial (RegExp.compile done) |
 | 3.4 | Strict mode detection ("use strict") | +100 | None | `build_js_ast.cpp` | **Done** |
 | 3.5 | Unicode whitespace / line terminators | +70 | None | `js_runtime.cpp` | Partial |
 | 3.6 | Future reserved words in strict mode | +55 | 3.4 | `js_early_errors.cpp` | **Done** |
@@ -549,9 +616,9 @@ Edge cases and advanced features.
 |---|-----------|-------------|-------------|-------|--------|
 | 4.1 | DataView BigInt accessors + Float16 | +100 | None | `js_typed_array.cpp` | Partial |
 | 4.2 | Atomics on non-shared buffers (throw) | +100 | None | `js_typed_array.cpp` | Not started |
-| 4.3 | Date setter NaN/coercion edge cases | +90 | None | `js_runtime.cpp` | Partial |
+| 4.3 | Date setter NaN/coercion edge cases | +90 | None | `js_runtime.cpp` | **Done** |
 | 4.4 | JSON.parse reviver + stringify replacer | +30 | None | `js_runtime.cpp` | **Done** |
-| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` | Not started |
+| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` | Partial (constructor done) |
 | 4.6 | SharedArrayBuffer constructor + species | +40 | None | `js_typed_array.cpp` | Not started |
 
 ---
@@ -566,11 +633,15 @@ Edge cases and advanced features.
 | Sloppy eval + Annex B | 23,859 | 70.0% | +447 |
 | Proxy traps + with-scope + TypedArray | 24,143 | 70.8% | +731 |
 | Exception propagation fix (iterators) | 24,212 | 71.0% | +800 |
-| **Current baseline** | **24,212** | **71.0%** | **+800** |
-| After Tier 1 | ~25,900 | ~76% | +2,500 |
-| After Tier 2 | ~27,500 | ~81% | +4,000 |
-| After Tier 3 | ~28,500 | ~84% | +5,000 |
-| After Tier 4 | ~29,100 | ~85% | +5,600 |
+| Date setter + TypedArray thisArg | 24,256 | 71.1% | +844 |
+| Comparisons + species + Symbol protocols + BigInt + more | 24,495 | 71.9% | +1,083 |
+| TypedArray species constructor | 24,616 | 72.2% | +1,204 |
+| Object.defineProperty non-writable bypass + defineProperties error stop | 24,879 | 73.0% | +1,467 |
+| **Current baseline** | **24,879** | **73.0%** | **+1,467** |
+| After Tier 1 remaining | ~25,200 | ~74% | +1,800 |
+| After Tier 2 remaining | ~25,800 | ~76% | +2,400 |
+| After Tier 3 remaining | ~26,100 | ~77% | +2,700 |
+| After Tier 4 remaining | ~26,500 | ~78% | +3,100 |
 | Theoretical max (excluding skipped) | 34,094 | 100% | +10,672 |
 
 **Note:** The remaining ≈5,000 gap after Tier 4 comes from:

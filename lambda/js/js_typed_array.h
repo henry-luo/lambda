@@ -92,6 +92,9 @@ Item js_typed_array_construct(int type_id, Item arg, int byte_offset, int length
 // Returns the JS type name (e.g. "Uint8Array"), or NULL if not a typed array
 const char* js_typed_array_type_name(Item val);
 
+// ES §22.2.4.7 TypedArraySpeciesCreate — creates result using @@species constructor
+Item js_typed_array_species_create(Item exemplar, int length);
+
 #ifdef __cplusplus
 }
 #endif
