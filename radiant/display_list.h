@@ -86,6 +86,7 @@ typedef struct {
     RdtStrokeJoin join;
     float* dash_array;   // arena-allocated copy, NULL if no dashes
     int dash_count;
+    float dash_phase;
     bool has_transform;
     RdtMatrix transform;
 } DlStrokePath;
@@ -285,7 +286,7 @@ void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
 
 void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
-                    const float* dash_array, int dash_count,
+                    const float* dash_array, int dash_count, float dash_phase,
                     const RdtMatrix* transform);
 
 void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,

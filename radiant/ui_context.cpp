@@ -13,6 +13,7 @@
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
+
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
@@ -54,6 +55,11 @@ int ui_context_init(UiContext* uicon, bool headless) {
         // (e.g. WKWebView) that require a parent window still function.
         #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+        #endif
+        #ifdef __APPLE__
+        // Prevent dock icon and menu bar creation in headless mode.
+        // Must be set before glfwInit() — glfwInit() creates the NSApp dock icon.
+        glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
         #endif
         if (!glfwInit()) {
             fprintf(stderr, "Error: Could not initialize GLFW for headless mode.\n");

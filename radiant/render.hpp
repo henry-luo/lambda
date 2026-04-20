@@ -88,9 +88,9 @@ static inline void rc_fill_path(RenderContext* rdcon, RdtPath* path, Color color
 static inline void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float width,
                                   RdtStrokeCap cap, RdtStrokeJoin join,
                                   const float* dash_array, int dash_count,
-                                  const RdtMatrix* transform) {
-    if (rdcon->dl) dl_stroke_path(rdcon->dl, path, color, width, cap, join, dash_array, dash_count, transform);
-    else rdt_stroke_path(&rdcon->vec, path, color, width, cap, join, dash_array, dash_count, transform);
+                                  const RdtMatrix* transform, float dash_phase = 0) {
+    if (rdcon->dl) dl_stroke_path(rdcon->dl, path, color, width, cap, join, dash_array, dash_count, dash_phase, transform);
+    else rdt_stroke_path(&rdcon->vec, path, color, width, cap, join, dash_array, dash_count, dash_phase, transform);
 }
 
 static inline void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,

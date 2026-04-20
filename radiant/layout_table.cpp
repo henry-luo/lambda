@@ -6900,8 +6900,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("Constraining preferred width from %.1fpx to %.1fpx (available space minus margins)",
                      pref_table_width, max_available_width);
             pref_table_width = max_available_width;
-        } else if (max_available_width == 0 && container_width > 0) {
-            // Margins consume all available space - use minimum content width
+        } else if (max_available_width == 0 && pref_table_width > min_table_width) {
+            // Margins consume all available space — shrink to minimum content width.
+            // CSS 2.1 §17.5.2: when the available width (container minus margins) is
+            // zero or negative, the table uses its minimum content width and overflows.
             log_debug("Margins consume all space, using minimum content width: %.1fpx", min_table_width);
             pref_table_width = min_table_width;
         }

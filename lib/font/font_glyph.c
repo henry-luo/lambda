@@ -9,6 +9,7 @@
  */
 
 #include "font_internal.h"
+#include "font_gpos.h"
 
 #include "../memtrack.h"
 #include <math.h>
@@ -194,8 +195,8 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
         return info; // glyph not in this font
     }
 
-#ifndef __APPLE__
-    // primary: FreeType — full glyph metrics
+#ifdef LAMBDA_HAS_FREETYPE
+    // primary (Windows): FreeType — full glyph metrics
     {
         FT_Face face = handle->ft_face;
         if (face) {
@@ -215,6 +216,17 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
                 goto apply_overrides;
             }
             log_debug("font_glyph: FT_Load_Glyph failed for U+%04X (error %d)", codepoint, err);
+        }
+    }
+#elif !defined(__APPLE__)
+    // primary (Linux): ThorVG metrics
+    if (handle->tvg_raster_ctx && handle->tables) {
+        GlyphInfo tvg_info = {0};
+        if (font_rasterize_tvg_metrics(handle->tables, codepoint, handle->size_px,
+                                        handle->bitmap_scale, &tvg_info)) {
+            tvg_info.id = char_index;
+            info = tvg_info;
+            goto apply_overrides;
         }
     }
 #endif
@@ -372,6 +384,25 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
                 }
             }
         }
+
+        // GPOS PairPos kerning (fallback when kern table has no pair)
+        GposTable* gpos = font_tables_get_gpos(handle->tables);
+        if (gpos) {
+            CmapTable* cmap = font_tables_get_cmap(handle->tables);
+            if (cmap) {
+                uint16_t li = cmap_lookup(cmap, left);
+                uint16_t ri = cmap_lookup(cmap, right);
+                if (li != 0 && ri != 0) {
+                    int16_t val = gpos_get_kern(gpos, li, ri);
+                    if (val != 0) {
+                        HeadTable* head = font_tables_get_head(handle->tables);
+                        if (head && head->units_per_em > 0) {
+                            return val * handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
+                        }
+                    }
+                }
+            }
+        }
     }
 
 #ifdef __APPLE__
@@ -404,6 +435,18 @@ float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_
                 }
             }
         }
+
+        // GPOS PairPos kerning (fallback when kern table has no pair)
+        GposTable* gpos = font_tables_get_gpos(handle->tables);
+        if (gpos) {
+            int16_t val = gpos_get_kern(gpos, (uint16_t)left_index, (uint16_t)right_index);
+            if (val != 0) {
+                HeadTable* head = font_tables_get_head(handle->tables);
+                if (head && head->units_per_em > 0) {
+                    return val * handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
+                }
+            }
+        }
     }
 
     return 0;
@@ -429,7 +472,7 @@ bool font_has_codepoint(FontHandle* handle, uint32_t codepoint) {
 const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                                       GlyphRenderMode mode) {
     if (!handle) return NULL;
-#ifndef __APPLE__
+#ifdef LAMBDA_HAS_FREETYPE
     if (!handle->ft_face) return NULL;
 #endif
 
@@ -501,7 +544,8 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
         }
     }
 
-    // FreeType fallback path
+#ifdef LAMBDA_HAS_FREETYPE
+    // FreeType fallback path (Windows only)
     FT_Face face = handle->ft_face;
     FT_UInt char_index = 0;
     if (handle->tables) {
@@ -569,8 +613,6 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     if (bmp_cache) {
         int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
         if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
-            // simple eviction: clear the cache (bitmap data lives in glyph_arena
-            // which is reset per frame anyway, so this is safe)
             hashmap_clear(bmp_cache, false);
         }
         BitmapCacheEntry entry = {
@@ -583,6 +625,9 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     }
 
     return bmp;
+#endif // LAMBDA_HAS_FREETYPE
+
+    return NULL;
 }
 #endif // !__APPLE__
 
@@ -590,7 +635,7 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 // font_load_glyph — glyph loading with automatic codepoint fallback
 // ============================================================================
 
-#ifndef __APPLE__
+#ifdef LAMBDA_HAS_FREETYPE
 // fill the static LoadedGlyph from an FT_GlyphSlot
 // bitmap_scale: for fixed-size bitmap fonts (e.g. emoji at 109ppem scaled to 16px), <1.0
 static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot, float bitmap_scale) {
@@ -629,9 +674,11 @@ static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_I
     if (err) return NULL;
     return fill_loaded_glyph_from_slot(face->glyph, h->bitmap_scale);
 }
+#endif // LAMBDA_HAS_FREETYPE
 
+#ifndef __APPLE__
 // try loading a glyph via ThorVG rasterization (Linux/WASM).
-// Returns LoadedGlyph* on success, NULL on failure (falls back to FreeType).
+// Returns LoadedGlyph* on success, NULL on failure.
 static LoadedGlyph* try_load_from_handle_tvg(FontHandle* h, uint32_t codepoint) {
     if (!h || !h->tvg_raster_ctx || !h->tables || !h->ctx) return NULL;
 
@@ -725,8 +772,10 @@ static void fill_loaded_glyph_font_metrics(FontHandle* h) {
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering) {
     if (!handle) return NULL;
-#ifndef __APPLE__
+#ifdef LAMBDA_HAS_FREETYPE
     if (!handle->ft_face) return NULL;
+#elif !defined(__APPLE__)
+    if (!handle->tables) return NULL;
 #endif
 
     // Phase 17: check loaded glyph cache before loading
@@ -768,7 +817,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         }
     }
 #else
-    // Non-macOS: ThorVG primary path, FreeType fallback
+    // Non-macOS: ThorVG primary path
     if (handle->tvg_raster_ctx && handle->tables) {
         result = try_load_from_handle_tvg(handle, codepoint);
         if (result) {
@@ -778,17 +827,21 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         }
     }
 
-    // FreeType fallback
-    FT_Int32 load_flags = for_rendering
-        ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
-        : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+#ifdef LAMBDA_HAS_FREETYPE
+    // FreeType fallback (Windows only)
+    {
+        FT_Int32 load_flags = for_rendering
+            ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+            : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
 
-    result = try_load_from_handle(handle, codepoint, load_flags);
-    if (result) {
-        fill_loaded_glyph_font_metrics(handle);
-        if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
-        return result;
+        result = try_load_from_handle(handle, codepoint, load_flags);
+        if (result) {
+            fill_loaded_glyph_font_metrics(handle);
+            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            return result;
+        }
     }
+#endif
 #endif
 
     // step 2: try codepoint fallback via FontContext
@@ -804,9 +857,14 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         if (fallback->tvg_raster_ctx && fallback->tables) {
             result = try_load_from_handle_tvg(fallback, codepoint);
         }
+#ifdef LAMBDA_HAS_FREETYPE
         if (!result) {
-            result = try_load_from_handle(fallback, codepoint, load_flags);
+            FT_Int32 fb_flags = for_rendering
+                ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+                : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+            result = try_load_from_handle(fallback, codepoint, fb_flags);
         }
+#endif
 #endif
         if (result) {
             // populate metrics from the fallback font, not the primary
@@ -886,10 +944,18 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
             result = try_load_from_handle_ct(emoji_handle, codepoint);
         }
 #else
-        FT_Int32 load_flags = for_rendering
-            ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
-            : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
-        result = try_load_from_handle(emoji_handle, codepoint, load_flags);
+        // ThorVG primary
+        if (emoji_handle->tvg_raster_ctx && emoji_handle->tables) {
+            result = try_load_from_handle_tvg(emoji_handle, codepoint);
+        }
+#ifdef LAMBDA_HAS_FREETYPE
+        if (!result) {
+            FT_Int32 load_flags = for_rendering
+                ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+                : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+            result = try_load_from_handle(emoji_handle, codepoint, load_flags);
+        }
+#endif
 #endif
         if (result) {
             fill_loaded_glyph_font_metrics(emoji_handle);

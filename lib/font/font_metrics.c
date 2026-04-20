@@ -20,6 +20,7 @@
  */
 
 #include "font_internal.h"
+#include "font_gpos.h"
 
 #include <math.h>
 
@@ -161,10 +162,10 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     }
 
     FontTables* ft = handle->tables;
-#ifdef __APPLE__
-    if (!ft) return NULL;
-#else
+#ifdef LAMBDA_HAS_FREETYPE
     if (!handle->ft_face && !ft) return NULL;
+#else
+    if (!ft) return NULL;
 #endif
 
     FontMetrics* m = &handle->metrics;
@@ -248,9 +249,13 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
         m->em_size = 1000.0f; // reasonable default
     }
 
-    // kerning: FontTables kern table primary, CoreText GPOS secondary
+    // kerning: FontTables kern table primary, GPOS secondary, CoreText tertiary
     KernTable* kern = ft ? font_tables_get_kern(ft) : NULL;
     m->has_kerning = (kern && kern->valid && kern->num_pairs > 0);
+    if (!m->has_kerning && ft) {
+        GposTable* gpos = font_tables_get_gpos(ft);
+        if (gpos_has_kerning(gpos)) m->has_kerning = true;
+    }
 #ifdef __APPLE__
     if (!m->has_kerning && handle->ct_font_ref) {
         m->has_kerning = true;
