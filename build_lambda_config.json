@@ -1804,14 +1804,10 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc",
-                            "AVFoundation",
-                            "CoreMedia",
-                            "CoreVideo",
-                            "Foundation"
+                            "rpmalloc"
                         ],
                         "additional_sources": [
-                            "radiant/rdt_video_avf.mm"
+                            "radiant/rdt_video_stub.cpp"
                         ],
                         "binary": "test_video_gtest.exe",
                         "icon": "🎬"
@@ -1872,7 +1868,8 @@
                             "ThorVG",
                             "png",
                             "turbojpeg",
-                            "zlib"
+                            "zlib",
+                            "gomp"
                         ],
                         "additional_sources": [
                             "radiant/animation.cpp",

@@ -1,0 +1,93 @@
+PASS string valid
+PASS string min pass
+PASS string min fail
+PASS string max pass
+PASS string max fail
+PASS string length pass
+PASS string length fail
+PASS string email pass
+PASS string email fail
+PASS string uri pass
+PASS string pattern pass
+PASS string pattern fail
+PASS string regex alias
+PASS string alphanum pass
+PASS string alphanum fail
+PASS string required empty
+PASS string allow empty
+PASS string trim
+PASS string lowercase
+PASS string uppercase
+PASS number valid
+PASS number min pass
+PASS number min fail
+PASS number max pass
+PASS number max fail
+PASS number integer pass
+PASS number integer fail
+PASS number positive pass
+PASS number positive fail
+PASS number negative pass
+PASS number negative fail
+PASS number greater
+PASS number less
+PASS number port pass
+PASS number port fail
+PASS boolean true
+PASS boolean false
+PASS boolean truthy
+PASS boolean falsy
+PASS array valid
+PASS array items string
+PASS array items fail
+PASS array min fail
+PASS array max fail
+PASS array length pass
+PASS array length fail
+PASS array unique pass
+PASS array unique fail
+PASS array ordered pass
+PASS array ordered fail
+PASS array sparse
+PASS object valid
+PASS object missing required
+PASS object extra key
+PASS object nested
+PASS object unknown
+PASS object or
+PASS object and fail
+PASS object rename
+PASS alt string
+PASS alt number
+PASS alt fail
+PASS date iso
+PASS date timestamp
+PASS any valid
+PASS any required fail
+PASS any forbidden
+PASS any default
+PASS any valid values
+PASS any valid values fail
+PASS any invalid values
+PASS any strip
+PASS any optional
+PASS symbol valid
+PASS when then
+PASS when otherwise
+PASS error details message
+PASS error details type
+PASS error details path
+PASS label in error
+PASS concat valid
+PASS concat min fail
+PASS ref valid
+PASS ref fail
+PASS abort early false
+PASS attempt pass
+PASS attempt fail
+PASS assert pass
+PASS assert fail
+PASS isSchema true
+PASS isSchema false
+PASS email custom tlds
+DONE: 92/92 passed

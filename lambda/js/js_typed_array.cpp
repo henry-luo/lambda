@@ -11,6 +11,26 @@
 #include <cmath>
 
 extern void* heap_alloc(int size, TypeId type_id);
+extern "C" int js_check_exception(void);
+extern Item js_to_number(Item);
+
+// ValidateTypedArray: returns JsTypedArray* or NULL (throws TypeError)
+static JsTypedArray* validate_typed_array(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) {
+        js_throw_type_error("not a typed array");
+        return NULL;
+    }
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta) {
+        js_throw_type_error("invalid typed array");
+        return NULL;
+    }
+    if (ta->buffer && ta->buffer->detached) {
+        js_throw_type_error("Cannot perform %TypedArray%.prototype method on a detached ArrayBuffer");
+        return NULL;
+    }
+    return ta;
+}
 
 // Sentinel markers for type identification
 static TypeMap js_typed_array_type_marker = {};
@@ -62,6 +82,7 @@ static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     ab->byte_length = byte_length;
     ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
+    ab->detached = false;
     return ab;
 }
 
@@ -187,6 +208,24 @@ extern "C" bool js_arraybuffer_is_view(Item val) {
 extern "C" Item js_arraybuffer_is_view_item(Item val) {
     bool result = js_arraybuffer_is_view(val);
     return (Item){.item = result ? (ITEM_TRUE) : (ITEM_FALSE)};
+}
+
+// Detach an ArrayBuffer: set byte_length to 0 and mark as detached
+extern "C" void js_arraybuffer_detach(Item val) {
+    if (!js_is_arraybuffer(val)) return;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return;
+    ab->data = NULL;
+    ab->byte_length = 0;
+    ab->detached = true;
+}
+
+// Check if an ArrayBuffer is detached
+extern "C" bool js_arraybuffer_is_detached(Item val) {
+    if (!js_is_arraybuffer(val)) return false;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return false;
+    return ab->detached;
 }
 
 // ============================================================================
@@ -405,11 +444,24 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     double num_val;
     TypeId vtype = get_type_id(value);
     if (vtype == LMD_TYPE_INT) {
-        num_val = (double)it2i(value);
+        // Check for Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
+        int64_t iv = it2i(value);
+        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
+            js_throw_type_error("Cannot convert a Symbol value to a number");
+            return (Item){.item = ITEM_NULL};
+        }
+        num_val = (double)iv;
     } else if (vtype == LMD_TYPE_FLOAT) {
         num_val = it2d(value);
     } else {
-        num_val = 0.0;
+        // ES spec: IntegerIndexedElementSet calls ToNumber(value)
+        // This throws TypeError for Symbol, which is the spec-required behavior
+        Item num_item = js_to_number(value);
+        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        vtype = get_type_id(num_item);
+        if (vtype == LMD_TYPE_INT) num_val = (double)it2i(num_item);
+        else if (vtype == LMD_TYPE_FLOAT) num_val = it2d(num_item);
+        else num_val = 0.0;
     }
 
     switch (ta->element_type) {
