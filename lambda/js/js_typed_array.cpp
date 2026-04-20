@@ -622,13 +622,28 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     if (end < 0) end = ta->length + end;
     if (start < 0) start = 0;
     if (end > ta->length) end = ta->length;
-    if (start >= end) return js_typed_array_new((int)ta->element_type, 0);
+    if (start >= end) {
+        Item result = js_typed_array_species_create(ta_item, 0);
+        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        return result;
+    }
 
     int new_length = end - start;
-    Item result = js_typed_array_new((int)ta->element_type, new_length);
+    Item result = js_typed_array_species_create(ta_item, new_length);
+    if (js_check_exception()) return (Item){.item = ITEM_NULL};
+    // Copy elements — species may return a different typed array type, so use element-by-element copy
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    int elem_size = typed_array_element_size(ta->element_type);
-    memcpy(rta->data, (char*)ta->data + start * elem_size, new_length * elem_size);
+    if (rta && rta->element_type == ta->element_type && rta->length >= new_length) {
+        // Same type — fast memcpy
+        int elem_size = typed_array_element_size(ta->element_type);
+        memcpy(rta->data, (char*)ta->data + start * elem_size, new_length * elem_size);
+    } else {
+        // Different type — element-by-element
+        for (int i = 0; i < new_length; i++) {
+            Item elem = js_typed_array_get(ta_item, (Item){.item = i2it(start + i)});
+            js_typed_array_set(result, (Item){.item = i2it(i)}, elem);
+        }
+    }
     return result;
 }
 

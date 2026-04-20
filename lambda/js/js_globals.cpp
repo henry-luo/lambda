@@ -3106,6 +3106,8 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
             // look for __sym_3 (Symbol.hasInstance = ID 3) via property_get (handles both MAP and FUNC)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
             Item has_instance_fn = js_property_get(right, sym_key);
+            // ES §12.10.4 step 3: ReturnIfAbrupt — propagate getter errors
+            if (js_check_exception()) return ItemNull;
             if (has_instance_fn.item != ItemNull.item && get_type_id(has_instance_fn) == LMD_TYPE_FUNC) {
                 Item args[1] = { left };
                 Item result = js_call_function(has_instance_fn, right, args, 1);
