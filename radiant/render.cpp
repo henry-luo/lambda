@@ -2266,6 +2266,48 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
     }
 
+    // Save backdrop for opacity stacking context (must nest inside mix-blend save)
+    bool has_opacity_group = (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f);
+    uint32_t* opacity_backdrop = nullptr;
+    int opx0 = 0, opy0 = 0, opw = 0, oph = 0;
+    if (has_opacity_group) {
+        float os = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            opx0 = (int)(pa_block.x + block->x * os);
+            opy0 = (int)(pa_block.y + block->y * os);
+            int ox1 = opx0 + (int)(block->width * os);
+            int oy1 = opy0 + (int)(block->height * os);
+            if (opx0 < 0) opx0 = 0;
+            if (opy0 < 0) opy0 = 0;
+            if (ox1 > surface->width) ox1 = surface->width;
+            if (oy1 > surface->height) oy1 = surface->height;
+            opw = ox1 - opx0;
+            oph = oy1 - opy0;
+            if (opw > 0 && oph > 0) {
+                if (rdcon->dl) {
+                    dl_save_backdrop(rdcon->dl, opx0, opy0, opw, oph);
+                } else {
+                    opacity_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)opw * oph * sizeof(uint32_t));
+                    if (opacity_backdrop) {
+                        uint32_t* px = (uint32_t*)surface->pixels;
+                        int pitch = surface->pitch / 4;
+                        for (int row = 0; row < oph; row++) {
+                            memcpy(opacity_backdrop + row * opw,
+                                   px + (opy0 + row) * pitch + opx0,
+                                   opw * sizeof(uint32_t));
+                        }
+                        // clear region so element renders on transparent background
+                        for (int row = 0; row < oph; row++) {
+                            memset(px + (opy0 + row) * pitch + opx0, 0, opw * sizeof(uint32_t));
+                        }
+                        log_debug("[OPACITY] Saved backdrop %dx%d for <%s>", opw, oph, block->node_name());
+                    }
+                }
+            }
+        }
+    }
+
     if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
@@ -2444,38 +2486,52 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         g_render_filter_count++;
     }
 
-    // Apply CSS opacity: multiply alpha of all pixels in the element's region
-    if (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f) {
+    // Apply CSS opacity: composite element group over saved backdrop at opacity
+    if (has_opacity_group && opw > 0 && oph > 0) {
         auto to1 = std::chrono::high_resolution_clock::now();
 
         float opacity = block->in_line->opacity;
-        float s = rdcon->scale;
-        ImageSurface* surface = rdcon->ui_context->surface;
-        if (surface && surface->pixels) {
-            int x0 = (int)(pa_block.x + block->x * s);
-            int y0 = (int)(pa_block.y + block->y * s);
-            int x1 = x0 + (int)(block->width * s);
-            int y1 = y0 + (int)(block->height * s);
-            // Clamp to surface dimensions
-            if (x0 < 0) x0 = 0;
-            if (y0 < 0) y0 = 0;
-            if (x1 > surface->width) x1 = surface->width;
-            if (y1 > surface->height) y1 = surface->height;
-
-            if (rdcon->dl) {
-                dl_apply_opacity(rdcon->dl, x0, y0, x1, y1, opacity);
-            } else {
-                for (int y = y0; y < y1; y++) {
-                    uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
-                    for (int x = x0; x < x1; x++) {
-                        uint8_t* pixel = row + x * 4;
-                        // Multiply alpha channel by opacity
-                        pixel[3] = (uint8_t)(pixel[3] * opacity + 0.5f);
+        if (rdcon->dl) {
+            dl_composite_opacity(rdcon->dl, opx0, opy0, opw, oph, opacity);
+        } else if (opacity_backdrop) {
+            ImageSurface* surface = rdcon->ui_context->surface;
+            uint32_t* px = (uint32_t*)surface->pixels;
+            int pitch = surface->pitch / 4;
+            int opacity_i = (int)(opacity * 256 + 0.5f);
+            for (int row = 0; row < oph; row++) {
+                for (int col = 0; col < opw; col++) {
+                    uint32_t src = px[(opy0 + row) * pitch + (opx0 + col)];
+                    uint32_t dst = opacity_backdrop[row * opw + col];
+                    if (src == 0) {
+                        px[(opy0 + row) * pitch + (opx0 + col)] = dst;
+                        continue;
                     }
+                    // Scale source by opacity (premultiplied alpha compositing)
+                    uint32_t sa = ((src >> 24) & 0xFF) * opacity_i + 128;  sa >>= 8;
+                    uint32_t sr = (src & 0xFF) * opacity_i + 128;          sr >>= 8;
+                    uint32_t sg = ((src >> 8) & 0xFF) * opacity_i + 128;   sg >>= 8;
+                    uint32_t sb = ((src >> 16) & 0xFF) * opacity_i + 128;  sb >>= 8;
+                    // Porter-Duff source over: result = src' + dst * (1 - src'_alpha)
+                    uint32_t inv_sa = 255 - sa;
+                    uint32_t da = (dst >> 24) & 0xFF;
+                    uint32_t dr = dst & 0xFF;
+                    uint32_t dg = (dst >> 8) & 0xFF;
+                    uint32_t db = (dst >> 16) & 0xFF;
+                    uint32_t ra = sa + (da * inv_sa + 128) / 255;
+                    uint32_t rr = sr + (dr * inv_sa + 128) / 255;
+                    uint32_t rg = sg + (dg * inv_sa + 128) / 255;
+                    uint32_t rb = sb + (db * inv_sa + 128) / 255;
+                    if (ra > 255) ra = 255;
+                    if (rr > 255) rr = 255;
+                    if (rg > 255) rg = 255;
+                    if (rb > 255) rb = 255;
+                    px[(opy0 + row) * pitch + (opx0 + col)] =
+                        (ra << 24) | (rb << 16) | (rg << 8) | rr;
                 }
             }
-            log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
-                      opacity, block->node_name(), x0, y0, x1, y1);
+            scratch_free(&rdcon->scratch, opacity_backdrop);
+            log_debug("[OPACITY] Composited opacity=%.2f on <%s> region (%d,%d) %dx%d",
+                      opacity, block->node_name(), opx0, opy0, opw, oph);
         }
 
         auto to2 = std::chrono::high_resolution_clock::now();

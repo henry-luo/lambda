@@ -40,6 +40,7 @@ typedef enum {
     DL_BLIT_SURFACE_SCALED,
     // opacity / blend / filter layers (post-processing pixel ops)
     DL_APPLY_OPACITY,
+    DL_COMPOSITE_OPACITY,    // save backdrop + composite at opacity (CSS stacking context)
     DL_SAVE_BACKDROP,        // save surface pixels before blend-mode element renders
     DL_APPLY_BLEND_MODE,
     DL_APPLY_FILTER,
@@ -162,6 +163,13 @@ typedef struct {
     float opacity;
 } DlApplyOpacity;
 
+// CSS opacity stacking context: composite element group over saved backdrop at opacity.
+// Uses DL_SAVE_BACKDROP (pushed earlier) for the backdrop pixels.
+typedef struct {
+    int x0, y0, w, h;       // physical pixel region
+    float opacity;
+} DlCompositeOpacity;
+
 // Save backdrop pixels before element with mix-blend-mode renders.
 // During replay, the replay function saves a copy and clears the region.
 typedef struct {
@@ -220,6 +228,7 @@ typedef struct DisplayItem {
         DlFillSurfaceRect    fill_surface_rect;
         DlBlitSurfaceScaled  blit_surface_scaled;
         DlApplyOpacity       apply_opacity;
+        DlCompositeOpacity   composite_opacity;
         DlSaveBackdrop       save_backdrop;
         DlApplyBlendMode     apply_blend_mode;
         DlApplyFilter        apply_filter;
@@ -309,6 +318,9 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
 // Post-processing operations (coordinates already in physical pixels)
 void dl_apply_opacity(DisplayList* dl, int x0, int y0, int x1, int y1,
                       float opacity);
+
+void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
+                          float opacity);
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h);
 

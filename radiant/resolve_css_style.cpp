@@ -10982,9 +10982,39 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             arg_idx = 1;
                             log_debug("[CSS Gradient] angle from length: %.1f deg", angle);
                         } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
-                            // Handle "to top", "to right", etc.
-                            // For now, use default angle
+                            // Single keyword direction (e.g., bare "right" without "to")
+                            CssEnum kw = first_arg->data.keyword;
+                            if (kw == CSS_VALUE_TOP)         angle = 0.0f;
+                            else if (kw == CSS_VALUE_RIGHT)  angle = 90.0f;
+                            else if (kw == CSS_VALUE_BOTTOM) angle = 180.0f;
+                            else if (kw == CSS_VALUE_LEFT)   angle = 270.0f;
                             arg_idx = 1;
+                            log_debug("[CSS Gradient] direction keyword: angle=%.1f", angle);
+                        } else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
+                            // "to <side-or-corner>" parsed as list: [to, top/right/bottom/left, ...]
+                            bool has_top = false, has_bottom = false;
+                            bool has_left = false, has_right = false;
+                            for (int li = 0; li < first_arg->data.list.count; li++) {
+                                CssValue* lv = first_arg->data.list.values[li];
+                                if (!lv) continue;
+                                if (lv->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    CssEnum kw = lv->data.keyword;
+                                    if (kw == CSS_VALUE_TOP)         has_top = true;
+                                    else if (kw == CSS_VALUE_BOTTOM) has_bottom = true;
+                                    else if (kw == CSS_VALUE_LEFT)   has_left = true;
+                                    else if (kw == CSS_VALUE_RIGHT)  has_right = true;
+                                }
+                            }
+                            if (has_top && has_right)        angle = 45.0f;
+                            else if (has_top && has_left)    angle = 315.0f;
+                            else if (has_bottom && has_right) angle = 135.0f;
+                            else if (has_bottom && has_left) angle = 225.0f;
+                            else if (has_top)                angle = 0.0f;
+                            else if (has_right)              angle = 90.0f;
+                            else if (has_bottom)             angle = 180.0f;
+                            else if (has_left)               angle = 270.0f;
+                            arg_idx = 1;
+                            log_debug("[CSS Gradient] direction list: angle=%.1f", angle);
                         }
                     }
                     lg->angle = angle;

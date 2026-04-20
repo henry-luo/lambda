@@ -217,30 +217,43 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         (bg->gradient_type != GRADIENT_NONE &&
          (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient));
 
-    // Save backdrop pixels before rendering upper layers if blend mode is active
+    // Save backdrop (background-color) before rendering upper layers if blend mode is active.
+    // In display-list mode, use DL_SAVE_BACKDROP/DL_APPLY_BLEND_MODE so the blending
+    // happens during replay when surface pixels are available.
     ImageSurface* surface = rdcon->ui_context->surface;
     uint32_t* saved_pixels = nullptr;
     int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
-    if (has_blend && has_upper_layers && surface && surface->pixels) {
+    if (has_blend && has_upper_layers) {
         blend_x0 = max(0, (int)rdcon->block.clip.left);
         blend_y0 = max(0, (int)rdcon->block.clip.top);
-        int x1 = min(surface->width, (int)rdcon->block.clip.right);
-        int y1 = min(surface->height, (int)rdcon->block.clip.bottom);
+        int x1 = 0, y1 = 0;
+        if (surface) {
+            x1 = min(surface->width, (int)rdcon->block.clip.right);
+            y1 = min(surface->height, (int)rdcon->block.clip.bottom);
+        } else {
+            x1 = (int)rdcon->block.clip.right;
+            y1 = (int)rdcon->block.clip.bottom;
+        }
         blend_w = x1 - blend_x0;
         blend_h = y1 - blend_y0;
         if (blend_w > 0 && blend_h > 0) {
-            saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
-            if (saved_pixels) {
-                uint32_t* px = (uint32_t*)surface->pixels;
-                int pitch = surface->pitch / 4;
-                for (int row = 0; row < blend_h; row++) {
-                    memcpy(saved_pixels + row * blend_w,
-                           px + (blend_y0 + row) * pitch + blend_x0,
-                           blend_w * sizeof(uint32_t));
-                }
-                // Clear the region to transparent so upper layers render cleanly
-                for (int row = 0; row < blend_h; row++) {
-                    memset(px + (blend_y0 + row) * pitch + blend_x0, 0, blend_w * sizeof(uint32_t));
+            if (rdcon->dl) {
+                // record save/apply pair — replay handles pixel ops
+                dl_save_backdrop(rdcon->dl, blend_x0, blend_y0, blend_w, blend_h);
+            } else if (surface && surface->pixels) {
+                saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
+                if (saved_pixels) {
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < blend_h; row++) {
+                        memcpy(saved_pixels + row * blend_w,
+                               px + (blend_y0 + row) * pitch + blend_x0,
+                               blend_w * sizeof(uint32_t));
+                    }
+                    // Clear the region to transparent so upper layers render cleanly
+                    for (int row = 0; row < blend_h; row++) {
+                        memset(px + (blend_y0 + row) * pitch + blend_x0, 0, blend_w * sizeof(uint32_t));
+                    }
                 }
             }
         }
@@ -269,19 +282,27 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Apply background-blend-mode: composite upper layers onto saved backdrop
-    if (saved_pixels && blend_w > 0 && blend_h > 0) {
-        uint32_t* px = (uint32_t*)surface->pixels;
-        int pitch = surface->pitch / 4;
-        for (int row = 0; row < blend_h; row++) {
-            for (int col = 0; col < blend_w; col++) {
-                uint32_t backdrop = saved_pixels[row * blend_w + col];
-                uint32_t source = px[(blend_y0 + row) * pitch + (blend_x0 + col)];
-                px[(blend_y0 + row) * pitch + (blend_x0 + col)] =
-                    composite_blend_pixel(backdrop, source, bg->blend_mode);
+    if (has_blend && has_upper_layers && blend_w > 0 && blend_h > 0) {
+        if (rdcon->dl) {
+            // display-list mode: emit apply-blend that runs during replay
+            dl_apply_blend_mode(rdcon->dl, blend_x0, blend_y0, blend_w, blend_h,
+                                bg->blend_mode);
+            log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
+                      bg->blend_mode, blend_w, blend_h);
+        } else if (saved_pixels) {
+            uint32_t* px = (uint32_t*)surface->pixels;
+            int pitch = surface->pitch / 4;
+            for (int row = 0; row < blend_h; row++) {
+                for (int col = 0; col < blend_w; col++) {
+                    uint32_t backdrop = saved_pixels[row * blend_w + col];
+                    uint32_t source = px[(blend_y0 + row) * pitch + (blend_x0 + col)];
+                    px[(blend_y0 + row) * pitch + (blend_x0 + col)] =
+                        composite_blend_pixel(backdrop, source, bg->blend_mode);
+                }
             }
+            mem_free(saved_pixels);
+            log_debug("[BLEND] Applied background-blend-mode to %dx%d region", blend_w, blend_h);
         }
-        mem_free(saved_pixels);
-        log_debug("[BLEND] Applied background-blend-mode to %dx%d region", blend_w, blend_h);
     }
 
     // Restore original clip
@@ -337,7 +358,7 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
 
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
 
-    if (has_radius || needs_rounded_clip || rdcon->has_transform) {
+    if (has_radius || needs_rounded_clip || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
         const RdtMatrix* xform = get_transform(rdcon);
 
         RdtPath* p = rdt_path_new();
