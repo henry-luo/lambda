@@ -1717,6 +1717,21 @@ class PremakeGenerator:
                 test_special_flags = test.get('special_flags', special_flags)  # Test-specific flags override suite flags
                 additional_sources = test.get('additional_sources', [])  # New field for extra source files
 
+                # Apply platform-specific overrides for tests
+                if self.use_macos_config:
+                    macos_overrides = test.get('macos', {})
+                    if macos_overrides:
+                        # Override additional_sources if specified
+                        if 'additional_sources' in macos_overrides:
+                            additional_sources = macos_overrides['additional_sources']
+                        # Add extra libraries
+                        if 'libraries' in macos_overrides:
+                            libraries = libraries + [lib for lib in macos_overrides['libraries'] if lib not in libraries]
+                        # Remove libraries not available on macOS
+                        if 'exclude_libraries' in macos_overrides:
+                            exclude_set = set(macos_overrides['exclude_libraries'])
+                            libraries = [lib for lib in libraries if lib not in exclude_set]
+
                 if not source or not binary_name:
                     continue
 
@@ -2459,6 +2474,28 @@ class PremakeGenerator:
                 mm_pattern = f"{source_dir}/*.mm"
                 mm_files = glob.glob(mm_pattern, recursive=False)
                 all_source_files.extend(mm_files)
+
+        # On macOS, remove _stub.cpp files when a platform-specific .mm exists
+        # e.g., rdt_video_stub.cpp is excluded when rdt_video_avf.mm is present
+        if self.use_macos_config:
+            mm_basenames = set()
+            for f in all_source_files:
+                if f.endswith('.mm'):
+                    # Extract the base name before the platform suffix
+                    # e.g., radiant/rdt_video_avf.mm -> rdt_video
+                    import re
+                    base = os.path.basename(f)
+                    m = re.match(r'(.+?)_(?:avf|mac|macos|cg)\.mm$', base)
+                    if m:
+                        mm_basenames.add((os.path.dirname(f), m.group(1)))
+            if mm_basenames:
+                all_source_files = [
+                    f for f in all_source_files
+                    if not any(
+                        os.path.dirname(f) == d and os.path.basename(f) == f'{base}_stub.cpp'
+                        for d, base in mm_basenames
+                    )
+                ]
 
         # Remove excluded files
         if exclude_files:
