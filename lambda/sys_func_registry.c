@@ -1298,6 +1298,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
+    {"js_error_captureStackTrace", FPTR(js_error_captureStackTrace)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},

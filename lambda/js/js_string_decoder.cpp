@@ -60,6 +60,14 @@ extern "C" Item js_string_decoder_new(Item encoding_item) {
     js_property_set(decoder, make_string_item("__pending_len__"),
                     (Item){.item = i2it(0)});
 
+    // Set write and end methods on the instance
+    extern Item js_string_decoder_write(Item decoder, Item buffer);
+    extern Item js_string_decoder_end(Item decoder, Item buffer);
+    js_property_set(decoder, make_string_item("write"),
+                    js_new_function((void*)js_string_decoder_write, 2));
+    js_property_set(decoder, make_string_item("end"),
+                    js_new_function((void*)js_string_decoder_end, 2));
+
     return decoder;
 }
 

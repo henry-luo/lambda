@@ -741,6 +741,23 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
     return error;
 }
 
+// V8-specific: Error.captureStackTrace(targetObject[, constructorOpt])
+// Sets .stack property on targetObject. In our runtime, just a no-op stub
+// that sets an empty stack string to satisfy code that checks for .stack.
+extern "C" Item js_error_captureStackTrace(Item target, Item ctor) {
+    (void)ctor;
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        Item stack_key = (Item){.item = s2it(heap_create_name("stack", 5))};
+        // only set if not already present
+        bool found = false;
+        js_map_get_fast(target.map, "stack", 5, &found);
+        if (!found) {
+            js_property_set(target, stack_key, (Item){.item = s2it(heap_create_name("", 0))});
+        }
+    }
+    return make_js_undefined();
+}
+
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
     // Register static Item variables as GC roots on the CURRENT heap so their
@@ -5775,6 +5792,11 @@ extern "C" Item js_property_get(Item object, Item key) {
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
+    // process.env: symbol keys throw TypeError (before symbol-to-key conversion)
+    if (js_key_is_symbol(key) && get_type_id(object) == LMD_TYPE_MAP &&
+        object.map->map_kind == MAP_KIND_PROCESS_ENV) {
+        return js_throw_type_error("Cannot convert a Symbol value to a string");
+    }
     // Convert Symbol keys to unique string keys for property storage
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
@@ -6005,6 +6027,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // v28: iterators are opaque — ignore external property writes
                 return value;
             case MAP_KIND_PROCESS_ENV:
+                // process.env: symbols as keys/values throw TypeError
+                if (get_type_id(key) == LMD_TYPE_SYMBOL) {
+                    js_throw_type_error("Cannot convert a Symbol value to a string");
+                    return make_js_undefined();
+                }
+                if (get_type_id(value) == LMD_TYPE_SYMBOL) {
+                    js_throw_type_error("Cannot convert a Symbol value to a string");
+                    return make_js_undefined();
+                }
                 // process.env coerces all values to strings (Node.js semantics)
                 // but allow sentinel values through for delete operations
                 if (get_type_id(value) != LMD_TYPE_STRING && value.item != JS_DELETED_SENTINEL_VAL) {
@@ -15679,6 +15710,62 @@ extern "C" Item js_get_console_object_value() {
     if (js_console_object.item == ITEM_NULL) {
         js_console_object = js_object_create(ItemNull);
         heap_register_gc_root(&js_console_object.item);
+
+        // Populate console methods as function objects
+        extern void js_console_log(Item);
+        extern void js_console_log_multi(Item*, int);
+        extern Item js_console_count_fn(Item);
+        extern Item js_console_countReset_fn(Item);
+        extern Item js_console_time_fn(Item);
+        extern Item js_console_timeEnd_fn(Item);
+        extern Item js_console_timeLog_fn(Item);
+        extern Item js_console_clear_fn(void);
+        extern Item js_console_group_fn(Item);
+        extern Item js_console_groupEnd_fn(void);
+        extern Item js_console_trace_fn(Item);
+        extern Item js_console_dir_fn(Item);
+        extern Item js_console_table_fn(Item);
+        extern Item js_console_assert_fn(Item, Item);
+
+        // log, warn, error, info, debug all map to console_log
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("log", 3))},
+            js_new_function((void*)js_console_log, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("warn", 4))},
+            js_new_function((void*)js_console_log, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("error", 5))},
+            js_new_function((void*)js_console_log, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("info", 4))},
+            js_new_function((void*)js_console_log, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("debug", 5))},
+            js_new_function((void*)js_console_log, 1));
+        // count, countReset
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("count", 5))},
+            js_new_function((void*)js_console_count_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("countReset", 10))},
+            js_new_function((void*)js_console_countReset_fn, 1));
+        // time, timeEnd, timeLog
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("time", 4))},
+            js_new_function((void*)js_console_time_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("timeEnd", 7))},
+            js_new_function((void*)js_console_timeEnd_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("timeLog", 7))},
+            js_new_function((void*)js_console_timeLog_fn, 1));
+        // clear, group, groupEnd
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("clear", 5))},
+            js_new_function((void*)js_console_clear_fn, 0));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("group", 5))},
+            js_new_function((void*)js_console_group_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("groupEnd", 8))},
+            js_new_function((void*)js_console_groupEnd_fn, 0));
+        // trace, dir, table, assert
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("trace", 5))},
+            js_new_function((void*)js_console_trace_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("dir", 3))},
+            js_new_function((void*)js_console_dir_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("table", 5))},
+            js_new_function((void*)js_console_table_fn, 1));
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("assert", 6))},
+            js_new_function((void*)js_console_assert_fn, 2));
     }
     return js_console_object;
 }
@@ -18125,8 +18212,16 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 
 // vm.createContext(sandbox) — returns sandbox (or new object) marked as a "context"
 static Item js_vm_createContext(Item sandbox) {
+    extern Item js_throw_type_error_code(const char* code, const char* msg);
     // If no sandbox provided, create a new empty object
-    if (sandbox.item == 0 || sandbox.item == ITEM_NULL || sandbox.item == ITEM_UNDEFINED) {
+    TypeId t = get_type_id(sandbox);
+    if (t == LMD_TYPE_STRING || t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT ||
+        t == LMD_TYPE_BOOL || t == LMD_TYPE_SYMBOL) {
+        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"contextObject\" argument must be an object");
+        return make_js_undefined();
+    }
+    if (t != LMD_TYPE_MAP) {
         sandbox = js_new_object();
     }
     // Mark it as a vm context (set a hidden property)
@@ -18137,9 +18232,20 @@ static Item js_vm_createContext(Item sandbox) {
 
 // vm.isContext(obj) — check if object is a context
 static Item js_vm_isContext(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
+    extern Item js_throw_type_error_code(const char* code, const char* msg);
+    TypeId t = get_type_id(obj);
+    // Arrays are objects in JS — don't throw, return false
+    if (t == LMD_TYPE_ARRAY) return (Item){.item = ITEM_FALSE};
+    if (t != LMD_TYPE_MAP) {
+        js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"sandbox\" argument must be an object");
+        return make_js_undefined();
+    }
+    if (t != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
     Item marker = js_property_get(obj, (Item){.item = s2it(heap_create_name("__vmContext", 11))});
-    return (marker.item == ITEM_TRUE) ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
+    if (get_type_id(marker) == LMD_TYPE_BOOL && marker.item == ITEM_TRUE)
+        return (Item){.item = ITEM_TRUE};
+    return (Item){.item = ITEM_FALSE};
 }
 
 // vm.runInThisContext(code, options) — evaluate code in global context
@@ -18147,9 +18253,8 @@ static Item js_vm_runInThisContext(Item code) {
     return js_builtin_eval(code, 1); // global scope
 }
 
-// Helper: wrap code with sandbox variable declarations
-// Produces: (function(var1, var2, ...) { return eval(code); }).call(sandbox, sandbox.var1, sandbox.var2, ...)
-// This approach lets the code access sandbox properties as local variables.
+// Helper: run code with sandbox variables injected as temporary globals.
+// Sets sandbox properties as globals before eval, removes after.
 static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     if (get_type_id(code) != LMD_TYPE_STRING) return ItemNull;
 
@@ -18163,18 +18268,49 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     Item keys = js_object_keys(sandbox);
     int64_t nkeys = js_array_length(keys);
 
-    // Filter out internal keys
     if (nkeys == 0) {
         return js_builtin_eval(code, 1);
     }
 
-    String* code_str = it2s(code);
+    // Get globalThis to inject sandbox variables
+    extern Item js_get_global_this(void);
+    Item global = js_get_global_this();
 
-    // Build: (function(k1,k2,...){ <code>\n }).call(null, sandbox_val1, sandbox_val2, ...)
-    // But we can't pass the sandbox values through eval. Instead, inject var declarations:
-    // var k1 = <json_val>; var k2 = <json_val>; ... <code>
-    // For simplicity, just eval the code directly — most vm tests don't rely on sandbox vars
-    return js_builtin_eval(code, 1);
+    // Save existing global values and inject sandbox values
+    Item* saved_vals = (Item*)mem_alloc(sizeof(Item) * nkeys, MEM_CAT_TEMP);
+    bool* had_val = (bool*)mem_alloc(sizeof(bool) * nkeys, MEM_CAT_TEMP);
+
+    for (int64_t i = 0; i < nkeys; i++) {
+        Item k = js_array_get_int(keys, (int)i);
+        if (get_type_id(k) != LMD_TYPE_STRING) { had_val[i] = false; continue; }
+        String* ks = it2s(k);
+        // Skip internal keys
+        if (ks->len > 1 && ks->chars[0] == '_' && ks->chars[1] == '_') {
+            had_val[i] = false;
+            continue;
+        }
+        // Save existing value
+        saved_vals[i] = js_property_get(global, k);
+        had_val[i] = true;
+        // Set sandbox value on global
+        js_property_set(global, k, js_property_get(sandbox, k));
+    }
+
+    // Eval the code in global scope
+    Item result = js_builtin_eval(code, 1);
+
+    // Restore original globals
+    for (int64_t i = 0; i < nkeys; i++) {
+        if (!had_val[i]) continue;
+        Item k = js_array_get_int(keys, (int)i);
+        if (get_type_id(k) != LMD_TYPE_STRING) continue;
+        // Restore original value
+        js_property_set(global, k, saved_vals[i]);
+    }
+
+    mem_free(saved_vals);
+    mem_free(had_val);
+    return result;
 }
 
 // vm.runInContext(code, context, options) — evaluate code
@@ -18233,18 +18369,16 @@ static Item js_vm_Script_runInThisContext(void) {
 
 // Script.runInContext wrapper
 static Item js_vm_Script_runInContext(Item context) {
-    (void)context;
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
-    return js_builtin_eval(code, 1);
+    return js_vm_run_with_sandbox(code, context);
 }
 
 // Script.runInNewContext wrapper
 static Item js_vm_Script_runInNewContext(Item sandbox) {
-    (void)sandbox;
     Item self = js_get_this();
     Item code = js_property_get(self, (Item){.item = s2it(heap_create_name("_code", 5))});
-    return js_builtin_eval(code, 1);
+    return js_vm_run_with_sandbox(code, sandbox);
 }
 
 // Script constructor wrapper (called with `new vm.Script(code, options)`)

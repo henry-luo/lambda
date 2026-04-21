@@ -407,10 +407,62 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
 }
 
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
-extern "C" Item js_buffer_concat(Item list) {
-    if (js_array_length(list) < 0) return create_buffer(0);
+extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
+    extern Item js_throw_type_error(const char* msg);
+    extern Item js_throw_range_error(const char* msg);
 
+    // list must be an array-like
     int64_t count = js_array_length(list);
+    if (count < 0) {
+        js_throw_type_error("\"list\" argument must be an instance of Array, Buffer, or Uint8Array");
+        return make_js_undefined();
+    }
+
+    // Validate totalLength if provided (must be integer, >= 0)
+    if (get_type_id(total_length_item) != LMD_TYPE_UNDEFINED &&
+        total_length_item.item != ITEM_NULL && total_length_item.item != ITEM_JS_UNDEFINED) {
+        // Check if it's not an integer — simple approach: check if string representation has a dot
+        // Node.js throws ERR_OUT_OF_RANGE for non-integer or negative totalLength
+        TypeId tl_type = get_type_id(total_length_item);
+        if (tl_type == LMD_TYPE_FLOAT) {
+            // Check if value has fractional part or is negative
+            extern Item js_to_string(Item value);
+            Item str = js_to_string(total_length_item);
+            String* s = it2s(str);
+            if (s) {
+                bool has_dot = false;
+                bool is_neg = (s->len > 0 && s->chars[0] == '-');
+                for (int i = 0; i < (int)s->len; i++) {
+                    if (s->chars[i] == '.') { has_dot = true; break; }
+                }
+                if (has_dot) {
+                    js_throw_range_error("The value of \"totalLength\" is out of range. It must be an integer");
+                    return make_js_undefined();
+                }
+                if (is_neg) {
+                    js_throw_range_error("The value of \"totalLength\" is out of range. It must be >= 0");
+                    return make_js_undefined();
+                }
+            }
+        } else if (tl_type == LMD_TYPE_INT) {
+            // check negative
+            int64_t v = it2i(total_length_item);
+            if (v < 0) {
+                js_throw_range_error("The value of \"totalLength\" is out of range. It must be >= 0");
+                return make_js_undefined();
+            }
+        }
+    }
+
+    // Validate each element is a Buffer/Uint8Array
+    for (int64_t i = 0; i < count; i++) {
+        Item buf = js_array_get_int(list, i);
+        if (!js_is_typed_array(buf)) {
+            js_throw_type_error("\"list[" "i" "]\" argument must be an instance of Buffer or Uint8Array");
+            return make_js_undefined();
+        }
+    }
+
     // compute total length
     int total = 0;
     for (int64_t i = 0; i < count; i++) {
@@ -448,6 +500,100 @@ extern "C" Item js_buffer_isBuffer(Item obj) {
     if (ta && ta->element_type == JS_TYPED_UINT8)
         return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
+}
+
+// ─── Buffer.isUtf8(input) ──────────────────────────────────────────────────
+static Item js_buffer_isUtf8(Item input) {
+    if (!js_is_typed_array(input)) return (Item){.item = b2it(false)};
+    Map* m = input.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta || !ta->data) return (Item){.item = b2it(false)};
+
+    // Validate UTF-8 byte sequence
+    const uint8_t* bytes = (const uint8_t*)ta->data;
+    size_t len = ta->byte_length;
+    size_t i = 0;
+    while (i < len) {
+        uint8_t b = bytes[i];
+        int seqlen = 0;
+        if (b <= 0x7F) { seqlen = 1; }
+        else if ((b & 0xE0) == 0xC0) { seqlen = 2; }
+        else if ((b & 0xF0) == 0xE0) { seqlen = 3; }
+        else if ((b & 0xF8) == 0xF0) { seqlen = 4; }
+        else return (Item){.item = b2it(false)};
+
+        if (i + seqlen > len) return (Item){.item = b2it(false)};
+        for (int j = 1; j < seqlen; j++) {
+            if ((bytes[i + j] & 0xC0) != 0x80) return (Item){.item = b2it(false)};
+        }
+        // Check overlong encodings and surrogates
+        if (seqlen == 2 && b < 0xC2) return (Item){.item = b2it(false)};
+        if (seqlen == 3) {
+            uint32_t cp = ((b & 0x0F) << 12) | ((bytes[i+1] & 0x3F) << 6) | (bytes[i+2] & 0x3F);
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return (Item){.item = b2it(false)};
+        }
+        if (seqlen == 4) {
+            uint32_t cp = ((b & 0x07) << 18) | ((bytes[i+1] & 0x3F) << 12) | ((bytes[i+2] & 0x3F) << 6) | (bytes[i+3] & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF) return (Item){.item = b2it(false)};
+        }
+        i += seqlen;
+    }
+    return (Item){.item = b2it(true)};
+}
+
+// ─── Buffer.isAscii(input) ─────────────────────────────────────────────────
+static Item js_buffer_isAscii(Item input) {
+    if (!js_is_typed_array(input)) return (Item){.item = b2it(false)};
+    Map* m = input.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta || !ta->data) return (Item){.item = b2it(true)};
+    if (ta->byte_length == 0) return (Item){.item = b2it(true)};
+
+    const uint8_t* bytes = (const uint8_t*)ta->data;
+    for (int i = 0; i < ta->byte_length; i++) {
+        if (bytes[i] > 0x7F) return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(true)};
+}
+
+// ─── Buffer.copyBytesFrom(view, offset, length) ────────────────────────────
+static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_item) {
+    if (!js_is_typed_array(view)) return ItemNull;
+    Map* m = view.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta || !ta->data) return ItemNull;
+
+    int64_t offset = 0;
+    if (get_type_id(offset_item) == LMD_TYPE_INT) offset = it2i(offset_item);
+    if (offset < 0) offset = 0;
+
+    // Compute element size from type
+    int elem_size = 1;
+    switch (ta->element_type) {
+        case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
+        case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+        case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+        case JS_TYPED_FLOAT64: elem_size = 8; break;
+        default: break;
+    }
+
+    int64_t byte_len = (int64_t)ta->byte_length - offset * elem_size;
+    if (get_type_id(length_item) == LMD_TYPE_INT) {
+        int64_t req = it2i(length_item) * elem_size;
+        if (req < byte_len) byte_len = req;
+    }
+    if (byte_len <= 0) byte_len = 0;
+
+    int64_t src_offset = offset * elem_size;
+    extern Item js_buffer_alloc(Item size, Item fill);
+    Item result = js_buffer_alloc((Item){.item = i2it(byte_len)}, ItemNull);
+    if (js_is_typed_array(result) && byte_len > 0) {
+        JsTypedArray* dst_ta = (JsTypedArray*)result.map->data;
+        if (dst_ta && dst_ta->data && src_offset + byte_len <= (int64_t)ta->byte_length) {
+            memcpy(dst_ta->data, (const uint8_t*)ta->data + src_offset, byte_len);
+        }
+    }
+    return result;
 }
 
 // ─── Buffer.isEncoding(encoding) ────────────────────────────────────────────
@@ -743,7 +889,13 @@ extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item) {
     String* s = it2s(str_item);
     int offset = 0;
     if (get_type_id(offset_item) == LMD_TYPE_INT) offset = (int)it2i(offset_item);
-    if (offset < 0) offset = 0;
+    else if (get_type_id(offset_item) == LMD_TYPE_FLOAT) offset = (int)it2d(offset_item);
+    if (offset < 0 || offset > blen) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "The value of \"offset\" is out of range. It must be >= 0 and <= %d. Received %d", blen, offset);
+        return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+    }
     if (offset >= blen) return (Item){.item = i2it(0)};
 
     int write_len = (int)s->len;
@@ -1309,6 +1461,24 @@ static int validate_rw_offset(Item offset_item, int blen, int byte_size, const c
     return off;
 }
 
+// validate write value is in range [min, max]
+static bool validate_write_value(Item value_item, int64_t* out_val, int64_t min_val, int64_t max_val, int byte_size) {
+    int64_t v = 0;
+    TypeId tid = get_type_id(value_item);
+    if (tid == LMD_TYPE_INT) v = it2i(value_item);
+    else if (tid == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    *out_val = v;
+    if (v < min_val || v > max_val) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "The value of \"value\" is out of range. It must be >= %lld and <= %lld. Received %lld",
+            (long long)min_val, (long long)max_val, (long long)v);
+        js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
+        return false;
+    }
+    return true;
+}
+
 // ─── Endian-aware read methods ──────────────────────────────────────────────
 extern "C" Item js_buffer_readUInt8(Item buf, Item offset_item) {
     int blen = 0;
@@ -1493,8 +1663,7 @@ extern "C" Item js_buffer_writeUInt8(Item buf, Item value_item, Item offset_item
     int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, 0, 255, 1)) return make_js_undefined();
     data[off] = (uint8_t)(v & 0xFF);
     return (Item){.item = i2it(off + 1)};
 }
@@ -1507,8 +1676,7 @@ extern "C" Item js_buffer_writeUInt16BE(Item buf, Item value_item, Item offset_i
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, 0, 65535, 2)) return make_js_undefined();
     data[off] = (uint8_t)((v >> 8) & 0xFF);
     data[off + 1] = (uint8_t)(v & 0xFF);
     return (Item){.item = i2it(off + 2)};
@@ -1522,8 +1690,7 @@ extern "C" Item js_buffer_writeUInt16LE(Item buf, Item value_item, Item offset_i
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, 0, 65535, 2)) return make_js_undefined();
     data[off] = (uint8_t)(v & 0xFF);
     data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
     return (Item){.item = i2it(off + 2)};
@@ -1537,8 +1704,7 @@ extern "C" Item js_buffer_writeUInt32BE(Item buf, Item value_item, Item offset_i
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, 0, 4294967295LL, 4)) return make_js_undefined();
     data[off]     = (uint8_t)((v >> 24) & 0xFF);
     data[off + 1] = (uint8_t)((v >> 16) & 0xFF);
     data[off + 2] = (uint8_t)((v >> 8) & 0xFF);
@@ -1554,8 +1720,7 @@ extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_i
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, 0, 4294967295LL, 4)) return make_js_undefined();
     data[off]     = (uint8_t)(v & 0xFF);
     data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
     data[off + 2] = (uint8_t)((v >> 16) & 0xFF);
@@ -1573,8 +1738,7 @@ extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item)
     int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, -128, 127, 1)) return make_js_undefined();
     data[off] = (uint8_t)(v & 0xFF);
     return (Item){.item = i2it(off + 1)};
 }
@@ -1587,8 +1751,7 @@ extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_it
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, -32768, 32767, 2)) return make_js_undefined();
     data[off]     = (uint8_t)((v >> 8) & 0xFF);
     data[off + 1] = (uint8_t)(v & 0xFF);
     return (Item){.item = i2it(off + 2)};
@@ -1602,8 +1765,7 @@ extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_it
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, -32768, 32767, 2)) return make_js_undefined();
     data[off]     = (uint8_t)(v & 0xFF);
     data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
     return (Item){.item = i2it(off + 2)};
@@ -1617,8 +1779,7 @@ extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_it
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, -2147483648LL, 2147483647LL, 4)) return make_js_undefined();
     data[off]     = (uint8_t)((v >> 24) & 0xFF);
     data[off + 1] = (uint8_t)((v >> 16) & 0xFF);
     data[off + 2] = (uint8_t)((v >> 8) & 0xFF);
@@ -1634,8 +1795,7 @@ extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_it
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
     if (off < 0) return err;
     int64_t v = 0;
-    if (get_type_id(value_item) == LMD_TYPE_INT) v = it2i(value_item);
-    else if (get_type_id(value_item) == LMD_TYPE_FLOAT) v = (int64_t)it2d(value_item);
+    if (!validate_write_value(value_item, &v, -2147483648LL, 2147483647LL, 4)) return make_js_undefined();
     data[off]     = (uint8_t)(v & 0xFF);
     data[off + 1] = (uint8_t)((v >> 8) & 0xFF);
     data[off + 2] = (uint8_t)((v >> 16) & 0xFF);
@@ -2166,15 +2326,19 @@ extern "C" Item js_get_buffer_prototype(void) {
 extern "C" Item js_get_buffer_namespace(void) {
     if (buffer_namespace.item != 0) return buffer_namespace;
 
-    buffer_namespace = js_new_object();
+    // Buffer is both a callable function (deprecated Buffer(arg, enc)) and a namespace
+    buffer_namespace = js_new_function((void*)js_buffer_construct, 2);
 
     // static methods (Buffer.alloc, Buffer.from, etc.)
     buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);
     buf_set_method(buffer_namespace, "allocUnsafe", (void*)js_buffer_allocUnsafe, 1);
     buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 2);
-    buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 1);
+    buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 2);
     buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);
     buf_set_method(buffer_namespace, "isEncoding", (void*)js_buffer_isEncoding, 1);
+    buf_set_method(buffer_namespace, "isUtf8",     (void*)js_buffer_isUtf8, 1);
+    buf_set_method(buffer_namespace, "isAscii",    (void*)js_buffer_isAscii, 1);
+    buf_set_method(buffer_namespace, "copyBytesFrom", (void*)js_buffer_copyBytesFrom, 3);
     buf_set_method(buffer_namespace, "byteLength", (void*)js_buffer_byteLength, 2);
     buf_set_method(buffer_namespace, "allocUnsafeSlow", (void*)js_buffer_allocUnsafeSlow, 1);
     buf_set_method(buffer_namespace, "compare",    (void*)js_buffer_compare_static, 2);

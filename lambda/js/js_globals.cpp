@@ -677,8 +677,7 @@ extern "C" Item js_date_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
-    double* fp = &js_date_now_buf[js_date_now_idx % 64];
-    js_date_now_idx++;
+    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = ms;
     return (Item){.item = d2it(fp)};
 }
@@ -1494,13 +1493,73 @@ extern "C" Item js_process_nextTick(Item callback) {
     return make_js_undefined();
 }
 
+// process.emitWarning(warning, type, code) — emit a warning
+// Node.js: emits 'warning' event on process; for us, log and call listeners
+extern "C" Item js_process_emit(Item event_name, Item arg1);
+static Item js_process_emitWarning(Item warning, Item type_item, Item code_item) {
+    // Build a Warning object if warning is a string
+    Item warning_obj;
+    if (get_type_id(warning) == LMD_TYPE_STRING) {
+        warning_obj = js_new_object();
+        js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("message", 7))}, warning);
+        js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
+            get_type_id(type_item) == LMD_TYPE_STRING ? type_item :
+                (Item){.item = s2it(heap_create_name("Warning", 7))});
+        if (get_type_id(code_item) == LMD_TYPE_STRING) {
+            js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, code_item);
+        }
+    } else {
+        warning_obj = warning;
+    }
+
+    // Emit 'warning' event on process
+    js_process_emit((Item){.item = s2it(heap_create_name("warning", 7))}, warning_obj);
+    return make_js_undefined();
+}
+
 // POSIX: process.getuid/getgid/geteuid/getegid
 #ifndef _WIN32
 #include <unistd.h>
+#include <signal.h>
 extern "C" Item js_process_getuid(void) { return (Item){.item = i2it(getuid())}; }
 extern "C" Item js_process_getgid(void) { return (Item){.item = i2it(getgid())}; }
 extern "C" Item js_process_geteuid(void) { return (Item){.item = i2it(geteuid())}; }
 extern "C" Item js_process_getegid(void) { return (Item){.item = i2it(getegid())}; }
+
+// process.kill(pid, signal) — send a signal to a process
+extern "C" Item js_process_kill(Item pid_item, Item signal_item) {
+    int pid = (int)it2i(pid_item);
+    int sig = SIGTERM; // default
+    if (get_type_id(signal_item) == LMD_TYPE_INT) {
+        sig = (int)it2i(signal_item);
+    } else if (get_type_id(signal_item) == LMD_TYPE_STRING) {
+        String* s = it2s(signal_item);
+        if (s->len == 7 && memcmp(s->chars, "SIGKILL", 7) == 0) sig = SIGKILL;
+        else if (s->len == 7 && memcmp(s->chars, "SIGTERM", 7) == 0) sig = SIGTERM;
+        else if (s->len == 6 && memcmp(s->chars, "SIGINT", 6) == 0) sig = SIGINT;
+        else if (s->len == 7 && memcmp(s->chars, "SIGHUP", 6) == 0) sig = SIGHUP;
+        else if (s->len == 7 && memcmp(s->chars, "SIGUSR1", 7) == 0) sig = SIGUSR1;
+        else if (s->len == 7 && memcmp(s->chars, "SIGUSR2", 7) == 0) sig = SIGUSR2;
+        else if (s->len == 1 && s->chars[0] == '0') sig = 0;
+    }
+    int r = kill(pid, sig);
+    if (r != 0) {
+        log_error("process.kill: failed to send signal %d to pid %d", sig, pid);
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+// process.getgroups() — returns array of group IDs
+extern "C" Item js_process_getgroups(void) {
+    gid_t groups[256];
+    int ngroups = getgroups(256, groups);
+    if (ngroups < 0) ngroups = 0;
+    Item arr = js_array_new(ngroups);
+    for (int i = 0; i < ngroups; i++) {
+        js_array_set(arr, (Item){.item = i2it(i)}, (Item){.item = i2it(groups[i])});
+    }
+    return arr;
+}
 #endif
 
 // process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
@@ -1902,8 +1961,26 @@ extern "C" Item js_get_process_object_value(void) {
             js_property_set(js_process_object,
                 (Item){.item = s2it(heap_create_name("getegid", 7))},
                 js_new_function((void*)js_process_getegid, 0));
+            extern Item js_process_kill(Item, Item);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("kill", 4))},
+                js_new_function((void*)js_process_kill, 2));
+            extern Item js_process_getgroups(void);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getgroups", 9))},
+                js_new_function((void*)js_process_getgroups, 0));
         }
 #endif
+
+        // process.argv0 — the original argv[0] value
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("argv0", 5))},
+            (Item){.item = s2it(heap_create_name("lambda", 6))});
+
+        // process.emitWarning(warning, type, code)
+        js_property_set(js_process_object,
+            (Item){.item = s2it(heap_create_name("emitWarning", 11))},
+            js_new_function((void*)js_process_emitWarning, 3));
     }
     return js_process_object;
 }
@@ -3104,6 +3181,175 @@ extern "C" void js_console_log_multi(Item* args, int argc) {
 }
 
 // =============================================================================
+// Console stub methods (count, clear, group, time, trace, assert, dir, table)
+// =============================================================================
+
+// console.count / console.countReset
+static int js_console_count_map[64] = {0};
+static uint32_t js_console_count_keys[64] = {0};
+static int js_console_count_used = 0;
+
+static int* js_console_count_slot(const char* label, int label_len) {
+    uint32_t h = 0;
+    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
+    for (int i = 0; i < js_console_count_used; i++) {
+        if (js_console_count_keys[i] == h) return &js_console_count_map[i];
+    }
+    if (js_console_count_used < 64) {
+        int idx = js_console_count_used++;
+        js_console_count_keys[idx] = h;
+        js_console_count_map[idx] = 0;
+        return &js_console_count_map[idx];
+    }
+    return &js_console_count_map[0]; // fallback
+}
+
+extern "C" Item js_console_count_fn(Item label_item) {
+    const char* label = "default";
+    int label_len = 7;
+    char buf[256];
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    }
+    int* slot = js_console_count_slot(label, label_len);
+    (*slot)++;
+    snprintf(buf, sizeof(buf), "%.*s: %d", label_len, label, *slot);
+    printf("%s\n", buf);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_console_countReset_fn(Item label_item) {
+    const char* label = "default";
+    int label_len = 7;
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    }
+    int* slot = js_console_count_slot(label, label_len);
+    *slot = 0;
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.time / console.timeEnd / console.timeLog
+static double js_console_timers[32] = {0};
+static uint32_t js_console_timer_keys[32] = {0};
+static int js_console_timer_used = 0;
+
+static int js_console_timer_find(uint32_t h) {
+    for (int i = 0; i < js_console_timer_used; i++) {
+        if (js_console_timer_keys[i] == h) return i;
+    }
+    return -1;
+}
+
+extern "C" Item js_console_time_fn(Item label_item) {
+    const char* label = "default";
+    int label_len = 7;
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    }
+    uint32_t h = 0;
+    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
+    int idx = js_console_timer_find(h);
+    if (idx < 0 && js_console_timer_used < 32) {
+        idx = js_console_timer_used++;
+        js_console_timer_keys[idx] = h;
+    }
+    if (idx >= 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        js_console_timers[idx] = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_console_timeEnd_fn(Item label_item) {
+    const char* label = "default";
+    int label_len = 7;
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    }
+    uint32_t h = 0;
+    for (int i = 0; i < label_len; i++) h = h * 31 + (uint8_t)label[i];
+    int idx = js_console_timer_find(h);
+    if (idx >= 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double now = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+        double elapsed = now - js_console_timers[idx];
+        printf("%.*s: %.3fms\n", label_len, label, elapsed);
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_console_timeLog_fn(Item label_item) {
+    return js_console_timeEnd_fn(label_item); // same output, but doesn't clear timer
+}
+
+// console.clear — no-op in non-TTY
+extern "C" Item js_console_clear_fn(void) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.group / console.groupEnd — stubs
+static int js_console_group_depth = 0;
+extern "C" Item js_console_group_fn(Item label_item) {
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) printf("%.*s\n", (int)s->len, s->chars);
+    }
+    js_console_group_depth++;
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+extern "C" Item js_console_groupEnd_fn(void) {
+    if (js_console_group_depth > 0) js_console_group_depth--;
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.trace — print stack trace stub
+extern "C" Item js_console_trace_fn(Item label_item) {
+    printf("Trace");
+    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+        String* s = it2s(label_item);
+        if (s && s->len > 0) printf(": %.*s", (int)s->len, s->chars);
+    }
+    printf("\n");
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.dir — uses util.inspect-like output
+extern "C" Item js_console_dir_fn(Item obj) {
+    extern void js_console_log(Item value);
+    js_console_log(obj);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.table — simplified stub, just logs the value
+extern "C" Item js_console_table_fn(Item data) {
+    extern void js_console_log(Item value);
+    js_console_log(data);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// console.assert(value, ...args) — if !value, print assertion failed
+extern "C" bool js_is_truthy(Item val);
+extern "C" Item js_console_assert_fn(Item cond, Item msg) {
+    if (!js_is_truthy(cond)) {
+        fprintf(stderr, "Assertion failed");
+        if (get_type_id(msg) == LMD_TYPE_STRING) {
+            String* s = it2s(msg);
+            if (s && s->len > 0) fprintf(stderr, ": %.*s", (int)s->len, s->chars);
+        }
+        fprintf(stderr, "\n");
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// =============================================================================
 // Array fill (regular arrays)
 // =============================================================================
 
@@ -3360,15 +3606,10 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
             if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
                 return (Item){.item = b2it(true)};
             }
-            // error hierarchy: TypeError/RangeError/SyntaxError/ReferenceError/URIError/EvalError instanceof Error
+            // error hierarchy: any *Error subtype instanceof Error
             if (rn->len == 5 && strncmp(rn->chars, "Error", 5) == 0) {
-                if ((on->len == 9 && strncmp(on->chars, "TypeError", 9) == 0) ||
-                    (on->len == 10 && strncmp(on->chars, "RangeError", 10) == 0) ||
-                    (on->len == 11 && strncmp(on->chars, "SyntaxError", 11) == 0) ||
-                    (on->len == 14 && strncmp(on->chars, "ReferenceError", 14) == 0) ||
-                    (on->len == 8 && strncmp(on->chars, "URIError", 8) == 0) ||
-                    (on->len == 9 && strncmp(on->chars, "EvalError", 9) == 0) ||
-                    (on->len == 14 && strncmp(on->chars, "AggregateError", 14) == 0)) {
+                // check if class name ends with "Error" (covers TypeError, RangeError, AssertionError, etc.)
+                if (on->len > 5 && strncmp(on->chars + on->len - 5, "Error", 5) == 0) {
                     return (Item){.item = b2it(true)};
                 }
             }
@@ -8548,6 +8789,18 @@ extern "C" Item js_get_global_this() {
                 ac_ctor);
         }
 
+        // TextEncoder / TextDecoder constructors as globals
+        {
+            extern Item js_text_encoder_new(void);
+            extern Item js_text_decoder_new(Item encoding);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("TextEncoder", 11))},
+                js_new_function((void*)js_text_encoder_new, 0));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("TextDecoder", 11))},
+                js_new_function((void*)js_text_decoder_new, 1));
+        }
+
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
     }
@@ -9126,6 +9379,13 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
+    // Error.captureStackTrace — V8-specific no-op stub (sets .stack on target)
+    if (ctor_id == JS_CTOR_ERROR) {
+        extern Item js_new_function(void* func_ptr, int param_count);
+        Item cst_fn = js_new_function((void*)js_error_captureStackTrace, 2);
+        Item cst_key = (Item){.item = s2it(heap_create_name("captureStackTrace", 17))};
+        js_func_init_property(fn_item, cst_key, cst_fn);
+    }
     return fn_item;
 }
 

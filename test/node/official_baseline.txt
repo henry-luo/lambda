@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: 8ac8ee23c
+# Commit: 1620db542
 # Source: ref/node/test/parallel/
-# Total passing: 761 / 2052  (skipped: 0)
+# Total passing: 775 / 2052  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -44,7 +44,9 @@ test-buffer-equals.js
 test-buffer-failed-alloc-typed-arrays.js
 test-buffer-isencoding.js
 test-buffer-iterator.js
+test-buffer-no-negative-allocation.js
 test-buffer-nopendingdep-map.js
+test-buffer-over-max-length.js
 test-buffer-pending-deprecation.js
 test-buffer-readdouble.js
 test-buffer-readfloat.js
@@ -52,7 +54,9 @@ test-buffer-safe-unsafe.js
 test-buffer-swap-fast.js
 test-buffer-tojson.js
 test-buffer-tostring.js
+test-buffer-zero-fill-cli.js
 test-buffer-zero-fill-reset.js
+test-buffer-zero-fill.js
 test-child-process-advanced-serialization-largebuffer.js
 test-child-process-advanced-serialization-splitted-length-field.js
 test-child-process-can-write-to-stdout.js
@@ -609,6 +613,7 @@ test-net-socket-connect-without-cb.js
 test-net-socket-connecting.js
 test-net-socket-destroy-send.js
 test-net-socket-end-before-connect.js
+test-net-socket-end-callback.js
 test-net-socket-local-address.js
 test-net-socket-ready-without-cb.js
 test-net-socket-reset-send.js
@@ -628,11 +633,13 @@ test-net-write-fully-async-hex-string.js
 test-net-write-slow.js
 test-os-eol.js
 test-os-userinfo-handles-getter-errors.js
+test-path-isabsolute.js
 test-path-posix-exists.js
 test-path-posix-relative-on-windows.js
 test-path-win32-normalize-device-names.js
 test-process-abort.js
 test-process-beforeexit-throw-exit.js
+test-process-chdir.js
 test-process-constants-noatime.js
 test-process-dlopen-error-message-crash.js
 test-process-dlopen-undefined-exports.js
@@ -640,6 +647,7 @@ test-process-domain-segfault.js
 test-process-env-delete.js
 test-process-env-deprecation.js
 test-process-env-sideeffects.js
+test-process-env-symbols.js
 test-process-env-windows-error-reset.js
 test-process-execpath.js
 test-process-execve-no-args.js
@@ -757,11 +765,16 @@ test-tls-wrap-econnreset-socket.js
 test-tls-wrap-econnreset.js
 test-tls-write-error.js
 test-tls-writewrap-leak.js
+test-url-domain-ascii-unicode.js
+test-url-format-whatwg.js
+test-url-format.js
+test-url-parse-format.js
 test-util-getcallsites.js
 test-util-inspect-namespace.js
 test-util-primordial-monkeypatching.js
 test-vm-access-process-env.js
 test-vm-api-handles-getter-errors.js
+test-vm-create-context-arg.js
 test-vm-create-context-circular-reference.js
 test-vm-cross-context.js
 test-vm-data-property-writable.js
@@ -769,6 +782,7 @@ test-vm-deleting-property.js
 test-vm-function-redefinition.js
 test-vm-global-assignment.js
 test-vm-global-configurable-properties.js
+test-vm-is-context.js
 test-vm-module-after-evaluate.js
 test-vm-module-dynamic-import-promise.js
 test-vm-module-dynamic-import.js

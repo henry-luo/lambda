@@ -23842,12 +23842,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->eval_completion_reg = result;
 
     // v20 TDZ: Initialize let/const module vars to TDZ sentinel
+    // Skip preamble-inherited entries from outer scope (e.g. eval)
+    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
     if (mt->module_consts) {
         size_t tdz_iter = 0; void* tdz_item;
         while (hashmap_iter(mt->module_consts, &tdz_iter, &tdz_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)tdz_item;
             if (mce->const_type == MCONST_MODVAR &&
-                (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST)) {
+                (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) &&
+                (int)mce->int_val >= preamble_var_limit) {
                 MIR_reg_t tdz_val = jm_new_reg(mt, "tdz_init", MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, tdz_val),
@@ -23861,8 +23865,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Initialize declared var module vars to undefined (not implicit globals,
     // and not preamble-inherited entries from outer scope e.g. eval)
-    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
-        ? mt->preamble_var_count : 0;
     if (mt->module_consts) {
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
@@ -26313,6 +26315,13 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
                 snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd, filename);
             } else {
                 snprintf(abs_path, sizeof(abs_path), "%s", filename);
+            }
+        }
+        // Normalize: resolve . and .. components
+        {
+            char resolved[2048];
+            if (realpath(abs_path, resolved)) {
+                snprintf(abs_path, sizeof(abs_path), "%s", resolved);
             }
         }
         const char* last_slash = strrchr(abs_path, '/');
