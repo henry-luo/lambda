@@ -918,13 +918,48 @@ test262-strip:
 	@echo "Stripping comments from test262 files..."
 	@python3 utils/strip_test262_comments.py
 
+# Node.js official: install Lambda-compatible shims for test harness
+node-shim:
+	@echo "Installing Lambda test shims into ref/node/test/common/..."
+	@if [ -d ref/node/test/common ]; then \
+		if [ ! -f ref/node/test/common/index.js.orig ]; then \
+			cp ref/node/test/common/index.js ref/node/test/common/index.js.orig; \
+		fi; \
+		if [ ! -f ref/node/test/common/tmpdir.js.orig ]; then \
+			cp ref/node/test/common/tmpdir.js ref/node/test/common/tmpdir.js.orig; \
+		fi; \
+		if [ ! -f ref/node/test/common/fixtures.js.orig ]; then \
+			cp ref/node/test/common/fixtures.js ref/node/test/common/fixtures.js.orig; \
+		fi; \
+		cp lambda/js/test_shim/common_index.js ref/node/test/common/index.js; \
+		cp lambda/js/test_shim/tmpdir.js ref/node/test/common/tmpdir.js; \
+		cp lambda/js/test_shim/fixtures.js ref/node/test/common/fixtures.js; \
+		cp lambda/js/test_shim/package.json ref/node/test/common/package.json; \
+		echo "Shims installed."; \
+	else \
+		echo "ERROR: ref/node/test/common/ not found. Clone Node.js repo first."; \
+		exit 1; \
+	fi
+
+# Node.js official: restore original common module
+node-shim-restore:
+	@echo "Restoring original ref/node/test/common/..."
+	@if [ -f ref/node/test/common/index.js.orig ]; then \
+		mv ref/node/test/common/index.js.orig ref/node/test/common/index.js; \
+		mv ref/node/test/common/tmpdir.js.orig ref/node/test/common/tmpdir.js; \
+		mv ref/node/test/common/fixtures.js.orig ref/node/test/common/fixtures.js; \
+		echo "Originals restored."; \
+	else \
+		echo "No backup found — nothing to restore."; \
+	fi
+
 # Node.js official test suite: run official Node.js tests from ref/node/test/parallel/
-node-official: build-test
+node-official: build-test node-shim
 	@echo "Running Node.js official test suite..."
 	@./test/test_node_official_gtest.exe
 
 # Node.js official: update baseline with current passing set
-node-official-update-baseline: build-test
+node-official-update-baseline: build-test node-shim
 	@echo "Running Node.js official test suite and updating baseline..."
 	@./test/test_node_official_gtest.exe --update-baseline
 

@@ -114,6 +114,9 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"url",            "url",             true,  nullptr},
     {"util",           "util",            true,  nullptr},
     {"zlib",           "zlib",            true,  nullptr},
+    {"async_wrap",     "async-wrap",      true,  nullptr},
+    {"eventsource",    "eventsource",     true,  nullptr},
+    {"stringbytes",    "stringbytes",     true,  nullptr},
 
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         false, "clustering not implemented"},
@@ -155,7 +158,7 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"test-crypto-fips.js",                        "requires FIPS OpenSSL build"},
 
     // Tests depending on process.execPath being 'node'
-    {"test-process-execpath.js",                   "checks process.execPath === node"},
+    // NOTE: test-process-execpath.js now passes with the common shim
 
     // Non-deterministic tests
     {"test-crypto-random.js",                      "non-deterministic (random output)"},
@@ -170,6 +173,10 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"test-zlib-brotli.js",                        "hangs: requires fixtures module + brotli compression"},
     {"test-os-process-priority.js",                "hangs: requires os.constants.priority (not implemented)"},
     {"test-buffer-alloc.js",                       "timeout: 1192-line test, JIT compilation exceeds 30s"},
+
+    // Tests that use child_process.fork which spawns Node binary
+    {"test-child-process-fork-stdio.js",           "uses child_process.fork"},
+    {"test-child-process-fork-exec-argv.js",       "uses child_process.fork"},
 };
 
 // =============================================================================
