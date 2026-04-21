@@ -635,117 +635,54 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
     log_debug("[GRADIENT] Rendering conic gradient: from=%.1fdeg center=(%.2f,%.2f) stops=%d",
               gradient->from_angle, gradient->cx, gradient->cy, gradient->stop_count);
 
-    // Debug: log all color stops
     for (int i = 0; i < gradient->stop_count; i++) {
         log_debug("[GRADIENT] Conic stop %d: pos=%.2f color=#%02x%02x%02x",
                   i, gradient->stops[i].position,
                   gradient->stops[i].color.r, gradient->stops[i].color.g, gradient->stops[i].color.b);
     }
 
-    ImageSurface* surface = rdcon->ui_context->surface;
+    int w = (int)(rect.width + 0.5f);
+    int h = (int)(rect.height + 0.5f);
+    if (w <= 0 || h <= 0) return;
 
-    // Calculate center position in absolute coordinates
-    float cx = rect.x + rect.width * gradient->cx;
-    float cy = rect.y + rect.height * gradient->cy;
+    // Render gradient pixels to a temporary buffer
+    uint32_t* pixels = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_RENDER);
 
-    // From angle in radians (CSS: 0deg = up, clockwise)
-    float from_rad = (gradient->from_angle - 90.0f) * M_PI / 180.0f;
+    float cx = w * gradient->cx;
+    float cy = h * gradient->cy;
+    float from_rad = (gradient->from_angle - 90.0f) * (float)M_PI / 180.0f;
 
-    // Get border radius for rounded corners
-    float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
-    if (view->bound && view->bound->border) {
-        BorderProp* border = view->bound->border;
-        constrain_border_radii(border, rect.width, rect.height);
-        r_tl = border->radius.top_left;
-        r_tr = border->radius.top_right;
-        r_br = border->radius.bottom_right;
-        r_bl = border->radius.bottom_left;
-    }
-    bool has_radius = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
-
-    // Get clip bounds
-    Bound* clip = &rdcon->block.clip;
-    int clip_left = (int)clip->left;
-    int clip_top = (int)clip->top;
-    int clip_right = (int)clip->right;
-    int clip_bottom = (int)clip->bottom;
-
-    // Iterate over each pixel in the rect
-    int start_x = (int)fmaxf(rect.x, (float)clip_left);
-    int end_x = (int)fminf(rect.x + rect.width, (float)clip_right);
-    int start_y = (int)fmaxf(rect.y, (float)clip_top);
-    int end_y = (int)fminf(rect.y + rect.height, (float)clip_bottom);
-
-    for (int py = start_y; py < end_y; py++) {
-        for (int px = start_x; px < end_x; px++) {
-            // Check if pixel is inside rounded corners
-            if (has_radius) {
-                float lx = px - rect.x;  // local x relative to rect
-                float ly = py - rect.y;  // local y relative to rect
-                float w = rect.width;
-                float h = rect.height;
-
-                // Check each corner
-                // Top-left corner
-                if (lx < r_tl && ly < r_tl) {
-                    float dx = lx - r_tl;
-                    float dy = ly - r_tl;
-                    if (dx * dx + dy * dy > r_tl * r_tl) continue;
-                }
-                // Top-right corner
-                else if (lx > w - r_tr && ly < r_tr) {
-                    float dx = lx - (w - r_tr);
-                    float dy = ly - r_tr;
-                    if (dx * dx + dy * dy > r_tr * r_tr) continue;
-                }
-                // Bottom-right corner
-                else if (lx > w - r_br && ly > h - r_br) {
-                    float dx = lx - (w - r_br);
-                    float dy = ly - (h - r_br);
-                    if (dx * dx + dy * dy > r_br * r_br) continue;
-                }
-                // Bottom-left corner
-                else if (lx < r_bl && ly > h - r_bl) {
-                    float dx = lx - r_bl;
-                    float dy = ly - (h - r_bl);
-                    if (dx * dx + dy * dy > r_bl * r_bl) continue;
-                }
-            }
-
-            // Calculate angle from center to this pixel
+    for (int py = 0; py < h; py++) {
+        for (int px = 0; px < w; px++) {
             float dx = px - cx;
             float dy = py - cy;
             float angle = atan2f(dy, dx) - from_rad;
+            float position = fmodf((angle / (2.0f * (float)M_PI)) + 1.0f, 1.0f);
 
-            // Normalize to 0-1 range (one full rotation)
-            float position = fmodf((angle / (2.0f * M_PI)) + 1.0f, 1.0f);
-
-            // Get color at this angle position
             Color color = get_gradient_color_at(gradient->stops, gradient->stop_count, position);
-
-            // Set pixel (surface uses ABGR8888 format - same as ThorVG)
-            if (px >= 0 && px < surface->width && py >= 0 && py < surface->height) {
-                uint32_t* pixel = (uint32_t*)((uint8_t*)surface->pixels + py * surface->pitch) + px;
-
-                // Alpha blend if not fully opaque
-                if (color.a == 255) {
-                    // ABGR format: A in high bits, then B, G, R in low bits
-                    *pixel = (color.a << 24) | (color.b << 16) | (color.g << 8) | color.r;
-                } else if (color.a > 0) {
-                    // Simple alpha blend with existing pixel
-                    uint32_t existing = *pixel;
-                    uint8_t er = existing & 0xFF;           // R is in lowest byte
-                    uint8_t eg = (existing >> 8) & 0xFF;    // G
-                    uint8_t eb = (existing >> 16) & 0xFF;   // B
-                    float alpha = color.a / 255.0f;
-                    uint8_t nr = (uint8_t)(color.r * alpha + er * (1 - alpha));
-                    uint8_t ng = (uint8_t)(color.g * alpha + eg * (1 - alpha));
-                    uint8_t nb = (uint8_t)(color.b * alpha + eb * (1 - alpha));
-                    *pixel = (255 << 24) | (nb << 16) | (ng << 8) | nr;
-                }
-            }
+            pixels[py * w + px] = color.r | (color.g << 8) | (color.b << 16) | (color.a << 24);
         }
     }
+
+    // Clip to border-radius if present (using the ThorVG clip path, works in DL mode)
+    bool pushed_clip = false;
+    if (view->bound && view->bound->border && corner_has_radius(&view->bound->border->radius)) {
+        Corner radius = view->bound->border->radius;
+        constrain_corner_radii(&radius, rect.width, rect.height);
+        RdtPath* clip_path = build_rounded_rect_path(rect, &radius);
+        rc_push_clip(rdcon, clip_path, NULL);
+        pushed_clip = true;
+    }
+
+    // Draw through rc_draw_image (DL-aware: copies pixels into DL in DL mode)
+    rc_draw_image(rdcon, pixels, w, h, w * 4,
+                  rect.x, rect.y, rect.width, rect.height, 255, NULL);
+
+    if (pushed_clip) {
+        rc_pop_clip(rdcon);
+    }
+
+    mem_free(pixels);
 }
 
 /**
@@ -1461,8 +1398,9 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
  * Render a single tile of a background image using the raster blit path.
  */
 static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
+                         ScaleMode mode = SCALE_MODE_LINEAR,
                          ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
-    rc_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR, clip_shapes, clip_depth);
+    rc_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
 }
 
 /**
@@ -1601,6 +1539,13 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
         // ensure raster image pixels are decoded (lazy loading)
         image_surface_ensure_decoded(img);
     }
+
+    // Use wrap-around bilinear for repeating raster backgrounds so that
+    // tile boundaries blend seamlessly (matching browser behavior).
+    bool is_repeating = (repeat_x != CSS_VALUE_NO_REPEAT && repeat_x != CSS_VALUE_SPACE) ||
+                        (repeat_y != CSS_VALUE_NO_REPEAT && repeat_y != CSS_VALUE_SPACE);
+    ScaleMode tile_scale_mode = (is_repeating && !is_svg) ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
+
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
             Rect tile_rect;
@@ -1627,7 +1572,7 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
                 render_bg_tile_tvg(rdcon, img, &tile_rect);
             } else {
                 blit_bg_tile(rdcon, img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
-                             rdcon->clip_shapes, rdcon->clip_shape_depth);
+                             tile_scale_mode, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
         }
     }

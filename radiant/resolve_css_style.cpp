@@ -6254,6 +6254,56 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // column-rule shorthand: <column-rule-width> || <column-rule-style> || <column-rule-color>
+        case CSS_PROPERTY_COLUMN_RULE: {
+            log_debug("[CSS] Processing column-rule shorthand property");
+            if (!block) break;
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                memset(block->multicol, 0, sizeof(MultiColumnProp));
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    const CssValue* v = value->data.list.values[i];
+                    if (!v) continue;
+                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = v->data.keyword;
+                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
+                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
+                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
+                            block->multicol->rule_style = kw;
+                        } else if (kw == CSS_VALUE_THIN) {
+                            block->multicol->rule_width = 1.0f;
+                        } else if (kw == CSS_VALUE_MEDIUM) {
+                            block->multicol->rule_width = 3.0f;
+                        } else if (kw == CSS_VALUE_THICK) {
+                            block->multicol->rule_width = 5.0f;
+                        } else {
+                            block->multicol->rule_color = color_name_to_rgb(kw);
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
+                        block->multicol->rule_width = resolve_length_value(lycon, prop_id, v);
+                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
+                        block->multicol->rule_color = resolve_color_value(lycon, v);
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_width = 0;
+            }
+
+            log_debug("[CSS] column-rule: width=%.1f style=%d color=#%02x%02x%02x%02x",
+                      block->multicol->rule_width, block->multicol->rule_style,
+                      block->multicol->rule_color.r, block->multicol->rule_color.g,
+                      block->multicol->rule_color.b, block->multicol->rule_color.a);
+            break;
+        }
+
         case CSS_PROPERTY_COLUMN_RULE_WIDTH: {
             log_debug("[CSS] Processing column-rule-width property");
             if (!block) break;
@@ -8189,6 +8239,31 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->blk->text_overflow = val;
                     log_debug("[CSS] text-overflow: %s -> 0x%04X",
                              css_enum_info(val)->name, val);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WEBKIT_LINE_CLAMP: {
+            log_debug("[CSS] Processing -webkit-line-clamp property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break;
+                }
+            }
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int clamp = (int)value->data.number.value; // INT_CAST_OK: line count
+                if (clamp > 0) {
+                    block->blk->line_clamp = clamp;
+                    log_debug("[CSS] -webkit-line-clamp: %d", clamp);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                int clamp = (int)value->data.length.value; // INT_CAST_OK: line count
+                if (clamp > 0) {
+                    block->blk->line_clamp = clamp;
+                    log_debug("[CSS] -webkit-line-clamp: %d (from length)", clamp);
                 }
             }
             break;

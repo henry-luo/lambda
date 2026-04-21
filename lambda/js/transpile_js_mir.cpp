@@ -15,6 +15,7 @@
 #include "js_typed_array.h"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
@@ -930,6 +931,23 @@ static void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
 // Check if an expression subtree contains a yield (for generator spill decisions)
 static bool jm_has_yield(JsAstNode* node) {
     return jm_count_yields(node) > 0;
+}
+
+// Check if an expression subtree contains an optional chain (?.),
+// meaning the result may be undefined due to short-circuiting.
+static bool jm_has_optional_chain(JsAstNode* node) {
+    if (!node) return false;
+    if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* m = (JsMemberNode*)node;
+        if (m->optional) return true;
+        return jm_has_optional_chain(m->object);
+    }
+    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* c = (JsCallNode*)node;
+        if (c->optional) return true;
+        return jm_has_optional_chain(c->callee);
+    }
+    return false;
 }
 
 // Phase 6: Count await expressions in an async function body (mirrors jm_count_yields)
@@ -2552,6 +2570,7 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
             double val = lit->value.number_value;
+            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
             // If source text has '.' or 'e'/'E', treat as FLOAT even if integral-valued
             // (e.g., 999999.0, 1e5 → FLOAT; 999999 → INT)
             if (lit->has_decimal) return LMD_TYPE_FLOAT;
@@ -3856,6 +3875,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     }
     case JS_AST_NODE_PROPERTY: {
         JsPropertyNode* n = (JsPropertyNode*)node;
+        if (n->computed) jm_collect_functions(mt, n->key);
         jm_collect_functions(mt, n->value);
         break;
     }
@@ -5904,6 +5924,14 @@ static void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
 static MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
+        // BigInt literal: store string_value and call bigint_from_string at runtime
+        if (lit->is_bigint) {
+            String* s = lit->value.string_value;
+            // embed the string pointer and length as constants, call bigint_from_string at runtime
+            return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)s->chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+        }
         double val = lit->value.number_value;
         // If source had decimal point or scientific notation, always box as float
         if (lit->has_decimal) {
@@ -6717,6 +6745,7 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     (nl == 4 && strncmp(n, "atob", 4) == 0) ||
                     (nl == 4 && strncmp(n, "btoa", 4) == 0) ||
                     (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) ||
+                    (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) ||
                     (nl == 8 && strncmp(n, "DataView", 8) == 0) ||
                     (nl == 7 && strncmp(n, "WeakRef", 7) == 0) ||
                     (nl == 19 && strncmp(n, "FinalizationRegistry", 19) == 0) ||
@@ -6867,12 +6896,12 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 return un->prefix ? var->reg : old_val;
             }
         }
-        // boxed fallback — must ToNumber first per spec (++ always numeric)
+        // boxed fallback — must ToNumeric first per spec (++ always numeric, supports BigInt)
         MIR_reg_t operand = jm_transpile_box_item(mt, un->operand);
-        // ToNumber the operand: "1"++ should be 2, not "11"
-        MIR_reg_t num_operand = jm_call_1(mt, "js_to_number", MIR_T_I64,
+        // ToNumeric the operand: "1"++ should be 2, not "11"
+        MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, operand));
-        // For postfix (idx++), return the ToNumber'd old value
+        // For postfix (idx++), return the ToNumeric'd old value
         if (!un->prefix) {
             MIR_reg_t saved = jm_new_reg(mt, "inc_old_box", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -6880,10 +6909,8 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 MIR_new_reg_op(mt->ctx, num_operand)));
             num_operand = saved;
         }
-        MIR_reg_t one = jm_box_int_const(mt, 1);
-        MIR_reg_t result = jm_call_2(mt, "js_add", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, num_operand),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, one));
+        MIR_reg_t result = jm_call_1(mt, "js_increment", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, num_operand));
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
             char vname[128];
@@ -7056,12 +7083,12 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 return un->prefix ? var->reg : old_val;
             }
         }
-        // boxed fallback — must ToNumber first per spec (-- always numeric)
+        // boxed fallback — must ToNumeric first per spec (-- always numeric, supports BigInt)
         MIR_reg_t operand = jm_transpile_box_item(mt, un->operand);
-        // ToNumber the operand: "5"-- should be 4, not NaN
-        MIR_reg_t num_operand = jm_call_1(mt, "js_to_number", MIR_T_I64,
+        // ToNumeric the operand: "5"-- should be 4, not NaN
+        MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, operand));
-        // For postfix (idx--), return the ToNumber'd old value
+        // For postfix (idx--), return the ToNumeric'd old value
         if (!un->prefix) {
             MIR_reg_t saved = jm_new_reg(mt, "dec_old_box", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -7069,10 +7096,8 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 MIR_new_reg_op(mt->ctx, num_operand)));
             num_operand = saved;
         }
-        MIR_reg_t one = jm_box_int_const(mt, 1);
-        MIR_reg_t result = jm_call_2(mt, "js_subtract", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, num_operand),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, one));
+        MIR_reg_t result = jm_call_1(mt, "js_decrement", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, num_operand));
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
             char vname[128];
@@ -7198,6 +7223,22 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
         // delete obj.prop or delete obj[expr] → js_delete_property(obj, key)
         if (un->operand && un->operand->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
             JsMemberNode* m = (JsMemberNode*)un->operand;
+            // ES spec §12.5.3.2 step 5a: delete super.x → ReferenceError
+            if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
+                if (obj_id->name && obj_id->name->len == 5 &&
+                    strncmp(obj_id->name->chars, "super", 5) == 0) {
+                    MIR_reg_t msg = jm_box_string_literal(mt, "Unsupported reference to 'super'", 32);
+                    jm_call_void_1(mt, "js_throw_reference_error",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+                    jm_emit_exc_propagate_check(mt);
+                    MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE_VAL)));
+                    return r;
+                }
+            }
             MIR_reg_t obj = jm_transpile_box_item(mt, m->object);
             MIR_reg_t key;
             if (m->computed) {
@@ -10299,7 +10340,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // JSON.parse(str, reviver?)
             if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
                 prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "parse", 5) == 0) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // v20: check for reviver (2nd arg)
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
                 if (second_arg) {
@@ -10375,6 +10416,26 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_url_can_parse", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+            // BigInt.asIntN(bits, bigintValue)
+            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "BigInt", 6) == 0 &&
+                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "asIntN", 6) == 0) {
+                MIR_reg_t bits_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+                MIR_reg_t val_arg = arg2 ? jm_transpile_box_item(mt, arg2) : jm_emit_null(mt);
+                return jm_call_2(mt, "js_bigint_as_int_n", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, bits_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg));
+            }
+            // BigInt.asUintN(bits, bigintValue)
+            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "BigInt", 6) == 0 &&
+                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "asUintN", 7) == 0) {
+                MIR_reg_t bits_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+                MIR_reg_t val_arg = arg2 ? jm_transpile_box_item(mt, arg2) : jm_emit_null(mt);
+                return jm_call_2(mt, "js_bigint_as_uint_n", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, bits_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg));
             }
             // Number.isInteger(x)
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0 &&
@@ -11113,7 +11174,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_array),
                 MIR_new_reg_op(mt->ctx, is_arr)));
 
-            // if type == INT or FLOAT -> number method
+            // if type == INT or FLOAT or BIGINT -> number method
             MIR_label_t l_number = jm_new_label(mt);
             MIR_reg_t is_int = jm_new_reg(mt, "isint", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_int),
@@ -11125,6 +11186,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_number),
                 MIR_new_reg_op(mt->ctx, is_float)));
+            MIR_reg_t is_bigint_t = jm_new_reg(mt, "isbigint", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_bigint_t),
+                MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_DECIMAL)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_number),
+                MIR_new_reg_op(mt->ctx, is_bigint_t)));
 
             // if type == MAP: check typed array -> array path, dom -> dom path, else fallback
             MIR_reg_t is_map = jm_new_reg(mt, "ismap", MIR_T_I64);
@@ -11277,10 +11343,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_isFinite", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
-            // Number(val)
+            // Number(val) — ES2020: ToNumeric then BigInt→Number (unlike unary +)
             if (nl == 6 && strncmp(n, "Number", 6) == 0) {
                 MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_unary_plus", MIR_T_I64,
+                return jm_call_1(mt, "js_number_function", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             // String(val) — toString; String() with no args returns ""
@@ -11852,6 +11918,58 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (jm_has_yield(chk_yield)) { callee_spill_slot = jm_gen_spill_save(mt, callee); break; }
             chk_yield = chk_yield->next;
         }
+    }
+
+    // Optional chaining propagation: if callee is from an optional chain,
+    // it may be undefined from short-circuiting — skip the call.
+    if (!call->optional && jm_has_optional_chain(call->callee)) {
+        MIR_label_t l_skip = jm_new_label(mt);
+        MIR_label_t l_call = jm_new_label(mt);
+        MIR_label_t l_end = jm_new_label(mt);
+        MIR_reg_t result = jm_new_reg(mt, "optpc", MIR_T_I64);
+        MIR_reg_t cmp = jm_new_reg(mt, "optpk", MIR_T_I64);
+
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, cmp),
+            MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_skip),
+            MIR_new_reg_op(mt->ctx, cmp)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, cmp),
+            MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_skip),
+            MIR_new_reg_op(mt->ctx, cmp)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_call)));
+
+        jm_emit_label(mt, l_skip);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        jm_emit_label(mt, l_call);
+        jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+        MIR_reg_t null_this = jm_emit_undefined(mt);
+        MIR_reg_t call_result;
+        if (fallback_has_spread) {
+            MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
+            if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+        } else {
+            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
+                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, call_result)));
+        jm_emit_label(mt, l_end);
+        return result;
     }
 
     // Optional chaining: func?.() → return undefined if func is null/undefined
@@ -12781,7 +12899,7 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         // bypassing js_get_number() conversion overhead
         // Skip when optional chaining (?.) — need null/undefined guard first
         TypeId idx_type = jm_get_effective_type(mt, mem->property);
-        if (idx_type == LMD_TYPE_INT && !mem->optional) {
+        if (idx_type == LMD_TYPE_INT && !mem->optional && !jm_has_optional_chain(mem->object)) {
             MIR_reg_t idx_native = jm_transpile_as_native(mt, mem->property, idx_type, LMD_TYPE_INT);
             // A2: If object is a known array, use inline bounds check + indexed load
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
@@ -13007,6 +13125,57 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     int mem_obj_spill = -1;
     if (mt->in_generator && mem->computed && jm_has_yield(mem->property)) {
         mem_obj_spill = jm_gen_spill_save(mt, obj);
+    }
+
+    // Optional chaining propagation: if this is a non-optional access but our object
+    // came from an optional chain (?.),  the object may be undefined from short-circuiting.
+    // We need to propagate the short-circuit through the rest of the chain.
+    if (!mem->optional && jm_has_optional_chain(mem->object)) {
+        MIR_label_t l_skip = jm_new_label(mt);
+        MIR_label_t l_access = jm_new_label(mt);
+        MIR_label_t l_end = jm_new_label(mt);
+        MIR_reg_t result = jm_new_reg(mt, "optpm", MIR_T_I64);
+        MIR_reg_t cmp = jm_new_reg(mt, "optpc", MIR_T_I64);
+
+        // check obj == null
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, cmp),
+            MIR_new_reg_op(mt->ctx, obj), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_skip),
+            MIR_new_reg_op(mt->ctx, cmp)));
+        // check obj == undefined
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, cmp),
+            MIR_new_reg_op(mt->ctx, obj), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_skip),
+            MIR_new_reg_op(mt->ctx, cmp)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_access)));
+
+        // null/undefined path: return undefined
+        jm_emit_label(mt, l_skip);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        // normal access path
+        jm_emit_label(mt, l_access);
+        MIR_reg_t key;
+        if (mem->computed) {
+            key = jm_transpile_box_item(mt, mem->property);
+        } else if (mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+            key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+        } else {
+            key = jm_transpile_box_item(mt, mem->property);
+        }
+        if (mem_obj_spill >= 0) {
+            jm_gen_spill_load(mt, obj, mem_obj_spill);
+        }
+        MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, val)));
+        jm_emit_label(mt, l_end);
+        return result;
     }
 
     // Optional chaining: obj?.prop → return undefined if obj is null/undefined
@@ -14029,6 +14198,13 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         JsLiteralNode* lit = (JsLiteralNode*)item;
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
+            // BigInt literal: store bigint_str and call bigint_from_string at runtime
+            if (lit->is_bigint) {
+                String* s = lit->bigint_str;
+                return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+                    MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)s->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
+            }
             double val = lit->value.number_value;
             if (!lit->has_decimal && val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
                 return jm_box_int_const(mt, (int64_t)val);
@@ -16313,6 +16489,7 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     bool is_builtin = false;
     int typed_array_type = -1;
     bool is_arraybuffer = false;
+    bool is_sharedarraybuffer = false;
     bool is_dataview = false;
     bool is_buffer = false;
     if (ctor_len == 10 && strncmp(ctor_name, "Int32Array", 10) == 0) { typed_array_type = 4; is_builtin = true; }
@@ -16325,6 +16502,7 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 12 && strncmp(ctor_name, "Float64Array", 12) == 0) { typed_array_type = 7; is_builtin = true; }
     else if (ctor_len == 12 && strncmp(ctor_name, "Float32Array", 12) == 0) { typed_array_type = 6; is_builtin = true; }
     else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) { is_arraybuffer = true; is_builtin = true; }
+    else if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) { is_sharedarraybuffer = true; is_builtin = true; }
     else if (ctor_len == 8 && strncmp(ctor_name, "DataView", 8) == 0) { is_dataview = true; is_builtin = true; }
     else if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) is_builtin = true;
     else if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) is_builtin = true;
@@ -16360,6 +16538,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // OffscreenCanvas constructor (Canvas text measurement)
     else if (ctor_len == 15 && strncmp(ctor_name, "OffscreenCanvas", 15) == 0) is_builtin = true;
 
+    // new BigInt() — BigInt is not a constructor (must be called as function)
+    if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) {
+        return jm_call_0(mt, "js_bigint_not_constructor", MIR_T_I64);
+    }
+
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
     if (is_builtin && call->arguments) {
@@ -16370,6 +16553,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     if (is_arraybuffer) {
         MIR_reg_t len_arg = first_arg ? first_arg : jm_emit_undefined(mt);
         return jm_call_1(mt, "js_arraybuffer_construct", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
+    }
+
+    // new SharedArrayBuffer(byteLength)
+    if (is_sharedarraybuffer) {
+        MIR_reg_t len_arg = first_arg ? first_arg : jm_emit_undefined(mt);
+        return jm_call_1(mt, "js_sharedarraybuffer_construct", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
     }
 
@@ -16384,8 +16574,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             JsAstNode* arg3 = arg2->next;
             if (arg3) len_arg = jm_transpile_box_item(mt, arg3);
         }
-        MIR_op_t off_op = offset_arg ? MIR_new_reg_op(mt->ctx, offset_arg) : MIR_new_int_op(mt->ctx, 0);
-        MIR_op_t len_op = len_arg ? MIR_new_reg_op(mt->ctx, len_arg) : MIR_new_int_op(mt->ctx, -1);
+        MIR_op_t off_op = offset_arg ? MIR_new_reg_op(mt->ctx, offset_arg) : MIR_new_int_op(mt->ctx, (int64_t)i2it(0));
+        MIR_op_t len_op = len_arg ? MIR_new_reg_op(mt->ctx, len_arg) : MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED);
         return jm_call_3(mt, "js_dataview_new", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, buf_arg),
             MIR_T_I64, off_op,

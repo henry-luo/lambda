@@ -351,6 +351,7 @@ typedef enum {
 typedef enum {
     SCALE_MODE_NEAREST = 0,  // Nearest neighbor (fast, pixelated)
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
+    SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
 } ScaleMode;
 
 typedef struct ImageSurface {
@@ -1012,6 +1013,7 @@ typedef struct BlockProp {
     // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
     float first_line_baseline;  // first line box baseline (for flex baseline)
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
+    int line_clamp;         // -webkit-line-clamp: max visible lines (0 = no clamp)
 } BlockProp;
 
 typedef struct FontBox {
@@ -1025,6 +1027,7 @@ typedef struct TextRect {
     float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
+    bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     TextRect* next;
 } TextRect;
 

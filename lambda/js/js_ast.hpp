@@ -251,11 +251,13 @@ typedef struct JsLiteralNode {
     JsAstNode base;
     JsLiteralType literal_type;
     bool has_decimal;        // true if source text contains '.' or 'e'/'E' (fractional hint)
+    bool is_bigint;          // true if source text ends with 'n' (BigInt literal)
     union {
         double number_value;
         String* string_value;
         bool boolean_value;
     } value;
+    String* bigint_str;      // for BigInt literals: original text for arbitrary precision (pool-allocated)
 } JsLiteralNode;
 
 // JavaScript binary expression node

@@ -220,6 +220,8 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
 
     if (strcmp(node_type, "number") == 0) {
         literal->literal_type = JS_LITERAL_NUMBER;
+        // Check if source text ends with 'n' (BigInt literal)
+        literal->is_bigint = (source.length > 0 && source.str[source.length - 1] == 'n');
         // Check if source text contains '.' or 'e'/'E' (fractional/scientific hint)
         literal->has_decimal = false;
         for (size_t i = 0; i < source.length; i++) {
@@ -235,15 +237,28 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             for (size_t i = 0; i < source.length; i++) {
                 if (source.str[i] != '_') temp_str[j++] = source.str[i];
             }
+            // Strip trailing 'n' for BigInt literals
+            if (literal->is_bigint && j > 0) j--;
             temp_str[j] = '\0';
-            char* endptr;
-            // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
-            if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
-                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
-            } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
-                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
-            } else {
-                literal->value.number_value = strtod(temp_str, &endptr);
+            // For BigInt literals, store as string to preserve arbitrary precision
+            if (literal->is_bigint) {
+                // allocate a String on the AST pool (heap_create_name may not be available yet)
+                String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + j + 1);
+                s->len = j;
+                memcpy(s->chars, temp_str, j);
+                s->chars[j] = '\0';
+                literal->bigint_str = s;
+            }
+            {
+                char* endptr;
+                // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
+                if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
+                    literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
+                } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
+                    literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
+                } else {
+                    literal->value.number_value = strtod(temp_str, &endptr);
+                }
             }
             mem_free(temp_str);
         } else {
@@ -2510,6 +2525,43 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     TSNode left_node = ts_node_child_by_field_name(for_node, "left", strlen("left"));
     if (!ts_node_is_null(left_node)) {
         const char* left_type = ts_node_type(left_node);
+        // Workaround: tree-sitter misparsing of `for await (let [a, b] of ...)`
+        // Tree-sitter parses `let [a, b]` as subscript_expression (let[a, b]) when
+        // the `await` keyword is present, because `let` is ambiguous (keyword vs identifier).
+        // Detect this case and re-interpret as let + array_pattern.
+        if (strcmp(left_type, "subscript_expression") == 0) {
+            TSNode obj = ts_node_child_by_field_name(left_node, "object", 6);
+            if (!ts_node_is_null(obj) && strcmp(ts_node_type(obj), "identifier") == 0) {
+                uint32_t s = ts_node_start_byte(obj);
+                uint32_t e = ts_node_end_byte(obj);
+                if (e - s == 3 && strncmp(tp->source + s, "let", 3) == 0) {
+                    // Misparse detected: reinterpret as let [array_pattern]
+                    for_of->kind = 1; // let
+                    TSNode idx = ts_node_child_by_field_name(left_node, "index", 5);
+                    if (!ts_node_is_null(idx)) {
+                        JsArrayPatternNode* pattern = (JsArrayPatternNode*)alloc_js_ast_node(
+                            tp, JS_AST_NODE_ARRAY_PATTERN, left_node, sizeof(JsArrayPatternNode));
+                        pattern->elements = NULL;
+                        JsAstNode** tail = &pattern->elements;
+                        const char* idx_type = ts_node_type(idx);
+                        if (strcmp(idx_type, "sequence_expression") == 0) {
+                            uint32_t nc = ts_node_named_child_count(idx);
+                            for (uint32_t i = 0; i < nc; i++) {
+                                TSNode ch = ts_node_named_child(idx, i);
+                                JsAstNode* elem = build_js_expression(tp, ch);
+                                if (elem) { elem->next = NULL; *tail = elem; tail = &elem->next; }
+                            }
+                        } else {
+                            JsAstNode* elem = build_js_expression(tp, idx);
+                            if (elem) { elem->next = NULL; *tail = elem; }
+                        }
+                        for_of->left = (JsAstNode*)pattern;
+                        log_debug("js-ast: for-await let[...] misparse fixed → array_pattern");
+                    }
+                    goto for_in_left_done;
+                }
+            }
+        }
         if (strcmp(left_type, "identifier") == 0) {
             for_of->left = build_js_identifier(tp, left_node);
         } else {
@@ -2517,17 +2569,20 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
             for_of->left = build_js_expression(tp, left_node);
         }
     }
+    for_in_left_done:
 
     // Determine the variable kind from the first child (var/let/const keyword)
-    for_of->kind = 0; // default: var
-    uint32_t child_count = ts_node_child_count(for_node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        TSNode child = ts_node_child(for_node, i);
-        const char* child_type = ts_node_type(child);
-        if (strcmp(child_type, "var") == 0) { for_of->kind = 0; break; }
-        if (strcmp(child_type, "let") == 0) { for_of->kind = 1; break; }
-        if (strcmp(child_type, "const") == 0) { for_of->kind = 2; break; }
-        if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
+    // (skip if already set by the let[...] misparse fixup above)
+    if (for_of->kind == 0) {
+        uint32_t child_count = ts_node_child_count(for_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(for_node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "var") == 0) { for_of->kind = 0; break; }
+            if (strcmp(child_type, "let") == 0) { for_of->kind = 1; break; }
+            if (strcmp(child_type, "const") == 0) { for_of->kind = 2; break; }
+            if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
+        }
     }
 
     // Get the iterable expression (right side)

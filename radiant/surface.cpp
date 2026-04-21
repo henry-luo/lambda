@@ -486,6 +486,41 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
 }
 
 // Bilinear interpolation helper function (for upscaling or 1:1)
+static uint32_t bilinear_interpolate_wrap(ImageSurface* src, float src_x, float src_y) {
+    int w = src->width;
+    int h = src->height;
+    int x1 = (int)floorf(src_x);
+    int y1 = (int)floorf(src_y);
+    int x2 = x1 + 1;
+    int y2 = y1 + 1;
+
+    // wrap coordinates using modulo
+    x1 = ((x1 % w) + w) % w;
+    y1 = ((y1 % h) + h) % h;
+    x2 = ((x2 % w) + w) % w;
+    y2 = ((y2 % h) + h) % h;
+
+    float fx = src_x - floorf(src_x);
+    float fy = src_y - floorf(src_y);
+
+    uint32_t* p11 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x1 * 4);
+    uint32_t* p21 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x2 * 4);
+    uint32_t* p12 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x1 * 4);
+    uint32_t* p22 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x2 * 4);
+
+    uint8_t r11 = *p11 & 0xFF, g11 = (*p11 >> 8) & 0xFF, b11 = (*p11 >> 16) & 0xFF, a11 = (*p11 >> 24) & 0xFF;
+    uint8_t r21 = *p21 & 0xFF, g21 = (*p21 >> 8) & 0xFF, b21 = (*p21 >> 16) & 0xFF, a21 = (*p21 >> 24) & 0xFF;
+    uint8_t r12 = *p12 & 0xFF, g12 = (*p12 >> 8) & 0xFF, b12 = (*p12 >> 16) & 0xFF, a12 = (*p12 >> 24) & 0xFF;
+    uint8_t r22 = *p22 & 0xFF, g22 = (*p22 >> 8) & 0xFF, b22 = (*p22 >> 16) & 0xFF, a22 = (*p22 >> 24) & 0xFF;
+
+    uint8_t r = (uint8_t)(r11 * (1 - fx) * (1 - fy) + r21 * fx * (1 - fy) + r12 * (1 - fx) * fy + r22 * fx * fy);
+    uint8_t g = (uint8_t)(g11 * (1 - fx) * (1 - fy) + g21 * fx * (1 - fy) + g12 * (1 - fx) * fy + g22 * fx * fy);
+    uint8_t b = (uint8_t)(b11 * (1 - fx) * (1 - fy) + b21 * fx * (1 - fy) + b12 * (1 - fx) * fy + b22 * fx * fy);
+    uint8_t a = (uint8_t)(a11 * (1 - fx) * (1 - fy) + a21 * fx * (1 - fy) + a12 * (1 - fx) * fy + a22 * fx * fy);
+
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
 static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
     int x1 = (int)floorf(src_x);
     int y1 = (int)floorf(src_y);
@@ -637,6 +672,12 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
                 float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
                 float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
                 src_color = bilinear_interpolate(src, bx, by);
+            }
+            else if (scale_mode == SCALE_MODE_LINEAR_WRAP) {
+                // Bilinear with wrap-around for tiled/repeating backgrounds
+                float bx = src_rect->x + (j - dst_rect->x + 0.5f) * x_ratio - 0.5f;
+                float by = src_rect->y + (i - dst_rect->y + 0.5f) * y_ratio - 0.5f;
+                src_color = bilinear_interpolate_wrap(src, bx, by);
             }
             else { // Nearest neighbor scaling (default)
                 int int_src_x = (int)(src_x + 0.5f);  // round to nearest

@@ -2049,13 +2049,39 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     bool saved_stroke_none = ctx->stroke_none;
     RdtMatrix saved_transform = ctx->transform;
 
-    // apply group opacity (inherited, multiplied down)
+    // apply group opacity via save/composite for correct compositing
     const char* opacity_attr = get_svg_attr(elem, "opacity");
+    float group_op = 1.0f;
+    bool use_opacity_layer = false;
+    int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
     if (opacity_attr) {
-        float op = strtof(opacity_attr, nullptr);
-        if (op < 0.0f) op = 0.0f;
-        if (op > 1.0f) op = 1.0f;
-        ctx->opacity *= op;
+        group_op = strtof(opacity_attr, nullptr);
+        if (group_op < 0.0f) group_op = 0.0f;
+        if (group_op > 1.0f) group_op = 1.0f;
+        if (group_op < 1.0f) {
+            // use backdrop save/composite so overlapping children composite correctly
+            // compute viewport bounds in screen coords from the accumulated transform
+            float vx0 = ctx->transform.e13;
+            float vy0 = ctx->transform.e23;
+            float vx1 = ctx->transform.e11 * ctx->viewbox_width + ctx->transform.e12 * ctx->viewbox_height + ctx->transform.e13;
+            float vy1 = ctx->transform.e21 * ctx->viewbox_width + ctx->transform.e22 * ctx->viewbox_height + ctx->transform.e23;
+            op_x0 = (int)floorf(fminf(vx0, vx1));
+            op_y0 = (int)floorf(fminf(vy0, vy1));
+            op_w = (int)ceilf(fmaxf(vx0, vx1)) - op_x0;
+            op_h = (int)ceilf(fmaxf(vy0, vy1)) - op_y0;
+            if (op_w > 0 && op_h > 0) {
+                use_opacity_layer = true;
+                if (ctx->dl) {
+                    dl_save_backdrop(ctx->dl, op_x0, op_y0, op_w, op_h);
+                }
+                log_debug("[SVG-GROUP] opacity=%.2f, save backdrop (%d,%d,%d,%d) dl=%d",
+                          group_op, op_x0, op_y0, op_w, op_h, ctx->dl != nullptr);
+            }
+        }
+    }
+    // if not using opacity layer, fall back to inherited alpha multiply
+    if (!use_opacity_layer && group_op < 1.0f) {
+        ctx->opacity *= group_op;
     }
 
     // update CSS 'color' property (for currentColor keyword)
@@ -2095,6 +2121,14 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
 
     // render children directly
     render_svg_children(ctx, elem);
+
+    // composite opacity layer if active
+    if (use_opacity_layer && op_w > 0 && op_h > 0) {
+        if (ctx->dl) {
+            dl_composite_opacity(ctx->dl, op_x0, op_y0, op_w, op_h, group_op);
+        }
+        log_debug("[SVG-GROUP] composite opacity=%.2f over backdrop", group_op);
+    }
 
     // restore inherited state
     ctx->fill_color = saved_fill;

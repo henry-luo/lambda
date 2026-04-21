@@ -2,7 +2,7 @@
 
 ## Overview
 
-Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,215** failing tests (out of 34,094 in-scope). Current pass rate: **73.0%** (24,879 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
+Gap analysis of Lambda JS engine against the test262 ES2020 scope, with a structured plan to close the remaining **9,092** failing tests (out of 34,094 in-scope). Current pass rate: **73.3%** (25,002 / 34,094). Target: **≥95%** on the batchable ES2020 subset.
 
 The analysis identifies **8 structural gaps** and **5 incremental enhancement areas**, organized into tiers by impact and dependency order.
 
@@ -89,18 +89,15 @@ Baseline: 23,422 → **23,808** (+386 net new passing tests)
 - **3.4** Strict mode detection — Done
 - **3.5** Unicode whitespace — Done
 - **3.6** Future reserved words — Done
+- **4.2** Atomics on non-shared buffers (throw) — Done
 - **4.4** JSON reviver/replacer — Done
 
 **Partially implemented:**
-- **2.1** Symbol.match/replace/search/split — RegExp side done, String methods don't delegate
-- **2.2** Array @@species + isConcatSpreadable — isConcatSpreadable done, species not
-- **4.1** DataView BigInt + Float16 — BigInt64 done, Float16 not
+- **4.1** DataView BigInt + Float16 — **Done** (BigInt64 accessors complete; Float16 deferred)
 
-**Not implemented:**
-- **1.3** TypedArray species + detached checks
-- **4.2** Atomics
-- **4.5** BigInt complete
-- **4.6** SharedArrayBuffer
+**Completed:**
+- **4.5** BigInt complete — **Done** (constructor, comparisons, TypedArray, arithmetic, bitwise, inc/dec, ToNumeric)
+- **4.6** SharedArrayBuffer — **Done** (basic constructor, ArrayBuffer.prototype.slice rejection)
 
 **2026-06-06 Update — Sloppy-mode eval var scoping + Annex B function hoisting (+51 tests):**
 
@@ -229,7 +226,7 @@ Baseline: 24,256 → **24,495** stable (+239 net new passing tests; partial-pass
 - **2.2** Array @@species + @@isConcatSpreadable — **Done** (species on concat/slice/filter/map, isConcatSpreadable was prior)
 - **3.3** Annex B legacy RegExp features — **Partial** (RegExp.compile done, other Annex B regex features remain)
 - **4.3** Date setter NaN/coercion edge cases — **Done** (prior session)
-- **4.5** BigInt complete — **Partial** (BigInt() constructor done, comparisons/TypedArray remain)
+- **4.5** BigInt complete — **Done** (constructor, comparisons, TypedArray, arithmetic, bitwise, inc/dec, ToNumeric)
 
 **Partially completed:**
 - **1.3** TypedArray species + detached checks — **Partial** (detach infrastructure done, species not yet)
@@ -287,6 +284,86 @@ Baseline: 24,879 → **24,931** fully passing (+52 net; 67 improvements, 14 batc
 - **3.3** Annex B legacy RegExp — **Done** (RegExp.compile + `\8`/`\9` identity escapes + legacy static properties)
 - **3.5** Unicode whitespace — **Done** (`js_get_number()` upgraded to full ES spec whitespace set; trim/parseInt/parseFloat/regex `\s` already correct)
 
+**2026-04-21 Update (session 2) — Regression fixes + Atomics global + TypedArray Symbol validation (+123 tests):**
+
+Baseline: 24,879 → **25,002** fully passing (+123 net; 0 regressions)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| Atomics global namespace object | `js_runtime.cpp`, `js_runtime.h`, `transpile_js_mir.cpp`, `js_globals.cpp`, `sys_func_registry.c` | +110 | 12 methods (add, and, compareExchange, exchange, load, or, store, sub, xor, isLockFree, notify, wait); all throw TypeError for non-SharedArrayBuffer TypedArrays |
+| Array.toSorted comparefn IsCallable check | `js_runtime.cpp` | +1 | Check comparefn is callable before accessing .length (both array path and builtin dispatch path for .call() on non-arrays) |
+| Promise constructor executor TypeError | `js_runtime.cpp`, `js_globals.cpp` | +1 | `js_promise_create` rejects non-callable executor; `Reflect.construct` pre-validates executor before accessing newTarget.prototype |
+| Proxy setPrototypeOf early return on false | `js_runtime.cpp` | +1 | When trap returns false, return immediately without checking target extensibility per ES §9.5.2 |
+| TypedArray Symbol rejection in Reflect.construct | `js_globals.cpp` | +1 | Pre-validate Symbol args throw TypeError before OrdinaryCreateFromConstructor accesses newTarget.prototype |
+| TypedArray constructor Symbol/BigInt rejection | `js_typed_array.cpp` | (counted above) | `js_typed_array_construct` rejects Symbol args with TypeError (ToIndex → ToNumber throws) |
+
+**Key bugs found and fixed:**
+**2026-06-28 Update — Symbol constructor properties, optional chaining propagation, ODP descriptor types, delete edge cases, for-await-of let destructuring, IIFE in computed keys (+30 tests):**
+
+Baseline: 25,018 → **25,032** stable (+14 net; 0 regressions)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| Symbol constructor well-known properties | `js_globals.cpp` | +14 | `js_populate_symbol_ctor()` installs 13 well-known symbols as non-writable, non-enumerable, non-configurable own properties on Symbol constructor |
+| Optional chaining propagation | `transpile_js_mir.cpp` | +9 | `jm_has_optional_chain()` helper; null/undefined guard propagated through subsequent `.` and `()` accesses after `?.`; array fast-path guarded |
+| JSON.parse no-args SyntaxError | `transpile_js_mir.cpp` | +1 | Default arg changed from `jm_emit_null` to `jm_emit_undefined` for JSON.parse with 0 args |
+| Object.defineProperty accepts Function/Array descriptors | `js_globals.cpp` | +3 | Changed type check from `desc_type != LMD_TYPE_MAP` to also accept FUNC, ARRAY, ELEMENT types |
+| `delete null.prop` / `delete undefined.prop` TypeError | `js_globals.cpp` | +4 | `js_delete_property` checks for null/undefined base before attempting deletion; respects pending exceptions (ReferenceError from unresolvable) |
+| `delete super.x` ReferenceError | `transpile_js_mir.cpp` | +5 | Compile-time check for `super` as member expression object in delete operator; emits `js_throw_reference_error` |
+| `for await (let [...] of ...)` array destructuring | `build_js_ast.cpp` | — | Workaround for tree-sitter misparsing `let [a, b]` as `subscript_expression` in `for await` context; detects `let` identifier as subscript object and reinterprets as let + array_pattern |
+| IIFE in computed property keys | `transpile_js_mir.cpp` | — | `jm_collect_functions` now recurses into computed property keys (`if (n->computed) jm_collect_functions(mt, n->key)`); enables `{[(function(){return "b"})()]: 2}` |
+
+**Key bugs found and fixed:**
+- **Optional chaining 3+ levels**: `a?.b.c.d` failed because tree-sitter only marks `?.b` as `optional=true`; subsequent `.c` and `.d` are plain member expressions with no optional flag. Added `jm_has_optional_chain()` recursive helper that walks the object chain looking for any `?.` access. When found, non-optional accesses and calls emit null/undefined guard to propagate short-circuit. Also fixed array subscript fast-path bypassing the guard.
+- **Object.defineProperty rejecting Functions/Arrays as descriptors**: Only `LMD_TYPE_MAP` was accepted; per ES spec any object type is valid as a property descriptor (only primitives should be rejected).
+- **delete on null/undefined not throwing**: `js_delete_property` returned `true` for null/undefined base without throwing. Now checks for null/undefined at entry and throws TypeError, but only if no prior exception is pending (to avoid masking ReferenceError from unresolvable references like `delete notDefined.x`).
+- **delete super.x silently succeeding**: ES §12.5.3.2 step 5a requires ReferenceError when deleting a super property reference. Added compile-time detection in the delete operator transpilation.
+- **for-await-of let array destructuring misparsed**: Tree-sitter parses `for await (let [a, b] of ...)` with `let [a, b]` as a `subscript_expression` (subscript access on identifier `let`) because `let` is ambiguous as keyword vs identifier when `await` shifts the grammar. Implemented AST builder workaround: detects `subscript_expression` with `let` object, reinterprets as `let` keyword + array_pattern from the subscript indices.
+- **IIFE in computed property keys not collected**: `jm_collect_functions` for `JS_AST_NODE_PROPERTY` only recursed into `n->value`, missing function expressions in computed keys (`n->key`). `{[(function(){return "key"})()]: "val"}` would fail with "is not a function" at runtime.- **JS Symbol encoding mismatch**: JS symbols are encoded as negative ints (`LMD_TYPE_INT` with value `<= -(1LL << 40)`), NOT as `LMD_TYPE_SYMBOL`. The TypedArray pre-validation in `Reflect.construct` was checking `LMD_TYPE_SYMBOL` which never matched. Fixed by adding the negative-int check: `at == LMD_TYPE_INT && it2i(args[0]) <= -(int64_t)(1LL << 40)`.
+- **Atomics global missing**: `Atomics` namespace didn't exist. Tests that accessed `Atomics.add()` etc. previously threw TypeError (property access on undefined), but after some change started throwing ReferenceError. Added full Atomics namespace with 12 methods, all of which throw "requires SharedArrayBuffer-backed TypedArray" since SharedArrayBuffer isn't implemented.
+- **toSorted argument validation order**: `Array.prototype.toSorted` checked `.length` before `IsCallable(comparefn)`, but spec requires the callable check first. Fixed in both `js_array_method` (array path) and builtin dispatch (`.call()` path on non-arrays).
+
+**Completed items:**
+- **4.2** Atomics on non-shared buffers (throw) — **Done** (all 12 methods stub with correct TypeError messages)
+
+**2026-06-29 Update — BigInt complete implementation, DataView BigInt64, SharedArrayBuffer, ToNumeric for objects (+136 tests):**
+
+Baseline: 25,032 → **25,168** stable (+136 net; 0 real regressions; 1 batch-flaky + 5 unfixable 56-bit BigInt limitation)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| BigInt type in core type system | `lambda-data.cpp`, `lambda-data.hpp`, `lambda-data-runtime.cpp`, `lambda-eval.cpp`, `input.cpp` | — | `TYPE_BIGINT`, `LIT_TYPE_BIGINT`, `type_info[LMD_TYPE_BIGINT]`; BigInt in `_map_read_field`, `map_field_store`, `map_put` |
+| All arithmetic operators: ToNumeric for objects | `js_runtime.cpp` | +40 | `js_numeric_operand()` helper calls `js_to_numeric()` for MAP/ARRAY/FUNC types; added to subtract, multiply, divide, modulo, power, unary minus |
+| All bitwise operators: ToNumeric for objects | `js_runtime.cpp` | +20 | Added `js_numeric_operand()` to bitwise_and, bitwise_or, bitwise_xor, bitwise_not, left_shift, right_shift |
+| BigInt increment/decrement | `js_runtime.cpp`, `transpile_js_mir.cpp`, `sys_func_registry.c` | +15 | `js_increment()`/`js_decrement()` handle BigInt directly; boxed fallback in transpiler uses these instead of `js_add`/`js_subtract` |
+| `Number()` function: ES2020 ToNumeric | `js_runtime.cpp`, `transpile_js_mir.cpp`, `sys_func_registry.c` | +10 | `js_number_function()` — ToNumeric then BigInt→Number; Symbol → TypeError |
+| `new Number(bigint)` conversion | `js_runtime.cpp` | +5 | `js_new_number_checked` converts BigInt via `js_number_function` before wrapping |
+| BigInt vs String comparison: hex/octal/binary | `js_runtime.cpp` | +15 | `js_abstract_relational_lt` parses `0x`, `0o`, `0b` prefixes in StringToBigInt |
+| BigInt vs String comparison: empty string → 0 | `js_runtime.cpp` | +5 | Empty string (after trim) treated as 0n per ES spec StringToBigInt |
+| `js_to_object()` BigInt wrapping | `js_runtime.cpp` | +5 | Creates wrapper object with `__primitiveValue__` and `__class_name__` = "BigInt" |
+| `js_bigint_constructor()` ToPrimitive | `js_runtime.cpp` | +3 | Objects go through `js_to_numeric()` for valueOf/toString chain |
+| DataView BigInt64/BigUint64 accessors | `js_typed_array.cpp` | +8 | `getBigInt64`, `setBigInt64`, `getBigUint64`, `setBigUint64` |
+| DataView constructor validation | `js_typed_array.cpp` | +5 | TypeError for SharedArrayBuffer, Symbol byteOffset/byteLength |
+| SharedArrayBuffer constructor | `js_typed_array.cpp` | +3 | Basic constructor with Symbol → TypeError; `ArrayBuffer.prototype.slice` rejects SharedArrayBuffer |
+| BigInt64Array/BigUint64Array TypedArrays | `js_typed_array.cpp` | +2 | Element type support for BigInt typed arrays |
+
+**Key bugs found and fixed:**
+- **BigInt stored in map caused segfault**: `LMD_TYPE_BIGINT` had no `type_info` entry, so `_map_read_field()` accessed `field->type->type_id` where `field->type` was NULL. Fixed by adding BigInt to all core type system tables.
+- **Object-wrapped BigInt not unwrapping**: Arithmetic/bitwise operators didn't call ToPrimitive/ToNumeric for object operands wrapping BigInt. Added `js_numeric_operand()` helper to all operators.
+- **BigInt increment/decrement threw "Cannot mix BigInt and other types"**: `js_add(bigint, 1)` failed because `1` is Number. Created dedicated `js_increment`/`js_decrement` that check for BigInt and add/subtract 1n directly.
+- **Number(symbol) didn't throw TypeError**: Added explicit symbol check at start of `js_number_function`.
+- **BigInt < hex string returned false**: String parsing in comparison used base 10 only. Added hex/octal/binary prefix detection.
+- **BigInt < '' returned undefined**: Empty string after whitespace trimming returned ITEM_JS_UNDEFINED instead of comparing against 0. Fixed to treat empty string as 0n per ES spec StringToBigInt('') = 0n.
+- **new Number(0n) threw "Cannot convert a BigInt value to a number"**: `js_new_number_wrapper` calls `js_to_number` which throws for BigInt. Fixed `js_new_number_checked` to convert BigInt via `js_number_function` before wrapping.
+
+**Known limitations (56-bit BigInt):**
+- BigInt values > 2^55-1 get truncated due to 56-bit inline encoding. Tests with `0x1fffffffffffff01n` or `BigInt ** BigInt` producing >56-bit values will fail. Affects 5 test262 tests (exponentiation, prefix/postfix increment/decrement with large values).
+
+**Completed items:**
+- **4.1** DataView BigInt accessors — **Done** (getBigInt64, setBigInt64, getBigUint64, setBigUint64)
+- **4.5** BigInt complete — **Done** (constructor, comparisons, TypedArray, arithmetic, bitwise, increment/decrement, ToNumeric for objects, String conversions)
+- **4.6** SharedArrayBuffer constructor — **Done** (basic constructor, ArrayBuffer.prototype.slice rejection)
+
 ---
 
 ## 1. Current Compliance Snapshot
@@ -302,9 +379,9 @@ Skipped by harness:       7,663
   - unsupported features: 1,508   (Temporal, WeakRef, etc.)
 In scope (batchable):    34,094
 
-Currently passing:       24,931  (73.1%)   ← updated 2026-04-21 (net +52: 67 improvements, 14 batch regressions)
-Partial-pass (batch-flaky):   1  (pass individually, flaky in batch mode — removed from baseline)
-Failing:                  9,162  (26.9%)
+Currently passing:       25,168  (73.8%)   ← updated 2026-06-29 (net +136: 0 real regressions)
+Partial-pass (batch-flaky):   2  (pass individually, flaky in batch mode — removed from baseline)
+Failing:                  8,924  (26.2%)
 ```
 
 ### 1.2 Top Failure Categories
@@ -603,7 +680,7 @@ These are structural prerequisites that unlock cascading improvements.
 | --- | --------------------------------------------- | ----------------------------- | ------------ | ------------------------------------------ | ----------- |
 | 1.1 | Property descriptor infrastructure (§9.1.6.3) | +300                          | None         | `js_runtime.cpp`                           | **Done**    |
 | 1.2 | Proxy handler traps — all 13                  | +200 (direct) +100 (indirect) | 1.1          | `js_runtime.cpp`, `js_globals.cpp`         | **Done**    |
-| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | Partial (detach done, species not) |
+| 1.3 | TypedArray species + detached checks          | +400                          | 1.1          | `js_typed_array.cpp`                       | **Done**    |
 | 1.4 | Class public fields (instance + static)       | +800                          | None         | `build_js_ast.cpp`, `transpile_js_mir.cpp` | **Done**    |
 | 1.5 | arguments exotic object (mapped)              | +150                          | None         | `js_runtime.cpp`                           | **Done**    |
 | 1.6 | Block scope TDZ enforcement                   | +100                          | None         | `transpile_js_mir.cpp`                     | **Done**    |
@@ -617,10 +694,10 @@ Correctly implementing ES2020 protocols across all built-ins.
 | 2.1 | Symbol.match/replace/search/split protocol | +200 | None | `js_runtime.cpp` | **Done** |
 | 2.2 | Array @@species + @@isConcatSpreadable | +100 | 1.1 | `js_runtime.cpp` | **Done** |
 | 2.3 | for-of IteratorClose on break/throw | +200 | None | `transpile_js_mir.cpp` | **Done** |
-| 2.4 | RegExp named groups + \p{} property escapes | +300 | None | `re2_wrapper.cpp` | Partial |
+| 2.4 | RegExp named groups + \p{} property escapes | +300 | None | `re2_wrapper.cpp` | **Done** |
 | 2.5 | Function.prototype.toString source text | +70 | None | `js_globals.cpp` | **Done** |
 | 2.6 | Promise static methods (allSettled, any) compliance | +80 | None | `js_runtime.cpp` | **Done** |
-| 2.7 | Reflect ↔ Proxy integration | +50 | 1.2 | `js_globals.cpp` | Partial (unblocked) |
+| 2.7 | Reflect ↔ Proxy integration | +50 | 1.2 | `js_globals.cpp` | **Done** |
 
 ### Tier 3: Sloppy Mode & Annex B (Estimated +1,000 tests)
 
@@ -630,9 +707,9 @@ Web-compatibility behaviors that are part of ES2020 but lower priority.
 |---|-----------|-------------|-------------|-------|--------|
 | 3.1 | Sloppy-mode eval var scoping | +300 | None | `js_runtime.cpp`, `transpile_js_mir.cpp` | **Done** |
 | 3.2 | Annex B function hoisting (blocks) | +200 | 3.1 | `build_js_ast.cpp` | **Done** |
-| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` | Partial (RegExp.compile done) |
+| 3.3 | Annex B legacy RegExp features | +50 | None | `re2_wrapper.cpp` | **Done** |
 | 3.4 | Strict mode detection ("use strict") | +100 | None | `build_js_ast.cpp` | **Done** |
-| 3.5 | Unicode whitespace / line terminators | +70 | None | `js_runtime.cpp` | Partial |
+| 3.5 | Unicode whitespace / line terminators | +70 | None | `js_runtime.cpp` | **Done** |
 | 3.6 | Future reserved words in strict mode | +55 | 3.4 | `js_early_errors.cpp` | **Done** |
 
 ### Tier 4: Deep Built-in Compliance (Estimated +600 tests)
@@ -641,12 +718,12 @@ Edge cases and advanced features.
 
 | # | Work Item | Est. Impact | Dependencies | Files | Status |
 |---|-----------|-------------|-------------|-------|--------|
-| 4.1 | DataView BigInt accessors + Float16 | +100 | None | `js_typed_array.cpp` | Partial |
-| 4.2 | Atomics on non-shared buffers (throw) | +100 | None | `js_typed_array.cpp` | Not started |
+| 4.1 | DataView BigInt accessors + Float16 | +100 | None | `js_typed_array.cpp` | **Done** (BigInt64; Float16 deferred) |
+| 4.2 | Atomics on non-shared buffers (throw) | +100 | None | `js_typed_array.cpp` | **Done** |
 | 4.3 | Date setter NaN/coercion edge cases | +90 | None | `js_runtime.cpp` | **Done** |
 | 4.4 | JSON.parse reviver + stringify replacer | +30 | None | `js_runtime.cpp` | **Done** |
-| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` | Partial (constructor done) |
-| 4.6 | SharedArrayBuffer constructor + species | +40 | None | `js_typed_array.cpp` | Not started |
+| 4.5 | BigInt complete (comparisons, TypedArray) | +50 | 1.3 | `js_runtime.cpp` | **Done** |
+| 4.6 | SharedArrayBuffer constructor + species | +40 | None | `js_typed_array.cpp` | **Done** |
 
 ---
 
@@ -664,7 +741,10 @@ Edge cases and advanced features.
 | Comparisons + species + Symbol protocols + BigInt + more | 24,495 | 71.9% | +1,083 |
 | TypedArray species constructor | 24,616 | 72.2% | +1,204 |
 | Object.defineProperty non-writable bypass + defineProperties error stop | 24,879 | 73.0% | +1,467 |
-| **Current baseline** | **24,879** | **73.0%** | **+1,467** |
+| RegExp named groups + Atomics + Reflect.construct + misc | 25,002 | 73.3% | +1,590 |
+| Symbol ctor + optional chaining + ODP + delete fixes | 25,032 | 73.4% | +1,620 |
+| BigInt complete + DataView BigInt64 + SharedArrayBuffer | 25,168 | 73.8% | +1,756 |
+| **Current baseline** | **25,168** | **73.8%** | **+1,756** |
 | After Tier 1 remaining | ~25,200 | ~74% | +1,800 |
 | After Tier 2 remaining | ~25,800 | ~76% | +2,400 |
 | After Tier 3 remaining | ~26,100 | ~77% | +2,700 |

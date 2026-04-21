@@ -110,6 +110,11 @@ typedef struct BlockContext {
     float text_indent;          // Resolved text-indent value in pixels
     bool is_first_line;         // True if we're laying out the first line of this block
 
+    // -webkit-line-clamp support
+    int line_number;            // Current line number (1-based, incremented by line_break)
+    int line_clamp;             // Max visible lines (0 = no clamp, from BlockProp)
+    bool line_clamped;          // True after line_clamp lines have been laid out
+
     // =========================================================================
     // BFC Hierarchy
     // =========================================================================

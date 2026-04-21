@@ -939,3 +939,420 @@ int64_t decimal_to_int64(Item item) {
     mpd_del(truncated);
     return result;
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// BigInt Support — JS BigInt backed by libmpdec integer arithmetic
+// ═════════════════════════════════════════════════════════════════════
+
+// BigInt context: high precision for arbitrary-precision integers.
+// Separate from decimal's unlimited context to allow independent tuning.
+static mpd_context_t g_bigint_ctx;
+static bool g_bigint_ctx_initialized = false;
+
+static mpd_context_t* bigint_context() {
+    if (!g_bigint_ctx_initialized) {
+        mpd_maxcontext(&g_bigint_ctx);
+        g_bigint_ctx.prec = 2000;  // ~2000-digit integers
+        g_bigint_ctx_initialized = true;
+    }
+    return &g_bigint_ctx;
+}
+
+// helper: allocate Decimal struct on GC heap with DECIMAL tag, wrap mpd_t*
+static Item bigint_push_result(mpd_t* mpd_val) {
+    if (!mpd_val) return ItemError;
+    Decimal* dec = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!dec) { mpd_del(mpd_val); return ItemError; }
+    dec->dec_val = mpd_val;
+    dec->unlimited = DECIMAL_BIGINT;  // mark as BigInt
+    // encode as tagged pointer with LMD_TYPE_DECIMAL tag
+    uint64_t enc = ((uint64_t)LMD_TYPE_DECIMAL << 56) | ((uint64_t)dec & 0x00FFFFFFFFFFFFFF);
+    return (Item){.item = enc};
+}
+
+// helper: extract mpd_t* from BigInt Item
+mpd_t* bigint_get_mpd(Item bi) {
+    Decimal* dec = (Decimal*)(bi.item & 0x00FFFFFFFFFFFFFF);
+    if (!dec) return NULL;
+    return dec->dec_val;
+}
+
+// ─── Creation ────────────────────────────────────────────────────────
+
+Item bigint_from_int64(int64_t val) {
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    mpd_set_ssize(dec_val, (mpd_ssize_t)val, ctx);
+    return bigint_push_result(dec_val);
+}
+
+Item bigint_from_double(double val) {
+    // must be an exact integer
+    if (val != val) return ItemError;  // NaN
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    char str_buf[64];
+    snprintf(str_buf, sizeof(str_buf), "%.0f", val);
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str_buf, ctx, &status);
+    if (status != 0) { mpd_del(dec_val); return ItemError; }
+    // truncate to integer
+    mpd_t* truncated = mpd_new(ctx);
+    if (!truncated) { mpd_del(dec_val); return ItemError; }
+    mpd_trunc(truncated, dec_val, ctx);
+    mpd_del(dec_val);
+    return bigint_push_result(truncated);
+}
+
+Item bigint_from_string(const char* str, int len) {
+    if (!str) return ItemError;
+    // skip leading/trailing whitespace
+    while (len > 0 && (str[0] == ' ' || str[0] == '\t' || str[0] == '\n' || str[0] == '\r')) { str++; len--; }
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) { len--; }
+    // empty string (or whitespace-only) → 0n
+    if (len == 0) return bigint_from_int64(0);
+    mpd_context_t* ctx = bigint_context();
+
+    // handle hex, octal, binary prefixes
+    char buf[4096];
+    if (len >= (int)sizeof(buf)) return ItemError;
+    memcpy(buf, str, len);
+    buf[len] = '\0';
+
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+
+    if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
+        // hex: parse manually since mpd doesn't support hex
+        // use strtoull for up-to-64-bit, fall back to digit-by-digit for larger
+        bool negative = false;
+        const char* hex = buf + 2;
+        int hex_len = len - 2;
+        // each hex digit is 4 bits; if > 16 digits, won't fit in uint64
+        if (hex_len <= 16) {
+            char* endptr;
+            unsigned long long uval = strtoull(hex, &endptr, 16);
+            if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
+            mpd_set_u64(dec_val, uval, ctx);
+        } else {
+            // digit-by-digit: result = result * 16 + digit
+            mpd_set_u32(dec_val, 0, ctx);
+            mpd_t* sixteen = mpd_new(ctx);
+            mpd_t* digit = mpd_new(ctx);
+            mpd_t* temp = mpd_new(ctx);
+            if (!sixteen || !digit || !temp) {
+                if (sixteen) mpd_del(sixteen);
+                if (digit) mpd_del(digit);
+                if (temp) mpd_del(temp);
+                mpd_del(dec_val);
+                return ItemError;
+            }
+            mpd_set_u32(sixteen, 16, ctx);
+            for (int i = 0; i < hex_len; i++) {
+                char c = hex[i];
+                uint32_t d;
+                if (c >= '0' && c <= '9') d = c - '0';
+                else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+                else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+                else { mpd_del(sixteen); mpd_del(digit); mpd_del(temp); mpd_del(dec_val); return ItemError; }
+                mpd_mul(temp, dec_val, sixteen, ctx);
+                mpd_set_u32(digit, d, ctx);
+                mpd_add(dec_val, temp, digit, ctx);
+            }
+            mpd_del(sixteen); mpd_del(digit); mpd_del(temp);
+        }
+    } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
+        // octal
+        char* endptr;
+        unsigned long long uval = strtoull(buf + 2, &endptr, 8);
+        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
+        mpd_set_u64(dec_val, uval, ctx);
+    } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
+        // binary
+        char* endptr;
+        unsigned long long uval = strtoull(buf + 2, &endptr, 2);
+        if (*endptr != '\0') { mpd_del(dec_val); return ItemError; }
+        mpd_set_u64(dec_val, uval, ctx);
+    } else {
+        // decimal string — ES spec: only digits allowed (with optional leading +/-)
+        // reject decimal points, exponents, Infinity, NaN
+        int start = 0;
+        if (buf[0] == '+' || buf[0] == '-') start = 1;
+        if (start >= len) { mpd_del(dec_val); return ItemError; }
+        for (int i = start; i < len; i++) {
+            if (buf[i] < '0' || buf[i] > '9') { mpd_del(dec_val); return ItemError; }
+        }
+        uint32_t status = 0;
+        mpd_qset_string(dec_val, buf, ctx, &status);
+        if (status != 0) { mpd_del(dec_val); return ItemError; }
+    }
+
+    return bigint_push_result(dec_val);
+}
+
+// ─── Extraction ──────────────────────────────────────────────────────
+
+int64_t bigint_to_int64(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0;
+    return mpd_get_ssize(m, bigint_context());
+}
+
+double bigint_to_double(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0.0;
+    char* str = mpd_to_sci(m, 1);
+    if (!str) return 0.0;
+    double result = strtod(str, NULL);
+    mpd_free(str);
+    return result;
+}
+
+bool bigint_is_zero(Item bi) {
+    mpd_t* m = bigint_get_mpd(bi);
+    return m && mpd_iszero(m);
+}
+
+int bigint_cmp(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return 0;
+    return mpd_cmp(ma, mb, bigint_context());
+}
+
+int bigint_cmp_double(Item bi, double d) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return 0;
+    // convert double to mpd for comparison
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* d_mpd = mpd_new(ctx);
+    if (!d_mpd) return 0;
+    char str_buf[64];
+    snprintf(str_buf, sizeof(str_buf), "%.17g", d);
+    uint32_t status = 0;
+    mpd_qset_string(d_mpd, str_buf, ctx, &status);
+    if (status != 0) { mpd_del(d_mpd); return 0; }
+    int result = mpd_cmp(m, d_mpd, ctx);
+    mpd_del(d_mpd);
+    return result;
+}
+
+// ─── Arithmetic ──────────────────────────────────────────────────────
+
+Item bigint_add(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_add(r, ma, mb, ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_sub(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_sub(r, ma, mb, ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_mul(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_mul(r, ma, mb, ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_div(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    if (mpd_iszero(mb)) return ItemError;  // caller should throw RangeError
+    mpd_context_t* ctx = bigint_context();
+    // integer division: truncate toward zero
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_t* rem = mpd_new(ctx);
+    if (!rem) { mpd_del(r); return ItemError; }
+    mpd_divmod(r, rem, ma, mb, ctx);
+    mpd_del(rem);
+    return bigint_push_result(r);
+}
+
+Item bigint_mod(Item a, Item b) {
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    if (mpd_iszero(mb)) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_rem(r, ma, mb, ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_pow(Item base, Item exp) {
+    mpd_t* mb = bigint_get_mpd(base);
+    mpd_t* me = bigint_get_mpd(exp);
+    if (!mb || !me) return ItemError;
+    if (mpd_isnegative(me)) return ItemError;  // caller should throw RangeError
+    // 0^0 = 1 (ES spec)
+    if (mpd_iszero(me)) return bigint_from_int64(1);
+    if (mpd_iszero(mb)) return bigint_from_int64(0);
+    mpd_context_t* ctx = bigint_context();
+    // dynamically increase precision for large exponents
+    mpd_context_t pow_ctx = *ctx;
+    int64_t exp_val = mpd_get_ssize(me, ctx);
+    if (exp_val > 0) {
+        // estimate result digits: base_digits * exp
+        mpd_ssize_t base_digits = mb->digits;
+        mpd_ssize_t est = base_digits * exp_val + 10;
+        if (est > pow_ctx.prec) pow_ctx.prec = est < 100000 ? est : 100000;
+    }
+    mpd_t* r = mpd_new(&pow_ctx);
+    if (!r) return ItemError;
+    mpd_pow(r, mb, me, &pow_ctx);
+    if (mpd_isnan(r) || mpd_isinfinite(r)) { mpd_del(r); return ItemError; }
+    return bigint_push_result(r);
+}
+
+Item bigint_neg(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* r = mpd_new(ctx);
+    if (!r) return ItemError;
+    mpd_minus(r, m, ctx);
+    return bigint_push_result(r);
+}
+
+Item bigint_inc(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* one = mpd_new(ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, ctx);
+    mpd_t* r = mpd_new(ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_add(r, m, one, ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
+}
+
+Item bigint_dec(Item a) {
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* one = mpd_new(ctx);
+    if (!one) return ItemError;
+    mpd_set_u32(one, 1, ctx);
+    mpd_t* r = mpd_new(ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_sub(r, m, one, ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
+}
+
+// ─── Bitwise ─────────────────────────────────────────────────────────
+
+// For bitwise ops, extract to int64 (ES spec defines BigInt bitwise
+// on the mathematical integer value using two's complement).
+// For values that don't fit in int64, this truncates — matching the
+// practical limit of 64-bit bitwise operations.
+
+Item bigint_bitwise_and(Item a, Item b) {
+    int64_t va = bigint_to_int64(a);
+    int64_t vb = bigint_to_int64(b);
+    return bigint_from_int64(va & vb);
+}
+
+Item bigint_bitwise_or(Item a, Item b) {
+    int64_t va = bigint_to_int64(a);
+    int64_t vb = bigint_to_int64(b);
+    return bigint_from_int64(va | vb);
+}
+
+Item bigint_bitwise_xor(Item a, Item b) {
+    int64_t va = bigint_to_int64(a);
+    int64_t vb = bigint_to_int64(b);
+    return bigint_from_int64(va ^ vb);
+}
+
+Item bigint_bitwise_not(Item a) {
+    int64_t va = bigint_to_int64(a);
+    return bigint_from_int64(~va);
+}
+
+Item bigint_left_shift(Item a, Item b) {
+    int64_t va = bigint_to_int64(a);
+    int64_t vb = bigint_to_int64(b);
+    return bigint_from_int64(va << (vb & 0x3F));
+}
+
+Item bigint_right_shift(Item a, Item b) {
+    int64_t va = bigint_to_int64(a);
+    int64_t vb = bigint_to_int64(b);
+    return bigint_from_int64(va >> (vb & 0x3F));
+}
+
+// ─── String Conversion ───────────────────────────────────────────────
+
+// returns malloc'd string - caller must free with mpd_free() or free()
+char* bigint_to_cstring_radix(Item bi, int radix) {
+    mpd_t* m = bigint_get_mpd(bi);
+    if (!m) return NULL;
+
+    if (radix == 10) {
+        // fast path: use mpd_to_sci
+        char* str = mpd_to_sci(m, 1);
+        if (!str) return NULL;
+        // strip trailing ".0" or decimal point artifacts
+        char* dot = strchr(str, '.');
+        if (dot) *dot = '\0';
+        // strip trailing 'E+0' etc from sci notation
+        char* e = strchr(str, 'E');
+        if (!e) e = strchr(str, 'e');
+        if (e) {
+            // has exponent - convert via int64 fallback
+            int64_t v = bigint_to_int64(bi);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%lld", (long long)v);
+            mpd_free(str);
+            return strdup(buf);
+        }
+        return str; // caller frees with mpd_free()
+    }
+
+    // non-10 radix: extract int64 and do manual conversion
+    int64_t val = bigint_to_int64(bi);
+    bool negative = val < 0;
+    uint64_t uval = negative ? (uint64_t)(-val) : (uint64_t)val;
+
+    char buf[256];
+    int pos = sizeof(buf) - 1;
+    buf[pos] = '\0';
+    if (uval == 0) {
+        buf[--pos] = '0';
+    } else {
+        while (uval > 0 && pos > 1) {
+            int digit = (int)(uval % radix);
+            buf[--pos] = digit < 10 ? ('0' + digit) : ('a' + digit - 10);
+            uval /= radix;
+        }
+    }
+    if (negative) buf[--pos] = '-';
+
+    return strdup(buf + pos);
+}
