@@ -4,14 +4,14 @@
 
 Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented and an npm package management system. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
 
-### Current State (after Phase 3 implementation)
+### Current State (after Phase 4 implementation)
 
 | Metric | Count |
 |--------|-------|
 | Total official parallel tests | 3,926 |
 | Tests in enabled modules (27 modules) | ~2,050 |
 | Tests in disabled modules (9 modules) | ~1,876 |
-| **Baseline passing** | **739** |
+| **Baseline passing** | **795** |
 
 ### Phase 2 Implementation Results (cumulative)
 
@@ -49,6 +49,15 @@ Phase 3 (API surface completion) added missing constructor/class exports and Abo
 6. **Internal module aliases**: Mapped `_http_agent`, `_http_client`, `_http_common`, `_http_incoming`, `_http_outgoing`, `_http_server` to `http` module
 
 **Result: 739 passing tests** (+48 from Phase 2). Key gains: http +45, https +7, net +3.
+
+### Phase 4 Implementation Results
+
+Phase 4 (vm module + runtime API stubs) implemented three high-impact targets:
+1. **vm module**: Full implementation — `createContext`, `isContext`, `runInThisContext`, `runInContext`, `runInNewContext`, `compileFunction`, `Script` class (with `runInThisContext`/`runInContext`/`runInNewContext` methods), `constants.USE_MAIN_CONTEXT_DEFAULT_LOADER`. Lambda limitation: contexts share the same global scope (no V8 isolate separation), so sandbox variables are not injected into eval scope.
+2. **process POSIX APIs**: Added `process.getuid()`, `process.getgid()`, `process.geteuid()`, `process.getegid()` (guarded `#ifndef _WIN32`)
+3. **net.Socket method stubs**: Added `setTimeout`, `connect`, `setKeepAlive`, `setNoDelay`, `ref`, `unref`, `address` methods plus `readable`, `writable`, `_handle`, `allowHalfOpen` properties
+
+**Result: 795 passing tests** (+56 from Phase 3). Key gains: vm +17 (9→26), process/misc +25, net/socket +14.
 
 ### Phase 1 Implementation Results
 

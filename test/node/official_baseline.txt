@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: 3b1ed6b1d
+# Commit: 8ac8ee23c
 # Source: ref/node/test/parallel/
-# Total passing: 739 / 2052  (skipped: 0)
+# Total passing: 761 / 2052  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -37,6 +37,7 @@ test-assert-fail.js
 test-async-wrap-tlssocket-asyncreset.js
 test-buffer-alloc-unsafe-is-initialized-with-zero-fill-flag.js
 test-buffer-alloc-unsafe-is-uninitialized.js
+test-buffer-bytelength.js
 test-buffer-compare.js
 test-buffer-constructor-deprecation-error.js
 test-buffer-equals.js
@@ -99,6 +100,7 @@ test-fs-chmod-mask.js
 test-fs-chmod.js
 test-fs-chown-negative-one.js
 test-fs-close.js
+test-fs-copyfile-respect-permissions.js
 test-fs-cp-sync-dereference.js
 test-fs-error-messages.js
 test-fs-existssync-false.js
@@ -111,6 +113,7 @@ test-fs-link.js
 test-fs-long-path.js
 test-fs-make-callback.js
 test-fs-mkdir-mode-mask.js
+test-fs-mkdir-recursive-eaccess.js
 test-fs-mkdir-rmdir.js
 test-fs-mkdir.js
 test-fs-mkdtemp.js
@@ -614,6 +617,7 @@ test-net-socket-write-after-close.js
 test-net-socket-write-error.js
 test-net-stream.js
 test-net-sync-cork.js
+test-net-timeout-no-handle.js
 test-net-writable.js
 test-net-write-after-close.js
 test-net-write-after-end-nt.js
@@ -754,16 +758,34 @@ test-tls-wrap-econnreset.js
 test-tls-write-error.js
 test-tls-writewrap-leak.js
 test-util-getcallsites.js
+test-util-inspect-namespace.js
 test-util-primordial-monkeypatching.js
+test-vm-access-process-env.js
 test-vm-api-handles-getter-errors.js
+test-vm-create-context-circular-reference.js
+test-vm-cross-context.js
+test-vm-data-property-writable.js
+test-vm-deleting-property.js
+test-vm-function-redefinition.js
+test-vm-global-assignment.js
+test-vm-global-configurable-properties.js
 test-vm-module-after-evaluate.js
+test-vm-module-dynamic-import-promise.js
+test-vm-module-dynamic-import.js
+test-vm-module-dynamic-namespace.js
+test-vm-module-import-meta.js
 test-vm-module-link-shared-deps.js
+test-vm-module-link.js
+test-vm-module-reevaluate.js
+test-vm-module-synthetic.js
 test-vm-parse-abort-on-uncaught-exception.js
-test-vm-script-throw-in-tostring.js
+test-vm-proxy-failure-CP.js
+test-vm-set-proto-null-on-globalthis.js
 test-vm-sigint-existing-handler.js
 test-vm-sigint.js
 test-vm-syntax-error-message.js
 test-vm-syntax-error-stderr.js
+test-vm-util-lazy-properties.js
 test-zlib-brotli-from-brotli.js
 test-zlib-empty-buffer.js
 test-zlib-flush.js

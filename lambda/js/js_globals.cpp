@@ -1494,6 +1494,15 @@ extern "C" Item js_process_nextTick(Item callback) {
     return make_js_undefined();
 }
 
+// POSIX: process.getuid/getgid/geteuid/getegid
+#ifndef _WIN32
+#include <unistd.h>
+extern "C" Item js_process_getuid(void) { return (Item){.item = i2it(getuid())}; }
+extern "C" Item js_process_getgid(void) { return (Item){.item = i2it(getgid())}; }
+extern "C" Item js_process_geteuid(void) { return (Item){.item = i2it(geteuid())}; }
+extern "C" Item js_process_getegid(void) { return (Item){.item = i2it(getegid())}; }
+#endif
+
 // process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
 extern "C" Item js_process_memoryUsage(void) {
     Item result = js_new_object();
@@ -1873,6 +1882,28 @@ extern "C" Item js_get_process_object_value(void) {
                 (Item){.item = s2it(heap_create_name("features", 8))},
                 features_obj);
         }
+
+        // POSIX: process.getuid(), getgid(), geteuid(), getegid()
+#ifndef _WIN32
+        {
+            extern Item js_process_getuid(void);
+            extern Item js_process_getgid(void);
+            extern Item js_process_geteuid(void);
+            extern Item js_process_getegid(void);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getuid", 6))},
+                js_new_function((void*)js_process_getuid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getgid", 6))},
+                js_new_function((void*)js_process_getgid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("geteuid", 7))},
+                js_new_function((void*)js_process_geteuid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getegid", 7))},
+                js_new_function((void*)js_process_getegid, 0));
+        }
+#endif
     }
     return js_process_object;
 }

@@ -136,6 +136,59 @@ extern "C" Item js_socket_destroy(Item self) {
     return self;
 }
 
+// Socket.setTimeout(msecs, callback) — set idle timeout
+static Item js_socket_setTimeout(Item msecs, Item callback) {
+    Item self = js_get_this();
+    // Store timeout value; if callback provided, add as 'timeout' listener
+    js_property_set(self, make_string_item("timeout"), msecs);
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        // Register 'timeout' listener
+        Item args[] = { make_string_item("timeout"), callback };
+        Item on_fn = js_property_get(self, make_string_item("on"));
+        if (get_type_id(on_fn) == LMD_TYPE_FUNC) {
+            js_call_function(on_fn, self, args, 2);
+        }
+    }
+    return self;
+}
+
+// Socket.connect(options/port, host, callback) — initiate connection
+static Item js_socket_connect(Item port_or_options, Item host, Item callback) {
+    Item self = js_get_this();
+    // For now, just emit 'connect' event if callback provided
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[] = { make_string_item("connect"), callback };
+        Item on_fn = js_property_get(self, make_string_item("on"));
+        if (get_type_id(on_fn) == LMD_TYPE_FUNC) {
+            js_call_function(on_fn, self, args, 2);
+        }
+    }
+    return self;
+}
+
+// Socket.setKeepAlive(enable, initialDelay) — stub
+static Item js_socket_setKeepAlive(Item enable, Item delay) {
+    return js_get_this();
+}
+
+// Socket.setNoDelay(noDelay) — stub
+static Item js_socket_setNoDelay(Item noDelay) {
+    return js_get_this();
+}
+
+// Socket.ref() / Socket.unref() — stub
+static Item js_socket_ref(void) { return js_get_this(); }
+static Item js_socket_unref(void) { return js_get_this(); }
+
+// Socket.address() — return local address info
+static Item js_socket_address(void) {
+    Item result = js_new_object();
+    js_property_set(result, make_string_item("address"), make_string_item("127.0.0.1"));
+    js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+    js_property_set(result, make_string_item("port"), (Item){.item = i2it(0)});
+    return result;
+}
+
 // create a JS socket object wrapping a JsSocket
 static Item make_socket_object(JsSocket* sock) {
     Item obj = js_new_object();
@@ -150,6 +203,26 @@ static Item make_socket_object(JsSocket* sock) {
                     js_new_function((void*)js_socket_end, 1));
     js_property_set(obj, make_string_item("destroy"),
                     js_new_function((void*)js_socket_destroy, 1));
+    // Additional Socket properties
+    js_property_set(obj, make_string_item("readable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj, make_string_item("writable"), (Item){.item = ITEM_TRUE});
+    js_property_set(obj, make_string_item("_handle"), ItemNull);
+    js_property_set(obj, make_string_item("allowHalfOpen"), (Item){.item = ITEM_FALSE});
+    // Additional Socket methods
+    js_property_set(obj, make_string_item("setTimeout"),
+                    js_new_function((void*)js_socket_setTimeout, 2));
+    js_property_set(obj, make_string_item("connect"),
+                    js_new_function((void*)js_socket_connect, 3));
+    js_property_set(obj, make_string_item("setKeepAlive"),
+                    js_new_function((void*)js_socket_setKeepAlive, 2));
+    js_property_set(obj, make_string_item("setNoDelay"),
+                    js_new_function((void*)js_socket_setNoDelay, 1));
+    js_property_set(obj, make_string_item("ref"),
+                    js_new_function((void*)js_socket_ref, 0));
+    js_property_set(obj, make_string_item("unref"),
+                    js_new_function((void*)js_socket_unref, 0));
+    js_property_set(obj, make_string_item("address"),
+                    js_new_function((void*)js_socket_address, 0));
     sock->js_object = obj;
     return obj;
 }
