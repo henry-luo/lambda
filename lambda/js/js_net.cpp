@@ -490,6 +490,7 @@ extern "C" Item js_get_net_namespace(void) {
     net_set_method(net_namespace, "createConnection", (void*)js_net_createConnection, 2);
     net_set_method(net_namespace, "connect",          (void*)js_net_createConnection, 2); // alias
     net_set_method(net_namespace, "Socket",           (void*)js_net_Socket, 0);
+    net_set_method(net_namespace, "Server",           (void*)js_net_createServer, 1); // alias
     net_set_method(net_namespace, "isIP",             (void*)js_net_isIP, 1);
     net_set_method(net_namespace, "isIPv4",           (void*)js_net_isIPv4, 1);
     net_set_method(net_namespace, "isIPv6",           (void*)js_net_isIPv6, 1);

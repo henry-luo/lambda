@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: ca1f15687
+# Commit: 3b1ed6b1d
 # Source: ref/node/test/parallel/
-# Total passing: 691 / 2052  (skipped: 0)
+# Total passing: 739 / 2052  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -225,21 +225,34 @@ test-fs-writev-sync.js
 test-fs-writev.js
 test-http-1.0.js
 test-http-abort-before-end.js
+test-http-abort-client.js
 test-http-abort-queued.js
 test-http-abort-stream-end.js
 test-http-aborted.js
 test-http-after-connect.js
+test-http-agent-abort-controller.js
+test-http-agent-close.js
 test-http-agent-destroyed-socket.js
 test-http-agent-error-on-idle.js
 test-http-agent-false.js
+test-http-agent-maxsockets-respected.js
+test-http-agent-maxsockets.js
 test-http-agent-no-protocol.js
 test-http-agent-null.js
 test-http-agent-remove.js
+test-http-agent-reuse-drained-socket-only.js
+test-http-agent-scheduling.js
+test-http-agent-timeout-option.js
+test-http-agent-timeout.js
+test-http-agent-uninitialized-with-handle.js
+test-http-agent-uninitialized.js
+test-http-agent.js
 test-http-allow-content-length-304.js
 test-http-allow-req-after-204-res.js
 test-http-automatic-headers.js
 test-http-bind-twice.js
 test-http-blank-header.js
+test-http-buffer-sanity.js
 test-http-byteswritten.js
 test-http-catch-uncaughtexception.js
 test-http-chunk-extensions-limit.js
@@ -247,6 +260,7 @@ test-http-chunk-problem.js
 test-http-chunked-304.js
 test-http-chunked-smuggling.js
 test-http-chunked.js
+test-http-client-abort-destroy.js
 test-http-client-abort-event.js
 test-http-client-abort-keep-alive-destroy-res.js
 test-http-client-abort-keep-alive-queued-tcp-socket.js
@@ -254,7 +268,12 @@ test-http-client-abort-keep-alive-queued-unix-socket.js
 test-http-client-abort-no-agent.js
 test-http-client-abort-response-event.js
 test-http-client-abort-unix-socket.js
+test-http-client-abort.js
 test-http-client-abort2.js
+test-http-client-aborted-event.js
+test-http-client-agent-abort-close-event.js
+test-http-client-agent-end-close-event.js
+test-http-client-agent.js
 test-http-client-check-http-token.js
 test-http-client-close-event.js
 test-http-client-default-headers-exist.js
@@ -265,6 +284,7 @@ test-http-client-get-url.js
 test-http-client-headers-array.js
 test-http-client-input-function.js
 test-http-client-keep-alive-release-before-finish.js
+test-http-client-override-global-agent.js
 test-http-client-parse-error.js
 test-http-client-pipe-end.js
 test-http-client-readable.js
@@ -277,9 +297,12 @@ test-http-client-response-domain.js
 test-http-client-response-timeout.js
 test-http-client-set-timeout-after-end.js
 test-http-client-set-timeout.js
+test-http-client-spurious-aborted.js
 test-http-client-timeout-agent.js
 test-http-client-timeout-connect-listener.js
 test-http-client-timeout-event.js
+test-http-client-timeout-option-listeners.js
+test-http-client-timeout-option-with-agent.js
 test-http-client-timeout-with-data.js
 test-http-client-timeout.js
 test-http-client-upload-buf.js
@@ -339,6 +362,10 @@ test-http-keep-alive-drop-requests.js
 test-http-keep-alive-max-requests.js
 test-http-keep-alive-pipeline-max-requests.js
 test-http-keep-alive-timeout-buffer.js
+test-http-keep-alive-timeout-custom.js
+test-http-keep-alive-timeout-race-condition.js
+test-http-keep-alive-timeout.js
+test-http-keep-alive.js
 test-http-keepalive-free.js
 test-http-keepalive-override.js
 test-http-listening.js
@@ -367,6 +394,7 @@ test-http-parser-free.js
 test-http-parser-freed-before-upgrade.js
 test-http-parser-multiple-execute.js
 test-http-pause-no-dump.js
+test-http-pause-resume-one-end.js
 test-http-pipe-fs.js
 test-http-pipeline-assertionerror-finish.js
 test-http-pipeline-flood.js
@@ -376,25 +404,32 @@ test-http-pipeline-socket-parser-typeerror.js
 test-http-raw-headers.js
 test-http-rawheaders-limit.js
 test-http-readable-data-event.js
+test-http-remove-connection-header-persists-connection.js
 test-http-remove-header-stays-removed.js
+test-http-req-res-close.js
 test-http-request-agent.js
 test-http-request-arguments.js
 test-http-request-dont-override-options.js
+test-http-request-end-twice.js
+test-http-request-end.js
 test-http-request-host-header.js
 test-http-request-join-authorization-headers.js
 test-http-request-large-payload.js
 test-http-request-methods.js
 test-http-request-smuggling-content-length.js
+test-http-res-write-after-end.js
 test-http-response-add-header-after-sent.js
 test-http-response-close.js
 test-http-response-cork.js
 test-http-response-multi-content-length.js
 test-http-response-multiheaders.js
 test-http-response-no-headers.js
+test-http-response-readable.js
 test-http-response-remove-header-after-sent.js
 test-http-response-setheaders.js
 test-http-response-splitting.js
 test-http-response-status-message.js
+test-http-response-statuscode.js
 test-http-response-writehead-returns-this.js
 test-http-server-capture-rejections.js
 test-http-server-client-error.js
@@ -413,6 +448,7 @@ test-http-server-multiheaders2.js
 test-http-server-non-utf8-header.js
 test-http-server-optimize-empty-requests.js
 test-http-server-options-incoming-message.js
+test-http-server-options-server-response.js
 test-http-server-reject-chunked-with-content-length.js
 test-http-server-reject-cr-no-lf.js
 test-http-server-stale-close.js
@@ -432,6 +468,7 @@ test-http-status-message.js
 test-http-status-reason-invalid-chars.js
 test-http-timeout-client-warning.js
 test-http-timeout-overflow.js
+test-http-timeout.js
 test-http-transfer-encoding-repeated-chunked.js
 test-http-transfer-encoding-smuggling.js
 test-http-unix-socket-keep-alive.js
@@ -459,11 +496,18 @@ test-http-write-head-after-set-header.js
 test-http-write-head.js
 test-http-zero-length-write.js
 test-http-zerolengthbuffer.js
+test-http.js
+test-https-agent-abort-controller.js
+test-https-agent-create-connection.js
+test-https-agent-servername.js
 test-https-agent-session-injection.js
+test-https-agent-sni.js
+test-https-agent-sockets-leak.js
 test-https-agent-unref-socket.js
 test-https-byteswritten.js
 test-https-client-checkServerIdentity.js
 test-https-client-get-url.js
+test-https-client-override-global-agent.js
 test-https-client-reject.js
 test-https-client-renegotiation-limit.js
 test-https-client-resume.js
@@ -484,6 +528,7 @@ test-https-server-close-idle.js
 test-https-server-options-incoming-message.js
 test-https-server-options-server-response.js
 test-https-socket-options.js
+test-https-strict.js
 test-https-timeout-server-2.js
 test-https-timeout-server.js
 test-https-timeout.js
@@ -514,6 +559,8 @@ test-net-child-process-connect-reset.js
 test-net-client-bind-twice.js
 test-net-connect-abort-controller.js
 test-net-connect-after-destroy.js
+test-net-connect-buffer.js
+test-net-connect-buffer2.js
 test-net-connect-call-socket-connect.js
 test-net-connect-destroy.js
 test-net-connect-keepalive.js
@@ -551,6 +598,7 @@ test-net-server-capture-rejection.js
 test-net-server-close-before-calling-lookup-callback.js
 test-net-server-drop-connections.js
 test-net-server-listen-path.js
+test-net-server-try-ports.js
 test-net-settimeout.js
 test-net-socket-byteswritten.js
 test-net-socket-close-after-end.js
@@ -693,6 +741,7 @@ test-tls-set-default-ca-certificates-reset-https-request.js
 test-tls-set-secure-context.js
 test-tls-sni-servername.js
 test-tls-socket-close.js
+test-tls-socket-constructor-alpn-options-parsing.js
 test-tls-socket-destroy.js
 test-tls-socket-failed-handshake-emits-error.js
 test-tls-starttls-server.js
@@ -702,7 +751,6 @@ test-tls-wrap-econnreset-localaddress.js
 test-tls-wrap-econnreset-pipe.js
 test-tls-wrap-econnreset-socket.js
 test-tls-wrap-econnreset.js
-test-tls-wrap-event-emmiter.js
 test-tls-write-error.js
 test-tls-writewrap-leak.js
 test-util-getcallsites.js

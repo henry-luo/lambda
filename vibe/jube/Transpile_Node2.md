@@ -4,14 +4,14 @@
 
 Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented and an npm package management system. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
 
-### Current State (after Phase 2 implementation)
+### Current State (after Phase 3 implementation)
 
 | Metric | Count |
 |--------|-------|
 | Total official parallel tests | 3,926 |
 | Tests in enabled modules (27 modules) | ~2,050 |
 | Tests in disabled modules (9 modules) | ~1,876 |
-| **Baseline passing** | **691** |
+| **Baseline passing** | **739** |
 
 ### Phase 2 Implementation Results (cumulative)
 
@@ -37,6 +37,18 @@ Per-module pass breakdown:
 | util | 2 | other | 2 |
 
 **Result: 691 genuinely passing tests** (up from 255 after Phase 1)
+
+### Phase 3 Implementation Results
+
+Phase 3 (API surface completion) added missing constructor/class exports and AbortController:
+1. **http module**: Added `Server`, `Agent` (with `getName`, `destroy`, `createConnection`), `IncomingMessage`, `ServerResponse`, `ClientRequest`, `OutgoingMessage`, `globalAgent`
+2. **net module**: Added `Server` constructor export
+3. **tls module**: Added `Server`, `TLSSocket`, `createSecureContext` exports
+4. **https module**: Added `Server`, `Agent` exports
+5. **AbortController**: Implemented as proper constructor with `signal` (aborted, reason, addEventListener, removeEventListener, throwIfAborted) and `abort(reason)`
+6. **Internal module aliases**: Mapped `_http_agent`, `_http_client`, `_http_common`, `_http_incoming`, `_http_outgoing`, `_http_server` to `http` module
+
+**Result: 739 passing tests** (+48 from Phase 2). Key gains: http +45, https +7, net +3.
 
 ### Phase 1 Implementation Results
 

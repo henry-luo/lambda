@@ -18254,7 +18254,11 @@ extern "C" Item js_module_get(Item specifier) {
     // node:http
     if ((spec->len == 4 && memcmp(spec->chars, "http", 4) == 0) ||
         (spec->len == 7 && memcmp(spec->chars, "http.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:http", 9) == 0)) {
+        (spec->len == 9 && memcmp(spec->chars, "node:http", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "_http_agent", 11) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "_http_common", 12) == 0) ||
+        (spec->len == 12 && memcmp(spec->chars, "_http_server", 12) == 0) ||
+        (spec->len == 14 && memcmp(spec->chars, "_http_outgoing", 14) == 0)) {
         extern Item js_get_http_namespace(void);
         return js_get_http_namespace();
     }

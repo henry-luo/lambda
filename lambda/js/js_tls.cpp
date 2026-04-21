@@ -597,12 +597,20 @@ extern "C" Item js_get_tls_namespace(void) {
     tls_set_method(tls_namespace, "connect",             (void*)js_tls_connect, 1);
     tls_set_method(tls_namespace, "createServer",        (void*)js_tls_createServer, 2);
     tls_set_method(tls_namespace, "createSecureContext",  (void*)js_tls_createSecureContext, 1);
+    tls_set_method(tls_namespace, "Server",              (void*)js_tls_createServer, 2); // alias
+    tls_set_method(tls_namespace, "TLSSocket",           (void*)js_tls_connect, 1);     // alias
 
     // TLS constants
     js_property_set(tls_namespace, make_string_item("DEFAULT_MIN_VERSION"),
                     make_string_item("TLSv1.2"));
     js_property_set(tls_namespace, make_string_item("DEFAULT_MAX_VERSION"),
                     make_string_item("TLSv1.3"));
+
+    // Cipher suite defaults
+    js_property_set(tls_namespace, make_string_item("DEFAULT_CIPHERS"),
+        make_string_item("TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"));
+    js_property_set(tls_namespace, make_string_item("DEFAULT_ECDH_CURVE"),
+        make_string_item("auto"));
 
     Item default_key = make_string_item("default");
     js_property_set(tls_namespace, default_key, tls_namespace);
