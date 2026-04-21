@@ -14095,8 +14095,25 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 return (Item){.item = i2it(-1)};
             }
         }
-        // delegate to indexOf for string patterns
-        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+        // ES spec: coerce to string, create RegExp, use [Symbol.search]
+        {
+            Item arg_str = js_to_string(args[0]);
+            String* pat = it2s(arg_str);
+            if (pat) {
+                Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
+                JsRegexData* rd = js_get_regex_data(regex);
+                if (rd) {
+                    String* s = it2s(str);
+                    if (!s) return (Item){.item = i2it(-1)};
+                    re2::StringPiece match;
+                    if (js_regex_match_internal(rd, s->chars, (int)s->len, 0,
+                                       re2::RE2::UNANCHORED, &match, 1)) {
+                        return (Item){.item = i2it((int)(match.data() - s->chars))};
+                    }
+                }
+            }
+            return (Item){.item = i2it(-1)};
+        }
     }
     // toString
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
@@ -14164,49 +14181,69 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 return result;
             }
         }
-        // If arg is a string, treat as literal pattern
-        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+        // ES spec §21.1.3.11: coerce to string, create RegExp, use regex exec
+        {
+            Item arg_str = js_to_string(args[0]);
+            String* pat = it2s(arg_str);
+            if (pat) {
+                Item regex = js_create_regex(pat->chars, (int)pat->len, "", 0);
+                return js_regex_exec(regex, str);
+            }
+        }
+        return ItemNull;
     }
     // matchAll(regex) — returns an iterator of all match results
     if (method->len == 8 && strncmp(method->chars, "matchAll", 8) == 0) {
-        Item matches_arr = js_array_new(0);
+        Item regex_item = ItemNull;
+        JsRegexData* rd = nullptr;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            JsRegexData* rd = js_get_regex_data(args[0]);
-            if (rd) {
-                String* s = it2s(str);
-                if (s) {
-                    int offset = 0;
-                    int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
-                    if (num_groups > 16) num_groups = 16;
-                    re2::StringPiece matches[16];
-                    while (offset < (int)s->len) {
-                        bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
-                            re2::RE2::UNANCHORED, matches, num_groups);
-                        if (!matched) break;
-                        Item match_obj = js_new_object();
-                        for (int i = 0; i < num_groups; i++) {
-                            if (matches[i].data()) {
-                                Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
-                                char buf[24];
-                                snprintf(buf, sizeof(buf), "%d", i);
-                                Item key = (Item){.item = s2it(heap_create_name(buf))};
-                                js_property_set(match_obj, key, ms);
-                            }
+            rd = js_get_regex_data(args[0]);
+            if (rd) regex_item = args[0];
+        }
+        // ES spec: if not a regex, coerce to string and create RegExp with global flag
+        if (!rd && argc >= 1) {
+            Item arg_str = js_to_string(args[0]);
+            String* pat = it2s(arg_str);
+            if (pat) {
+                regex_item = js_create_regex(pat->chars, (int)pat->len, "g", 1);
+                rd = js_get_regex_data(regex_item);
+            }
+        }
+        Item matches_arr = js_array_new(0);
+        if (rd) {
+            String* s = it2s(str);
+            if (s) {
+                int offset = 0;
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                if (num_groups > 16) num_groups = 16;
+                re2::StringPiece matches[16];
+                while (offset < (int)s->len) {
+                    bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
+                        re2::RE2::UNANCHORED, matches, num_groups);
+                    if (!matched) break;
+                    Item match_obj = js_new_object();
+                    for (int i = 0; i < num_groups; i++) {
+                        if (matches[i].data()) {
+                            Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
+                            char buf[24];
+                            snprintf(buf, sizeof(buf), "%d", i);
+                            Item key = (Item){.item = s2it(heap_create_name(buf))};
+                            js_property_set(match_obj, key, ms);
                         }
-                        int match_index = (int)(matches[0].data() - s->chars);
-                        Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
-                        js_property_set(match_obj, index_key, (Item){.item = i2it(match_index)});
-                        Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
-                        js_property_set(match_obj, input_key, str);
-                        Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
-                        js_property_set(match_obj, groups_key, (Item){.item = ITEM_JS_UNDEFINED});
-                        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                        js_property_set(match_obj, length_key, (Item){.item = i2it(num_groups)});
-                        js_array_push_item_direct(matches_arr.array, match_obj);
-                        int advance = match_index + (int)matches[0].size();
-                        if (advance <= offset) advance = offset + 1;
-                        offset = advance;
                     }
+                    int match_index = (int)(matches[0].data() - s->chars);
+                    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
+                    js_property_set(match_obj, index_key, (Item){.item = i2it(match_index)});
+                    Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
+                    js_property_set(match_obj, input_key, str);
+                    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
+                    js_property_set(match_obj, groups_key, (Item){.item = ITEM_JS_UNDEFINED});
+                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    js_property_set(match_obj, length_key, (Item){.item = i2it(num_groups)});
+                    js_array_push_item_direct(matches_arr.array, match_obj);
+                    int advance = match_index + (int)matches[0].size();
+                    if (advance <= offset) advance = offset + 1;
+                    offset = advance;
                 }
             }
         }
