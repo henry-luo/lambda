@@ -45,6 +45,7 @@ typedef struct JsTranspiler {
     StrBuf* func_buf;               // Buffer for function definitions (for nested/expression functions)
     const char* source;             // JavaScript source code
     size_t source_length;           // Source code length
+    char* normalized_source;        // Owned parse buffer when source normalization is applied
     
     // Scoping and symbol management
     JsScope* current_scope;         // Current lexical scope

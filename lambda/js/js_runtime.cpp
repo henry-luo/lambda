@@ -107,6 +107,18 @@ static int js_module_var_count = 0;
 static uint64_t js_heap_epoch = 1;
 extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
 
+// Annex B legacy RegExp static properties — global state tracking last match
+#define JS_REGEXP_MAX_PAREN 9
+struct JsRegexpLastMatch {
+    String* input;                         // last input string
+    String* match;                         // last full match ($&)
+    String* groups[JS_REGEXP_MAX_PAREN];   // $1-$9 capture groups
+    int group_count;                       // number of captures (0-9)
+    int match_start;                       // offset of match in input
+    int match_end;                         // end offset
+};
+static JsRegexpLastMatch js_regexp_last_match = {};
+
 // v18m: Original 'this' for Array.prototype.call() on non-array objects.
 // When filter/forEach/every/map/etc. are called on a MAP via .call(),
 // we convert to array-like internally but callbacks should get the original object.
@@ -440,6 +452,8 @@ extern "C" void js_batch_reset() {
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
+    // reset legacy RegExp static properties ($1-$9, input, etc.)
+    memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset microtask queue and timers — callbacks referencing old heap
     extern void js_event_loop_init(void);
     js_event_loop_init();
@@ -1606,11 +1620,52 @@ static double js_get_number(Item value) {
     case LMD_TYPE_STRING: {
         String* str = it2s(value);
         if (!str || str->len == 0) return 0.0;
-        // trim whitespace
+        // trim ES spec whitespace (WhiteSpace + LineTerminator) including Unicode Zs
         const char* s = str->chars;
         int len = (int)str->len;
-        while (len > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r')) { s++; len--; }
-        while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\t' || s[len-1] == '\n' || s[len-1] == '\r')) { len--; }
+        // trim leading whitespace (UTF-8 aware)
+        while (len > 0) {
+            unsigned char c = (unsigned char)s[0];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
+                s++; len--;
+            } else if (c == 0xC2 && len >= 2 && (unsigned char)s[1] == 0xA0) {
+                s += 2; len -= 2; // U+00A0 NBSP
+            } else if (c == 0xE1 && len >= 3 && (unsigned char)s[1] == 0x9A && (unsigned char)s[2] == 0x80) {
+                s += 3; len -= 3; // U+1680
+            } else if (c == 0xE2 && len >= 3) {
+                unsigned char b1 = (unsigned char)s[1], b2 = (unsigned char)s[2];
+                if ((b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A) || // U+2000-U+200A
+                    (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9)) || // U+2028-U+2029
+                    (b1 == 0x80 && b2 == 0xAF) || // U+202F
+                    (b1 == 0x81 && b2 == 0x9F) || // U+205F
+                    false) {
+                    s += 3; len -= 3;
+                } else break;
+            } else if (c == 0xE3 && len >= 3 && (unsigned char)s[1] == 0x80 && (unsigned char)s[2] == 0x80) {
+                s += 3; len -= 3; // U+3000
+            } else if (c == 0xEF && len >= 3 && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) {
+                s += 3; len -= 3; // U+FEFF BOM
+            } else break;
+        }
+        // trim trailing whitespace (UTF-8 aware)
+        while (len > 0) {
+            unsigned char c = (unsigned char)s[len - 1];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') {
+                len--;
+            } else if (len >= 2 && (unsigned char)s[len - 2] == 0xC2 && c == 0xA0) {
+                len -= 2; // U+00A0 NBSP
+            } else if (len >= 3) {
+                unsigned char b0 = (unsigned char)s[len - 3], b1 = (unsigned char)s[len - 2];
+                if (b0 == 0xE1 && b1 == 0x9A && c == 0x80) { len -= 3; } // U+1680
+                else if (b0 == 0xE2 && b1 == 0x80 && c >= 0x80 && c <= 0x8A) { len -= 3; } // U+2000-U+200A
+                else if (b0 == 0xE2 && b1 == 0x80 && (c == 0xA8 || c == 0xA9)) { len -= 3; } // U+2028-U+2029
+                else if (b0 == 0xE2 && b1 == 0x80 && c == 0xAF) { len -= 3; } // U+202F
+                else if (b0 == 0xE2 && b1 == 0x81 && c == 0x9F) { len -= 3; } // U+205F
+                else if (b0 == 0xE3 && b1 == 0x80 && c == 0x80) { len -= 3; } // U+3000
+                else if (b0 == 0xEF && b1 == 0xBB && c == 0xBF) { len -= 3; } // U+FEFF BOM
+                else break;
+            } else break;
+        }
         if (len == 0) return 0.0;
         // handle hex/octal/binary
         if (len > 2 && s[0] == '0') {
@@ -3481,8 +3536,12 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
     if (js_exception_pending) return ItemNull;
     bool bool_result = it2b(js_to_boolean(result));
-    // ES2020 §9.5.2 invariant: if target is not extensible, proto must match target's prototype
-    if (bool_result && !js_is_extensible(PD_TARGET(pd))) {
+    // ES2020 §9.5.2 invariant: if target is not extensible, proto must match target's prototype.
+    // Use the abstract IsExtensible operation and propagate abrupt completion.
+    Item target_extensible_item = js_object_is_extensible(PD_TARGET(pd));
+    if (js_exception_pending) return ItemNull;
+    bool target_extensible = it2b(js_to_boolean(target_extensible_item));
+    if (bool_result && !target_extensible) {
         Item target_proto = js_get_prototype_of(PD_TARGET(pd));
         extern Item js_strict_equal(Item a, Item b);
         if (!it2b(js_strict_equal(proto, target_proto))) {
@@ -4994,6 +5053,48 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
                         return js_call_function(getter, object, NULL, 0);
                     }
+                }
+            }
+            // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
+            if (fn->name && fn->name->len == 6 && strncmp(fn->name->chars, "RegExp", 6) == 0) {
+                if (str_key->len == 2 && str_key->chars[0] == '$' &&
+                    str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
+                    int gi = str_key->chars[1] - '1'; // $1 → index 0
+                    String* gs = js_regexp_last_match.groups[gi];
+                    return gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))};
+                }
+                if ((str_key->len == 5 && strncmp(str_key->chars, "input", 5) == 0) ||
+                    (str_key->len == 2 && strncmp(str_key->chars, "$_", 2) == 0)) {
+                    String* s = js_regexp_last_match.input;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
+                }
+                if ((str_key->len == 9 && strncmp(str_key->chars, "lastMatch", 9) == 0) ||
+                    (str_key->len == 2 && strncmp(str_key->chars, "$&", 2) == 0)) {
+                    String* s = js_regexp_last_match.match;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
+                }
+                if ((str_key->len == 9 && strncmp(str_key->chars, "lastParen", 9) == 0) ||
+                    (str_key->len == 2 && strncmp(str_key->chars, "$+", 2) == 0)) {
+                    int gc = js_regexp_last_match.group_count;
+                    String* s = gc > 0 ? js_regexp_last_match.groups[gc - 1] : NULL;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
+                }
+                if ((str_key->len == 11 && strncmp(str_key->chars, "leftContext", 11) == 0) ||
+                    (str_key->len == 2 && strncmp(str_key->chars, "$`", 2) == 0)) {
+                    String* inp = js_regexp_last_match.input;
+                    if (inp && js_regexp_last_match.match_start > 0) {
+                        return (Item){.item = s2it(heap_strcpy(inp->chars, js_regexp_last_match.match_start))};
+                    }
+                    return (Item){.item = s2it(heap_create_name("", 0))};
+                }
+                if ((str_key->len == 12 && strncmp(str_key->chars, "rightContext", 12) == 0) ||
+                    (str_key->len == 2 && strncmp(str_key->chars, "$'", 2) == 0)) {
+                    String* inp = js_regexp_last_match.input;
+                    if (inp && js_regexp_last_match.match_end < (int)inp->len) {
+                        return (Item){.item = s2it(heap_strcpy(inp->chars + js_regexp_last_match.match_end,
+                            (int)inp->len - js_regexp_last_match.match_end))};
+                    }
+                    return (Item){.item = s2it(heap_create_name("", 0))};
                 }
             }
             // v83: __proto__ for function objects → return Function.prototype
@@ -10171,6 +10272,34 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
 // hidden property key for storing regex data pointer
 static const char* JS_REGEX_DATA_KEY = "__rd";
 
+// update legacy static state after a successful regex exec
+static void js_regexp_update_last_match(const char* input_str, int input_len,
+    re2::StringPiece* matches, int num_groups) {
+    js_regexp_last_match.input = heap_strcpy((char*)input_str, input_len);
+    js_regexp_last_match.match = matches[0].data()
+        ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
+        : heap_create_name("", 0);
+    js_regexp_last_match.match_start = matches[0].data()
+        ? (int)(matches[0].data() - input_str) : 0;
+    js_regexp_last_match.match_end = js_regexp_last_match.match_start
+        + (matches[0].data() ? (int)matches[0].size() : 0);
+    int gc = num_groups - 1; // exclude group 0 (full match)
+    if (gc > JS_REGEXP_MAX_PAREN) gc = JS_REGEXP_MAX_PAREN;
+    if (gc < 0) gc = 0;
+    js_regexp_last_match.group_count = gc;
+    for (int i = 0; i < gc; i++) {
+        int gi = i + 1; // groups[0] is full match, groups[1] is $1
+        if (gi < num_groups && matches[gi].data()) {
+            js_regexp_last_match.groups[i] = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
+        } else {
+            js_regexp_last_match.groups[i] = heap_create_name("", 0);
+        }
+    }
+    for (int i = gc; i < JS_REGEXP_MAX_PAREN; i++) {
+        js_regexp_last_match.groups[i] = heap_create_name("", 0);
+    }
+}
+
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
@@ -10363,6 +10492,24 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         effective_pattern_len = (int)v_processed.size();
     }
 
+    // count capture groups for backreference validation (Annex B: \8/\9 identity escapes)
+    int total_groups = 0;
+    {
+        int bd = 0;
+        for (int i = 0; i < effective_pattern_len; i++) {
+            if (effective_pattern[i] == '\\' && i + 1 < effective_pattern_len) { i++; continue; }
+            if (effective_pattern[i] == '[') bd++;
+            else if (effective_pattern[i] == ']' && bd > 0) bd--;
+            else if (effective_pattern[i] == '(' && bd == 0 && i + 1 < effective_pattern_len) {
+                if (effective_pattern[i + 1] != '?') total_groups++;
+                else if (i + 3 < effective_pattern_len && effective_pattern[i + 2] == '<' &&
+                         effective_pattern[i + 3] != '=' && effective_pattern[i + 3] != '!') total_groups++;
+                else if (i + 4 < effective_pattern_len && effective_pattern[i + 2] == 'P' &&
+                         effective_pattern[i + 3] == '<') total_groups++;
+            }
+        }
+    }
+
     // Preprocess pattern: expand JS \s / \S to the full Unicode whitespace class,
     // since RE2's \s only matches ASCII whitespace but JS \s is Unicode-aware.
     // JS \s = [ \t\n\r\f\v\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]
@@ -10398,9 +10545,16 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
             // Handle backreferences \1-\9: passed through for js_regex_wrapper to handle
             // The wrapper converts them to capture groups with post-filter equality checks
+            // Annex B: \N is an identity escape if N > total capture groups
             if (next >= '1' && next <= '9' && bracket_depth == 0) {
-                processed_pattern += '\\';
-                processed_pattern += next;
+                int ref_num = next - '0';
+                if (ref_num > total_groups) {
+                    // identity escape: treat \N as literal character N
+                    processed_pattern += next;
+                } else {
+                    processed_pattern += '\\';
+                    processed_pattern += next;
+                }
                 i++;
                 continue;
             }
@@ -10784,11 +10938,13 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     }
     const char* chars = str.get_chars();
     int len = str.get_len();
-    bool matched;
-    if (rd->wrapper && rd->wrapper->has_filters) {
-        matched = js_regex_wrapper_test(rd->wrapper, chars, len, 0);
-    } else {
-        matched = re2::RE2::PartialMatch(re2::StringPiece(chars, len), *rd->re2);
+    // perform match with captures to update legacy static properties
+    int num_groups = js_regex_num_groups(rd);
+    if (num_groups > 16) num_groups = 16;
+    re2::StringPiece matches[16];
+    bool matched = js_regex_match_internal(rd, chars, len, 0, re2::RE2::UNANCHORED, matches, num_groups);
+    if (matched) {
+        js_regexp_update_last_match(chars, len, matches, num_groups);
     }
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
@@ -10846,6 +11002,9 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         js_property_set(regex, li_key, (Item){.item = i2it(match_end)});
     }
 
+    // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
+    js_regexp_update_last_match(chars, len, matches, num_groups);
+
     // build result as an Array with .index, .input, .groups properties (per ES spec)
     Item result = js_array_new(num_groups);
     for (int i = 0; i < num_groups; i++) {
@@ -10866,12 +11025,25 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
     js_property_set(result, input_key, str);
     // groups property — populated with named captures if regex has named groups
+    // ES spec: groups object must be a null-prototype object (Object.create(null))
     Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
     const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
     if (!named.empty()) {
-        Item groups_obj = js_new_object();
+        Item groups_obj = js_object_create(ItemNull);
         for (auto& pair : named) {
-            int idx = pair.second;
+            int re2_idx = pair.second;
+            // when wrapper is active, matches[] uses original JS indices (already remapped)
+            // RE2's NamedCapturingGroups returns RE2-internal indices; reverse-map needed
+            int idx = re2_idx;
+            if (rd->wrapper && rd->wrapper->group_remap) {
+                // reverse lookup: find original JS index that maps to this RE2 index
+                for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
+                    if (rd->wrapper->group_remap[g] == re2_idx) {
+                        idx = g;
+                        break;
+                    }
+                }
+            }
             Item val = make_js_undefined();
             if (idx < num_groups && matches[idx].data()) {
                 int mlen = (int)matches[idx].size();
@@ -12475,9 +12647,10 @@ static bool js_is_whitespace_at(const char* s, size_t len, size_t pos) {
 
 // v46: Process $-substitution patterns in replacement strings per ES spec
 // $$ → $, $& → matched, $` → before match, $' → after match, $N → capture group N
+// $<name> → named capture group (ES2018 §21.1.3.17.1 step 11)
 static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
     const char* src, int src_len, int match_start, int match_len,
-    re2::StringPiece* groups, int ngroups)
+    re2::StringPiece* groups, int ngroups, Item groups_obj)
 {
     for (int i = 0; i < repl_len; i++) {
         if (repl[i] == '$' && i + 1 < repl_len) {
@@ -12496,6 +12669,30 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
                 if (after < src_len)
                     strbuf_append_str_n(buf, src + after, src_len - after);
                 i++;
+            } else if (next == '<') {
+                // $<name> — named capture group reference (ES2018)
+                if (groups_obj.item == ItemNull.item || groups_obj.item == make_js_undefined().item) {
+                    strbuf_append_char(buf, '$');
+                } else {
+                    int name_start = i + 2;
+                    int name_end = name_start;
+                    while (name_end < repl_len && repl[name_end] != '>') name_end++;
+                    if (name_end >= repl_len) {
+                        // no closing '>' — emit literal $<
+                        strbuf_append_char(buf, '$');
+                    } else {
+                        int name_len = name_end - name_start;
+                        Item name_key = (Item){.item = s2it(heap_create_name(repl + name_start, name_len))};
+                        Item val = js_property_get(groups_obj, name_key);
+                        if (val.item != make_js_undefined().item && val.item != ItemNull.item) {
+                            Item val_str = js_to_string(val);
+                            String* vs = it2s(val_str);
+                            if (vs) strbuf_append_str_n(buf, vs->chars, vs->len);
+                        }
+                        // else: undefined group → replace with empty string
+                        i = name_end; // skip past '>'
+                    }
+                }
             } else if (next >= '1' && next <= '9') {
                 // $N or $NN capture group reference
                 int group_idx = next - '0';
@@ -12529,6 +12726,30 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
     }
 }
 
+// build a named groups object from regex match data (for replace $<name> and callback)
+static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, int num_groups) {
+    const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
+    if (named.empty()) return make_js_undefined();
+    Item groups_obj = js_object_create(ItemNull);
+    for (auto& pair : named) {
+        int re2_idx = pair.second;
+        int idx = re2_idx;
+        if (rd->wrapper && rd->wrapper->group_remap) {
+            for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
+                if (rd->wrapper->group_remap[g] == re2_idx) { idx = g; break; }
+            }
+        }
+        Item val = make_js_undefined();
+        if (idx < num_groups && matches[idx].data()) {
+            int mlen = (int)matches[idx].size();
+            val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+        }
+        Item key = (Item){.item = s2it(heap_create_name(pair.first.c_str(), pair.first.size()))};
+        js_property_set(groups_obj, key, val);
+    }
+    return groups_obj;
+}
+
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
     if (!s || s->len == 0) return str;
@@ -12555,31 +12776,35 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             if (match_start > pos)
                 strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
             if (replacement_is_func) {
-                // call function(match, g1, g2, ..., offset, originalString)
-                int fn_argc = ngroups + 2;
+                // call function(match, g1, g2, ..., offset, originalString, groups)
+                Item groups_obj = js_build_groups_object(rd, matches, ngroups);
+                bool has_groups = (groups_obj.item != make_js_undefined().item);
+                int fn_argc = ngroups + 2 + (has_groups ? 1 : 0);
                 Item* fn_args = (Item*)alloca(fn_argc * sizeof(Item));
                 for (int i = 0; i < ngroups; i++) {
                     if (matches[i].data()) {
                         fn_args[i] = (Item){.item = s2it(heap_strcpy(
                             (char*)matches[i].data(), (int)matches[i].size()))};
                     } else {
-                        fn_args[i] = ItemNull;
+                        fn_args[i] = make_js_undefined();
                     }
                 }
                 fn_args[ngroups] = (Item){.item = i2it(match_start)};
                 fn_args[ngroups + 1] = str;
+                if (has_groups) fn_args[ngroups + 2] = groups_obj;
                 Item result = js_call_function(args[1], ItemNull, fn_args, fn_argc);
                 Item result_str = js_to_string(result);
                 String* rs = it2s(result_str);
                 if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
             } else {
                 // string replacement with $-substitution patterns
+                Item groups_obj = js_build_groups_object(rd, matches, ngroups);
                 Item repl_str = js_to_string(args[1]);
                 String* rs = it2s(repl_str);
                 if (rs) {
                     js_apply_replacement(buf, rs->chars, (int)rs->len,
                         s->chars, (int)s->len, match_start, match_len,
-                        matches, ngroups);
+                        matches, ngroups, groups_obj);
                 }
             }
             pos = match_start + match_len;
@@ -12621,7 +12846,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                     String* repl = it2s(js_to_string(args[1]));
                     if (repl && repl->len > 0) {
                         js_apply_replacement(buf, repl->chars, (int)repl->len,
-                            s->chars, slen, pos, 0, NULL, 0);
+                            s->chars, slen, pos, 0, NULL, 0, ItemNull);
                     }
                 }
                 if (pos < slen) strbuf_append_char(buf, s->chars[pos]);
@@ -12650,7 +12875,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         if (!repl || repl->len == 0) return str;
         StrBuf* buf = strbuf_new();
         js_apply_replacement(buf, repl->chars, (int)repl->len,
-            s->chars, (int)s->len, 0, 0, NULL, 0);
+            s->chars, (int)s->len, 0, 0, NULL, 0, ItemNull);
         strbuf_append_str_n(buf, s->chars, s->len);
         String* result_str = heap_strcpy(buf->str, buf->length);
         strbuf_free(buf);
@@ -12672,7 +12897,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
                 if (match_start > pos)
                     strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
                 js_apply_replacement(buf, repl->chars, (int)repl->len,
-                    s->chars, (int)s->len, match_start, (int)search->len, NULL, 0);
+                    s->chars, (int)s->len, match_start, (int)search->len, NULL, 0, ItemNull);
                 pos = match_start + (int)search->len;
             }
             if (found_any) {
@@ -12697,7 +12922,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             if (repl && repl->len > 0) {
                 // v46: process $-substitution patterns
                 js_apply_replacement(buf2, repl->chars, (int)repl->len,
-                    s->chars, (int)s->len, match_start, match_len, NULL, 0);
+                    s->chars, (int)s->len, match_start, match_len, NULL, 0, ItemNull);
             }
             int after = match_start + match_len;
             if (after < (int)s->len) strbuf_append_str_n(buf2, s->chars + after, (int)s->len - after);
