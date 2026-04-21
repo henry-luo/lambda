@@ -908,10 +908,20 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     RdtStrokeCap cap;
     int dash_count = get_dash_pattern(outline->style, w, dash, &cap);
 
+    // For outlines, adjust dash/gap to match browser proportions.
+    // Browser uses approximately dash=2.5w, gap=2w for dashed outlines.
+    // (Borders use per-side rendering with adjusted gaps, but outlines stroke
+    // the full perimeter as a single path.)
+    if (dash_count > 0 && outline->style == CSS_VALUE_DASHED) {
+        dash[0] = w * 2.5f;
+        dash[1] = w * 2;
+    }
+
     RdtPath* clip = create_border_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
+    float phase = (dash_count > 0) ? w * 0.75f : 0;
     rc_stroke_path(rdcon, p, outline->color, w, cap, RDT_JOIN_MITER,
-                    dash_count > 0 ? dash : NULL, dash_count, xform);
+                    dash_count > 0 ? dash : NULL, dash_count, xform, phase);
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
