@@ -277,3 +277,56 @@ static inline void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     *out_left = left;
     *out_right = right;
 }
+
+// Build a stack-local ClipShape from serialized DL parameters (type + float[8]).
+// Used by display list replay to reconstruct clip shape for post-blur masking.
+static inline ClipShape clip_shape_from_params(int type, const float* params) {
+    ClipShape cs = {};
+    cs.type = (ClipShapeType)type;
+    switch (cs.type) {
+        case CLIP_SHAPE_CIRCLE:
+            cs.circle = {params[0], params[1], params[2]};
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            cs.ellipse = {params[0], params[1], params[2], params[3]};
+            break;
+        case CLIP_SHAPE_INSET:
+            cs.inset = {params[0], params[1], params[2], params[3], params[4], params[5]};
+            break;
+        case CLIP_SHAPE_ROUNDED_RECT:
+            cs.rounded_rect = {params[0], params[1], params[2], params[3],
+                               params[4], params[5], params[6], params[7]};
+            break;
+        default: break;
+    }
+    return cs;
+}
+
+// Serialize a ClipShape into type + float[8] for DL recording.
+static inline void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params) {
+    *out_type = cs ? (int)cs->type : 0;
+    memset(out_params, 0, 8 * sizeof(float));
+    if (!cs) return;
+    switch (cs->type) {
+        case CLIP_SHAPE_CIRCLE:
+            out_params[0] = cs->circle.cx; out_params[1] = cs->circle.cy;
+            out_params[2] = cs->circle.r;
+            break;
+        case CLIP_SHAPE_ELLIPSE:
+            out_params[0] = cs->ellipse.cx; out_params[1] = cs->ellipse.cy;
+            out_params[2] = cs->ellipse.rx; out_params[3] = cs->ellipse.ry;
+            break;
+        case CLIP_SHAPE_INSET:
+            out_params[0] = cs->inset.x;  out_params[1] = cs->inset.y;
+            out_params[2] = cs->inset.w;  out_params[3] = cs->inset.h;
+            out_params[4] = cs->inset.rx; out_params[5] = cs->inset.ry;
+            break;
+        case CLIP_SHAPE_ROUNDED_RECT:
+            out_params[0] = cs->rounded_rect.x;    out_params[1] = cs->rounded_rect.y;
+            out_params[2] = cs->rounded_rect.w;    out_params[3] = cs->rounded_rect.h;
+            out_params[4] = cs->rounded_rect.r_tl; out_params[5] = cs->rounded_rect.r_tr;
+            out_params[6] = cs->rounded_rect.r_br; out_params[7] = cs->rounded_rect.r_bl;
+            break;
+        default: break;
+    }
+}

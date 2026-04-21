@@ -197,6 +197,8 @@ typedef struct {
 typedef struct {
     int rx, ry, rw, rh;      // pixel region to blur
     float blur_radius;        // CSS blur radius in pixels
+    int clip_type;            // ClipShapeType (0 = none, clips blur to CSS clip-path)
+    float clip_params[8];    // serialized clip shape parameters
 } DlBoxBlurRegion;
 
 // Inset box-shadow blur: blur expanded region, restore pixels outside inner rect
@@ -350,7 +352,8 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip);
 
-void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius);
+void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
+                        int clip_type, const float* clip_params);
 
 void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color);
 

@@ -536,7 +536,10 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     border->width.bottom *= s;
     border->width.left *= s;
 
-    if (needs_vector || rdcon->has_transform) {
+    // Force vector path when CSS clip-path is active — the direct-pixel path
+    // (render_straight_border) bypasses the ThorVG clip stack, so clip-path
+    // shapes would not be applied to the borders.
+    if (needs_vector || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
         render_rounded_border(rdcon, view, rect);
     } else {
         render_straight_border(rdcon, view, rect);
