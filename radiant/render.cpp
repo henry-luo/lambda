@@ -28,6 +28,8 @@
 
 // Forward declaration for inline SVG rendering (defined in render_svg_inline.cpp)
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
+// Forward declaration for SVG rasterization (defined later in this file)
+void render_svg(ImageSurface* surface);
 
 #define DEBUG_RENDER 0
 
@@ -1529,6 +1531,42 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     log_debug("[MARKER RENDER] type=%d, x=%.1f, y=%.1f, width=%.1f, bullet_size=%.1f",
              marker_type, x, y, width, bullet_size);
 
+    // CSS 2.1 §12.5: list-style-image overrides list-style-type
+    if (marker_prop->image_url && strcmp(marker_prop->image_url, "none") != 0) {
+        // Lazy-load the image on first render
+        if (!marker_prop->loaded_image) {
+            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image_url);
+            if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
+                // SVG: set rasterization size based on intrinsic dimensions
+                float iw, ih;
+                rdt_picture_get_size(marker_prop->loaded_image->pic, &iw, &ih);
+                if (iw > 0 && ih > 0) {
+                    marker_prop->loaded_image->max_render_width = (int)(iw + 0.5f); // INT_CAST_OK: pixel rounding
+                }
+                render_svg(marker_prop->loaded_image);
+            }
+        }
+        ImageSurface* img = marker_prop->loaded_image;
+        if (img && img->pixels && img->width > 0 && img->height > 0) {
+            image_surface_ensure_decoded(img);
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float img_w = (float)img->width;
+            float img_h = (float)img->height;
+            // Position image: right-aligned within marker box, vertically centered on x-height
+            float ix = x + width - img_w - 4.0f;
+            float iy = y + baseline_offset - font_size * 0.35f - img_h / 2.0f;
+            rc_draw_image(rdcon, (uint32_t*)img->pixels, img->width, img->height,
+                          img->width, ix, iy, img_w, img_h, 255, nullptr);
+            log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
+                     ix, iy, img_w, img_h);
+            return;  // image replaces the marker type
+        }
+        // Fallback: if image failed to load, fall through to marker_type rendering
+        log_debug("[MARKER RENDER] list-style-image failed to load, falling back to marker_type");
+    }
+
     switch (marker_type) {
         case CSS_VALUE_DISC: {
             // Filled circle - center vertically in line, positioned at right side of marker box
@@ -2324,6 +2362,65 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
     }
 
+    // Save backdrop for filter: drop-shadow() (element must render on transparent so we get true alpha)
+    bool has_drop_shadow = false;
+    uint32_t* ds_backdrop = nullptr;
+    int dsx0 = 0, dsy0 = 0, dsw = 0, dsh = 0;
+    float ds_offset_x = 0, ds_offset_y = 0, ds_blur = 0;
+    if (block->filter && block->filter->functions) {
+        FilterFunction* ff = block->filter->functions;
+        while (ff) {
+            if (ff->type == FILTER_DROP_SHADOW) {
+                has_drop_shadow = true;
+                ds_offset_x = ff->params.drop_shadow.offset_x;
+                ds_offset_y = ff->params.drop_shadow.offset_y;
+                ds_blur = ff->params.drop_shadow.blur_radius;
+                break;
+            }
+            ff = ff->next;
+        }
+    }
+    if (has_drop_shadow) {
+        float ds = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            // Expand region to cover element + shadow offset + blur
+            float expand = ceilf(fabs(ds_offset_x > 0 ? ds_offset_x : -ds_offset_x)) +
+                           ceilf(fabs(ds_offset_y > 0 ? ds_offset_y : -ds_offset_y)) +
+                           ceilf(ds_blur) + 2;
+            dsx0 = (int)(pa_block.x + block->x * ds - expand);
+            dsy0 = (int)(pa_block.y + block->y * ds - expand);
+            int dx1 = (int)(pa_block.x + block->x * ds + block->width * ds + expand);
+            int dy1 = (int)(pa_block.y + block->y * ds + block->height * ds + expand);
+            if (dsx0 < 0) dsx0 = 0;
+            if (dsy0 < 0) dsy0 = 0;
+            if (dx1 > surface->width) dx1 = surface->width;
+            if (dy1 > surface->height) dy1 = surface->height;
+            dsw = dx1 - dsx0;
+            dsh = dy1 - dsy0;
+            if (dsw > 0 && dsh > 0) {
+                if (rdcon->dl) {
+                    dl_save_backdrop(rdcon->dl, dsx0, dsy0, dsw, dsh);
+                } else {
+                    ds_backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)dsw * dsh * sizeof(uint32_t));
+                    if (ds_backdrop) {
+                        uint32_t* px = (uint32_t*)surface->pixels;
+                        int pitch = surface->pitch / 4;
+                        for (int row = 0; row < dsh; row++) {
+                            memcpy(ds_backdrop + row * dsw,
+                                   px + (dsy0 + row) * pitch + dsx0,
+                                   dsw * sizeof(uint32_t));
+                        }
+                        for (int row = 0; row < dsh; row++) {
+                            memset(px + (dsy0 + row) * pitch + dsx0, 0, dsw * sizeof(uint32_t));
+                        }
+                        log_debug("[DROP-SHADOW] Saved backdrop %dx%d for <%s>", dsw, dsh, block->node_name());
+                    }
+                }
+            }
+        }
+    }
+
     if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
@@ -2479,12 +2576,25 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     if (block->filter && block->filter->functions) {
         auto tf1 = std::chrono::high_resolution_clock::now();
 
-        // Calculate the element's bounding rect
+        // Calculate the element's bounding rect, expanded for filter effects
+        float filter_expand = 0;
+        FilterFunction* ff = block->filter->functions;
+        while (ff) {
+            if (ff->type == FILTER_BLUR && ff->params.blur_radius > filter_expand)
+                filter_expand = ff->params.blur_radius;
+            if (ff->type == FILTER_DROP_SHADOW) {
+                float ds_exp = fabsf(ff->params.drop_shadow.offset_x)
+                             + fabsf(ff->params.drop_shadow.offset_y)
+                             + ff->params.drop_shadow.blur_radius + 2;
+                if (ds_exp > filter_expand) filter_expand = ds_exp;
+            }
+            ff = ff->next;
+        }
         Rect filter_rect;
-        filter_rect.x = pa_block.x + block->x;
-        filter_rect.y = pa_block.y + block->y;
-        filter_rect.width = block->width;
-        filter_rect.height = block->height;
+        filter_rect.x = pa_block.x + block->x - filter_expand;
+        filter_rect.y = pa_block.y + block->y - filter_expand;
+        filter_rect.width = block->width + filter_expand * 2;
+        filter_rect.height = block->height + filter_expand * 2;
 
         log_debug("[FILTER] Applying filters to element %s at (%.0f,%.0f) size %.0fx%.0f",
                   block->node_name(), filter_rect.x, filter_rect.y, filter_rect.width, filter_rect.height);
@@ -2500,6 +2610,42 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         auto tf2 = std::chrono::high_resolution_clock::now();
         g_render_filter_time += std::chrono::duration<double, std::milli>(tf2 - tf1).count();
         g_render_filter_count++;
+    }
+
+    // Composite drop-shadow: element + shadow rendered on transparent, now composite over saved backdrop
+    if (has_drop_shadow && dsw > 0 && dsh > 0) {
+        if (rdcon->dl) {
+            // DL path: composite element+shadow group over saved backdrop at full opacity
+            dl_composite_opacity(rdcon->dl, dsx0, dsy0, dsw, dsh, 1.0f);
+        } else if (ds_backdrop) {
+            // Direct path: source-over composite element+shadow onto saved backdrop
+            ImageSurface* surface = rdcon->ui_context->surface;
+            uint32_t* px = (uint32_t*)surface->pixels;
+            int pitch = surface->pitch / 4;
+            for (int row = 0; row < dsh; row++) {
+                for (int col = 0; col < dsw; col++) {
+                    uint32_t src = px[(dsy0 + row) * pitch + (dsx0 + col)];
+                    uint32_t dst = ds_backdrop[row * dsw + col];
+                    if (src == 0) {
+                        px[(dsy0 + row) * pitch + (dsx0 + col)] = dst;
+                        continue;
+                    }
+                    uint32_t sa = (src >> 24) & 0xFF;
+                    if (sa == 255) continue;  // fully opaque element pixel, keep as is
+                    // Porter-Duff source-over: result = src + dst * (1 - src_a)
+                    uint32_t da = (dst >> 24) & 0xFF;
+                    uint32_t inv_sa = 255 - sa;
+                    uint32_t ra = sa + (da * inv_sa + 127) / 255;
+                    uint32_t rr = (src & 0xFF) + (((dst & 0xFF) * inv_sa + 127) / 255);
+                    uint32_t rg = (((src >> 8) & 0xFF) + ((((dst >> 8) & 0xFF) * inv_sa + 127) / 255));
+                    uint32_t rb = (((src >> 16) & 0xFF) + ((((dst >> 16) & 0xFF) * inv_sa + 127) / 255));
+                    px[(dsy0 + row) * pitch + (dsx0 + col)] =
+                        (std::min(ra, 255u) << 24) | (std::min(rb, 255u) << 16) |
+                        (std::min(rg, 255u) << 8) | std::min(rr, 255u);
+                }
+            }
+            log_debug("[DROP-SHADOW] Composited element+shadow over backdrop %dx%d", dsw, dsh);
+        }
     }
 
     // Apply CSS opacity: composite element group over saved backdrop at opacity

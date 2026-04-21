@@ -434,7 +434,8 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                          bool is_bullet_marker, bool is_outside,
                                          bool is_string_marker, const char* string_marker,
                                          const char* marker_css_content,
-                                         FontHandle* font_handle) {
+                                         FontHandle* font_handle,
+                                         const char* image_url) {
     float bullet_size = font_size * 0.35f;  // ~5-6px at 16px font
 
     DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
@@ -447,6 +448,15 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_prop->marker_type = marker_style;
     marker_prop->bullet_size = bullet_size;
     marker_prop->is_outside = is_outside;
+
+    // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
+    if (image_url && strcmp(image_url, "none") != 0) {
+        size_t url_len = strlen(image_url);
+        marker_prop->image_url = (char*)arena_alloc(parent_elem->doc->arena, url_len + 1);
+        if (marker_prop->image_url) {
+            memcpy(marker_prop->image_url, image_url, url_len + 1);
+        }
+    }
 
     if (marker_css_content) {
         // ::marker { content: ... } overrides list-style-type
@@ -637,12 +647,21 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             font_size = block->font->font_size;
         }
 
+        // CSS 2.1 §12.5: list-style-image is inherited; check self then parent
+        const char* image_url = (block->blk) ? block->blk->list_style_image : nullptr;
+        if (!image_url || strcmp(image_url, "none") == 0) {
+            DomElement* pe = dom_element_get_parent(dom_elem);
+            if (pe && pe->blk) {
+                image_url = pe->blk->list_style_image;
+            }
+        }
+
         DomElement* parent_elem = (DomElement*)elmt;
         DomElement* marker_elem = create_marker_element(
             lycon, parent_elem, marker_style, font_size,
             is_bullet_marker, is_outside_position,
             is_string_marker, string_marker, marker_css_content,
-            lycon->font.font_handle);
+            lycon->font.font_handle, image_url);
 
         if (marker_elem) {
             block->pseudo->marker = marker_elem;

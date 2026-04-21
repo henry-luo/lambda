@@ -10309,14 +10309,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
+            // Extract URL from either CSS_VALUE_TYPE_URL or CSS_VALUE_TYPE_FUNCTION(url)
+            const char* img_url = nullptr;
             if (value->type == CSS_VALUE_TYPE_URL) {
-                const char* url = value->data.url;
-                if (url) {
-                    size_t len = strlen(url);
-                    block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
-                    str_copy(block->blk->list_style_image, len + 1, url, len);
-                    log_debug("[CSS] list-style-image: %s (stored)", url);
-                }
+                img_url = value->data.url;
+            } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                       value->data.function->name && strcmp(value->data.function->name, "url") == 0 &&
+                       value->data.function->arg_count > 0 && value->data.function->args[0]) {
+                CssValue* arg = value->data.function->args[0];
+                if (arg->type == CSS_VALUE_TYPE_STRING) img_url = arg->data.string;
+                else if (arg->type == CSS_VALUE_TYPE_URL) img_url = arg->data.url;
+            }
+            if (img_url) {
+                size_t len = strlen(img_url);
+                block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
+                str_copy(block->blk->list_style_image, len + 1, img_url, len);
+                log_debug("[CSS] list-style-image: %s (stored)", img_url);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_NONE) {
                     block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
