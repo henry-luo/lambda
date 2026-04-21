@@ -428,6 +428,52 @@ extern "C" Item js_server_listen(Item self, Item port_item, Item host_item, Item
     return self;
 }
 
+// server.address() — returns {address, family, port} of the listening socket
+static Item js_server_address(void) {
+    Item self = js_get_this();
+    Item handle_item = js_property_get(self, make_string_item("__server__"));
+    if (handle_item.item == 0 || handle_item.item == ITEM_NULL) return ItemNull;
+    JsServer* srv = (JsServer*)(uintptr_t)it2i(handle_item);
+    if (!srv) return ItemNull;
+
+    struct sockaddr_storage addr;
+    int addrlen = sizeof(addr);
+    int r = uv_tcp_getsockname(&srv->tcp, (struct sockaddr*)&addr, &addrlen);
+    if (r != 0) return ItemNull;
+
+    Item result = js_new_object();
+    if (addr.ss_family == AF_INET) {
+        struct sockaddr_in* a4 = (struct sockaddr_in*)&addr;
+        char ip[64];
+        uv_ip4_name(a4, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv4"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a4->sin_port))});
+    } else if (addr.ss_family == AF_INET6) {
+        struct sockaddr_in6* a6 = (struct sockaddr_in6*)&addr;
+        char ip[128];
+        uv_ip6_name(a6, ip, sizeof(ip));
+        js_property_set(result, make_string_item("address"), make_string_item(ip));
+        js_property_set(result, make_string_item("family"), make_string_item("IPv6"));
+        js_property_set(result, make_string_item("port"), (Item){.item = i2it(ntohs(a6->sin6_port))});
+    }
+    return result;
+}
+
+// server.ref() / server.unref() — stubs
+static Item js_server_ref(void) { return js_get_this(); }
+static Item js_server_unref(void) { return js_get_this(); }
+
+// server.getConnections(callback) — stub: always reports 0
+static Item js_server_getConnections(Item callback) {
+    Item self = js_get_this();
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        Item args[2] = { ItemNull, (Item){.item = i2it(0)} };
+        js_call_function(callback, self, args, 2);
+    }
+    return self;
+}
+
 // server.close()
 extern "C" Item js_server_close(Item self) {
     Item handle_item = js_property_get(self, make_string_item("__server__"));
@@ -482,6 +528,14 @@ extern "C" Item js_net_createServer(Item handler) {
                     js_new_function((void*)js_server_close, 1));
     js_property_set(obj, make_string_item("on"),
                     js_new_function((void*)js_server_on, 3));
+    js_property_set(obj, make_string_item("address"),
+                    js_new_function((void*)js_server_address, 0));
+    js_property_set(obj, make_string_item("ref"),
+                    js_new_function((void*)js_server_ref, 0));
+    js_property_set(obj, make_string_item("unref"),
+                    js_new_function((void*)js_server_unref, 0));
+    js_property_set(obj, make_string_item("getConnections"),
+                    js_new_function((void*)js_server_getConnections, 1));
 
     srv->js_object = obj;
     return obj;

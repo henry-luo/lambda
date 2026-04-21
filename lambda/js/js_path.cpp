@@ -206,19 +206,30 @@ extern "C" Item js_path_extname(Item path_item) {
 extern "C" Item js_path_isAbsolute(Item path_item) {
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path || path[0] == '\0') return js_to_boolean(ItemNull);
+    if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
 
-#ifdef _WIN32
-    // Absolute if starts with drive letter + colon + separator, or UNC path
-    if ((path[0] >= 'A' && path[0] <= 'Z' && path[1] == ':') ||
-        (path[0] >= 'a' && path[0] <= 'z' && path[1] == ':') ||
-        (path[0] == '\\' && path[1] == '\\')) {
-        return (Item){.item = i2it(1)};
+    return (Item){.item = (path[0] == '/') ? ITEM_TRUE : ITEM_FALSE};
+}
+
+// path.win32.isAbsolute(path)
+// Returns true if path is a Windows absolute path
+static Item js_path_win32_isAbsolute(Item path_item) {
+    char path_buf[2048];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
+
+    // UNC path: \\server or //server
+    if ((path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/'))
+        return (Item){.item = ITEM_TRUE};
+    // Root path: / or backslash
+    if (path[0] == '\\' || path[0] == '/') return (Item){.item = ITEM_TRUE};
+    // Drive letter + colon + separator: c:\ or c:/
+    // Note: c: alone (without trailing separator) is relative (current dir on drive)
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'))
+        && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+        return (Item){.item = ITEM_TRUE};
     }
-    return (Item){.item = i2it(0)};
-#else
-    return (Item){.item = i2it(path[0] == '/' ? 1 : 0)};
-#endif
+    return (Item){.item = ITEM_FALSE};
 }
 
 // path.join(...paths)
@@ -610,6 +621,262 @@ extern "C" Item js_path_toNamespacedPath(Item path_item) {
 }
 
 // =============================================================================
+// Win32 path helpers
+// =============================================================================
+
+// Check if char is a Windows path separator
+static inline bool is_win32_sep(char c) { return c == '\\' || c == '/'; }
+
+// Check if char is a drive letter
+static inline bool is_drive_letter(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+// win32.normalize(path)
+static Item js_path_win32_normalize(Item path_item) {
+    char path_buf[4096];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path || path[0] == '\0') return make_string_item(".");
+
+    int plen = (int)strlen(path);
+    char result[4096];
+    const char* segments[256];
+    int seg_count = 0;
+    bool is_absolute = false;
+    int prefix_len = 0;
+    char prefix[16] = {0};
+
+    // Check for drive letter or UNC
+    if (plen >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
+        prefix[0] = path[0]; prefix[1] = ':';
+        prefix_len = 2;
+        if (plen >= 3 && is_win32_sep(path[2])) {
+            prefix[2] = '\\'; prefix_len = 3;
+            is_absolute = true;
+        }
+    } else if (plen >= 2 && is_win32_sep(path[0]) && is_win32_sep(path[1])) {
+        // UNC path
+        prefix[0] = '\\'; prefix[1] = '\\'; prefix_len = 2;
+        is_absolute = true;
+    } else if (is_win32_sep(path[0])) {
+        prefix[0] = '\\'; prefix_len = 1;
+        is_absolute = true;
+    }
+
+    // Tokenize remaining path
+    char temp[4096];
+    int remaining_start = prefix_len;
+    int rlen = plen - remaining_start;
+    if (rlen >= (int)sizeof(temp)) rlen = (int)sizeof(temp) - 1;
+    memcpy(temp, path + remaining_start, rlen);
+    temp[rlen] = '\0';
+
+    // Split on both / and backslash
+    char* p = temp;
+    while (*p) {
+        while (*p && is_win32_sep(*p)) p++;
+        if (!*p) break;
+        char* seg_start = p;
+        while (*p && !is_win32_sep(*p)) p++;
+        if (*p) { *p = '\0'; p++; }
+
+        if (strcmp(seg_start, ".") == 0) continue;
+        if (strcmp(seg_start, "..") == 0) {
+            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
+                seg_count--;
+            } else if (!is_absolute) {
+                segments[seg_count++] = "..";
+            }
+        } else {
+            if (seg_count < 256) segments[seg_count++] = seg_start;
+        }
+    }
+
+    // Build result with backslash separators
+    int pos = 0;
+    memcpy(result, prefix, prefix_len);
+    pos = prefix_len;
+    for (int i = 0; i < seg_count; i++) {
+        if (i > 0) result[pos++] = '\\';
+        int slen = (int)strlen(segments[i]);
+        if (pos + slen >= (int)sizeof(result) - 1) break;
+        memcpy(result + pos, segments[i], slen);
+        pos += slen;
+    }
+    if (pos == 0) { result[0] = '.'; pos = 1; }
+    result[pos] = '\0';
+    return make_string_item(result, pos);
+}
+
+// win32.basename(path, ext)
+static Item js_path_win32_basename(Item path_item, Item ext_item) {
+    char path_buf[2048];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path || !*path) return make_string_item("");
+
+    int path_len = (int)strlen(path);
+    int end = path_len - 1;
+    while (end >= 0 && is_win32_sep(path[end])) end--;
+    if (end < 0) return make_string_item("\\");
+
+    int start = end;
+    while (start > 0 && !is_win32_sep(path[start - 1]) && path[start - 1] != ':') start--;
+
+    int base_len = end - start + 1;
+    const char* base = path + start;
+
+    if (get_type_id(ext_item) == LMD_TYPE_STRING) {
+        char ext_buf[256];
+        const char* ext = item_to_cstr(ext_item, ext_buf, sizeof(ext_buf));
+        if (ext) {
+            int ext_len = (int)strlen(ext);
+            if (ext_len > 0 && ext_len <= base_len &&
+                memcmp(base + base_len - ext_len, ext, ext_len) == 0) {
+                return make_string_item(base, base_len - ext_len);
+            }
+        }
+    }
+    return make_string_item(base, base_len);
+}
+
+// win32.dirname(path)
+static Item js_path_win32_dirname(Item path_item) {
+    char path_buf[2048];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path || !*path) return make_string_item(".");
+
+    int plen = (int)strlen(path);
+    int root_end = -1;
+
+    // Check for drive letter prefix
+    if (plen >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
+        root_end = (plen > 2 && is_win32_sep(path[2])) ? 3 : 2;
+    } else if (is_win32_sep(path[0])) {
+        root_end = 1;
+    }
+
+    // Find end (skip trailing separators)
+    int end = plen - 1;
+    while (end > (root_end >= 0 ? root_end - 1 : -1) && is_win32_sep(path[end])) end--;
+    if (end < 0 || (root_end >= 0 && end < root_end)) {
+        // All root or separators
+        if (root_end > 0) return make_string_item(path, root_end);
+        return make_string_item(".");
+    }
+
+    // Find last separator before end
+    int i = end;
+    while (i > (root_end >= 0 ? root_end - 1 : -1) && !is_win32_sep(path[i])) i--;
+
+    if (i < 0 || (root_end >= 0 && i < root_end)) {
+        if (root_end > 0) return make_string_item(path, root_end);
+        return make_string_item(".");
+    }
+
+    // Strip trailing separators from dirname
+    while (i > (root_end >= 0 ? root_end - 1 : 0) && is_win32_sep(path[i])) i--;
+    if (root_end >= 0 && i < root_end) return make_string_item(path, root_end);
+
+    return make_string_item(path, i + 1);
+}
+
+// win32.extname — same as POSIX but handles backslash separators
+static Item js_path_win32_extname(Item path_item) {
+    char path_buf[2048];
+    const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
+    if (!path || !*path) return make_string_item("");
+
+    int path_len = (int)strlen(path);
+    int end = path_len - 1;
+    while (end >= 0 && is_win32_sep(path[end])) end--;
+    if (end < 0) return make_string_item("");
+
+    int start = end;
+    while (start > 0 && !is_win32_sep(path[start - 1]) && path[start - 1] != ':') start--;
+
+    int base_len = end - start + 1;
+    const char* base = path + start;
+
+    int last_dot = -1;
+    for (int i = base_len - 1; i >= 0; i--) {
+        if (base[i] == '.') { last_dot = i; break; }
+    }
+    if (last_dot <= 0) return make_string_item("");
+
+    bool all_dots = true;
+    for (int i = 0; i < last_dot; i++) {
+        if (base[i] != '.') { all_dots = false; break; }
+    }
+    if (all_dots) return make_string_item("");
+
+    return make_string_item(base + last_dot, base_len - last_dot);
+}
+
+// win32.resolve(...paths) — resolve to absolute path using backslashes
+static Item js_path_win32_resolve(Item args_item) {
+    // For cross-platform simulation, resolve as posix but with backslashes
+    // Simple: delegate to posix resolve, then replace / with backslash
+    Item posix_result = js_path_resolve(args_item);
+    if (get_type_id(posix_result) != LMD_TYPE_STRING) return posix_result;
+
+    char buf[4096];
+    const char* s = item_to_cstr(posix_result, buf, sizeof(buf));
+    if (!s) return posix_result;
+
+    // Replace / with backslash
+    for (char* p = buf; *p; p++) {
+        if (*p == '/') *p = '\\';
+    }
+    return make_string_item(buf);
+}
+
+// win32.join(...paths)
+static Item js_path_win32_join(Item args_item) {
+    Item posix_result = js_path_join(args_item);
+    if (get_type_id(posix_result) != LMD_TYPE_STRING) return posix_result;
+
+    char buf[4096];
+    const char* s = item_to_cstr(posix_result, buf, sizeof(buf));
+    if (!s) return posix_result;
+
+    for (char* p = buf; *p; p++) {
+        if (*p == '/') *p = '\\';
+    }
+    return make_string_item(buf);
+}
+
+// win32.relative(from, to) — compute relative path with backslashes
+static Item js_path_win32_relative(Item from_item, Item to_item) {
+    Item posix_result = js_path_relative(from_item, to_item);
+    if (get_type_id(posix_result) != LMD_TYPE_STRING) return posix_result;
+
+    char buf[4096];
+    const char* s = item_to_cstr(posix_result, buf, sizeof(buf));
+    if (!s) return posix_result;
+
+    for (char* p = buf; *p; p++) {
+        if (*p == '/') *p = '\\';
+    }
+    return make_string_item(buf);
+}
+
+// win32.parse(path)
+static Item js_path_win32_parse(Item path_item) {
+    // Delegate to posix parse for now — most fields are the same
+    return js_path_parse(path_item);
+}
+
+// win32.format(pathObject)
+static Item js_path_win32_format(Item obj) {
+    return js_path_format(obj);
+}
+
+// win32.toNamespacedPath(path) — on non-Windows, returns path unchanged
+static Item js_path_win32_toNamespacedPath(Item path_item) {
+    return path_item;
+}
+
+// =============================================================================
 // path Module Namespace Object
 // =============================================================================
 
@@ -645,20 +912,19 @@ extern "C" Item js_get_path_namespace(void) {
     // path.posix = path (on POSIX systems, posix is the same as the default)
     js_property_set(path_namespace, make_string_item("posix"), path_namespace);
 
-    // path.win32 — stub namespace with same methods but win32 separator behavior
-    // (needed for Node.js compat; full win32 path semantics deferred)
+    // path.win32 — win32-specific path implementations
     Item win32_ns = js_new_object();
-    js_path_set_method(win32_ns, "basename",   (void*)js_path_basename, 2);
-    js_path_set_method(win32_ns, "dirname",    (void*)js_path_dirname, 1);
-    js_path_set_method(win32_ns, "extname",    (void*)js_path_extname, 1);
-    js_path_set_method(win32_ns, "isAbsolute", (void*)js_path_isAbsolute, 1);
-    js_path_set_method(win32_ns, "join",       (void*)js_path_join, -1);
-    js_path_set_method(win32_ns, "resolve",    (void*)js_path_resolve, -1);
-    js_path_set_method(win32_ns, "normalize",  (void*)js_path_normalize, 1);
-    js_path_set_method(win32_ns, "relative",   (void*)js_path_relative, 2);
-    js_path_set_method(win32_ns, "parse",      (void*)js_path_parse, 1);
-    js_path_set_method(win32_ns, "format",     (void*)js_path_format, 1);
-    js_path_set_method(win32_ns, "toNamespacedPath", (void*)js_path_toNamespacedPath, 1);
+    js_path_set_method(win32_ns, "basename",   (void*)js_path_win32_basename, 2);
+    js_path_set_method(win32_ns, "dirname",    (void*)js_path_win32_dirname, 1);
+    js_path_set_method(win32_ns, "extname",    (void*)js_path_win32_extname, 1);
+    js_path_set_method(win32_ns, "isAbsolute", (void*)js_path_win32_isAbsolute, 1);
+    js_path_set_method(win32_ns, "join",       (void*)js_path_win32_join, -1);
+    js_path_set_method(win32_ns, "resolve",    (void*)js_path_win32_resolve, -1);
+    js_path_set_method(win32_ns, "normalize",  (void*)js_path_win32_normalize, 1);
+    js_path_set_method(win32_ns, "relative",   (void*)js_path_win32_relative, 2);
+    js_path_set_method(win32_ns, "parse",      (void*)js_path_win32_parse, 1);
+    js_path_set_method(win32_ns, "format",     (void*)js_path_win32_format, 1);
+    js_path_set_method(win32_ns, "toNamespacedPath", (void*)js_path_win32_toNamespacedPath, 1);
     js_property_set(win32_ns, make_string_item("sep"), make_string_item("\\"));
     js_property_set(win32_ns, make_string_item("delimiter"), make_string_item(";"));
     js_property_set(path_namespace, make_string_item("win32"), win32_ns);

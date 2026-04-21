@@ -430,6 +430,9 @@ Item js_new_aggregate_error(Item errors, Item message);
  */
 Item js_error_set_cause(Item error, Item options);
 
+// V8-specific: Error.captureStackTrace(targetObject[, constructorOpt])
+Item js_error_captureStackTrace(Item target, Item ctor);
+
 // TDZ (Temporal Dead Zone) check for let/const
 void js_check_tdz(Item value, const char* name, int name_len);
 
