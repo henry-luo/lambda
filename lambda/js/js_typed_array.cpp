@@ -384,6 +384,13 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, int byte_offset,
         return js_typed_array_new_from_array(type_id, arg);
     }
 
+    // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws)
+    // JS symbols are encoded as negative ints (LMD_TYPE_INT with value <= -(1LL << 40))
+    if (arg_type == LMD_TYPE_SYMBOL || 
+        (arg_type == LMD_TYPE_INT && it2i(arg) <= -(int64_t)(1LL << 40))) {
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
+    }
+
     // Number: create typed array with that length
     if (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_FLOAT) {
         int len = (int)it2i(arg);

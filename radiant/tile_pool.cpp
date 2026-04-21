@@ -766,7 +766,60 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             // adjust coordinates relative to tile origin
             int rx = r->rx - (int)tile_x;
             int ry = r->ry - (int)tile_y;
-            box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
+            if (r->clip_type && tile_surface && tile_surface->pixels) {
+                int sw = tile_surface->width, sh = tile_surface->height;
+                int x0 = std::max(0, rx), y0 = std::max(0, ry);
+                int x1 = std::min(sw, rx + r->rw), y1 = std::min(sh, ry + r->rh);
+                int w = x1 - x0, h = y1 - y0;
+                uint32_t* saved = nullptr;
+                if (w > 0 && h > 0) {
+                    saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+                    uint32_t* px = (uint32_t*)tile_surface->pixels;
+                    int pitch = tile_surface->pitch / 4;
+                    for (int row = 0; row < h; row++)
+                        memcpy(saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
+                }
+                box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
+                if (saved) {
+                    // reconstruct clip shape with tile-relative coordinates
+                    float adj_params[8];
+                    memcpy(adj_params, r->clip_params, 8 * sizeof(float));
+                    // offset shape x/y by tile origin
+                    switch ((ClipShapeType)r->clip_type) {
+                        case CLIP_SHAPE_CIRCLE:
+                        case CLIP_SHAPE_ELLIPSE:
+                            adj_params[0] -= tile_x; adj_params[1] -= tile_y;
+                            break;
+                        case CLIP_SHAPE_INSET:
+                        case CLIP_SHAPE_ROUNDED_RECT:
+                            adj_params[0] -= tile_x; adj_params[1] -= tile_y;
+                            break;
+                        default: break;
+                    }
+                    ClipShape cs = clip_shape_from_params(r->clip_type, adj_params);
+                    uint32_t* px = (uint32_t*)tile_surface->pixels;
+                    int pitch = tile_surface->pitch / 4;
+                    for (int row = 0; row < h; row++) {
+                        for (int col = 0; col < w; col++) {
+                            float fx = (float)(x0 + col) + 0.5f;
+                            float fy = (float)(y0 + row) + 0.5f;
+                            if (!clip_point_in_shape(&cs, fx, fy))
+                                px[(y0 + row) * pitch + (x0 + col)] = saved[row * w + col];
+                        }
+                    }
+                }
+            } else {
+                box_blur_region(scratch, tile_surface, rx, ry, r->rw, r->rh, r->blur_radius);
+            }
+            break;
+        }
+
+        case DL_BOX_BLUR_INSET: {
+            DlBoxBlurInset* r = &item->box_blur_inset;
+            int rx = r->rx - (int)tile_x;
+            int ry = r->ry - (int)tile_y;
+            box_blur_region_inset(scratch, tile_surface, rx, ry, r->rw, r->rh,
+                                  r->pad, r->blur_radius, r->bg_color);
             break;
         }
 

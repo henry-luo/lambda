@@ -83,21 +83,21 @@ Baseline: 23,422 → **23,808** (+386 net new passing tests)
 - **2.3** for-of IteratorClose — Done
 - **2.5** Function.prototype.toString — Done
 - **2.6** Promise.allSettled/any — Done
+- **2.4** RegExp named groups + \p{} — Done
+- **2.7** Reflect ↔ Proxy — Done
+- **3.3** Annex B legacy RegExp — Done
 - **3.4** Strict mode detection — Done
+- **3.5** Unicode whitespace — Done
 - **3.6** Future reserved words — Done
 - **4.4** JSON reviver/replacer — Done
 
 **Partially implemented:**
 - **2.1** Symbol.match/replace/search/split — RegExp side done, String methods don't delegate
 - **2.2** Array @@species + isConcatSpreadable — isConcatSpreadable done, species not
-- **2.4** RegExp named groups + \p{} — Both present but coverage incomplete
-- **2.7** Reflect ↔ Proxy — All 13 Reflect methods done, Proxy traps now implemented; invariant validation incomplete
-- **3.5** Unicode whitespace — regex \p{Z} only
 - **4.1** DataView BigInt + Float16 — BigInt64 done, Float16 not
 
 **Not implemented:**
 - **1.3** TypedArray species + detached checks
-- **3.3** Annex B legacy RegExp
 - **4.2** Atomics
 - **4.5** BigInt complete
 - **4.6** SharedArrayBuffer
@@ -260,6 +260,33 @@ Baseline: 24,616 → **24,879** stable (+263 net new passing tests; 6 batch-flak
 - **`js_array_set` non-writable guard checked presence not value**: The array element write path (`js_array_set`) checked `if (nw_found)` (presence only), while the MAP path checked `if (nw_found && js_is_truthy(nw_val))`. When the `__nw_` marker was temporarily set to `false` during defineProperty, arrays still rejected the write. Fixed to check value like MAP path.
 - **defineProperties continued after TypeError**: `Object.defineProperties({property: ..., property1: ...})` didn't stop on first error. If `property` threw TypeError (non-configurable + non-writable), `property1` (configurable + non-writable) would still get updated via the new bypass. Fix: break loop on `js_check_exception()`.
 
+**2026-04-21 Update — RegExp named groups, legacy static properties, Unicode whitespace, Annex B escapes (+67 tests):**
+
+Baseline: 24,879 → **24,931** fully passing (+52 net; 67 improvements, 14 batch regressions — none in changed areas)
+
+| Change | Files | Tests Fixed | Notes |
+|--------|-------|:-----------:|-------|
+| `$<name>` substitution in `String.prototype.replace` | `js_runtime.cpp` | +67 total | Named capture group references in replacement strings per ES2018 §21.1.3.17.1 |
+| `groups` argument in replacement function callback | `js_runtime.cpp` | (counted above) | When regex has named groups, callback receives `groups` object as last arg |
+| `.groups` null-prototype object on exec result | `js_runtime.cpp` | (counted above) | Changed from `js_new_object()` to `js_object_create(ItemNull)` per spec |
+| Named group index fix with wrapper (lookaheads) | `js_runtime.cpp` | (counted above) | Reverse-remap RE2 internal indices to original JS indices when wrapper active |
+| Legacy RegExp static properties ($1-$9, input, etc.) | `js_runtime.cpp` | (counted above) | `JsRegexpLastMatch` global state, updated on exec/test; intercepted in property_get for RegExp constructor |
+| `\8`/`\9` identity escapes (Annex B) | `js_runtime.cpp` | (counted above) | Count capture groups before preprocessing; treat `\N` as literal when N > total groups |
+| `js_get_number()` Unicode whitespace trimming | `js_runtime.cpp` | (counted above) | Full ES spec whitespace set (NBSP, BOM, U+1680, U+2000-U+200A, U+2028-U+2029, U+202F, U+205F, U+3000) |
+| Replacement function: unmatched groups as `undefined` | `js_runtime.cpp` | (counted above) | Changed `ItemNull` to `make_js_undefined()` for unmatched capture groups in callback args |
+
+**Key implementation details:**
+- **`$<name>` substitution**: Added handling for `$<name>` pattern in `js_apply_replacement()`. Looks up named group from the groups object via `js_property_get`. If groups object is undefined/null or no closing `>`, emits literal `$<`.
+- **Legacy RegExp properties**: New `JsRegexpLastMatch` struct stores input, match, $1-$9, match_start/end. Updated in `js_regex_exec()` and `js_regex_test()`. Property access intercepted in `js_property_get()` for FUNC objects with name "RegExp". Supports both short names (`$1`, `$&`, `$_`, `` $` ``, `$'`, `$+`) and long names (`input`, `lastMatch`, `lastParen`, `leftContext`, `rightContext`). State reset in `js_batch_reset()`.
+- **Named group reverse-remap**: When `rd->wrapper->group_remap` is active, `matches[]` uses original JS indices but `NamedCapturingGroups()` returns RE2 indices. Helper `js_build_groups_object()` performs reverse lookup to find original JS index for each named group.
+- **Reflect ↔ Proxy (2.7)**: Analysis confirmed all 13 proxy traps already have complete ES2020 invariant checks. All 13 Reflect methods are proxy-aware. Item marked as **Done**.
+
+**Completed items:**
+- **2.4** RegExp named groups — **Done** ($<name> substitution, groups callback arg, null-prototype, wrapper index fix)
+- **2.7** Reflect ↔ Proxy invariant validation — **Done** (already fully implemented, confirmed via audit)
+- **3.3** Annex B legacy RegExp — **Done** (RegExp.compile + `\8`/`\9` identity escapes + legacy static properties)
+- **3.5** Unicode whitespace — **Done** (`js_get_number()` upgraded to full ES spec whitespace set; trim/parseInt/parseFloat/regex `\s` already correct)
+
 ---
 
 ## 1. Current Compliance Snapshot
@@ -275,9 +302,9 @@ Skipped by harness:       7,663
   - unsupported features: 1,508   (Temporal, WeakRef, etc.)
 In scope (batchable):    34,094
 
-Currently passing:       24,879  (73.0%)   ← updated 2026-06-22 (stable: 0 regressions)
-Partial-pass (batch-flaky):   3  (pass individually, flaky in batch mode — removed from baseline)
-Failing:                  9,599  (28.1%)
+Currently passing:       24,931  (73.1%)   ← updated 2026-04-21 (net +52: 67 improvements, 14 batch regressions)
+Partial-pass (batch-flaky):   1  (pass individually, flaky in batch mode — removed from baseline)
+Failing:                  9,162  (26.9%)
 ```
 
 ### 1.2 Top Failure Categories

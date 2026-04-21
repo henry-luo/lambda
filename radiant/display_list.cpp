@@ -355,7 +355,8 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
     item->apply_filter.clip = clip ? *clip : (Bound){0, 0, 99999, 99999};
 }
 
-void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius) {
+void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
+                        int clip_type, const float* clip_params) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_BOX_BLUR_REGION;
     item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
@@ -365,6 +366,27 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
     item->box_blur_region.rw = rw;
     item->box_blur_region.rh = rh;
     item->box_blur_region.blur_radius = blur_radius;
+    item->box_blur_region.clip_type = clip_type;
+    if (clip_type && clip_params) {
+        memcpy(item->box_blur_region.clip_params, clip_params, 8 * sizeof(float));
+    } else {
+        memset(item->box_blur_region.clip_params, 0, 8 * sizeof(float));
+    }
+}
+
+void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_BOX_BLUR_INSET;
+    // bounds cover the expanded region for tile culling
+    item->bounds[0] = (float)(rx - pad); item->bounds[1] = (float)(ry - pad);
+    item->bounds[2] = (float)(rw + 2 * pad); item->bounds[3] = (float)(rh + 2 * pad);
+    item->box_blur_inset.rx = rx;
+    item->box_blur_inset.ry = ry;
+    item->box_blur_inset.rw = rw;
+    item->box_blur_inset.rh = rh;
+    item->box_blur_inset.pad = pad;
+    item->box_blur_inset.blur_radius = blur_radius;
+    item->box_blur_inset.bg_color = bg_color;
 }
 
 void dl_video_placeholder(DisplayList* dl, void* video,
@@ -830,7 +852,44 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
 
         case DL_BOX_BLUR_REGION: {
             DlBoxBlurRegion* r = &item->box_blur_region;
-            box_blur_region(scratch, surface, r->rx, r->ry, r->rw, r->rh, r->blur_radius);
+            if (r->clip_type && surface && surface->pixels) {
+                // Save pixels before blur, then restore outside clip after blur
+                int sw = surface->width, sh = surface->height;
+                int x0 = std::max(0, r->rx), y0 = std::max(0, r->ry);
+                int x1 = std::min(sw, r->rx + r->rw), y1 = std::min(sh, r->ry + r->rh);
+                int w = x1 - x0, h = y1 - y0;
+                uint32_t* saved = nullptr;
+                if (w > 0 && h > 0) {
+                    saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < h; row++)
+                        memcpy(saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
+                }
+                box_blur_region(scratch, surface, r->rx, r->ry, r->rw, r->rh, r->blur_radius);
+                if (saved) {
+                    ClipShape cs = clip_shape_from_params(r->clip_type, r->clip_params);
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < h; row++) {
+                        for (int col = 0; col < w; col++) {
+                            float fx = (float)(x0 + col) + 0.5f;
+                            float fy = (float)(y0 + row) + 0.5f;
+                            if (!clip_point_in_shape(&cs, fx, fy))
+                                px[(y0 + row) * pitch + (x0 + col)] = saved[row * w + col];
+                        }
+                    }
+                }
+            } else {
+                box_blur_region(scratch, surface, r->rx, r->ry, r->rw, r->rh, r->blur_radius);
+            }
+            break;
+        }
+
+        case DL_BOX_BLUR_INSET: {
+            DlBoxBlurInset* r = &item->box_blur_inset;
+            box_blur_region_inset(scratch, surface, r->rx, r->ry, r->rw, r->rh,
+                                  r->pad, r->blur_radius, r->bg_color);
             break;
         }
 
