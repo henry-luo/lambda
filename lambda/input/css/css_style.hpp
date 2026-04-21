@@ -573,6 +573,9 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_TEXT_BOX_TRIM,
     CSS_PROPERTY_TEXT_BOX_EDGE,
 
+    // Vendor-prefixed Properties
+    CSS_PROPERTY_WEBKIT_LINE_CLAMP,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 

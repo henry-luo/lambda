@@ -3210,9 +3210,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         // Phase 16: save height contribution for future incremental passes
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         child = child->next_sibling;
-                    } while (child);
+                    } while (child && !lycon->block.line_clamped);
                     // handle last line
-                    if (!lycon->line.is_line_start) {
+                    if (!lycon->line.is_line_start && !lycon->block.line_clamped) {
                         lycon->line.is_last_line = true;
                         line_break(lycon);
                     }
@@ -3630,6 +3630,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     // Initialize is_first_line to true when starting a new block
     lycon->block.is_first_line = true;
+
+    // -webkit-line-clamp support: initialize line tracking
+    lycon->block.line_number = 0;
+    lycon->block.line_clamp = (block->blk && block->blk->line_clamp > 0) ? block->blk->line_clamp : 0;
+    lycon->block.line_clamped = false;
 
     // Resolve text-indent: percentage needs containing block width (now available)
     float resolved_text_indent = 0.0f;
