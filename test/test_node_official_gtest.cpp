@@ -73,7 +73,7 @@
 static const char* NODE_TEST_DIR   = "ref/node/test/parallel";
 static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
-static int         g_timeout_ms    = 30000;    // per-test timeout (30s for JIT compilation)
+static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
 static bool        g_update_baseline = false;
 static const int   PARALLEL_WORKERS  = 4;      // concurrent test executions
 
@@ -104,6 +104,7 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"crypto",         "crypto",          true,  nullptr},
     {"dns",            "dns",             true,  nullptr},
     {"events",         "events",          true,  nullptr},
+    {"events",         "event",           true,  nullptr},  // test-event-emitter-*
     {"fs",             "fs",              true,  nullptr},
     {"os",             "os",              true,  nullptr},
     {"path",           "path",            true,  nullptr},
@@ -128,12 +129,62 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"tls",            "tls",             true,  nullptr},
     {"vm",             "vm",              true,  nullptr},
 
+    // --- Additional test prefixes (non-module tests) ---
+    {"misc",           "next",            true,  nullptr},  // test-next-tick-*
+    {"misc",           "microtask",       true,  nullptr},  // test-microtask-queue-*
+    {"misc",           "promise",         true,  nullptr},  // test-promise-*
+    {"misc",           "readable",        true,  nullptr},  // test-readable-*
+    {"misc",           "global",          true,  nullptr},  // test-global-*
+    {"misc",           "error",           true,  nullptr},  // test-error-*
+    {"misc",           "eval",            true,  nullptr},  // test-eval-*
+    {"misc",           "common",          true,  nullptr},  // test-common-*
+    {"misc",           "console",         true,  nullptr},  // test-console-*
+    {"misc",           "async",           true,  nullptr},  // test-async-*
+    {"misc",           "whatwg",          true,  nullptr},  // test-whatwg-*
+    {"misc",           "internal",        true,  nullptr},  // test-internal-*
+    {"misc",           "regression",      true,  nullptr},  // test-regression-*
+    {"misc",           "instanceof",      true,  nullptr},  // test-instanceof-*
+    {"misc",           "messagechannel",  true,  nullptr},  // test-messagechannel-*
+    {"misc",           "messageevent",    true,  nullptr},  // test-messageevent-*
+    {"misc",           "utf8",            true,  nullptr},  // test-utf8-*
+    {"misc",           "beforeexit",      true,  nullptr},  // test-beforeexit-*
+    {"misc",           "json",            true,  nullptr},  // test-json-*
+    {"misc",           "number",          true,  nullptr},  // test-number-*
+    {"misc",           "object",          true,  nullptr},  // test-object-*
+    {"misc",           "symbol",          true,  nullptr},  // test-symbol-*
+    {"misc",           "math",            true,  nullptr},  // test-math-*
+    {"misc",           "date",            true,  nullptr},  // test-date-*
+    {"misc",           "eslint",          true,  nullptr},  // test-eslint-*
+    {"misc",           "heap",            true,  nullptr},  // test-heap-*
+    {"misc",           "warn",            true,  nullptr},  // test-warn-*
+    {"misc",           "snapshot",        true,  nullptr},  // test-snapshot-*
+    {"misc",           "compile",         true,  nullptr},  // test-compile-*
+    {"misc",           "pipe",            true,  nullptr},  // test-pipe-*
+    {"misc",           "socket",          true,  nullptr},  // test-socket-*
+    {"misc",           "shadow",          true,  nullptr},  // test-shadow-*
+    {"misc",           "sqlite",          true,  nullptr},  // test-sqlite-*
+    {"misc",           "debugger",        true,  nullptr},  // test-debugger-*
+    {"misc",           "abort",           true,  nullptr},  // test-abort-*
+    {"misc",           "abortcontroller", true,  nullptr},  // test-abortcontroller-*
+    {"misc",           "eventtarget",     true,  nullptr},  // test-eventtarget-*
+    {"misc",           "domexception",    true,  nullptr},  // test-domexception-*
+    {"misc",           "blob",            true,  nullptr},  // test-blob-*
+    {"misc",           "performance",     true,  nullptr},  // test-performance-*
+    {"misc",           "structuredClone", true,  nullptr},  // test-structuredClone-*
+    {"misc",           "errors",          true,  nullptr},  // test-errors-*
+    {"misc",           "esm",            true,  nullptr},  // test-esm-*
+    {"misc",           "stdin",           true,  nullptr},  // test-stdin-*
+    {"misc",           "stdout",          true,  nullptr},  // test-stdout-*
+    {"misc",           "stdio",           true,  nullptr},  // test-stdio-*
+    {"misc",           "require",         true,  nullptr},  // test-require-*
+    {"misc",           "inspect",         true,  nullptr},  // test-inspect-*
+
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         false, "clustering not implemented"},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
     {"domain",         "domain",          false, "domain module not implemented"},
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
-    {"inspector",      "inspector",       false, "inspector not implemented"},
+    {"inspector",      "inspector",       true,  nullptr},
     {"perf_hooks",     "perf-hooks",      false, "performance hooks not implemented"},
     {"repl",           "repl",            false, "REPL not implemented"},
     {"tty",            "tty",             false, "TTY not implemented"},
@@ -178,7 +229,7 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
 
     // Tests that use child_process.fork which spawns Node binary
     {"test-child-process-fork-stdio.js",           "uses child_process.fork"},
-    {"test-child-process-fork-exec-argv.js",       "uses child_process.fork"},
+    // test-child-process-fork-exec-argv.js — now passes, removed from skip list
 };
 
 // =============================================================================

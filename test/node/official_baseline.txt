@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: 1620db542
+# Commit: 0236a46a2
 # Source: ref/node/test/parallel/
-# Total passing: 775 / 2052  (skipped: 0)
+# Total passing: 1053 / 2619  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -9,6 +9,7 @@
 #   child_process
 #   crypto
 #   dns
+#   events
 #   events
 #   fs
 #   os
@@ -31,10 +32,61 @@
 #   timers
 #   tls
 #   vm
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   inspector
 #
+test-abort-controller-any-timeout.js
 test-assert-esm-cjs-message-verify.js
 test-assert-fail.js
 test-async-wrap-tlssocket-asyncreset.js
+test-beforeexit-event-exit.js
 test-buffer-alloc-unsafe-is-initialized-with-zero-fill-flag.js
 test-buffer-alloc-unsafe-is-uninitialized.js
 test-buffer-bytelength.js
@@ -69,6 +121,7 @@ test-child-process-exec-timeout-kill.js
 test-child-process-exec-timeout-not-expired.js
 test-child-process-exit-code.js
 test-child-process-fork-closed-channel-segfault.js
+test-child-process-fork-exec-argv.js
 test-child-process-no-deprecation.js
 test-child-process-server-close.js
 test-child-process-set-blocking.js
@@ -79,6 +132,31 @@ test-child-process-spawnsync.js
 test-child-process-stdin-ipc.js
 test-child-process-stdio-overlapped.js
 test-child-process-stdout-ipc.js
+test-common-countdown.js
+test-compile-cache-api-env.js
+test-compile-cache-api-flush.js
+test-compile-cache-api-options-portable-env.js
+test-compile-cache-api-permission.js
+test-compile-cache-api-portable.js
+test-compile-cache-api-success.js
+test-compile-cache-api-tmpdir.js
+test-compile-cache-bad-syntax.js
+test-compile-cache-disable.js
+test-compile-cache-dynamic-import.js
+test-compile-cache-esm.js
+test-compile-cache-existing-directory.js
+test-compile-cache-permission-allowed.js
+test-compile-cache-permission-disallowed.js
+test-compile-cache-portable-esm.js
+test-compile-cache-portable.js
+test-compile-cache-success.js
+test-compile-cache-typescript-commonjs.js
+test-compile-cache-typescript-esm.js
+test-compile-cache-typescript-strip-sourcemaps.js
+test-compile-cache-updated-file.js
+test-console-not-call-toString.js
+test-console-self-assign.js
+test-console-stdio-setters.js
 test-crypto-aes-wrap.js
 test-crypto-argon2.js
 test-crypto-authenticated-stream.js
@@ -93,6 +171,58 @@ test-crypto-pqc-sign-verify-ml-dsa.js
 test-crypto-publicDecrypt-fails-first-time.js
 test-crypto-randomuuid.js
 test-crypto-scrypt.js
+test-debugger-break.js
+test-debugger-clear-breakpoints.js
+test-debugger-list.js
+test-debugger-object-type-remote-object.js
+test-debugger-pid.js
+test-debugger-profile-command.js
+test-debugger-profile.js
+test-debugger-random-port-with-inspect-port.js
+test-debugger-random-port.js
+test-debugger-repeat-last.js
+test-debugger-run-after-quit-restart.js
+test-debugger-sb-before-load.js
+test-debugger-use-strict.js
+test-debugger-watch-validation.js
+test-debugger-websocket-secret-mismatch.js
+test-error-reporting.js
+test-eslint-alphabetize-errors.js
+test-eslint-alphabetize-primordials.js
+test-eslint-async-iife-no-unused-result.js
+test-eslint-avoid-prototype-pollution.js
+test-eslint-crypto-check.js
+test-eslint-documented-deprecation-codes.js
+test-eslint-documented-errors.js
+test-eslint-duplicate-requires.js
+test-eslint-eslint-check.js
+test-eslint-inspector-check.js
+test-eslint-lowercase-name-for-primitive.js
+test-eslint-must-call-assert.js
+test-eslint-no-array-destructuring.js
+test-eslint-no-unescaped-regexp-dot.js
+test-eslint-non-ascii-character.js
+test-eslint-prefer-assert-iferror.js
+test-eslint-prefer-assert-methods.js
+test-eslint-prefer-common-mustnotcall.js
+test-eslint-prefer-common-mustsucceed.js
+test-eslint-prefer-optional-chaining.js
+test-eslint-prefer-primordials.js
+test-eslint-prefer-proto.js
+test-eslint-prefer-util-format-errors.js
+test-eslint-require-common-first.js
+test-eslint-required-modules.js
+test-esm-loader-hooks-inspect-brk.js
+test-esm-loader-hooks-inspect-wait.js
+test-eval.js
+test-event-emitter-emit-context.js
+test-event-emitter-get-max-listeners.js
+test-event-emitter-listener-count.js
+test-event-emitter-max-listeners-warning-for-null.js
+test-event-emitter-max-listeners-warning-for-symbol.js
+test-event-emitter-modify-in-emit.js
+test-event-emitter-num-args.js
+test-event-emitter-symbols.js
 test-events-listener-count-with-listener.js
 test-events-once.js
 test-eventsource-disabled.js
@@ -185,6 +315,14 @@ test-fs-utimes.js
 test-fs-watch-close-when-destroyed.js
 test-fs-watch-encoding.js
 test-fs-watch-file-enoent-after-deletion.js
+test-fs-watch-ignore-function.js
+test-fs-watch-ignore-glob.js
+test-fs-watch-ignore-mixed.js
+test-fs-watch-ignore-recursive-glob-subdirectories.js
+test-fs-watch-ignore-recursive-glob.js
+test-fs-watch-ignore-recursive-mixed.js
+test-fs-watch-ignore-recursive-regexp.js
+test-fs-watch-ignore-regexp.js
 test-fs-watch-recursive-add-file-to-existing-subfolder.js
 test-fs-watch-recursive-add-file-to-new-folder.js
 test-fs-watch-recursive-add-file.js
@@ -230,6 +368,18 @@ test-fs-writesync-crash.js
 test-fs-writev-promises.js
 test-fs-writev-sync.js
 test-fs-writev.js
+test-global-encoder.js
+test-heap-prof-basic.js
+test-heap-prof-dir-absolute.js
+test-heap-prof-dir-name.js
+test-heap-prof-dir-relative.js
+test-heap-prof-exec-argv.js
+test-heap-prof-exit.js
+test-heap-prof-interval.js
+test-heap-prof-invalid-args.js
+test-heap-prof-loop-drained.js
+test-heap-prof-name.js
+test-heap-prof-sigint.js
 test-http-1.0.js
 test-http-abort-before-end.js
 test-http-abort-client.js
@@ -541,6 +691,87 @@ test-https-timeout-server.js
 test-https-timeout.js
 test-https-truncate.js
 test-https-unix-socket-self-signed.js
+test-inspect-address-in-use.js
+test-inspect-async-hook-setup-at-inspect.js
+test-inspect-publish-uid.js
+test-inspect-support-for-node_options.js
+test-inspector-already-activated-cli.js
+test-inspector-async-call-stack-abort.js
+test-inspector-async-call-stack.js
+test-inspector-async-hook-after-done.js
+test-inspector-async-hook-setup-at-inspect-brk.js
+test-inspector-async-hook-setup-at-signal.js
+test-inspector-async-stack-traces-promise-then.js
+test-inspector-async-stack-traces-set-interval.js
+test-inspector-bindings.js
+test-inspector-break-e.js
+test-inspector-break-when-eval.js
+test-inspector-close-worker.js
+test-inspector-connect-main-thread.js
+test-inspector-connect-to-main-thread.js
+test-inspector-console-top-frame.js
+test-inspector-console.js
+test-inspector-contexts.js
+test-inspector-debug-async-hook.js
+test-inspector-debug-brk-flag.js
+test-inspector-debug-end.js
+test-inspector-dom-storage.js
+test-inspector-emit-protocol-event-errors.js
+test-inspector-emit-protocol-event.js
+test-inspector-enabled.js
+test-inspector-esm.js
+test-inspector-exception.js
+test-inspector-exit-worker-in-wait-for-connection.js
+test-inspector-exit-worker-in-wait-for-connection2.js
+test-inspector-has-idle.js
+test-inspector-heap-allocation-tracker.js
+test-inspector-heapdump.js
+test-inspector-host-warning.js
+test-inspector-inspect-brk-node.js
+test-inspector-invalid-args.js
+test-inspector-invalid-protocol.js
+test-inspector-ip-detection.js
+test-inspector-module.js
+test-inspector-multisession-js.js
+test-inspector-multisession-ws.js
+test-inspector-network-arbitrary-data.js
+test-inspector-network-data-received.js
+test-inspector-network-data-sent.js
+test-inspector-network-fetch.js
+test-inspector-network-http.js
+test-inspector-network-http2.js
+test-inspector-network-websocket.js
+test-inspector-not-blocked-on-idle.js
+test-inspector-open-coverage.js
+test-inspector-open-port-integer-overflow.js
+test-inspector-open.js
+test-inspector-overwrite-config.js
+test-inspector-port-zero-cluster.js
+test-inspector-port-zero.js
+test-inspector-promises.js
+test-inspector-reported-host.js
+test-inspector-resource-name-to-url.js
+test-inspector-runtime-evaluate-with-timeout.js
+test-inspector-scriptparsed-context.js
+test-inspector-stop-profile-after-done.js
+test-inspector-stops-no-file.js
+test-inspector-stress-http.js
+test-inspector-strip-types.js
+test-inspector-tracing-domain.js
+test-inspector-vm-global-accessors-getter-sideeffect.js
+test-inspector-vm-global-accessors-sideeffects.js
+test-inspector-wait-for-connection.js
+test-inspector-waiting-for-disconnect.js
+test-inspector-worker-target.js
+test-inspector-workers-flat-list.js
+test-inspector.js
+test-instanceof.js
+test-internal-fs-syncwritestream.js
+test-messagechannel.js
+test-messageevent-brandcheck.js
+test-microtask-queue-integration.js
+test-microtask-queue-run-immediate.js
+test-microtask-queue-run.js
 test-module-cache.js
 test-module-circular-symlinks.js
 test-module-loading-deprecated.js
@@ -631,12 +862,25 @@ test-net-write-connect-write.js
 test-net-write-fully-async-buffer.js
 test-net-write-fully-async-hex-string.js
 test-net-write-slow.js
+test-next-tick-doesnt-hang.js
+test-next-tick-domain.js
+test-next-tick-ordering.js
+test-next-tick-ordering2.js
+test-next-tick-when-exiting.js
 test-os-eol.js
 test-os-userinfo-handles-getter-errors.js
 test-path-isabsolute.js
 test-path-posix-exists.js
 test-path-posix-relative-on-windows.js
 test-path-win32-normalize-device-names.js
+test-pipe-abstract-socket-http.js
+test-pipe-abstract-socket.js
+test-pipe-address.js
+test-pipe-head.js
+test-pipe-outgoing-message-data-emitted-after-ended.js
+test-pipe-stream.js
+test-pipe-unref.js
+test-pipe-writev.js
 test-process-abort.js
 test-process-beforeexit-throw-exit.js
 test-process-chdir.js
@@ -663,13 +907,85 @@ test-process-load-env-file.js
 test-process-redirect-warnings-env.js
 test-process-redirect-warnings.js
 test-process-uptime.js
+test-promise-handled-rejection-no-warning.js
+test-promise-reject-callback-exception.js
+test-promise-unhandled-error-with-reading-file.js
+test-promise-unhandled-issue-43655.js
 test-querystring-escape.js
 test-querystring-multichar-separator.js
+test-readable-large-hwm.js
+test-readable-single-end.js
 test-readline-async-iterators-backpressure.js
 test-readline-async-iterators-destroy.js
 test-readline-async-iterators.js
 test-readline-carriage-return-between-chunks.js
 test-readline-reopen.js
+test-regression-object-prototype.js
+test-require-enoent-dir.js
+test-require-extensions-same-filename-as-dir-trailing-slash.js
+test-require-extensions-same-filename-as-dir.js
+test-require-invalid-main-no-exports.js
+test-require-long-path.js
+test-require-symlink.js
+test-require-unicode.js
+test-shadow-realm-allowed-builtin-modules.js
+test-shadow-realm-custom-loaders.js
+test-shadow-realm-import-value-resolve.js
+test-shadow-realm-module.js
+test-shadow-realm-preload-module.js
+test-snapshot-argv1.js
+test-snapshot-basic.js
+test-snapshot-child-process-sync.js
+test-snapshot-cjs-main.js
+test-snapshot-config.js
+test-snapshot-console.js
+test-snapshot-coverage.js
+test-snapshot-cwd.js
+test-snapshot-dns-lookup-localhost-promise.js
+test-snapshot-dns-lookup-localhost.js
+test-snapshot-dns-resolve-localhost-promise.js
+test-snapshot-dns-resolve-localhost.js
+test-snapshot-error.js
+test-snapshot-eval.js
+test-snapshot-gzip.js
+test-snapshot-incompatible.js
+test-snapshot-namespaced-builtin.js
+test-snapshot-net.js
+test-snapshot-reproducible.js
+test-snapshot-stack-trace-limit-mutation.js
+test-snapshot-stack-trace-limit.js
+test-snapshot-typescript.js
+test-snapshot-umd.js
+test-snapshot-warning.js
+test-snapshot-weak-reference.js
+test-snapshot-worker.js
+test-socket-address.js
+test-socket-write-after-fin-error.js
+test-socket-write-after-fin.js
+test-socket-writes-before-passed-to-tls-socket.js
+test-sqlite-authz.js
+test-sqlite-custom-functions.js
+test-sqlite-data-types.js
+test-sqlite-database-sync-dispose.js
+test-sqlite-database-sync.js
+test-sqlite-limits.js
+test-sqlite-named-parameters.js
+test-sqlite-serialize.js
+test-sqlite-statement-sync-columns.js
+test-sqlite-statement-sync.js
+test-sqlite-template-tag.js
+test-sqlite-timeout.js
+test-sqlite-transactions.js
+test-sqlite-typed-array-and-data-view.js
+test-sqlite.js
+test-stdin-child-proc.js
+test-stdin-from-file.js
+test-stdin-hang.js
+test-stdio-closed.js
+test-stdio-pipe-access.js
+test-stdio-pipe-stderr.js
+test-stdout-pipeline-destroy.js
+test-stdout-to-file.js
 test-stream-base-typechecking.js
 test-stream-catch-rejections.js
 test-stream-duplex-readable-end.js
@@ -769,6 +1085,7 @@ test-url-domain-ascii-unicode.js
 test-url-format-whatwg.js
 test-url-format.js
 test-url-parse-format.js
+test-utf8-scripts.js
 test-util-getcallsites.js
 test-util-inspect-namespace.js
 test-util-primordial-monkeypatching.js
@@ -800,6 +1117,17 @@ test-vm-sigint.js
 test-vm-syntax-error-message.js
 test-vm-syntax-error-stderr.js
 test-vm-util-lazy-properties.js
+test-warn-sigprof.js
+test-warn-tls-common-deprecation.js
+test-warn-tls-wrap-deprecation.js
+test-whatwg-encoding-custom-fatal-streaming.js
+test-whatwg-encoding-custom-textdecoder-fatal.js
+test-whatwg-encoding-custom-textdecoder-utf16-surrogates.js
+test-whatwg-url-custom-deepequal.js
+test-whatwg-url-custom-inspect.js
+test-whatwg-url-custom-parsing.js
+test-whatwg-url-custom-setters.js
+test-whatwg-writablestream-close.js
 test-zlib-brotli-from-brotli.js
 test-zlib-empty-buffer.js
 test-zlib-flush.js

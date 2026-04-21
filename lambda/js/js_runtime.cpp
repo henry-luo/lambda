@@ -6448,6 +6448,23 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if (get_type_id(value) != LMD_TYPE_STRING && value.item != JS_DELETED_SENTINEL_VAL) {
                     value = js_to_string(value);
                 }
+                // propagate to actual system environment (Node.js semantics)
+                if (get_type_id(key) == LMD_TYPE_STRING && get_type_id(value) == LMD_TYPE_STRING) {
+                    String* env_key = it2s(key);
+                    String* env_val = it2s(value);
+                    if (env_key && env_val) {
+                        char kbuf[256], vbuf[4096];
+                        int klen = env_key->len < 255 ? env_key->len : 255;
+                        int vlen = env_val->len < 4095 ? env_val->len : 4095;
+                        memcpy(kbuf, env_key->chars, klen); kbuf[klen] = '\0';
+                        memcpy(vbuf, env_val->chars, vlen); vbuf[vlen] = '\0';
+                        if (vlen == 0) {
+                            unsetenv(kbuf);
+                        } else {
+                            setenv(kbuf, vbuf, 1);
+                        }
+                    }
+                }
                 break;  // fall through to regular property set
             case MAP_KIND_PROXY:
                 return js_proxy_trap_set(object, key, value);
@@ -16210,6 +16227,14 @@ extern "C" Item js_get_console_object_value() {
             js_new_function((void*)js_console_table_fn, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("assert", 6))},
             js_new_function((void*)js_console_assert_fn, 2));
+
+        // Console constructor — Node.js tests use `const { Console } = require('console')`
+        // returns a function that, when called with new, returns the console object itself
+        Item console_ctor = js_new_function((void*)js_get_console_object_value, 0);
+        js_property_set(console_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))},
+                        js_console_object);
+        js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("Console", 7))},
+                        console_ctor);
     }
     return js_console_object;
 }
@@ -18945,6 +18970,16 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_util_namespace(void);
         return js_get_util_namespace();
     }
+    // util/types, node:util/types — type checking utilities
+    if ((spec->len == 10 && memcmp(spec->chars, "util/types", 10) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "node:util/types", 15) == 0)) {
+        extern Item js_get_util_namespace(void);
+        Item util_ns = js_get_util_namespace();
+        Item types_key = (Item){.item = s2it(heap_create_name("types", 5))};
+        Item types_obj = js_property_get(util_ns, types_key);
+        if (types_obj.item != ITEM_NULL) return types_obj;
+        return util_ns; // fallback
+    }
     // node:process
     if ((spec->len == 7 && memcmp(spec->chars, "process", 7) == 0) ||
         (spec->len == 12 && memcmp(spec->chars, "node:process", 12) == 0)) {
@@ -19004,6 +19039,13 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 9 && memcmp(spec->chars, "stream.js", 9) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:stream", 11) == 0)) {
         extern Item js_get_stream_namespace(void);
+        return js_get_stream_namespace();
+    }
+    // stream/promises, node:stream/promises
+    if ((spec->len == 15 && memcmp(spec->chars, "stream/promises", 15) == 0) ||
+        (spec->len == 20 && memcmp(spec->chars, "node:stream/promises", 20) == 0)) {
+        extern Item js_get_stream_namespace(void);
+        // return stream namespace — promises sub-module is the same (pipeline, finished)
         return js_get_stream_namespace();
     }
     // node:net
@@ -19087,11 +19129,73 @@ extern "C" Item js_module_get(Item specifier) {
         }
         return timers_ns;
     }
+    // timers/promises, node:timers/promises
+    if ((spec->len == 15 && memcmp(spec->chars, "timers/promises", 15) == 0) ||
+        (spec->len == 20 && memcmp(spec->chars, "node:timers/promises", 20) == 0)) {
+        // return a namespace with promisified setTimeout
+        static Item tp_ns = {0};
+        static int tp_epoch = -1;
+        if (tp_ns.item == 0 || tp_epoch != js_heap_epoch) {
+            tp_epoch = js_heap_epoch;
+            tp_ns = js_new_object();
+            heap_register_gc_root(&tp_ns.item);
+            extern Item js_setTimeout(Item, Item);
+            extern Item js_setInterval(Item, Item);
+            extern Item js_setImmediate(Item);
+            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setTimeout", 10))},
+                            js_new_function((void*)js_setTimeout, 2));
+            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setInterval", 11))},
+                            js_new_function((void*)js_setInterval, 2));
+            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setImmediate", 12))},
+                            js_new_function((void*)js_setImmediate, 1));
+            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tp_ns);
+        }
+        return tp_ns;
+    }
     // node:console — alias to global console
     if ((spec->len == 7 && memcmp(spec->chars, "console", 7) == 0) ||
+        (spec->len == 10 && memcmp(spec->chars, "console.js", 10) == 0) ||
         (spec->len == 12 && memcmp(spec->chars, "node:console", 12) == 0)) {
         extern Item js_get_console_object_value(void);
         return js_get_console_object_value();
+    }
+    // node:module — Module object with isBuiltin, builtinModules
+    if ((spec->len == 6 && memcmp(spec->chars, "module", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "module.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:module", 11) == 0)) {
+        static Item module_ns = {0};
+        static int module_epoch = -1;
+        if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
+            module_epoch = js_heap_epoch;
+            module_ns = js_new_object();
+            heap_register_gc_root(&module_ns.item);
+            // builtinModules — array of built-in module names
+            static const char* builtin_names[] = {
+                "assert", "buffer", "child_process", "console", "crypto", "dns",
+                "events", "fs", "http", "https", "module", "net", "os", "path",
+                "process", "querystring", "readline", "stream", "string_decoder",
+                "timers", "tls", "url", "util", "vm", "worker_threads", "zlib"
+            };
+            int builtin_count = sizeof(builtin_names) / sizeof(builtin_names[0]);
+            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+            arr->type_id = LMD_TYPE_ARRAY;
+            arr->items = nullptr;
+            arr->length = 0;
+            arr->capacity = 0;
+            for (int i = 0; i < builtin_count; i++) {
+                array_push(arr, (Item){.item = s2it(heap_create_name(builtin_names[i], strlen(builtin_names[i])))});
+            }
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("builtinModules", 14))},
+                            (Item){.array = arr});
+            // isBuiltin(id) — check if a module is built-in
+            // (implemented as a simple function that checks the list)
+            extern Item js_module_is_builtin(Item id);
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("isBuiltin", 9))},
+                            js_new_function((void*)js_module_is_builtin, 1));
+            // default export is the module object itself
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("default", 7))}, module_ns);
+        }
+        return module_ns;
     }
     // node:test — basic test runner (test, describe, it)
     if ((spec->len == 9 && memcmp(spec->chars, "node:test", 9) == 0)) {
@@ -19155,6 +19259,30 @@ extern "C" Item js_module_get(Item specifier) {
         }
     }
     return ItemNull;
+}
+
+extern "C" Item js_module_is_builtin(Item id) {
+    if (get_type_id(id) != LMD_TYPE_STRING) return (Item){.item = ITEM_FALSE};
+    String* s = it2s(id);
+    const char* name = s->chars;
+    int len = (int)s->len;
+    // strip "node:" prefix if present
+    if (len > 5 && memcmp(name, "node:", 5) == 0) {
+        name += 5;
+        len -= 5;
+    }
+    static const char* builtins[] = {
+        "assert", "buffer", "child_process", "console", "crypto", "dns",
+        "events", "fs", "http", "https", "module", "net", "os", "path",
+        "process", "querystring", "readline", "stream", "string_decoder",
+        "timers", "tls", "url", "util", "vm", "worker_threads", "zlib"
+    };
+    int n = sizeof(builtins) / sizeof(builtins[0]);
+    for (int i = 0; i < n; i++) {
+        if ((int)strlen(builtins[i]) == len && memcmp(builtins[i], name, len) == 0)
+            return (Item){.item = ITEM_TRUE};
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 extern "C" Item js_module_namespace_create(Item exports_map) {

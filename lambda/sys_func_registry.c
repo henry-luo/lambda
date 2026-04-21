@@ -1554,7 +1554,13 @@ JitImport jit_runtime_imports[] = {
     {"js_promise_all_settled", FPTR(js_promise_all_settled)},
     // v14: Event loop & timers
     {"js_setTimeout", FPTR(js_setTimeout)},
+    {"js_setTimeout_args", FPTR(js_setTimeout_args)},
     {"js_setInterval", FPTR(js_setInterval)},
+    {"js_setInterval_args", FPTR(js_setInterval_args)},
+    {"js_pack_args_1", FPTR(js_pack_args_1)},
+    {"js_pack_args_2", FPTR(js_pack_args_2)},
+    {"js_pack_args_3", FPTR(js_pack_args_3)},
+    {"js_pack_args_4", FPTR(js_pack_args_4)},
     {"js_clearTimeout", FPTR(js_clearTimeout)},
     {"js_clearInterval", FPTR(js_clearInterval)},
     {"js_setImmediate", FPTR(js_setImmediate)},
