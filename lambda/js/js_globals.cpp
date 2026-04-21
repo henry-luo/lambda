@@ -79,8 +79,10 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
         name = js_to_property_key(name);
     }
     // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
+    // Any object type is valid (Map, Function, Array, Element, etc.); reject primitives.
     TypeId desc_type = get_type_id(descriptor);
-    if (desc_type != LMD_TYPE_MAP) {
+    if (desc_type != LMD_TYPE_MAP && desc_type != LMD_TYPE_FUNC &&
+        desc_type != LMD_TYPE_ARRAY && desc_type != LMD_TYPE_ELEMENT) {
         Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
         Item msg = (Item){.item = s2it(heap_create_name("Property description must be an object"))};
         js_throw_value(js_new_error_with_name(tn, msg));
@@ -2457,6 +2459,51 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
     if (!method) return ItemNull;
+
+    // BigInt prototype methods
+    if (get_type_id(num) == LMD_TYPE_BIGINT) {
+        if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+            int64_t val = it2i(num);
+            int radix = 10;
+            if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
+                Item radix_item = js_to_number(args[0]);
+                if (js_check_exception()) return ItemNull;
+                TypeId rt = get_type_id(radix_item);
+                if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
+                else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
+                if (radix < 2 || radix > 36) {
+                    return js_throw_range_error("toString() radix must be between 2 and 36");
+                }
+            }
+            if (radix == 10) return js_to_string(num);
+            // Convert to radix string
+            bool negative = val < 0;
+            uint64_t abs_val = negative ? (uint64_t)(-val) : (uint64_t)val;
+            const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+            char buf[128];
+            int pos = 127;
+            buf[pos] = '\0';
+            if (abs_val == 0) {
+                buf[--pos] = '0';
+            } else {
+                while (abs_val > 0) {
+                    buf[--pos] = digits[abs_val % radix];
+                    abs_val /= radix;
+                }
+            }
+            if (negative) buf[--pos] = '-';
+            return (Item){.item = s2it(heap_create_name(&buf[pos], 127 - pos))};
+        }
+        if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
+            return num;
+        }
+        if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
+            return js_to_string(num);
+        }
+        // BigInt doesn't have toFixed, toPrecision, toExponential
+        js_throw_type_error("is not a function");
+        return ItemNull;
+    }
 
     if (method->len == 7 && strncmp(method->chars, "toFixed", 7) == 0) {
         Item digits = (argc > 0) ? args[0] : (Item){.item = i2it(0)};
@@ -7549,20 +7596,16 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
 
 extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     // Process space parameter
-    // ES spec: unwrap Number/String wrapper objects first
+    // ES spec §24.5.3 step 5: unwrap Number/String wrapper objects
     if (get_type_id(space) == LMD_TYPE_MAP) {
         bool cn_own = false;
         Item cn = js_map_get_fast_ext(space.map, "__class_name__", 14, &cn_own);
         if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
             String* cn_str = it2s(cn);
-            bool pv_own = false;
-            Item pv = js_map_get_fast_ext(space.map, "__primitiveValue__", 18, &pv_own);
-            if (pv_own) {
-                if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
-                    space = js_to_number(pv);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
-                    space = pv;
-                }
+            if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                space = js_to_number(space);
+            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                space = js_to_string(space);
             }
         }
     }
@@ -7672,6 +7715,22 @@ extern "C" Item js_json_stringify(Item value) {
 // =============================================================================
 
 extern "C" Item js_delete_property(Item obj, Item key) {
+    // TypeError if base is null or undefined (non-object-coercible)
+    // But only if there's no pending exception (e.g. from an unresolvable reference)
+    if (obj.item == ITEM_NULL || obj.item == ITEM_JS_UNDEFINED) {
+        extern int js_check_exception(void);
+        if (!js_check_exception()) {
+            String* sk = (get_type_id(key) == LMD_TYPE_STRING) ? it2s(key) : NULL;
+            const char* base = (obj.item == ITEM_NULL) ? "null" : "undefined";
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot delete property '%.*s' of %s",
+                     sk ? (int)sk->len : 0, sk ? sk->chars : "", base);
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item em = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+            js_throw_value(js_new_error_with_name(tn, em));
+        }
+        return (Item){.item = b2it(false)};
+    }
     // Proxy [[Delete]] trap
     if (js_is_proxy(obj)) {
         return js_proxy_trap_delete(obj, key);
@@ -8928,6 +8987,9 @@ static void js_populate_number_ctor(Item fn_item) {
     }
 }
 
+// Populate Symbol constructor with well-known symbol properties (deferred — called from js_create_constructor)
+static void js_populate_symbol_ctor(Item fn_item);
+
 static Item js_create_constructor(int ctor_id, const char* name, int param_count) {
     if (!js_ctor_cache_init) {
         for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache[i] = ItemNull;
@@ -8979,6 +9041,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     js_constructor_cache[ctor_id] = fn_item;
     // Populate constructor-specific own properties
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
+    if (ctor_id == JS_CTOR_SYMBOL) js_populate_symbol_ctor(fn_item);
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
     return fn_item;
@@ -9091,6 +9154,7 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_SPLIT          10
 #define JS_SYMBOL_ID_UNSCOPABLES    11
 #define JS_SYMBOL_ID_IS_CONCAT_SPREADABLE 12
+#define JS_SYMBOL_ID_MATCH_ALL     13
 
 static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
     (void)udata;
@@ -9124,6 +9188,39 @@ static bool js_is_symbol_item(Item item) {
 
 static uint64_t js_symbol_item_id(Item item) {
     return (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE));
+}
+
+// Populate Symbol constructor with well-known symbol properties
+// so they appear via hasOwnProperty, Object.getOwnPropertyDescriptor, etc.
+// Per ES §19.4.2: each is {writable: false, enumerable: false, configurable: false}
+static void js_populate_symbol_ctor(Item fn_item) {
+    struct { const char* name; int len; int sym_id; } well_known[] = {
+        {"asyncIterator", 13, JS_SYMBOL_ID_ASYNC_ITERATOR},
+        {"hasInstance", 11, JS_SYMBOL_ID_HAS_INSTANCE},
+        {"isConcatSpreadable", 18, JS_SYMBOL_ID_IS_CONCAT_SPREADABLE},
+        {"iterator", 8, JS_SYMBOL_ID_ITERATOR},
+        {"match", 5, JS_SYMBOL_ID_MATCH},
+        {"matchAll", 8, JS_SYMBOL_ID_MATCH_ALL},
+        {"replace", 7, JS_SYMBOL_ID_REPLACE},
+        {"search", 6, JS_SYMBOL_ID_SEARCH},
+        {"species", 7, JS_SYMBOL_ID_SPECIES},
+        {"split", 5, JS_SYMBOL_ID_SPLIT},
+        {"toPrimitive", 11, JS_SYMBOL_ID_TO_PRIMITIVE},
+        {"toStringTag", 11, JS_SYMBOL_ID_TO_STRING_TAG},
+        {"unscopables", 11, JS_SYMBOL_ID_UNSCOPABLES},
+    };
+    for (int i = 0; i < 13; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(well_known[i].name, well_known[i].len))};
+        Item value = js_make_symbol_item(well_known[i].sym_id);
+        js_func_init_property(fn_item, key, value);
+        js_mark_non_enumerable(fn_item, key);
+        js_mark_non_writable(fn_item, key);
+        // Mark non-configurable
+        char nc_buf[64];
+        snprintf(nc_buf, sizeof(nc_buf), "__nc_%s", well_known[i].name);
+        Item nc_key = (Item){.item = s2it(heap_create_name(nc_buf, strlen(nc_buf)))};
+        js_func_init_property(fn_item, nc_key, (Item){.item = b2it(true)});
+    }
 }
 
 extern "C" Item js_symbol_create(Item description) {
