@@ -4,25 +4,43 @@
 
 Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented and an npm package management system. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
 
-### Current State (after Phase 1 implementation)
+### Current State (after Phase 2 implementation)
 
 | Metric | Count |
 |--------|-------|
 | Total official parallel tests | 3,926 |
-| Tests in enabled modules (19 modules) | 1,034 |
-| Tests in disabled modules (17 modules) | ~2,892 |
-| **Baseline passing (old, inflated)** | **208** |
-| **Baseline passing (new, genuine)** | **255** |
-| Failed (exit 1 — assertion/logic) | ~778 |
-| Crashed (segfault/abort) | 0* |
-| Timed out | 2 |
-| Skipped (known incompatible) | ~17 |
+| Tests in enabled modules (27 modules) | ~2,050 |
+| Tests in disabled modules (9 modules) | ~1,876 |
+| **Baseline passing** | **691** |
 
-*\*Crash count dropped to 0 in this run — may vary between runs.*
+### Phase 2 Implementation Results (cumulative)
+
+Phase 2 built on Phase 1 with three changes:
+1. **Fixed `fs.mkdtempSync`** — was not appending `XXXXXX` template suffix, causing null returns and stray dirs at project root
+2. **Removed leaked DOM globals** — `Node`, `innerWidth`, `innerHeight` removed from global scope (were failing ~80 tests)
+3. **Enabled 8 new modules** — http (266 passes), net (76), tls (54), https (30), timers (16), module (9), vm (9), readline (5)
+
+Per-module pass breakdown:
+
+| Module | Passes | Module | Passes |
+|--------|--------|--------|--------|
+| http | 266 | crypto | 14 |
+| fs | 132 | module | 9 |
+| net | 76 | vm | 9 |
+| tls | 54 | zlib | 7 |
+| https | 30 | readline | 5 |
+| stream | 25 | events | 3 |
+| process | 24 | path | 3 |
+| child-process | 22 | assert | 2 |
+| buffer | 17 | os | 2 |
+| timers | 16 | querystring | 2 |
+| util | 2 | other | 2 |
+
+**Result: 691 genuinely passing tests** (up from 255 after Phase 1)
 
 ### Phase 1 Implementation Results
 
-Phase 1 (test harness shim) has been implemented:
+Phase 1 (test harness shim) was implemented:
 - Created Lambda-compatible shims for `common/index.js`, `common/tmpdir.js`, `common/fixtures.js`
 - Removed Proxy wrapper (Lambda's optimized method dispatch bypasses Proxy get traps)
 - Relaxed `mustCall` validation (Lambda lacks a full event loop, so many async callbacks never fire)

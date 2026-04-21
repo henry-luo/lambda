@@ -118,23 +118,25 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"eventsource",    "eventsource",     true,  nullptr},
     {"stringbytes",    "stringbytes",     true,  nullptr},
 
+    // --- Modules with partial support (enabled for coverage) ---
+    {"http",           "http",            true,  nullptr},
+    {"https",          "https",           true,  nullptr},
+    {"module",         "module",          true,  nullptr},
+    {"net",            "net",             true,  nullptr},
+    {"readline",       "readline",        true,  nullptr},
+    {"timers",         "timers",          true,  nullptr},
+    {"tls",            "tls",             true,  nullptr},
+    {"vm",             "vm",              true,  nullptr},
+
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         false, "clustering not implemented"},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
     {"domain",         "domain",          false, "domain module not implemented"},
-    {"http",           "http",            false, "HTTP server not implemented"},
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
-    {"https",          "https",           false, "HTTPS not implemented"},
     {"inspector",      "inspector",       false, "inspector not implemented"},
-    {"module",         "module",          false, "module system not fully implemented"},
-    {"net",            "net",             false, "TCP sockets not implemented"},
     {"perf_hooks",     "perf-hooks",      false, "performance hooks not implemented"},
-    {"readline",       "readline",        false, "readline not implemented"},
     {"repl",           "repl",            false, "REPL not implemented"},
-    {"timers",         "timers",          false, "timers not fully implemented"},
-    {"tls",            "tls",             false, "TLS not implemented"},
     {"tty",            "tty",             false, "TTY not implemented"},
-    {"vm",             "vm",              false, "VM contexts not implemented"},
     {"wasi",           "wasi",            false, "WASI not implemented"},
     {"worker",         "worker",          false, "worker_threads not implemented"},
 };
