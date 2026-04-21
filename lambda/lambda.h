@@ -118,7 +118,6 @@ enum EnumTypeId {
 
     // JavaScript-specific types (added at end to preserve existing type IDs)
     LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
-    LMD_TYPE_BIGINT,     // JavaScript BigInt (int56 inline, like LMD_TYPE_INT)
 
     LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
@@ -736,7 +735,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
-#define ITEM_BIGINT         ((uint64_t)LMD_TYPE_BIGINT << 56)
+// BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
+#define DECIMAL_BIGINT      2
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 // numeric type range check — includes sized types outside INT..NUMBER range
@@ -759,8 +759,8 @@ inline uint64_t b2it(uint8_t bool_val) {
 #else
 #define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #endif
-// BigInt: same inline encoding as INT but with LMD_TYPE_BIGINT tag
-#define bi2it(int_val)       (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_BIGINT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
+// BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
+#define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
 #define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)

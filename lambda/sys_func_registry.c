@@ -51,6 +51,9 @@ extern Item js_bigint_not_constructor(void);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
 extern Item js_number_function(Item value);
+// BigInt creation (lambda-decimal.cpp)
+extern Item bigint_from_int64(int64_t val);
+extern Item bigint_from_string(const char* str, int len);
 
 // view/edit template apply
 extern Item fn_apply1(Item target);
@@ -1215,6 +1218,8 @@ JitImport jit_runtime_imports[] = {
     {"js_bigint_as_int_n", FPTR(js_bigint_as_int_n)},
     {"js_bigint_as_uint_n", FPTR(js_bigint_as_uint_n)},
     {"js_bigint_not_constructor", FPTR(js_bigint_not_constructor)},
+    {"bigint_from_int64", FPTR(bigint_from_int64)},
+    {"bigint_from_string", FPTR(bigint_from_string)},
     {"js_typeof", FPTR(js_typeof)},
     {"js_typeof_is", FPTR(js_typeof_is)},
     {"js_lt_raw", FPTR(js_lt_raw)},

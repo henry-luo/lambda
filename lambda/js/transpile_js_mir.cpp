@@ -15,6 +15,7 @@
 #include "js_typed_array.h"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
@@ -2569,7 +2570,7 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
             double val = lit->value.number_value;
-            if (lit->is_bigint) return LMD_TYPE_BIGINT;
+            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
             // If source text has '.' or 'e'/'E', treat as FLOAT even if integral-valued
             // (e.g., 999999.0, 1e5 → FLOAT; 999999 → INT)
             if (lit->has_decimal) return LMD_TYPE_FLOAT;
@@ -5923,17 +5924,15 @@ static void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
 static MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
     case JS_LITERAL_NUMBER: {
-        double val = lit->value.number_value;
-        // BigInt literal: emit bi2it() instead of i2it()
+        // BigInt literal: store string_value and call bigint_from_string at runtime
         if (lit->is_bigint) {
-            int64_t ival = (int64_t)val;
-            MIR_reg_t r = jm_new_reg(mt, "bigint", MIR_T_I64);
-            uint64_t packed = ITEM_BIGINT | ((uint64_t)ival & 0x00FFFFFFFFFFFFFF);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, r),
-                MIR_new_int_op(mt->ctx, (int64_t)packed)));
-            return r;
+            String* s = lit->value.string_value;
+            // embed the string pointer and length as constants, call bigint_from_string at runtime
+            return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)s->chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
         }
+        double val = lit->value.number_value;
         // If source had decimal point or scientific notation, always box as float
         if (lit->has_decimal) {
             MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
@@ -11189,7 +11188,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_new_reg_op(mt->ctx, is_float)));
             MIR_reg_t is_bigint_t = jm_new_reg(mt, "isbigint", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_bigint_t),
-                MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_BIGINT)));
+                MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_DECIMAL)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_number),
                 MIR_new_reg_op(mt->ctx, is_bigint_t)));
 
@@ -14199,17 +14198,14 @@ static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         JsLiteralNode* lit = (JsLiteralNode*)item;
         switch (lit->literal_type) {
         case JS_LITERAL_NUMBER: {
-            double val = lit->value.number_value;
-            // BigInt literal: emit bi2it() with BIGINT type tag
+            // BigInt literal: store bigint_str and call bigint_from_string at runtime
             if (lit->is_bigint) {
-                int64_t ival = (int64_t)val;
-                MIR_reg_t r = jm_new_reg(mt, "bigint", MIR_T_I64);
-                uint64_t packed = ITEM_BIGINT | ((uint64_t)ival & 0x00FFFFFFFFFFFFFF);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, r),
-                    MIR_new_int_op(mt->ctx, (int64_t)packed)));
-                return r;
+                String* s = lit->bigint_str;
+                return jm_call_2(mt, "bigint_from_string", MIR_T_I64,
+                    MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)s->chars),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)s->len));
             }
+            double val = lit->value.number_value;
             if (!lit->has_decimal && val == (double)(int64_t)val && val >= -36028797018963968.0 && val <= 36028797018963967.0) {
                 return jm_box_int_const(mt, (int64_t)val);
             }

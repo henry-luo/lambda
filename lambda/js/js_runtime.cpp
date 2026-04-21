@@ -11,6 +11,7 @@
 #include "js_typed_array.h"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
@@ -1017,10 +1018,16 @@ extern "C" Item js_to_number(Item value) {
         // User-facing functions (isFinite, isNaN, Number()) check separately.
         return value;
 
-    case LMD_TYPE_BIGINT:
+    case LMD_TYPE_DECIMAL: {
         // ES spec: ToNumber(bigint) throws TypeError
-        js_throw_type_error("Cannot convert a BigInt value to a number");
-        return ItemNull;
+        Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (_dec && _dec->unlimited == DECIMAL_BIGINT) {
+            js_throw_type_error("Cannot convert a BigInt value to a number");
+            return ItemNull;
+        }
+        // regular decimal → float
+        return push_d(decimal_to_double(value));
+    }
 
     default:
         // v16: Objects/arrays — check for Symbol.toPrimitive before returning NaN
@@ -1106,7 +1113,10 @@ extern "C" Item js_to_number(Item value) {
 // Used by increment/decrement (++/--) which must work on BigInt values.
 extern "C" Item js_to_numeric(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_BIGINT) return value;
+    if (type == LMD_TYPE_DECIMAL) {
+        Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
+    }
     // ToPrimitive for objects (hint: number) — ES spec §7.1.3
     if (type == LMD_TYPE_MAP) {
         bool own_pv = false;
@@ -1305,11 +1315,20 @@ extern "C" Item js_to_string(Item value) {
         return (Item){.item = s2it(heap_create_name(buffer))};
     }
 
-    case LMD_TYPE_BIGINT: {
-        int64_t v = it2i(value);
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
-        return (Item){.item = s2it(heap_create_name(buffer))};
+    case LMD_TYPE_DECIMAL: {
+        Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (_dec && _dec->unlimited == DECIMAL_BIGINT) {
+            char* s = bigint_to_cstring_radix(value, 10);
+            if (!s) return ItemNull;
+            Item result = (Item){.item = s2it(heap_create_name(s))};
+            free(s);
+            return result;
+        }
+        // regular decimal
+        char* s = decimal_to_string(value);
+        Item result = (Item){.item = s2it(heap_create_name(s))};
+        decimal_free_string(s);
+        return result;
     }
 
     case LMD_TYPE_FLOAT: {
@@ -1519,8 +1538,8 @@ extern "C" bool js_is_truthy(Item value) {
     case LMD_TYPE_INT:
         return it2i(value) != 0;
 
-    case LMD_TYPE_BIGINT:
-        return it2i(value) != 0;
+    case LMD_TYPE_DECIMAL:
+        return !bigint_is_zero(value);
 
     case LMD_TYPE_FLOAT: {
         double d = it2d(value);
@@ -1569,7 +1588,11 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
         return 0;
     case 'b':
         if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
-        if (type_str[1] == 'i') return (type == LMD_TYPE_BIGINT) ? 1 : 0;    // "bigint"
+        if (type_str[1] == 'i') {  // "bigint"
+            if (type != LMD_TYPE_DECIMAL) return 0;
+            Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+            return (_dec && _dec->unlimited == DECIMAL_BIGINT) ? 1 : 0;
+        }
         return 0;
     case 'u': return (type == LMD_TYPE_UNDEFINED) ? 1 : 0;  // "undefined"
     case 'o':
@@ -1840,9 +1863,11 @@ static inline bool js_is_symbol(Item v) {
     return get_type_id(v) == LMD_TYPE_INT && it2i(v) <= -(int64_t)JS_SYMBOL_BASE;
 }
 
-// Helper: check if an Item is a BigInt
+// Helper: check if an Item is a BigInt (Decimal with unlimited == DECIMAL_BIGINT)
 static inline bool js_is_bigint(Item v) {
-    return get_type_id(v) == LMD_TYPE_BIGINT;
+    if (get_type_id(v) != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec = (Decimal*)(v.item & 0x00FFFFFFFFFFFFFF);
+    return dec && dec->unlimited == DECIMAL_BIGINT;
 }
 
 // Helper: check for BigInt mixed-type error in arithmetic.
@@ -1861,19 +1886,19 @@ static inline bool js_check_bigint_arithmetic(Item left, Item right) {
 
 // Helper: make a BigInt result from int64_t
 static inline Item js_make_bigint(int64_t val) {
-    return (Item){.item = bi2it(val)};
+    return bigint_from_int64(val);
 }
 
 // Increment: handles both Number and BigInt (for ++ operator)
 extern "C" Item js_increment(Item value) {
-    if (js_is_bigint(value)) return js_make_bigint(it2i(value) + 1);
+    if (js_is_bigint(value)) return bigint_inc(value);
     double d = js_get_number(value);
     return js_make_number(d + 1.0);
 }
 
 // Decrement: handles both Number and BigInt (for -- operator)
 extern "C" Item js_decrement(Item value) {
-    if (js_is_bigint(value)) return js_make_bigint(it2i(value) - 1);
+    if (js_is_bigint(value)) return bigint_dec(value);
     double d = js_get_number(value);
     return js_make_number(d - 1.0);
 }
@@ -1888,7 +1913,7 @@ extern "C" Item js_number_function(Item value) {
     Item num = js_to_numeric(value);
     if (js_check_exception()) return ItemNull;
     if (js_is_bigint(num)) {
-        return js_make_number((double)it2i(num));
+        return js_make_number(bigint_to_double(num));
     }
     return num;
 }
@@ -2038,7 +2063,7 @@ extern "C" Item js_add(Item left, Item right) {
     // BigInt: mixed types → TypeError, same types → integer addition
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) + it2i(right));
+        return bigint_add(left, right);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2050,7 +2075,7 @@ extern "C" Item js_subtract(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) - it2i(right));
+        return bigint_sub(left, right);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2062,7 +2087,7 @@ extern "C" Item js_multiply(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) * it2i(right));
+        return bigint_mul(left, right);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2074,9 +2099,8 @@ extern "C" Item js_divide(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        int64_t r = it2i(right);
-        if (r == 0) { js_throw_range_error("Division by zero"); return ItemNull; }
-        return js_make_bigint(it2i(left) / r);
+        if (bigint_is_zero(right)) { js_throw_range_error("Division by zero"); return ItemNull; }
+        return bigint_div(left, right);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2088,9 +2112,8 @@ extern "C" Item js_modulo(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        int64_t r = it2i(right);
-        if (r == 0) { js_throw_range_error("Division by zero"); return ItemNull; }
-        return js_make_bigint(it2i(left) % r);
+        if (bigint_is_zero(right)) { js_throw_range_error("Division by zero"); return ItemNull; }
+        return bigint_mod(left, right);
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2102,12 +2125,9 @@ extern "C" Item js_power(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        int64_t exp = it2i(right);
+        int64_t exp = bigint_to_int64(right);
         if (exp < 0) { js_throw_range_error("Exponent must be positive"); return ItemNull; }
-        int64_t base = it2i(left);
-        int64_t result = 1;
-        for (int64_t i = 0; i < exp; i++) result *= base;
-        return js_make_bigint(result);
+        return bigint_pow(left, right);
     }
     double base_d = js_get_number(js_to_number(left));
     double exp_d = js_get_number(js_to_number(right));
@@ -2142,37 +2162,37 @@ extern "C" Item js_equal(Item left, Item right) {
     }
 
     // BigInt == Number: compare values
-    if (left_type == LMD_TYPE_BIGINT && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+    bool left_bigint = js_is_bigint(left);
+    bool right_bigint = js_is_bigint(right);
+    if (left_bigint && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
         double r = js_get_number(right);
         if (isnan(r) || r == INFINITY || r == -INFINITY) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it((double)it2i(left) == r)};
+        return (Item){.item = b2it(bigint_cmp_double(left, r) == 0)};
     }
-    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_type == LMD_TYPE_BIGINT) {
+    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_bigint) {
         double l = js_get_number(left);
         if (isnan(l) || l == INFINITY || l == -INFINITY) return (Item){.item = b2it(false)};
-        return (Item){.item = b2it(l == (double)it2i(right))};
+        return (Item){.item = b2it(bigint_cmp_double(right, l) == 0)};
     }
     // BigInt == String: convert string to BigInt and compare
-    if (left_type == LMD_TYPE_BIGINT && right_type == LMD_TYPE_STRING) {
+    if (left_bigint && right_type == LMD_TYPE_STRING) {
         String* s = it2s(right);
-        char* end;
-        long long v = strtoll(s->chars, &end, 10);
-        if (end == s->chars + s->len) return (Item){.item = b2it(it2i(left) == v)};
-        return (Item){.item = b2it(false)};
+        Item rbi = bigint_from_string(s->chars, s->len);
+        if (rbi.item == ItemError.item) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(bigint_cmp(left, rbi) == 0)};
     }
-    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_BIGINT) {
+    if (left_type == LMD_TYPE_STRING && right_bigint) {
         String* s = it2s(left);
-        char* end;
-        long long v = strtoll(s->chars, &end, 10);
-        if (end == s->chars + s->len) return (Item){.item = b2it(v == it2i(right))};
-        return (Item){.item = b2it(false)};
+        Item lbi = bigint_from_string(s->chars, s->len);
+        if (lbi.item == ItemError.item) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(bigint_cmp(lbi, right) == 0)};
     }
     // BigInt == Boolean: convert boolean to BigInt
-    if (left_type == LMD_TYPE_BIGINT && right_type == LMD_TYPE_BOOL) {
-        return (Item){.item = b2it(it2i(left) == (it2b(right) ? 1 : 0))};
+    if (left_bigint && right_type == LMD_TYPE_BOOL) {
+        return (Item){.item = b2it(bigint_cmp(left, bigint_from_int64(it2b(right) ? 1 : 0)) == 0)};
     }
-    if (left_type == LMD_TYPE_BOOL && right_type == LMD_TYPE_BIGINT) {
-        return (Item){.item = b2it((it2b(left) ? 1 : 0) == it2i(right))};
+    if (left_type == LMD_TYPE_BOOL && right_bigint) {
+        return (Item){.item = b2it(bigint_cmp(bigint_from_int64(it2b(left) ? 1 : 0), right) == 0)};
     }
 
     // String to number
@@ -2308,8 +2328,8 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     case LMD_TYPE_INT:
         return (Item){.item = b2it(it2i(left) == it2i(right))};
 
-    case LMD_TYPE_BIGINT:
-        return (Item){.item = b2it(it2i(left) == it2i(right))};
+    case LMD_TYPE_DECIMAL:
+        return (Item){.item = b2it(bigint_cmp(left, right) == 0)};
 
     case LMD_TYPE_FLOAT: {
         double l = it2d(left);
@@ -2457,71 +2477,36 @@ static Item js_abstract_relational_lt(Item left, Item right) {
     if (left_type == LMD_TYPE_NULL) { left = (Item){.item = i2it(0)}; left_type = LMD_TYPE_INT; }
     if (right_type == LMD_TYPE_NULL) { right = (Item){.item = i2it(0)}; right_type = LMD_TYPE_INT; }
     // BigInt comparisons
-    if (left_type == LMD_TYPE_BIGINT && right_type == LMD_TYPE_BIGINT) {
-        return (Item){.item = b2it(it2i(left) < it2i(right))};
+    bool left_bi = js_is_bigint(left);
+    bool right_bi = js_is_bigint(right);
+    if (left_bi && right_bi) {
+        return (Item){.item = b2it(bigint_cmp(left, right) < 0)};
     }
     // BigInt vs Number
-    if (left_type == LMD_TYPE_BIGINT && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+    if (left_bi && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
         double r = js_get_number(right);
         if (isnan(r)) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it((double)it2i(left) < r)};
+        return (Item){.item = b2it(bigint_cmp_double(left, r) < 0)};
     }
-    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_type == LMD_TYPE_BIGINT) {
+    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_bi) {
         double l = js_get_number(left);
         if (isnan(l)) return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(l < (double)it2i(right))};
+        return (Item){.item = b2it(bigint_cmp_double(right, l) > 0)};
     }
     // BigInt vs String — ES spec: StringToBigInt with hex/octal/binary support
-    if (left_type == LMD_TYPE_BIGINT && right_type == LMD_TYPE_STRING) {
+    if (left_bi && right_type == LMD_TYPE_STRING) {
         String* s = it2s(right);
         if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
-        // Trim whitespace
-        const char* p = s->chars;
-        int len = (int)s->len;
-        while (len > 0 && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) { p++; len--; }
-        while (len > 0 && (p[len-1] == ' ' || p[len-1] == '\t' || p[len-1] == '\n' || p[len-1] == '\r')) { len--; }
-        if (len == 0) return (Item){.item = b2it(it2i(left) < 0)}; // empty string → 0n
-        char buf[256];
-        if (len >= (int)sizeof(buf)) return (Item){.item = ITEM_JS_UNDEFINED};
-        memcpy(buf, p, len); buf[len] = '\0';
-        char* end;
-        long long v;
-        if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
-            v = strtoll(buf + 2, &end, 16);
-        } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
-            v = strtoll(buf + 2, &end, 8);
-        } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
-            v = strtoll(buf + 2, &end, 2);
-        } else {
-            v = strtoll(buf, &end, 10);
-        }
-        if (*end != '\0') return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(it2i(left) < v)};
+        Item rbi = bigint_from_string(s->chars, s->len);
+        if (rbi.item == ItemError.item) return (Item){.item = ITEM_JS_UNDEFINED};
+        return (Item){.item = b2it(bigint_cmp(left, rbi) < 0)};
     }
-    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_BIGINT) {
+    if (left_type == LMD_TYPE_STRING && right_bi) {
         String* s = it2s(left);
         if (!s) return (Item){.item = ITEM_JS_UNDEFINED};
-        const char* p = s->chars;
-        int len = (int)s->len;
-        while (len > 0 && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) { p++; len--; }
-        while (len > 0 && (p[len-1] == ' ' || p[len-1] == '\t' || p[len-1] == '\n' || p[len-1] == '\r')) { len--; }
-        if (len == 0) return (Item){.item = b2it(0 < it2i(right))}; // empty string → 0n
-        char buf[256];
-        if (len >= (int)sizeof(buf)) return (Item){.item = ITEM_JS_UNDEFINED};
-        memcpy(buf, p, len); buf[len] = '\0';
-        char* end;
-        long long v;
-        if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
-            v = strtoll(buf + 2, &end, 16);
-        } else if (len > 2 && buf[0] == '0' && (buf[1] == 'o' || buf[1] == 'O')) {
-            v = strtoll(buf + 2, &end, 8);
-        } else if (len > 2 && buf[0] == '0' && (buf[1] == 'b' || buf[1] == 'B')) {
-            v = strtoll(buf + 2, &end, 2);
-        } else {
-            v = strtoll(buf, &end, 10);
-        }
-        if (*end != '\0') return (Item){.item = ITEM_JS_UNDEFINED};
-        return (Item){.item = b2it(v < it2i(right))};
+        Item lbi = bigint_from_string(s->chars, s->len);
+        if (lbi.item == ItemError.item) return (Item){.item = ITEM_JS_UNDEFINED};
+        return (Item){.item = b2it(bigint_cmp(lbi, right) < 0)};
     }
     double l = js_get_number(left);
     double r = js_get_number(right);
@@ -2605,7 +2590,7 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) & it2i(right));
+        return bigint_bitwise_and(left, right);
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
@@ -2617,7 +2602,7 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) | it2i(right));
+        return bigint_bitwise_or(left, right);
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
@@ -2629,7 +2614,7 @@ extern "C" Item js_bitwise_xor(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) ^ it2i(right));
+        return bigint_bitwise_xor(left, right);
     }
     int32_t l = js_to_int32(js_get_number(left));
     int32_t r = js_to_int32(js_get_number(right));
@@ -2640,7 +2625,7 @@ extern "C" Item js_bitwise_not(Item operand) {
     operand = js_numeric_operand(operand);
     if (js_is_symbol(operand)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(operand)) {
-        return js_make_bigint(~it2i(operand));
+        return bigint_bitwise_not(operand);
     }
     int32_t val = js_to_int32(js_get_number(operand));
     return (Item){.item = i2it(~val)};
@@ -2651,7 +2636,7 @@ extern "C" Item js_left_shift(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) << (it2i(right) & 0x3F));
+        return bigint_left_shift(left, right);
     }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
@@ -2663,7 +2648,7 @@ extern "C" Item js_right_shift(Item left, Item right) {
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
-        return js_make_bigint(it2i(left) >> (it2i(right) & 0x3F));
+        return bigint_right_shift(left, right);
     }
     int32_t l = js_to_int32(js_get_number(left));
     uint32_t r = (uint32_t)js_to_int32(js_get_number(right)) & 0x1F;
@@ -2688,38 +2673,31 @@ extern "C" Item js_unsigned_right_shift(Item left, Item right) {
 
 // v90: BigInt(value) — ES2020 BigInt constructor (called as function, not with new)
 // Calls ToPrimitive(value, "number") to handle valueOf/toString on objects.
-// Returns LMD_TYPE_BIGINT.
+// Returns a BigInt (Decimal with unlimited == DECIMAL_BIGINT).
 extern "C" Item js_bigint_constructor(Item value) {
     // If already a BigInt, return as-is
-    if (get_type_id(value) == LMD_TYPE_BIGINT) return value;
+    if (js_is_bigint(value)) return value;
     TypeId vt = get_type_id(value);
     // ToPrimitive for objects (hint: number) — ES spec §7.1.13
     if (vt == LMD_TYPE_MAP || vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_FUNC) {
         Item prim = js_to_numeric(value);
         if (js_check_exception()) return ItemNull;
         // If ToPrimitive returned a BigInt, we're done
-        if (get_type_id(prim) == LMD_TYPE_BIGINT) return prim;
+        if (js_is_bigint(prim)) return prim;
         // Otherwise recursively convert the primitive result
         return js_bigint_constructor(prim);
     }
     // Boolean: true → 1n, false → 0n
     if (vt == LMD_TYPE_BOOL) {
-        return (Item){.item = bi2it(js_is_truthy(value) ? 1 : 0)};
+        return bigint_from_int64(js_is_truthy(value) ? 1 : 0);
     }
     // String: parse as integer
     if (vt == LMD_TYPE_STRING) {
-        Item num = js_to_number(value);
-        if (js_check_exception()) return ItemNull;
-        TypeId nt = get_type_id(num);
-        if (nt == LMD_TYPE_FLOAT) {
-            double d = it2d(num);
-            if (d != d || d == INFINITY || d == -INFINITY || d != (double)(int64_t)d) {
-                js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
-                return ItemNull;
-            }
-            return (Item){.item = bi2it((int64_t)d)};
+        String* s = it2s(value);
+        if (s) {
+            Item bi = bigint_from_string(s->chars, s->len);
+            if (bi.item != ItemError.item) return bi;
         }
-        if (nt == LMD_TYPE_INT) return (Item){.item = bi2it(it2i(num))};
         js_throw_syntax_error((Item){.item = s2it(heap_create_name("Cannot convert string to a BigInt"))});
         return ItemNull;
     }
@@ -2729,7 +2707,7 @@ extern "C" Item js_bigint_constructor(Item value) {
         if (d != d || d == INFINITY || d == -INFINITY || d != (double)(int64_t)d) {
             return js_throw_range_error("The number cannot be converted to a BigInt because it is not an integer");
         }
-        return (Item){.item = bi2it((int64_t)d)};
+        return bigint_from_int64((int64_t)d);
     }
     if (vt == LMD_TYPE_INT) {
         int64_t iv = it2i(value);
@@ -2738,7 +2716,7 @@ extern "C" Item js_bigint_constructor(Item value) {
             js_throw_type_error("Cannot convert a Symbol value to a BigInt");
             return ItemNull;
         }
-        return (Item){.item = bi2it(iv)};
+        return bigint_from_int64(iv);
     }
     // undefined, null, object, etc. → TypeError
     js_throw_type_error("Cannot convert value to a BigInt");
@@ -2758,9 +2736,9 @@ extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     }
     Item bigint_val = js_bigint_constructor(bigint_item);
     if (js_check_exception()) return ItemNull;
-    int64_t val = it2i(bigint_val);
-    if (bits == 0) return (Item){.item = bi2it(0)};
-    if (bits >= 64) return (Item){.item = bi2it(val)};
+    int64_t val = bigint_to_int64(bigint_val);
+    if (bits == 0) return bigint_from_int64(0);
+    if (bits >= 64) return bigint_from_int64(val);
     // Truncate to N bits and sign-extend
     uint64_t mask = ((uint64_t)1 << bits) - 1;
     uint64_t truncated = (uint64_t)val & mask;
@@ -2768,7 +2746,7 @@ extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     if (truncated & ((uint64_t)1 << (bits - 1))) {
         truncated |= ~mask;
     }
-    return (Item){.item = bi2it((int64_t)truncated)};
+    return bigint_from_int64((int64_t)truncated);
 }
 
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
@@ -2784,11 +2762,11 @@ extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     }
     Item bigint_val = js_bigint_constructor(bigint_item);
     if (js_check_exception()) return ItemNull;
-    int64_t val = it2i(bigint_val);
-    if (bits == 0) return (Item){.item = bi2it(0)};
-    if (bits >= 64) return (Item){.item = bi2it(val)};
+    int64_t val = bigint_to_int64(bigint_val);
+    if (bits == 0) return bigint_from_int64(0);
+    if (bits >= 64) return bigint_from_int64(val);
     uint64_t mask = ((uint64_t)1 << bits) - 1;
-    return (Item){.item = bi2it((int64_t)((uint64_t)val & mask))};
+    return bigint_from_int64((int64_t)((uint64_t)val & mask));
 }
 
 extern "C" Item js_bigint_not_constructor(void) {
@@ -2809,8 +2787,8 @@ extern "C" Item js_unary_minus(Item operand) {
     // ToNumeric for objects (unwrap Object(BigInt) etc.)
     operand = js_numeric_operand(operand);
     // BigInt negation
-    if (get_type_id(operand) == LMD_TYPE_BIGINT) {
-        return js_make_bigint(-it2i(operand));
+    if (js_is_bigint(operand)) {
+        return bigint_neg(operand);
     }
     // ES spec: ToNumber(Symbol) throws TypeError
     if (get_type_id(operand) == LMD_TYPE_INT && it2i(operand) <= -(int64_t)JS_SYMBOL_BASE) {
@@ -2849,7 +2827,7 @@ extern "C" Item js_typeof(Item value) {
     case LMD_TYPE_FLOAT:
         result = js_key_is_symbol(value) ? "symbol" : "number";
         break;
-    case LMD_TYPE_BIGINT:
+    case LMD_TYPE_DECIMAL:
         result = "bigint";
         break;
     case LMD_TYPE_STRING:
@@ -16743,7 +16721,7 @@ extern "C" Item js_new_number_checked(Item arg) {
         return ItemNull;
     }
     // BigInt → Number conversion (ES2020: ToNumeric then BigInt::numberValue)
-    if (get_type_id(arg) == LMD_TYPE_BIGINT) {
+    if (get_type_id(arg) == LMD_TYPE_DECIMAL && js_is_bigint(arg)) {
         arg = js_number_function(arg);
     }
     return js_new_number_wrapper(arg);
@@ -16788,7 +16766,7 @@ extern "C" Item js_to_object(Item value) {
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
-    if (type == LMD_TYPE_BIGINT) {
+    if (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) {
         // BigInt wrapper object with __primitiveValue__
         Item obj = js_new_object();
         Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
