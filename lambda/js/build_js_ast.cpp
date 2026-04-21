@@ -1832,6 +1832,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
 
         // skip comments and empty statements inside expressions
         if (strcmp(node_type, "comment") == 0) return NULL;
+        if (strcmp(node_type, "html_comment") == 0) return NULL;
         if (strcmp(node_type, "empty_statement") == 0) return NULL;
 
         log_error("Unsupported JavaScript expression type: %s (symbol: %d, content: %.*s)",
@@ -1985,7 +1986,7 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
             expr_stmt->base.type = &TYPE_NULL;
         }
         return (JsAstNode*)expr_stmt;
-    } else if (strcmp(node_type, "comment") == 0) {
+    } else if (strcmp(node_type, "comment") == 0 || strcmp(node_type, "html_comment") == 0) {
         // Skip comments - they don't generate any code
         return NULL;
     } else if (strcmp(node_type, "empty_statement") == 0) {

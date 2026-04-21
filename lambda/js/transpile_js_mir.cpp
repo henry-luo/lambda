@@ -131,6 +131,7 @@ struct JsCaptureEntry {
     int scope_env_slot;  // slot in parent's scope env (-1 if not remapped)
     int grandparent_slot; // v29: for transitive captures in mixed scope envs, read from
                           // grandparent env (stored in parent env slot 0). -1 if not transitive.
+    bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
 };
 
 // Function entry for pre-pass collection
@@ -697,6 +698,7 @@ static bool jm_name_set_has(struct hashmap* set, const char* name) {
 static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only);
 static void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
+static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 
 // v15: Count yield points in a generator function body (not recursing into nested functions)
 static int jm_count_yields(JsAstNode* node) {
@@ -1777,6 +1779,9 @@ static void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
             ve->is_const = (e->var_kind == 2);  // JS_VAR_CONST
             ve->tdz_active = true;
         }
+        // v29 TDZ: Also write TDZ sentinel to scope_env so closures sharing
+        // the scope env see TDZ before the variable is initialized.
+        jm_scope_env_mark_and_writeback(mt, e->name, tdz_reg);
     }
     hashmap_free(let_consts);
 }
@@ -2824,7 +2829,7 @@ static bool jm_is_native_type(TypeId tid) {
 
 // Helper: if a variable is in the current function's scope env, mark it and write-back.
 // Called after jm_set_var or assignment to propagate value to shared scope env.
-static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY) {
+static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id) {
     if (mt->scope_env_reg == 0) return;
     // Check if this var name is in the current function's scope env
     int fi = mt->current_func_index;
@@ -13528,6 +13533,14 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     if (fc->has_rest_param) pc = -pc;  // negative signals rest params to js_invoke_fn
     MIR_reg_t fn_reg;
     if (fc->capture_count > 0) {
+        // v29 TDZ: Propagate is_let_const from parent scope var entries to captures.
+        // This runs in the parent's scope where var entries are available.
+        for (int ci = 0; ci < fc->capture_count; ci++) {
+            JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+            if (cv && cv->is_let_const) {
+                fc->captures[ci].is_let_const = true;
+            }
+        }
         // Check if this closure should use the parent's shared scope env.
         // Share scope env so var-scoped closures can persist mutations to outer
         // variables.  But in loops, if any captured variable is let/const, we must
@@ -13833,10 +13846,10 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
                     }
                     if (!found_const) {
                         log_error("js-mir: captured variable '%s' not found in scope (in function '%s')", fc->captures[i].name, fc->name);
-                        MIR_reg_t null_val = jm_emit_null(mt);
+                        MIR_reg_t undef_val = jm_emit_undefined(mt);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
-                            MIR_new_reg_op(mt->ctx, null_val)));
+                            MIR_new_reg_op(mt->ctx, undef_val)));
                     }
                     } // close else (non _js_this)
                 }
@@ -15077,7 +15090,6 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                 jm_emit_set_function_name(mt, boxed_val, id->name->chars);
                             }
                         }
-                        log_debug("modvar: init js_set_module_var(%d) for '%s' (no local)", modvar_index, vname);
                         // Write back to scope env if this var is captured by child closures
                         jm_scope_env_mark_and_writeback(mt, vname, boxed_val);
                         // P7: detect new ClassName(...) and record class_entry in module_consts
@@ -15109,10 +15121,8 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
-                        log_debug("modvar: let/const '%s' init to undefined (exit TDZ)", vname);
                     } else {
                         // var redeclaration without init: no-op (don't reset to undefined)
-                        log_debug("modvar: skip re-init for '%s' (no initializer)", vname);
                     }
                 } else if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
@@ -15420,7 +15430,6 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             jm_call_void_2(mt, "js_set_module_var",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
-                            log_debug("modvar: const init js_set_module_var(%d) for '%s'", (int)mc->int_val, vname);
                         }
                     }
                     // Store class object to module var so closures/methods can access it
@@ -15430,7 +15439,6 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             jm_call_void_2(mt, "js_set_module_var",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ve->reg));
-                            log_debug("modvar: class init js_set_module_var(%d) for '%s'", (int)mc->int_val, vname);
                         }
                     }
                 }
@@ -16240,20 +16248,20 @@ static MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollecte
             } else {
                 log_error("js-mir: captured variable '%s' not found for class method '%s'",
                     fc->captures[ci].name, fc->name);
-                // Store null as graceful fallback to prevent crash from uninitialized env slot
-                MIR_reg_t null_val = jm_emit_null(mt);
+                // Store undefined as graceful fallback to prevent crash from uninitialized env slot.
+                MIR_reg_t undef_val = jm_emit_undefined(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
-                    MIR_new_reg_op(mt->ctx, null_val)));
+                    MIR_new_reg_op(mt->ctx, undef_val)));
             }
         } else {
             log_error("js-mir: captured variable '%s' not found for class method '%s'",
                 fc->captures[ci].name, fc->name);
-            // Store null as graceful fallback to prevent crash from uninitialized env slot
-            MIR_reg_t null_val = jm_emit_null(mt);
+            // Store undefined as graceful fallback to prevent crash from uninitialized env slot.
+            MIR_reg_t undef_val = jm_emit_undefined(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
-                MIR_new_reg_op(mt->ctx, null_val)));
+                MIR_new_reg_op(mt->ctx, undef_val)));
         }
     }
     return jm_call_4(mt, "js_new_closure", MIR_T_I64,
@@ -17699,8 +17707,6 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             JsFunctionNode* enclosing_fn = mt->current_fc ? mt->current_fc->node : NULL;
             if (enclosing_fn && jm_func_has_param_named(enclosing_fn,
                     fn_decl->name->chars, (int)fn_decl->name->len)) {
-                log_debug("js-mir: skip Annex B binding for '%.*s' — parameter name collision",
-                    (int)fn_decl->name->len, fn_decl->name->chars);
                 break;
             }
             char fn_vname[128];
@@ -17710,16 +17716,17 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // Annex B skip: if the existing binding is let/const, don't overwrite
             // (B.3.3.1/B.3.3.3 — would produce early error if replaced with var)
             if (existing && existing->is_let_const) {
-                log_debug("js-mir: skip Annex B binding for '%.*s' — let/const conflict (scope_depth=%d)",
-                    (int)fn_decl->name->len, fn_decl->name->chars, mt->scope_depth);
                 break;
             }
-            if (existing) {
-                log_debug("js-mir: Annex B binding '%.*s' — existing found (is_let_const=%d scope_depth=%d)",
-                    (int)fn_decl->name->len, fn_decl->name->chars, existing->is_let_const, mt->scope_depth);
-            } else {
-                log_debug("js-mir: Annex B binding '%.*s' — no existing var",
-                    (int)fn_decl->name->len, fn_decl->name->chars);
+            // Also check module_consts for let/const conflict (eval context stores
+            // let/const as MCONST_MODVAR, not local MIR vars)
+            if (!existing && mt->module_consts) {
+                JsModuleConstEntry mclookup;
+                snprintf(mclookup.name, sizeof(mclookup.name), "%s", fn_vname);
+                JsModuleConstEntry* mvc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                if (mvc && mvc->const_type == MCONST_MODVAR && (mvc->var_kind == 1 || mvc->var_kind == 2)) {
+                    break;
+                }
             }
             JsFuncCollected* fc_decl = jm_find_collected_func(mt, fn_decl);
             if (fc_decl && fc_decl->func_item) {
@@ -17742,6 +17749,18 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_new_reg_op(mt->ctx, fn_reg)));
                     jm_set_var(mt, fn_vname, var_reg);
                     jm_scope_env_mark_and_writeback(mt, fn_vname, var_reg);
+                }
+                // Annex B: also write closure to module_var if hoisted as MCONST_MODVAR
+                // (closures that capture let/const vars are resolved via js_get_module_var)
+                if (mt->module_consts) {
+                    JsModuleConstEntry mvlookup;
+                    snprintf(mvlookup.name, sizeof(mvlookup.name), "%s", fn_vname);
+                    JsModuleConstEntry* mvc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mvlookup);
+                    if (mvc && mvc->const_type == MCONST_MODVAR && mvc->var_kind == 0) {
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mvc->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                    }
                 }
             }
         }
@@ -20259,6 +20278,13 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_reg = env_reg;
                 }
                 entry.var.typed_array_type = -1;  // not a typed array by default
+                // v29 TDZ: Mark captured let/const variables so js_check_tdz is
+                // emitted when reading them. The TDZ sentinel may be in the env
+                // if the variable hasn't been initialized yet.
+                if (fc->captures[i].is_let_const) {
+                    entry.var.tdz_active = true;
+                    entry.var.is_let_const = true;
+                }
                 hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
             }
         }
@@ -22964,6 +22990,58 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
 
             jm_analyze_captures(fc, ancestor_names, mt->module_consts, ancestor_func_locals);
+
+            // v29 TDZ: Mark captures that reference let/const variables.
+            // Collect let/const names from the enclosing scope(s) and check each capture.
+            if (fc->capture_count > 0) {
+                struct hashmap* let_const_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                // Collect from program body (top-level let/const)
+                {
+                    JsAstNode* s = program->body;
+                    while (s) {
+                        if (s->node_type == JS_AST_NODE_BLOCK_STATEMENT)
+                            jm_collect_let_const_names(s, let_const_names);
+                        // Also check top-level variable declarations
+                        if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                            JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
+                            if (v->kind == JS_VAR_LET || v->kind == JS_VAR_CONST) {
+                                JsAstNode* d = v->declarations;
+                                while (d) {
+                                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                                        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                                        if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                                            JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+                                            char lname[128];
+                                            snprintf(lname, sizeof(lname), "_js_%.*s", (int)id->name->len, id->name->chars);
+                                            jm_name_set_add_kind(let_const_names, lname, (int)v->kind);
+                                        }
+                                    }
+                                    d = d->next;
+                                }
+                            }
+                        }
+                        s = s->next;
+                    }
+                }
+                // Collect from ancestor function bodies
+                int anc_idx = fc->parent_index;
+                while (anc_idx >= 0 && anc_idx < mt->func_count) {
+                    JsFuncCollected* anc = &mt->func_entries[anc_idx];
+                    if (anc->node && anc->node->body) {
+                        jm_collect_let_const_names(anc->node->body, let_const_names);
+                    }
+                    anc_idx = anc->parent_index;
+                }
+                // Mark captures
+                for (int ci = 0; ci < fc->capture_count; ci++) {
+                    if (jm_name_set_has(let_const_names, fc->captures[ci].name)) {
+                        fc->captures[ci].is_let_const = true;
+                    }
+                }
+                hashmap_free(let_const_names);
+            }
+
             hashmap_free(ancestor_func_locals);
             hashmap_free(ancestor_names);
         }

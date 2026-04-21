@@ -235,11 +235,142 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     if (tp->type_registry) {
         hashmap_free(tp->type_registry);
     }
+    if (tp->normalized_source) {
+        mem_free(tp->normalized_source);
+    }
 
     mem_free(tp);
 }
 
+static char* js_normalize_annexb_html_open_comments(const char* source, size_t length) {
+    if (!source || length == 0) return NULL;
+
+    bool has_html_open = false;
+    for (size_t i = 0; i + 3 < length; i++) {
+        if (source[i] == '<' && source[i + 1] == '!' && source[i + 2] == '-' && source[i + 3] == '-') {
+            has_html_open = true;
+            break;
+        }
+    }
+    if (!has_html_open) return NULL;
+
+    char* out = (char*)mem_alloc(length + 1, MEM_CAT_JS_RUNTIME);
+    memcpy(out, source, length);
+    out[length] = '\0';
+
+    enum {
+        ST_DEFAULT = 0,
+        ST_SQ,
+        ST_DQ,
+        ST_TPL,
+        ST_LINE_COMMENT,
+        ST_BLOCK_COMMENT,
+    } state = ST_DEFAULT;
+
+    bool escaped = false;
+    for (size_t i = 0; i < length; i++) {
+        char c = out[i];
+        char n = (i + 1 < length) ? out[i + 1] : '\0';
+        char n2 = (i + 2 < length) ? out[i + 2] : '\0';
+        char n3 = (i + 3 < length) ? out[i + 3] : '\0';
+
+        if (state == ST_LINE_COMMENT) {
+            if (c == '\n' || c == '\r') state = ST_DEFAULT;
+            continue;
+        }
+        if (state == ST_BLOCK_COMMENT) {
+            if (c == '*' && n == '/') {
+                state = ST_DEFAULT;
+                i++;
+            }
+            continue;
+        }
+        if (state == ST_SQ) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '\'') state = ST_DEFAULT;
+            continue;
+        }
+        if (state == ST_DQ) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '"') state = ST_DEFAULT;
+            continue;
+        }
+        if (state == ST_TPL) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '`') state = ST_DEFAULT;
+            continue;
+        }
+
+        if (c == '/' && n == '/') {
+            state = ST_LINE_COMMENT;
+            i++;
+            continue;
+        }
+        if (c == '/' && n == '*') {
+            state = ST_BLOCK_COMMENT;
+            i++;
+            continue;
+        }
+        if (c == '\'') {
+            state = ST_SQ;
+            continue;
+        }
+        if (c == '"') {
+            state = ST_DQ;
+            continue;
+        }
+        if (c == '`') {
+            state = ST_TPL;
+            continue;
+        }
+
+        if (c == '<' && n == '!' && n2 == '-' && n3 == '-') {
+            // Normalize `<!--` to `//--` so parser treats it as single-line comment.
+            // Keep source length unchanged to avoid offset shifts in diagnostics.
+            out[i] = '/';
+            out[i + 1] = '/';
+            state = ST_LINE_COMMENT;
+            i++;
+            continue;
+        }
+    }
+
+    return out;
+}
+
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
+    if (tp->normalized_source) {
+        mem_free(tp->normalized_source);
+        tp->normalized_source = NULL;
+    }
+
+    char* normalized = js_normalize_annexb_html_open_comments(source, length);
+    if (normalized) {
+        tp->normalized_source = normalized;
+        source = tp->normalized_source;
+    }
+
     tp->source = source;
     tp->source_length = length;
 
