@@ -120,12 +120,15 @@ static thread_local WorkerState tl_worker = {};
 
 static void worker_init_local(Tile* tile) {
     if (tl_worker.initialized) return;
-    // create a thread-local ThorVG canvas (small initial size; re-bound per tile)
-    rdt_vector_init(&tl_worker.vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
-    // create a thread-local backing arena + scratch arena
+    // Initialize memory pool first — this calls ensure_rpmalloc_initialized()
+    // which must happen before any malloc/new calls on this thread (rpmalloc
+    // interposes on malloc; without per-thread init the shared fallback heap
+    // is used, which is not thread-safe).
     tl_worker.pool = pool_create();
     tl_worker.arena = arena_create_default(tl_worker.pool);
     scratch_init(&tl_worker.scratch, tl_worker.arena);
+    // Now safe to create ThorVG canvas (internally uses malloc/new)
+    rdt_vector_init(&tl_worker.vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
     tl_worker.initialized = true;
     log_debug("[WORKER] thread-local ThorVG canvas + scratch arena initialised");
 }
