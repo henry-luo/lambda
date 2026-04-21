@@ -1142,6 +1142,117 @@ static Item build_status_codes(void) {
 }
 
 // =============================================================================
+// http.Agent class
+// =============================================================================
+
+// Agent.prototype.getName(options)
+extern "C" Item js_http_agent_getName(Item options) {
+    // Node.js Agent.getName returns "host:port:localAddress:family"
+    char host[256] = "localhost";
+    char port[32] = "";
+    char local_addr[256] = "";
+    char family_str[16] = "";
+
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item h = js_property_get(options, make_string_item("host"));
+        if (get_type_id(h) == LMD_TYPE_STRING) {
+            String* s = it2s(h);
+            int len = (int)s->len < 255 ? (int)s->len : 255;
+            memcpy(host, s->chars, len);
+            host[len] = '\0';
+        }
+        Item p = js_property_get(options, make_string_item("port"));
+        if (get_type_id(p) == LMD_TYPE_INT) {
+            snprintf(port, sizeof(port), "%d", (int)it2i(p));
+        } else if (get_type_id(p) == LMD_TYPE_STRING) {
+            String* s = it2s(p);
+            int len = (int)s->len < 31 ? (int)s->len : 31;
+            memcpy(port, s->chars, len);
+            port[len] = '\0';
+        }
+        Item la = js_property_get(options, make_string_item("localAddress"));
+        if (get_type_id(la) == LMD_TYPE_STRING) {
+            String* s = it2s(la);
+            int len = (int)s->len < 255 ? (int)s->len : 255;
+            memcpy(local_addr, s->chars, len);
+            local_addr[len] = '\0';
+        }
+        Item fam = js_property_get(options, make_string_item("family"));
+        if (get_type_id(fam) == LMD_TYPE_INT) {
+            int fv = (int)it2i(fam);
+            if (fv != 0) {
+                snprintf(family_str, sizeof(family_str), "%d", fv);
+            }
+        }
+    }
+    char result[600];
+    snprintf(result, sizeof(result), "%s:%s:%s:%s", host, port, local_addr, family_str);
+    return make_string_item(result);
+}
+
+// Agent.prototype.destroy()
+extern "C" Item js_http_agent_destroy(void) {
+    // Stub — clear sockets/freeSockets/requests
+    Item self = js_get_this();
+    js_property_set(self, make_string_item("sockets"), js_new_object());
+    js_property_set(self, make_string_item("freeSockets"), js_new_object());
+    js_property_set(self, make_string_item("requests"), js_new_object());
+    return ItemNull;
+}
+
+// Agent.prototype.createConnection(options, cb)
+extern "C" Item js_http_agent_createConnection(Item options) {
+    // Delegate to net.createConnection
+    extern Item js_net_createConnection(Item, Item);
+    return js_net_createConnection(options, ItemNull);
+}
+
+// new http.Agent(options) constructor
+extern "C" Item js_http_Agent(Item options) {
+    Item agent = js_new_object();
+    js_property_set(agent, make_string_item("__class_name__"), make_string_item("Agent"));
+
+    // defaults
+    int max_sockets = 256;
+    bool keep_alive = false;
+    int keep_alive_msecs = 1000;
+
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item ms = js_property_get(options, make_string_item("maxSockets"));
+        if (get_type_id(ms) == LMD_TYPE_INT) max_sockets = (int)it2i(ms);
+        Item ka = js_property_get(options, make_string_item("keepAlive"));
+        if (get_type_id(ka) == LMD_TYPE_BOOL) keep_alive = it2b(ka);
+        Item kam = js_property_get(options, make_string_item("keepAliveMsecs"));
+        if (get_type_id(kam) == LMD_TYPE_INT) keep_alive_msecs = (int)it2i(kam);
+    }
+
+    js_property_set(agent, make_string_item("maxSockets"), (Item){.item = i2it(max_sockets)});
+    js_property_set(agent, make_string_item("keepAlive"), (Item){.item = b2it(keep_alive)});
+    js_property_set(agent, make_string_item("keepAliveMsecs"), (Item){.item = i2it(keep_alive_msecs)});
+    js_property_set(agent, make_string_item("requests"), js_new_object());
+    js_property_set(agent, make_string_item("sockets"), js_new_object());
+    js_property_set(agent, make_string_item("freeSockets"), js_new_object());
+    js_property_set(agent, make_string_item("maxFreeSockets"), (Item){.item = i2it(256)});
+    js_property_set(agent, make_string_item("options"), options);
+
+    // methods directly on agent (will also inherit from prototype)
+    js_property_set(agent, make_string_item("getName"),
+        js_new_function((void*)js_http_agent_getName, 1));
+    js_property_set(agent, make_string_item("destroy"),
+        js_new_function((void*)js_http_agent_destroy, 0));
+    js_property_set(agent, make_string_item("createConnection"),
+        js_new_function((void*)js_http_agent_createConnection, 1));
+
+    return agent;
+}
+
+// Stub constructor for IncomingMessage, ServerResponse, etc.
+extern "C" Item js_http_stub_ctor(void) {
+    Item obj = js_new_object();
+    return obj;
+}
+
+// =============================================================================
 // http Module Namespace
 // =============================================================================
 
@@ -1162,6 +1273,9 @@ extern "C" Item js_get_http_namespace(void) {
     http_set_method(http_namespace, "request",      (void*)js_http_request, 2);
     http_set_method(http_namespace, "get",           (void*)js_http_get, 2);
 
+    // Server — alias for createServer (Node.js allows http.Server(cb))
+    http_set_method(http_namespace, "Server",       (void*)js_http_createServer, 1);
+
     // STATUS_CODES
     js_property_set(http_namespace, make_string_item("STATUS_CODES"), build_status_codes());
 
@@ -1175,10 +1289,27 @@ extern "C" Item js_get_http_namespace(void) {
     }
     js_property_set(http_namespace, make_string_item("METHODS"), methods);
 
-    // globalAgent — stub
+    // Agent constructor
+    http_set_method(http_namespace, "Agent", (void*)js_http_Agent, 1);
+
+    // globalAgent — stub Agent instance
     Item agent = js_new_object();
     js_property_set(agent, make_string_item("maxSockets"), (Item){.item = i2it(256)});
+    js_property_set(agent, make_string_item("keepAlive"), (Item){.item = b2it(false)});
+    js_property_set(agent, make_string_item("requests"), js_new_object());
+    js_property_set(agent, make_string_item("sockets"), js_new_object());
+    js_property_set(agent, make_string_item("freeSockets"), js_new_object());
+    js_property_set(agent, make_string_item("getName"),
+        js_new_function((void*)js_http_agent_getName, 1));
+    js_property_set(agent, make_string_item("destroy"),
+        js_new_function((void*)js_http_agent_destroy, 0));
     js_property_set(http_namespace, make_string_item("globalAgent"), agent);
+
+    // Stub constructors for IncomingMessage, ServerResponse, ClientRequest, OutgoingMessage
+    http_set_method(http_namespace, "IncomingMessage", (void*)js_http_stub_ctor, 0);
+    http_set_method(http_namespace, "ServerResponse",  (void*)js_http_stub_ctor, 0);
+    http_set_method(http_namespace, "ClientRequest",   (void*)js_http_stub_ctor, 0);
+    http_set_method(http_namespace, "OutgoingMessage",  (void*)js_http_stub_ctor, 0);
 
     Item default_key = make_string_item("default");
     js_property_set(http_namespace, default_key, http_namespace);

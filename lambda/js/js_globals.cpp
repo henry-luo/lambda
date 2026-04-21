@@ -1494,6 +1494,15 @@ extern "C" Item js_process_nextTick(Item callback) {
     return make_js_undefined();
 }
 
+// POSIX: process.getuid/getgid/geteuid/getegid
+#ifndef _WIN32
+#include <unistd.h>
+extern "C" Item js_process_getuid(void) { return (Item){.item = i2it(getuid())}; }
+extern "C" Item js_process_getgid(void) { return (Item){.item = i2it(getgid())}; }
+extern "C" Item js_process_geteuid(void) { return (Item){.item = i2it(geteuid())}; }
+extern "C" Item js_process_getegid(void) { return (Item){.item = i2it(getegid())}; }
+#endif
+
 // process.memoryUsage() — returns object with rss, heapTotal, heapUsed, external, arrayBuffers
 extern "C" Item js_process_memoryUsage(void) {
     Item result = js_new_object();
@@ -1873,6 +1882,28 @@ extern "C" Item js_get_process_object_value(void) {
                 (Item){.item = s2it(heap_create_name("features", 8))},
                 features_obj);
         }
+
+        // POSIX: process.getuid(), getgid(), geteuid(), getegid()
+#ifndef _WIN32
+        {
+            extern Item js_process_getuid(void);
+            extern Item js_process_getgid(void);
+            extern Item js_process_geteuid(void);
+            extern Item js_process_getegid(void);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getuid", 6))},
+                js_new_function((void*)js_process_getuid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getgid", 6))},
+                js_new_function((void*)js_process_getgid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("geteuid", 7))},
+                js_new_function((void*)js_process_geteuid, 0));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("getegid", 7))},
+                js_new_function((void*)js_process_getegid, 0));
+        }
+#endif
     }
     return js_process_object;
 }
@@ -8274,6 +8305,139 @@ extern "C" void js_globals_batch_reset() {
     js_with_batch_reset();
 }
 
+// =============================================================================
+// AbortController / AbortSignal implementation
+// =============================================================================
+
+static Item make_string_item(const char* str) {
+    return (Item){.item = s2it(heap_create_name(str, strlen(str)))};
+}
+static Item make_string_item(const char* str, int len) {
+    return (Item){.item = s2it(heap_create_name(str, len))};
+}
+
+// AbortSignal constructor — creates an AbortSignal object
+static Item js_make_abort_signal() {
+    Item signal = js_new_object();
+    js_property_set(signal, make_string_item("__class_name__"), make_string_item("AbortSignal"));
+    js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(false)});
+    js_property_set(signal, make_string_item("reason"), make_js_undefined());
+    js_property_set(signal, make_string_item("__listeners__"), js_array_new(0));
+    return signal;
+}
+
+// signal.addEventListener / signal.on
+extern "C" Item js_abort_signal_addEventListener(Item event, Item handler) {
+    Item self = js_get_this();
+    // store in __listeners__ array
+    Item listeners = js_property_get(self, make_string_item("__listeners__"));
+    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
+        Item entry = js_new_object();
+        js_property_set(entry, make_string_item("type"), event);
+        js_property_set(entry, make_string_item("handler"), handler);
+        js_array_push(listeners, entry);
+    }
+    return make_js_undefined();
+}
+
+// signal.removeEventListener
+extern "C" Item js_abort_signal_removeEventListener(Item event, Item handler) {
+    return make_js_undefined();
+}
+
+// signal.throwIfAborted()
+extern "C" Item js_abort_signal_throwIfAborted(void) {
+    Item self = js_get_this();
+    Item aborted = js_property_get(self, make_string_item("aborted"));
+    if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
+        Item reason = js_property_get(self, make_string_item("reason"));
+        return reason; // caller should throw this
+    }
+    return make_js_undefined();
+}
+
+// forward declaration
+extern "C" Item js_abort_controller_abort(Item reason);
+
+// AbortController() constructor
+extern "C" Item js_new_AbortController(void) {
+    Item controller = js_new_object();
+    js_property_set(controller, make_string_item("__class_name__"), make_string_item("AbortController"));
+
+    Item signal = js_make_abort_signal();
+    // set signal methods
+    js_property_set(signal, make_string_item("addEventListener"),
+        js_new_function((void*)js_abort_signal_addEventListener, 2));
+    js_property_set(signal, make_string_item("removeEventListener"),
+        js_new_function((void*)js_abort_signal_removeEventListener, 2));
+    js_property_set(signal, make_string_item("throwIfAborted"),
+        js_new_function((void*)js_abort_signal_throwIfAborted, 0));
+    js_property_set(signal, make_string_item("onabort"), ItemNull);
+    js_property_set(controller, make_string_item("signal"), signal);
+
+    // abort method directly on instance
+    js_property_set(controller, make_string_item("abort"),
+        js_new_function((void*)js_abort_controller_abort, 1));
+
+    return controller;
+}
+
+// AbortController.prototype.abort(reason)
+extern "C" Item js_abort_controller_abort(Item reason) {
+    Item self = js_get_this();
+    Item signal = js_property_get(self, make_string_item("signal"));
+    if (get_type_id(signal) != LMD_TYPE_MAP) return make_js_undefined();
+
+    // mark as aborted
+    js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(true)});
+
+    // set reason (default: DOMException "AbortError")
+    if (get_type_id(reason) == LMD_TYPE_NULL || get_type_id(reason) == LMD_TYPE_UNDEFINED) {
+        Item err = js_new_object();
+        js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+        js_property_set(err, make_string_item("message"), make_string_item("The operation was aborted"));
+        js_property_set(err, make_string_item("code"), (Item){.item = i2it(20)});
+        reason = err;
+    }
+    js_property_set(signal, make_string_item("reason"), reason);
+
+    // fire onabort handler
+    Item onabort = js_property_get(signal, make_string_item("onabort"));
+    if (get_type_id(onabort) == LMD_TYPE_FUNC) {
+        extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+        Item event = js_new_object();
+        js_property_set(event, make_string_item("type"), make_string_item("abort"));
+        js_property_set(event, make_string_item("target"), signal);
+        Item argv[1] = { event };
+        js_call_function(onabort, signal, argv, 1);
+    }
+
+    // fire 'abort' event listeners
+    Item listeners = js_property_get(signal, make_string_item("__listeners__"));
+    if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
+        extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+        int64_t len = js_array_length(listeners);
+        for (int i = 0; i < (int)len; i++) {
+            Item entry = js_array_get_int(listeners, i);
+            Item type = js_property_get(entry, make_string_item("type"));
+            if (get_type_id(type) == LMD_TYPE_STRING) {
+                String* ts = it2s(type);
+                if (ts->len == 5 && memcmp(ts->chars, "abort", 5) == 0) {
+                    Item handler = js_property_get(entry, make_string_item("handler"));
+                    if (get_type_id(handler) == LMD_TYPE_FUNC) {
+                        Item event = js_new_object();
+                        js_property_set(event, make_string_item("type"), make_string_item("abort"));
+                        js_property_set(event, make_string_item("target"), signal);
+                        Item argv[1] = { event };
+                        js_call_function(handler, signal, argv, 1);
+                    }
+                }
+            }
+        }
+    }
+    return make_js_undefined();
+}
+
 // forward declaration for populating globalThis with constructors
 extern "C" Item js_get_constructor(Item name_item);
 
@@ -8371,12 +8535,18 @@ extern "C" Item js_get_global_this() {
             (Item){.item = s2it(heap_create_name("Buffer", 6))},
             js_get_buffer_namespace());
 
-        // AbortController stub constructor
-        js_property_set(js_global_this_obj,
-            (Item){.item = s2it(heap_create_name("AbortController", 15))},
-            js_get_global_builtin_fn(
+        // AbortController constructor
+        {
+            Item ac_ctor = js_new_function((void*)js_new_AbortController, 0);
+            js_property_set(ac_ctor, make_string_item("prototype"), js_new_object());
+            // abort method on instances (set by constructor), but also add as static for access
+            Item ac_proto = js_property_get(ac_ctor, make_string_item("prototype"));
+            js_property_set(ac_proto, make_string_item("abort"),
+                js_new_function((void*)js_abort_controller_abort, 1));
+            js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("AbortController", 15))},
-                (Item){.item = i2it(0)}));
+                ac_ctor);
+        }
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
