@@ -4,8 +4,12 @@
 #include "font_face.h"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/mempool.h"
 #include "../lib/memtrack.h"
+#include "../lib/log.h"
 }
+#include "../lambda/input/input.hpp"
+#include "../radiant/script_runner.h"
 #include <stdio.h>
 #include <string.h>
 #include <png.h>
@@ -17,6 +21,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+void view_pool_destroy(ViewTree* tree);
 // load_html_doc is declared in view.hpp
 
 // Save surface to PNG using libpng
@@ -462,4 +467,232 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     mem_free(svg_content);
     log_info("render_uicontext_to_svg: completed successfully");
     return 0;
+}
+
+// ─── Batch render command ────────────────────────────────────────────────────
+//
+// Reads render jobs from stdin (one per line, tab-separated):
+//   <html_file>\t<output_png>\t<viewport_width>\t<viewport_height>\t<pixel_ratio>
+//
+// Initializes UiContext ONCE and reuses it across all renders, saving ~70MB of
+// per-process overhead (GLFW/Metal driver, font database scan, ThorVG, FreeType).
+//
+// Writes results to stdout (one per line):
+//   OK\t<html_file>
+//   FAIL\t<html_file>\t<reason>
+
+// JS runtime batch reset functions
+extern "C" void js_batch_reset(void);
+extern "C" void js_dom_batch_reset(void);
+extern "C" void js_globals_batch_reset(void);
+extern "C" void script_runner_cleanup_heap(void);
+extern void script_runner_cleanup_js_state(DomDocument* doc);
+extern void image_cache_cleanup(UiContext* uicon);
+
+static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
+    if (doc) {
+        script_runner_cleanup_js_state(doc);
+        if (doc->view_tree) {
+            view_pool_destroy(doc->view_tree);
+            mem_free(doc->view_tree);
+            doc->view_tree = nullptr;
+        }
+        dom_document_destroy(doc);
+    }
+
+    js_batch_reset();
+    js_dom_batch_reset();
+    js_globals_batch_reset();
+    script_runner_cleanup_heap();
+
+    font_context_reset_document_fonts(ui_context->font_ctx);
+    font_context_reset_glyph_caches(ui_context->font_ctx);
+    ui_context->font_face_count = 0;
+
+    image_cache_cleanup(ui_context);
+    InputManager::destroy_global();
+    ui_context->document = nullptr;
+}
+
+static bool render_batch_single(
+    UiContext* ui_context,
+    const char* html_file,
+    const char* png_file,
+    int viewport_width,
+    int viewport_height,
+    float pixel_ratio,
+    Url* cwd
+) {
+    float scale = 1.0f;
+    float total_scale = scale * pixel_ratio;
+
+    int layout_width = viewport_width > 0 ? viewport_width : 100;
+    int layout_height = viewport_height > 0 ? viewport_height : 100;
+
+    // update ui_context dimensions for this render
+    ui_context->pixel_ratio = pixel_ratio;
+    int surface_width = (int)(layout_width * total_scale);
+    int surface_height = (int)(layout_height * total_scale);
+    ui_context_create_surface(ui_context, surface_width, surface_height);
+    ui_context->window_width = surface_width;
+    ui_context->window_height = surface_height;
+    ui_context->viewport_width = layout_width;
+    ui_context->viewport_height = layout_height;
+
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
+    if (!doc) {
+        log_error("render-batch: failed to load %s", html_file);
+        render_batch_cleanup_doc(ui_context, nullptr);
+        return false;
+    }
+
+    ui_context->document = doc;
+    doc->given_scale = scale;
+    doc->scale = total_scale;
+
+    process_document_font_faces(ui_context, doc);
+
+    if (doc->root) {
+        layout_html_doc(ui_context, doc, false);
+    }
+
+    int output_width = surface_width;
+    int output_height = surface_height;
+
+    bool rendered = false;
+    static const int64_t PNG_TILE_THRESHOLD = (int64_t)32 * 1024 * 1024;
+
+    bool auto_width = (viewport_width == 0);
+    bool auto_height = (viewport_height == 0);
+    if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
+        extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
+        int content_max_x = 0, content_max_y = 0;
+        calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
+        content_max_x += 50;
+        content_max_y += 50;
+        if (auto_width) output_width = (int)(content_max_x * total_scale);
+        if (auto_height) output_height = (int)(content_max_y * total_scale);
+
+        View* root_view = doc->view_tree->root;
+        if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* root_block = (ViewBlock*)root_view;
+            if (root_block->scroller && root_block->scroller->has_clip) {
+                if (auto_width)  root_block->scroller->clip.right  = (float)content_max_x;
+                if (auto_height) root_block->scroller->clip.bottom = (float)content_max_y;
+            }
+        }
+
+        if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
+            render_html_doc_tiled(ui_context, doc->view_tree, png_file,
+                output_width, output_height);
+            rendered = true;
+        } else {
+            ui_context_create_surface(ui_context, output_width, output_height);
+        }
+    }
+
+    if (!rendered) {
+        if (doc->view_tree) {
+            render_html_doc(ui_context, doc->view_tree, png_file);
+        } else {
+            log_error("render-batch: no view tree for %s", html_file);
+            render_batch_cleanup_doc(ui_context, doc);
+            return false;
+        }
+    }
+
+    render_batch_cleanup_doc(ui_context, doc);
+    return true;
+}
+
+int cmd_render_batch(int argc, char** argv) {
+    // parse optional args: --pixel-ratio <value>
+    float default_pixel_ratio = 1.0f;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--pixel-ratio") == 0 && i + 1 < argc) {
+            default_pixel_ratio = (float)atof(argv[i + 1]);
+            if (default_pixel_ratio <= 0) default_pixel_ratio = 1.0f;
+        }
+    }
+
+    // initialize UI context once
+    UiContext ui_context;
+    memset(&ui_context, 0, sizeof(UiContext));
+    if (ui_context_init(&ui_context, true) != 0) {
+        fprintf(stderr, "FAIL\t(init)\tFailed to initialize UI context\n");
+        return 1;
+    }
+
+    Url* cwd = get_current_dir();
+    if (!cwd) {
+        fprintf(stderr, "FAIL\t(init)\tFailed to get current directory\n");
+        ui_context_cleanup(&ui_context);
+        return 1;
+    }
+
+    // read jobs from stdin, one per line
+    char line[4096];
+    int success_count = 0;
+    int failure_count = 0;
+
+    while (fgets(line, sizeof(line), stdin)) {
+        // strip trailing newline
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        if (len == 0) continue;
+
+        // parse tab-separated fields: html_file\toutput_png\tvw\tvh[\tpixel_ratio]
+        char* html_file = line;
+        char* tab1 = strchr(html_file, '\t');
+        if (!tab1) {
+            fprintf(stdout, "FAIL\t%s\tmalformed input line\n", html_file);
+            fflush(stdout);
+            failure_count++;
+            continue;
+        }
+        *tab1 = '\0';
+        char* output_png = tab1 + 1;
+
+        char* tab2 = strchr(output_png, '\t');
+        if (!tab2) {
+            fprintf(stdout, "FAIL\t%s\tmalformed input line\n", html_file);
+            fflush(stdout);
+            failure_count++;
+            continue;
+        }
+        *tab2 = '\0';
+        int vw = atoi(tab2 + 1);
+
+        char* tab3 = strchr(tab2 + 1, '\t');
+        int vh = 0;
+        float pixel_ratio = default_pixel_ratio;
+        if (tab3) {
+            *tab3 = '\0';
+            vw = atoi(tab2 + 1);
+            vh = atoi(tab3 + 1);
+
+            char* tab4 = strchr(tab3 + 1, '\t');
+            if (tab4) {
+                *tab4 = '\0';
+                vh = atoi(tab3 + 1);
+                pixel_ratio = (float)atof(tab4 + 1);
+                if (pixel_ratio <= 0) pixel_ratio = default_pixel_ratio;
+            }
+        }
+
+        bool ok = render_batch_single(&ui_context, html_file, output_png, vw, vh, pixel_ratio, cwd);
+        if (ok) {
+            fprintf(stdout, "OK\t%s\n", html_file);
+            success_count++;
+        } else {
+            fprintf(stdout, "FAIL\t%s\trender error\n", html_file);
+            failure_count++;
+        }
+        fflush(stdout);
+    }
+
+    ui_context_cleanup(&ui_context);
+    return failure_count > 0 ? 1 : 0;
 }

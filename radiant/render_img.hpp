@@ -13,4 +13,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
 int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
 
+// Batch render command: reads jobs from stdin, shares one UiContext
+int cmd_render_batch(int argc, char** argv);
+
 #endif // RENDER_IMG_HPP
