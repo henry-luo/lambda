@@ -799,6 +799,7 @@ extern Item js_reflect_set_prototype_of(Item obj, Item proto);
 extern Item js_reflect_prevent_extensions(Item obj);
 extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
 extern Item js_get_reflect_object_value();
+extern Item js_get_atomics_object_value();
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1310,6 +1311,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},
     {"js_get_reflect_object_value", FPTR(js_get_reflect_object_value)},
+    {"js_get_atomics_object_value", FPTR(js_get_atomics_object_value)},
     {"js_get_262_object_value", FPTR(js_get_262_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
     {"js_is_document_proxy", FPTR(js_is_document_proxy)},

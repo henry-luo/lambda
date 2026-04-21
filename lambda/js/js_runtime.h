@@ -189,6 +189,7 @@ Item js_get_math_object_value(void);
 Item js_get_json_object_value(void);
 Item js_get_console_object_value(void);
 Item js_get_reflect_object_value(void);
+Item js_get_atomics_object_value(void);
 Item js_get_262_object_value(void);
 
 // =============================================================================
