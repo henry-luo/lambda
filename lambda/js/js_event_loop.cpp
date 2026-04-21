@@ -79,6 +79,8 @@ typedef struct JsTimerHandle {
     int64_t    id;
     Item       callback;
     bool       is_interval;
+    Item       extra_args[8];   // extra args to pass to callback
+    int        extra_count;     // number of extra args
 } JsTimerHandle;
 
 #define MAX_TIMER_HANDLES 1024
@@ -102,7 +104,11 @@ static void timer_close_cb(uv_handle_t *handle) {
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
-        js_call_function(th->callback, ItemNull, NULL, 0);
+        if (th->extra_count > 0) {
+            js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
+        } else {
+            js_call_function(th->callback, ItemNull, NULL, 0);
+        }
     }
     // microtasks are drained by the uv_prepare_t handle after each callback
 
@@ -137,6 +143,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     th->id = next_timer_id++;
     th->callback = callback;
     th->is_interval = false;
+    th->extra_count = 0;
     th->timer.data = th;
 
     uv_timer_init(loop, &th->timer);
@@ -147,6 +154,91 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     }
 
     return (Item){.item = i2it(th->id)};
+}
+
+// setTimeout with extra args passed as a JS array
+extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
+    uv_loop_t *loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("event_loop: uv loop not initialized for setTimeout");
+        return ItemNull;
+    }
+
+    double ms = item_to_ms(delay);
+    if (ms < 0) ms = 0;
+
+    JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
+    if (!th) return ItemNull;
+
+    th->id = next_timer_id++;
+    th->callback = callback;
+    th->is_interval = false;
+    th->extra_count = 0;
+    th->timer.data = th;
+
+    // extract extra args from the array
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        Array* arr = args_array.array;
+        int count = (int)arr->length;
+        if (count > 8) count = 8;
+        for (int i = 0; i < count; i++) {
+            th->extra_args[i] = arr->items[i];
+        }
+        th->extra_count = count;
+    }
+
+    uv_timer_init(loop, &th->timer);
+    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
+
+    if (timer_handle_count < MAX_TIMER_HANDLES) {
+        timer_handles[timer_handle_count++] = th;
+    }
+
+    return (Item){.item = i2it(th->id)};
+}
+
+// Helper: create a JS array from 1-4 items (used by transpiler for setTimeout extra args)
+extern "C" Item js_pack_args_1(Item a1) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    array_push(arr, a1);
+    return (Item){.array = arr};
+}
+extern "C" Item js_pack_args_2(Item a1, Item a2) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    array_push(arr, a1);
+    array_push(arr, a2);
+    return (Item){.array = arr};
+}
+extern "C" Item js_pack_args_3(Item a1, Item a2, Item a3) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    array_push(arr, a1);
+    array_push(arr, a2);
+    array_push(arr, a3);
+    return (Item){.array = arr};
+}
+extern "C" Item js_pack_args_4(Item a1, Item a2, Item a3, Item a4) {
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->items = nullptr;
+    arr->length = 0;
+    arr->capacity = 0;
+    array_push(arr, a1);
+    array_push(arr, a2);
+    array_push(arr, a3);
+    array_push(arr, a4);
+    return (Item){.array = arr};
 }
 
 extern "C" Item js_setInterval(Item callback, Item delay) {
@@ -165,7 +257,48 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     th->id = next_timer_id++;
     th->callback = callback;
     th->is_interval = true;
+    th->extra_count = 0;
     th->timer.data = th;
+
+    uv_timer_init(loop, &th->timer);
+    uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);
+
+    if (timer_handle_count < MAX_TIMER_HANDLES) {
+        timer_handles[timer_handle_count++] = th;
+    }
+
+    return (Item){.item = i2it(th->id)};
+}
+
+// setInterval with extra args passed as a JS array
+extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) {
+    uv_loop_t *loop = lambda_uv_loop();
+    if (!loop) {
+        log_error("event_loop: uv loop not initialized for setInterval");
+        return ItemNull;
+    }
+
+    double ms = item_to_ms(delay);
+    if (ms < 1) ms = 1;
+
+    JsTimerHandle *th = (JsTimerHandle *)mem_calloc(1, sizeof(JsTimerHandle), MEM_CAT_JS_RUNTIME);
+    if (!th) return ItemNull;
+
+    th->id = next_timer_id++;
+    th->callback = callback;
+    th->is_interval = true;
+    th->extra_count = 0;
+    th->timer.data = th;
+
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        Array* arr = args_array.array;
+        int count = (int)arr->length;
+        if (count > 8) count = 8;
+        for (int i = 0; i < count; i++) {
+            th->extra_args[i] = arr->items[i];
+        }
+        th->extra_count = count;
+    }
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);

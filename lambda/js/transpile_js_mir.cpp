@@ -11500,22 +11500,64 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_symbol_create", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-            // v14: setTimeout(callback, delay)
+            // v14: setTimeout(callback, delay, ...extra_args)
             if (nl == 10 && strncmp(n, "setTimeout", 10) == 0) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
                     : jm_box_int_const(mt, 0);
+                // check for extra args (setTimeout(fn, delay, arg1, arg2, ...))
+                JsAstNode* extra = (call->arguments && call->arguments->next) ? call->arguments->next->next : NULL;
+                if (extra) {
+                    // count extra args (up to 4)
+                    int ec = 0;
+                    MIR_reg_t ea[4];
+                    JsAstNode* e = extra;
+                    while (e && ec < 4) {
+                        ea[ec++] = jm_transpile_box_item(mt, e);
+                        e = e->next;
+                    }
+                    // pack into array
+                    MIR_reg_t arr;
+                    if (ec == 1) arr = jm_call_1(mt, "js_pack_args_1", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]));
+                    else if (ec == 2) arr = jm_call_2(mt, "js_pack_args_2", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]));
+                    else if (ec == 3) arr = jm_call_3(mt, "js_pack_args_3", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]));
+                    else arr = jm_call_4(mt, "js_pack_args_4", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[3]));
+                    return jm_call_3(mt, "js_setTimeout_args", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, delay),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr));
+                }
                 return jm_call_2(mt, "js_setTimeout", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));
             }
-            // v14: setInterval(callback, delay)
+            // v14: setInterval(callback, delay, ...extra_args)
             if (nl == 11 && strncmp(n, "setInterval", 11) == 0) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
                     : jm_box_int_const(mt, 0);
+                // check for extra args
+                JsAstNode* extra = (call->arguments && call->arguments->next) ? call->arguments->next->next : NULL;
+                if (extra) {
+                    int ec = 0;
+                    MIR_reg_t ea[4];
+                    JsAstNode* e = extra;
+                    while (e && ec < 4) {
+                        ea[ec++] = jm_transpile_box_item(mt, e);
+                        e = e->next;
+                    }
+                    MIR_reg_t arr;
+                    if (ec == 1) arr = jm_call_1(mt, "js_pack_args_1", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]));
+                    else if (ec == 2) arr = jm_call_2(mt, "js_pack_args_2", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]));
+                    else if (ec == 3) arr = jm_call_3(mt, "js_pack_args_3", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]));
+                    else arr = jm_call_4(mt, "js_pack_args_4", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[3]));
+                    return jm_call_3(mt, "js_setInterval_args", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, delay),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr));
+                }
                 return jm_call_2(mt, "js_setInterval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));

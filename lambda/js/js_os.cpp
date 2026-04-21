@@ -145,15 +145,39 @@ extern "C" Item js_os_homedir(void) {
 // os.tmpdir()
 extern "C" Item js_os_tmpdir(void) {
 #ifdef _WIN32
-    static char temp[MAX_PATH] = {0};
-    if (temp[0] == 0) {
-        GetTempPathA(sizeof(temp), temp);
+    // Windows: check TEMP, then TMP, then system GetTempPath
+    const char* temp = getenv("TEMP");
+    if (!temp || !temp[0]) temp = getenv("TMP");
+    if (!temp || !temp[0]) {
+        static char wbuf[MAX_PATH] = {0};
+        if (wbuf[0] == 0) GetTempPathA(sizeof(wbuf), wbuf);
+        temp = wbuf;
     }
-    return make_string_item(temp);
+    // strip trailing slashes (but not if root like "C:\")
+    size_t len = strlen(temp);
+    while (len > 1 && (temp[len-1] == '\\' || temp[len-1] == '/')) {
+        // don't strip "C:\"
+        if (len == 3 && temp[1] == ':') break;
+        len--;
+    }
+    char buf[MAX_PATH];
+    memcpy(buf, temp, len);
+    buf[len] = '\0';
+    return make_string_item(buf);
 #else
-    const char* temp = shell_getenv("TMPDIR");
-    if (temp) return make_string_item(temp);
-    return make_string_item("/tmp");
+    // Unix: check TMPDIR, then TMP, then TEMP, fallback to /tmp
+    const char* temp = getenv("TMPDIR");
+    if (!temp || !temp[0]) temp = getenv("TMP");
+    if (!temp || !temp[0]) temp = getenv("TEMP");
+    if (!temp || !temp[0]) temp = "/tmp";
+    // strip trailing slashes (but not if root "/")
+    size_t len = strlen(temp);
+    while (len > 1 && temp[len-1] == '/') len--;
+    char buf[4096];
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, temp, len);
+    buf[len] = '\0';
+    return make_string_item(buf);
 #endif
 }
 
