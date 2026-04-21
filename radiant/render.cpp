@@ -28,6 +28,8 @@
 
 // Forward declaration for inline SVG rendering (defined in render_svg_inline.cpp)
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
+// Forward declaration for SVG rasterization (defined later in this file)
+void render_svg(ImageSurface* surface);
 
 #define DEBUG_RENDER 0
 
@@ -1528,6 +1530,42 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
     log_debug("[MARKER RENDER] type=%d, x=%.1f, y=%.1f, width=%.1f, bullet_size=%.1f",
              marker_type, x, y, width, bullet_size);
+
+    // CSS 2.1 §12.5: list-style-image overrides list-style-type
+    if (marker_prop->image_url && strcmp(marker_prop->image_url, "none") != 0) {
+        // Lazy-load the image on first render
+        if (!marker_prop->loaded_image) {
+            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image_url);
+            if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
+                // SVG: set rasterization size based on intrinsic dimensions
+                float iw, ih;
+                rdt_picture_get_size(marker_prop->loaded_image->pic, &iw, &ih);
+                if (iw > 0 && ih > 0) {
+                    marker_prop->loaded_image->max_render_width = (int)(iw + 0.5f); // INT_CAST_OK: pixel rounding
+                }
+                render_svg(marker_prop->loaded_image);
+            }
+        }
+        ImageSurface* img = marker_prop->loaded_image;
+        if (img && img->pixels && img->width > 0 && img->height > 0) {
+            image_surface_ensure_decoded(img);
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
+            float img_w = (float)img->width;
+            float img_h = (float)img->height;
+            // Position image: right-aligned within marker box, vertically centered on x-height
+            float ix = x + width - img_w - 4.0f;
+            float iy = y + baseline_offset - font_size * 0.35f - img_h / 2.0f;
+            rc_draw_image(rdcon, (uint32_t*)img->pixels, img->width, img->height,
+                          img->width, ix, iy, img_w, img_h, 255, nullptr);
+            log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
+                     ix, iy, img_w, img_h);
+            return;  // image replaces the marker type
+        }
+        // Fallback: if image failed to load, fall through to marker_type rendering
+        log_debug("[MARKER RENDER] list-style-image failed to load, falling back to marker_type");
+    }
 
     switch (marker_type) {
         case CSS_VALUE_DISC: {
