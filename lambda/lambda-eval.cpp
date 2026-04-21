@@ -4739,7 +4739,6 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
     case LMD_TYPE_INT:   *(int64_t*)field_ptr = value.get_int56(); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
-    case LMD_TYPE_BIGINT: *(int64_t*)field_ptr = value.get_int56(); break;
     case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
     case LMD_TYPE_DTIME: *(DateTime*)field_ptr = value.get_datetime(); break;
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {

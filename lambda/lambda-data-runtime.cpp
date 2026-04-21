@@ -690,8 +690,6 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
         return {.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     case LMD_TYPE_INT:
         return {.item = i2it(*(int64_t*)field_ptr)};
-    case LMD_TYPE_BIGINT:
-        return {.item = bi2it(*(int64_t*)field_ptr)};
     case LMD_TYPE_INT64:
         return push_l(*(int64_t*)field_ptr);
     case LMD_TYPE_FLOAT:

@@ -29,7 +29,6 @@ Type TYPE_UNDEFINED = {.type_id = LMD_TYPE_UNDEFINED};  // JavaScript undefined
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
-Type TYPE_BIGINT = {.type_id = LMD_TYPE_BIGINT};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
@@ -133,7 +132,6 @@ TypeType LIT_TYPE_NULL;
 TypeType LIT_TYPE_BOOL;
 TypeType LIT_TYPE_INT;
 TypeType LIT_TYPE_INT64;
-TypeType LIT_TYPE_BIGINT;
 TypeType LIT_TYPE_FLOAT;
 TypeType LIT_TYPE_DECIMAL;
 TypeType LIT_TYPE_NUMBER;
@@ -190,7 +188,6 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_BOOL) = LIT_TYPE;  LIT_TYPE_BOOL.type = &TYPE_BOOL;
     *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT;
     *(Type*)(&LIT_TYPE_INT64) = LIT_TYPE;  LIT_TYPE_INT64.type = &TYPE_INT64;
-    *(Type*)(&LIT_TYPE_BIGINT) = LIT_TYPE;  LIT_TYPE_BIGINT.type = &TYPE_BIGINT;
     *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
     *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
     *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
@@ -241,7 +238,6 @@ void init_type_info() {
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
-    type_info[LMD_TYPE_BIGINT] = {sizeof(int64_t), "bigint", &TYPE_BIGINT, (Type*)&LIT_TYPE_BIGINT};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
     type_info[LMD_TYPE_NUMBER] = {sizeof(double), "number", &TYPE_NUMBER, (Type*)&LIT_TYPE_NUMBER};
@@ -349,9 +345,6 @@ bool it2b(Item itm) {
 
 int64_t it2i(Item itm) {
     if (itm._type_id == LMD_TYPE_INT) {
-        return itm.get_int56();
-    }
-    else if (itm._type_id == LMD_TYPE_BIGINT) {
         return itm.get_int56();
     }
     else if (itm._type_id == LMD_TYPE_INT64) {

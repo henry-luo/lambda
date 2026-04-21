@@ -12,6 +12,7 @@
 #include "js_typed_array.h"
 #include "js_dom_events.h"
 #include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
 
@@ -2492,48 +2493,37 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     if (!method) return ItemNull;
 
     // BigInt prototype methods
-    if (get_type_id(num) == LMD_TYPE_BIGINT) {
-        if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
-            int64_t val = it2i(num);
-            int radix = 10;
-            if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-                Item radix_item = js_to_number(args[0]);
-                if (js_check_exception()) return ItemNull;
-                TypeId rt = get_type_id(radix_item);
-                if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
-                else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
-                if (radix < 2 || radix > 36) {
-                    return js_throw_range_error("toString() radix must be between 2 and 36");
+    if (get_type_id(num) == LMD_TYPE_DECIMAL) {
+        Decimal* dec = (Decimal*)(num.item & 0x00FFFFFFFFFFFFFF);
+        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+            if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+                int radix = 10;
+                if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
+                    Item radix_item = js_to_number(args[0]);
+                    if (js_check_exception()) return ItemNull;
+                    TypeId rt = get_type_id(radix_item);
+                    if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
+                    else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
+                    if (radix < 2 || radix > 36) {
+                        return js_throw_range_error("toString() radix must be between 2 and 36");
+                    }
                 }
+                char* s = bigint_to_cstring_radix(num, radix);
+                if (!s) return ItemNull;
+                Item result = (Item){.item = s2it(heap_create_name(s))};
+                free(s);
+                return result;
             }
-            if (radix == 10) return js_to_string(num);
-            // Convert to radix string
-            bool negative = val < 0;
-            uint64_t abs_val = negative ? (uint64_t)(-val) : (uint64_t)val;
-            const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-            char buf[128];
-            int pos = 127;
-            buf[pos] = '\0';
-            if (abs_val == 0) {
-                buf[--pos] = '0';
-            } else {
-                while (abs_val > 0) {
-                    buf[--pos] = digits[abs_val % radix];
-                    abs_val /= radix;
-                }
+            if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
+                return num;
             }
-            if (negative) buf[--pos] = '-';
-            return (Item){.item = s2it(heap_create_name(&buf[pos], 127 - pos))};
+            if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
+                return js_to_string(num);
+            }
+            // BigInt doesn't have toFixed, toPrecision, toExponential
+            js_throw_type_error("is not a function");
+            return ItemNull;
         }
-        if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
-            return num;
-        }
-        if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
-            return js_to_string(num);
-        }
-        // BigInt doesn't have toFixed, toPrecision, toExponential
-        js_throw_type_error("is not a function");
-        return ItemNull;
     }
 
     if (method->len == 7 && strncmp(method->chars, "toFixed", 7) == 0) {

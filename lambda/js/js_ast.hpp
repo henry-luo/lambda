@@ -257,6 +257,7 @@ typedef struct JsLiteralNode {
         String* string_value;
         bool boolean_value;
     } value;
+    String* bigint_str;      // for BigInt literals: original text for arbitrary precision (pool-allocated)
 } JsLiteralNode;
 
 // JavaScript binary expression node

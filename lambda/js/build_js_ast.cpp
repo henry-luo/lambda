@@ -240,14 +240,25 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             // Strip trailing 'n' for BigInt literals
             if (literal->is_bigint && j > 0) j--;
             temp_str[j] = '\0';
-            char* endptr;
-            // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
-            if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
-                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
-            } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
-                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
-            } else {
-                literal->value.number_value = strtod(temp_str, &endptr);
+            // For BigInt literals, store as string to preserve arbitrary precision
+            if (literal->is_bigint) {
+                // allocate a String on the AST pool (heap_create_name may not be available yet)
+                String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + j + 1);
+                s->len = j;
+                memcpy(s->chars, temp_str, j);
+                s->chars[j] = '\0';
+                literal->bigint_str = s;
+            }
+            {
+                char* endptr;
+                // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
+                if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
+                    literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
+                } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
+                    literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
+                } else {
+                    literal->value.number_value = strtod(temp_str, &endptr);
+                }
             }
             mem_free(temp_str);
         } else {

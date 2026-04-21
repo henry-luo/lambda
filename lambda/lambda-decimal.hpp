@@ -215,3 +215,54 @@ char* decimal_to_string(Item item);
 
 // Convert Decimal* to string (caller must free with decimal_free_string)
 char* decimal_to_string(Decimal* decimal);
+
+// ─────────────────────────────────────────────────────────────────────
+// BigInt Support (JS BigInt backed by libmpdec integer arithmetic)
+// ─────────────────────────────────────────────────────────────────────
+// BigInt reuses Decimal struct with unlimited == DECIMAL_BIGINT (2).
+// All values are integers (no fractional part). Uses unlimited context.
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Creation
+Item bigint_from_int64(int64_t val);
+Item bigint_from_double(double val);          // must be exact integer, else returns ItemError
+Item bigint_from_string(const char* str, int len);  // decimal string (no "n" suffix)
+
+// Extraction
+int64_t bigint_to_int64(Item bi);             // truncates if too large
+double  bigint_to_double(Item bi);            // may lose precision
+bool    bigint_is_zero(Item bi);
+int     bigint_cmp(Item a, Item b);           // -1, 0, +1
+int     bigint_cmp_double(Item bi, double d); // compare BigInt with double
+
+// Arithmetic (all return BigInt Item)
+Item bigint_add(Item a, Item b);
+Item bigint_sub(Item a, Item b);
+Item bigint_mul(Item a, Item b);
+Item bigint_div(Item a, Item b);              // integer division (truncate toward zero)
+Item bigint_mod(Item a, Item b);
+Item bigint_pow(Item base, Item exp);         // exp must be non-negative
+Item bigint_neg(Item a);
+Item bigint_inc(Item a);                      // a + 1
+Item bigint_dec(Item a);                      // a - 1
+
+// Bitwise (all return BigInt Item)
+Item bigint_bitwise_and(Item a, Item b);
+Item bigint_bitwise_or(Item a, Item b);
+Item bigint_bitwise_xor(Item a, Item b);
+Item bigint_bitwise_not(Item a);
+Item bigint_left_shift(Item a, Item b);
+Item bigint_right_shift(Item a, Item b);
+
+// String conversion
+char* bigint_to_cstring_radix(Item bi, int radix);  // returns malloc'd string, caller frees
+
+// Get the mpd_t* from a BigInt Item (for advanced use)
+mpd_t* bigint_get_mpd(Item bi);
+
+#ifdef __cplusplus
+}
+#endif
