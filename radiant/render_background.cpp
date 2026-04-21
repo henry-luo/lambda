@@ -1436,9 +1436,9 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* ti
     m.e13 = tile_rect->x;
     m.e23 = tile_rect->y;
 
-    // Clip to block clip region
+    // Clip to block clip region (clip path is already in absolute coordinates, no transform needed)
     RdtPath* clip_path = create_bg_clip_path(rdcon);
-    rc_push_clip(rdcon, clip_path, &m);
+    rc_push_clip(rdcon, clip_path, NULL);
     rc_draw_picture(rdcon, pic, 255, &m);
     rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
