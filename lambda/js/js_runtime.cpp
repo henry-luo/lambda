@@ -428,6 +428,8 @@ extern "C" void js_batch_reset() {
     js_reset_console_object();
     extern void js_reset_reflect_object();
     js_reset_reflect_object();
+    extern void js_reset_atomics_object();
+    js_reset_atomics_object();
     extern void js_reset_262_object();
     js_reset_262_object();
     // reset interned __proto__ key (allocated in old pool)
@@ -544,6 +546,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_console_object();
     extern void js_reset_reflect_object();
     js_reset_reflect_object();
+    extern void js_reset_atomics_object();
+    js_reset_atomics_object();
     extern void js_reset_262_object();
     js_reset_262_object();
     // reset interned __proto__ key
@@ -2876,6 +2880,19 @@ enum JsBuiltinId {
     JS_BUILTIN_TYPED_ARRAY_OF,
     JS_BUILTIN_REGEXP_COMPILE,       // RegExp.prototype.compile (Annex B)
     JS_BUILTIN_ARRAYBUFFER_SLICE,    // ArrayBuffer.prototype.slice
+    // Atomics methods
+    JS_BUILTIN_ATOMICS_ADD,
+    JS_BUILTIN_ATOMICS_AND,
+    JS_BUILTIN_ATOMICS_COMPAREEXCHANGE,
+    JS_BUILTIN_ATOMICS_EXCHANGE,
+    JS_BUILTIN_ATOMICS_ISLOCKFREE,
+    JS_BUILTIN_ATOMICS_LOAD,
+    JS_BUILTIN_ATOMICS_NOTIFY,
+    JS_BUILTIN_ATOMICS_OR,
+    JS_BUILTIN_ATOMICS_STORE,
+    JS_BUILTIN_ATOMICS_SUB,
+    JS_BUILTIN_ATOMICS_WAIT,
+    JS_BUILTIN_ATOMICS_XOR,
     JS_BUILTIN_MAX
 };
 
@@ -3536,12 +3553,17 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
     Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
     if (js_exception_pending) return ItemNull;
     bool bool_result = it2b(js_to_boolean(result));
-    // ES2020 §9.5.2 invariant: if target is not extensible, proto must match target's prototype.
+    // ES2020 §9.5.2 step 9: If booleanTrapResult is false, return false
+    // (skip IsExtensible check — step 10 only applies when trap returned true)
+    if (!bool_result) {
+        return (Item){.item = b2it(false)};
+    }
+    // ES2020 §9.5.2 step 10-12 invariant: if target is not extensible, proto must match target's prototype.
     // Use the abstract IsExtensible operation and propagate abrupt completion.
     Item target_extensible_item = js_object_is_extensible(PD_TARGET(pd));
     if (js_exception_pending) return ItemNull;
     bool target_extensible = it2b(js_to_boolean(target_extensible_item));
-    if (bool_result && !target_extensible) {
+    if (!target_extensible) {
         Item target_proto = js_get_prototype_of(PD_TARGET(pd));
         extern Item js_strict_equal(Item a, Item b);
         if (!it2b(js_strict_equal(proto, target_proto))) {
@@ -8476,6 +8498,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_throw_value(error);
             return ItemNull;
         }
+        // ES2023 §23.1.3.34 step 1: toSorted must check IsCallable(comparefn) BEFORE any other step
+        if (builtin_id == JS_BUILTIN_ARR_TO_SORTED && arg_count >= 1 &&
+            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("comparefn is not a function");
+        }
         // Route to js_array_method for actual arrays, js_map_method for maps/typed arrays.
         // Do NOT call js_map_method for plain MAPs — it would recurse through
         // the property access fallback which finds the builtin again.
@@ -9920,6 +9947,43 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF: {
         return js_reflect_set_prototype_of(arg0, arg1);
+    }
+    // Atomics methods — all operations require SharedArrayBuffer-backed TypedArrays.
+    // Since SharedArrayBuffer is not implemented, all operations throw TypeError.
+    case JS_BUILTIN_ATOMICS_ADD:
+    case JS_BUILTIN_ATOMICS_AND:
+    case JS_BUILTIN_ATOMICS_COMPAREEXCHANGE:
+    case JS_BUILTIN_ATOMICS_EXCHANGE:
+    case JS_BUILTIN_ATOMICS_LOAD:
+    case JS_BUILTIN_ATOMICS_OR:
+    case JS_BUILTIN_ATOMICS_STORE:
+    case JS_BUILTIN_ATOMICS_SUB:
+    case JS_BUILTIN_ATOMICS_XOR: {
+        // Validate first arg is a TypedArray (throws TypeError if not)
+        if (!js_is_typed_array(arg0)) {
+            return js_throw_type_error("Atomics operation requires a TypedArray");
+        }
+        // All buffers are non-shared (SharedArrayBuffer not implemented)
+        return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
+    }
+    case JS_BUILTIN_ATOMICS_NOTIFY:
+    case JS_BUILTIN_ATOMICS_WAIT: {
+        // Atomics.wait/notify require Int32Array or BigInt64Array backed by SharedArrayBuffer
+        if (!js_is_typed_array(arg0)) {
+            return js_throw_type_error("Atomics operation requires a TypedArray");
+        }
+        // Check for Int32Array type
+        extern const char* js_typed_array_type_name(Item val);
+        const char* ta_name = js_typed_array_type_name(arg0);
+        if (!ta_name || (strcmp(ta_name, "Int32Array") != 0 && strcmp(ta_name, "BigInt64Array") != 0)) {
+            return js_throw_type_error("Atomics.wait/notify requires an Int32Array or BigInt64Array");
+        }
+        return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
+    }
+    case JS_BUILTIN_ATOMICS_ISLOCKFREE: {
+        // isLockFree(size) — returns true for 1, 2, 4 byte sizes
+        int64_t size = it2i(arg0);
+        return (Item){.item = b2it(size == 1 || size == 2 || size == 4)};
     }
     case JS_BUILTIN_SET_INTERSECTION:
     case JS_BUILTIN_SET_UNION:
@@ -15127,6 +15191,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // toSorted() — ES2023: returns new sorted copy without mutating original
     if (method->len == 8 && strncmp(method->chars, "toSorted", 8) == 0) {
+        // ES2023 §23.1.3.34 step 1: check IsCallable(comparefn) BEFORE reading length
+        if (argc >= 1 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("comparefn is not a function");
+        }
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* src = arr.array;
         Item copy = js_array_new(src->length);
@@ -15666,6 +15734,42 @@ extern "C" Item js_get_reflect_object_value() {
         }
     }
     return js_reflect_object;
+}
+
+// Atomics namespace object
+static Item js_atomics_object = {.item = ITEM_NULL};
+void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; }
+
+extern "C" Item js_get_atomics_object_value() {
+    if (js_atomics_object.item == ITEM_NULL) {
+        js_atomics_object = js_object_create(ItemNull);
+        heap_register_gc_root(&js_atomics_object.item);
+        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+        js_property_set(js_atomics_object, tag_k, (Item){.item = s2it(heap_create_name("Atomics", 7))});
+
+        struct { const char* name; int len; int bid; int pc; } methods[] = {
+            {"add",             3, JS_BUILTIN_ATOMICS_ADD,             3},
+            {"and",             3, JS_BUILTIN_ATOMICS_AND,             3},
+            {"compareExchange", 15, JS_BUILTIN_ATOMICS_COMPAREEXCHANGE, 4},
+            {"exchange",        8, JS_BUILTIN_ATOMICS_EXCHANGE,        3},
+            {"isLockFree",     10, JS_BUILTIN_ATOMICS_ISLOCKFREE,      1},
+            {"load",            4, JS_BUILTIN_ATOMICS_LOAD,            2},
+            {"notify",          6, JS_BUILTIN_ATOMICS_NOTIFY,          3},
+            {"or",              2, JS_BUILTIN_ATOMICS_OR,              3},
+            {"store",           5, JS_BUILTIN_ATOMICS_STORE,           3},
+            {"sub",             3, JS_BUILTIN_ATOMICS_SUB,             3},
+            {"wait",            4, JS_BUILTIN_ATOMICS_WAIT,            3},
+            {"xor",             3, JS_BUILTIN_ATOMICS_XOR,             3},
+            {NULL, 0, 0, 0}
+        };
+        for (int i = 0; methods[i].name; i++) {
+            Item mk = (Item){.item = s2it(heap_create_name(methods[i].name, methods[i].len))};
+            Item mf = js_get_or_create_builtin(methods[i].bid, methods[i].name, methods[i].pc);
+            js_property_set(js_atomics_object, mk, mf);
+            js_mark_non_enumerable(js_atomics_object, mk);
+        }
+    }
+    return js_atomics_object;
 }
 
 extern "C" Item js_math_set_property(Item key, Item value) {
@@ -17401,10 +17505,14 @@ static Item js_reject_callback(Item promise_idx_item, Item reason) {
 }
 
 extern "C" Item js_promise_create(Item executor) {
+    // ES2020 §25.6.3.1 step 2: If IsCallable(executor) is false, throw a TypeError
+    if (get_type_id(executor) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("Promise resolver is not a function");
+    }
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;
 
-    if (get_type_id(executor) == LMD_TYPE_FUNC) {
+    {
         // Create resolve/reject functions bound to this promise's index
         int idx = (int)(p - js_promises);
         Item idx_item = (Item){.item = i2it(idx)};

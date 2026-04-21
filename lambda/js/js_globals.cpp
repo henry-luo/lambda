@@ -3887,6 +3887,46 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
         return js_proxy_trap_construct(target, args, argc, 
             (nt_type == LMD_TYPE_FUNC || js_is_proxy(new_target)) ? new_target : target);
     }
+    // ES spec: built-in constructors validate arguments BEFORE OrdinaryCreateFromConstructor
+    // (which accesses NewTarget.prototype). Perform those checks here to ensure the correct
+    // error ordering when NewTarget has a throwing .prototype getter.
+    if (get_type_id(target) == LMD_TYPE_FUNC) {
+        JsFunctionLayout* fn = (JsFunctionLayout*)target.function;
+        if (fn->name) {
+            const char* n = fn->name->chars;
+            int nl = (int)fn->name->len;
+            // Promise(executor): IsCallable(executor) check before prototype access
+            if (nl == 7 && strncmp(n, "Promise", 7) == 0) {
+                Item executor = (argc > 0) ? args[0] : ItemNull;
+                if (get_type_id(executor) != LMD_TYPE_FUNC) {
+                    extern Item js_throw_type_error(const char* msg);
+                    return js_throw_type_error("Promise resolver is not a function");
+                }
+            }
+            // TypedArray(arg): ToNumber(arg) throws for Symbol/BigInt before prototype access
+            if (argc > 0) {
+                bool is_ta = (nl == 9  && strncmp(n, "Int8Array", 9) == 0) ||
+                             (nl == 10 && strncmp(n, "Uint8Array", 10) == 0) ||
+                             (nl == 17 && strncmp(n, "Uint8ClampedArray", 17) == 0) ||
+                             (nl == 10 && strncmp(n, "Int16Array", 10) == 0) ||
+                             (nl == 11 && strncmp(n, "Uint16Array", 11) == 0) ||
+                             (nl == 10 && strncmp(n, "Int32Array", 10) == 0) ||
+                             (nl == 11 && strncmp(n, "Uint32Array", 11) == 0) ||
+                             (nl == 12 && strncmp(n, "Float32Array", 12) == 0) ||
+                             (nl == 12 && strncmp(n, "Float64Array", 12) == 0);
+                if (is_ta) {
+                    // JS symbols are encoded as negative ints (LMD_TYPE_INT with value <= -JS_SYMBOL_BASE)
+                    TypeId at = get_type_id(args[0]);
+                    bool is_sym = (at == LMD_TYPE_SYMBOL) || 
+                                  (at == LMD_TYPE_INT && it2i(args[0]) <= -(int64_t)(1LL << 40));
+                    if (is_sym) {
+                        extern Item js_throw_type_error(const char* msg);
+                        return js_throw_type_error("Cannot convert a Symbol value to a number");
+                    }
+                }
+            }
+        }
+    }
     Item new_obj = js_constructor_create_object(proto_source);
     // Set new.target so that js_ctor_requires_new allows the call through
     extern void js_set_new_target(Item target);
@@ -8294,6 +8334,8 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("JSON", 4))}, js_get_json_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Reflect", 7))}, js_get_reflect_object_value());
+        extern Item js_get_atomics_object_value(void);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Atomics", 7))}, js_get_atomics_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("console", 7))}, js_get_console_object_value());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("process", 7))}, js_get_process_object_value());
 

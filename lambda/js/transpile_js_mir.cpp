@@ -6133,6 +6133,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     if (id->name->len == 7 && strncmp(id->name->chars, "Reflect", 7) == 0) {
         return jm_call_0(mt, "js_get_reflect_object_value", MIR_T_I64);
     }
+    if (id->name->len == 7 && strncmp(id->name->chars, "Atomics", 7) == 0) {
+        return jm_call_0(mt, "js_get_atomics_object_value", MIR_T_I64);
+    }
     if (id->name->len == 7 && strncmp(id->name->chars, "console", 7) == 0) {
         return jm_call_0(mt, "js_get_console_object_value", MIR_T_I64);
     }
