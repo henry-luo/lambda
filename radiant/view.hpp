@@ -554,9 +554,11 @@ typedef struct Margin : Spacing {
 } Margin;
 
 typedef struct Corner {
-    struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
+    struct { float top_left, top_right, bottom_right, bottom_left; };  // horizontal border radius
+    struct { float top_left_y, top_right_y, bottom_right_y, bottom_left_y; };  // vertical border radius
     int64_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
-    bool tl_percent, tr_percent, br_percent, bl_percent;  // true if value is a percentage (0-100)
+    bool tl_percent, tr_percent, br_percent, bl_percent;  // true if horizontal radius is a percentage (0-100)
+    bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y;  // true if vertical radius is a percentage (0-100)
 } Corner;
 
 typedef struct {

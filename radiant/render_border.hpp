@@ -6,8 +6,11 @@
 void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
 void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
 void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
+bool corner_has_radius(const Corner* radius);
+void constrain_corner_radii(Corner* radius, float width, float height);
 void constrain_border_radii(BorderProp* border, float width, float height);
 void resolve_border_radius_percentages(Corner* radius, float width, float height);
+RdtPath* build_rounded_rect_path(Rect rect, const Corner* radius);
 
 // Outline rendering
 void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect);

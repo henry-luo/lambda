@@ -770,6 +770,15 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             break;
         }
 
+        case DL_BOX_BLUR_INSET: {
+            DlBoxBlurInset* r = &item->box_blur_inset;
+            int rx = r->rx - (int)tile_x;
+            int ry = r->ry - (int)tile_y;
+            box_blur_region_inset(scratch, tile_surface, rx, ry, r->rw, r->rh,
+                                  r->pad, r->blur_radius, r->bg_color);
+            break;
+        }
+
         case DL_BEGIN_ELEMENT:
         case DL_END_ELEMENT:
             break;

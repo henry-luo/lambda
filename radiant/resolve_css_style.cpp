@@ -53,6 +53,203 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
     return nullptr;
 }
 
+static bool is_border_radius_slash(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name &&
+           strcmp(value->data.custom_property.name, "/") == 0;
+}
+
+static bool parse_border_radius_component(LayoutContext* lycon, int prop_id, const CssValue* value,
+                                          float* out_radius, bool* out_percent) {
+    if (!value || !out_radius || !out_percent) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *out_radius = (float)value->data.percentage.value;
+        *out_percent = true;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        *out_radius = resolve_length_value(lycon, prop_id, value);
+        *out_percent = false;
+        return true;
+    }
+    return false;
+}
+
+static bool expand_border_radius_values(LayoutContext* lycon, int prop_id, CssValue** values, int count,
+                                        float out_radius[4], bool out_percent[4]) {
+    if (!values || count <= 0 || count > 4) return false;
+
+    float parsed[4] = {0, 0, 0, 0};
+    bool parsed_percent[4] = {false, false, false, false};
+    for (int i = 0; i < count; i++) {
+        if (!parse_border_radius_component(lycon, prop_id, values[i], &parsed[i], &parsed_percent[i])) {
+            return false;
+        }
+    }
+
+    switch (count) {
+        case 1:
+            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
+            out_radius[1] = parsed[0]; out_percent[1] = parsed_percent[0];
+            out_radius[2] = parsed[0]; out_percent[2] = parsed_percent[0];
+            out_radius[3] = parsed[0]; out_percent[3] = parsed_percent[0];
+            return true;
+        case 2:
+            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
+            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
+            out_radius[2] = parsed[0]; out_percent[2] = parsed_percent[0];
+            out_radius[3] = parsed[1]; out_percent[3] = parsed_percent[1];
+            return true;
+        case 3:
+            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
+            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
+            out_radius[2] = parsed[2]; out_percent[2] = parsed_percent[2];
+            out_radius[3] = parsed[1]; out_percent[3] = parsed_percent[1];
+            return true;
+        case 4:
+            out_radius[0] = parsed[0]; out_percent[0] = parsed_percent[0];
+            out_radius[1] = parsed[1]; out_percent[1] = parsed_percent[1];
+            out_radius[2] = parsed[2]; out_percent[2] = parsed_percent[2];
+            out_radius[3] = parsed[3]; out_percent[3] = parsed_percent[3];
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void set_corner_radius_values(Corner* radius, int corner_index,
+                                     float radius_x, bool percent_x,
+                                     float radius_y, bool percent_y,
+                                     int64_t specificity) {
+    switch (corner_index) {
+        case 0:
+            radius->top_left = radius_x;
+            radius->top_left_y = radius_y;
+            radius->tl_percent = percent_x;
+            radius->tl_percent_y = percent_y;
+            radius->tl_specificity = specificity;
+            break;
+        case 1:
+            radius->top_right = radius_x;
+            radius->top_right_y = radius_y;
+            radius->tr_percent = percent_x;
+            radius->tr_percent_y = percent_y;
+            radius->tr_specificity = specificity;
+            break;
+        case 2:
+            radius->bottom_right = radius_x;
+            radius->bottom_right_y = radius_y;
+            radius->br_percent = percent_x;
+            radius->br_percent_y = percent_y;
+            radius->br_specificity = specificity;
+            break;
+        case 3:
+            radius->bottom_left = radius_x;
+            radius->bottom_left_y = radius_y;
+            radius->bl_percent = percent_x;
+            radius->bl_percent_y = percent_y;
+            radius->bl_specificity = specificity;
+            break;
+    }
+}
+
+static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Corner* radius,
+                                          const CssValue* value, int64_t specificity) {
+    if (!value || !radius) return false;
+
+    CssValue* horiz_values[4] = {nullptr, nullptr, nullptr, nullptr};
+    CssValue* vert_values[4] = {nullptr, nullptr, nullptr, nullptr};
+    int horiz_count = 0;
+    int vert_count = 0;
+
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        bool seen_slash = false;
+        for (size_t i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            if (is_border_radius_slash(item)) {
+                if (seen_slash) return false;
+                seen_slash = true;
+                continue;
+            }
+            if (!seen_slash) {
+                if (horiz_count >= 4) return false;
+                horiz_values[horiz_count++] = item;
+            } else {
+                if (vert_count >= 4) return false;
+                vert_values[vert_count++] = item;
+            }
+        }
+        if (horiz_count == 0) return false;
+        if (vert_count == 0) {
+            vert_count = horiz_count;
+            for (int i = 0; i < horiz_count; i++) vert_values[i] = horiz_values[i];
+        }
+    } else {
+        horiz_values[0] = (CssValue*)value;
+        vert_values[0] = (CssValue*)value;
+        horiz_count = 1;
+        vert_count = 1;
+    }
+
+    float radius_x[4], radius_y[4];
+    bool percent_x[4], percent_y[4];
+    if (!expand_border_radius_values(lycon, prop_id, horiz_values, horiz_count, radius_x, percent_x)) return false;
+    if (!expand_border_radius_values(lycon, prop_id, vert_values, vert_count, radius_y, percent_y)) return false;
+
+    int64_t current_specificity[4] = {
+        radius->tl_specificity,
+        radius->tr_specificity,
+        radius->br_specificity,
+        radius->bl_specificity
+    };
+    for (int i = 0; i < 4; i++) {
+        if (specificity >= current_specificity[i]) {
+            set_corner_radius_values(radius, i, radius_x[i], percent_x[i], radius_y[i], percent_y[i], specificity);
+        }
+    }
+    return true;
+}
+
+static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner* radius,
+                                      int corner_index, const CssValue* value, int64_t specificity) {
+    CssValue* values[2] = {nullptr, nullptr};
+    int count = 0;
+
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (size_t i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item || is_border_radius_slash(item)) continue;
+            if (count >= 2) return false;
+            values[count++] = item;
+        }
+    } else {
+        values[count++] = (CssValue*)value;
+    }
+    if (count <= 0) return false;
+
+    float radius_x = 0, radius_y = 0;
+    bool percent_x = false, percent_y = false;
+    if (!parse_border_radius_component(lycon, prop_id, values[0], &radius_x, &percent_x)) return false;
+    if (count == 2) {
+        if (!parse_border_radius_component(lycon, prop_id, values[1], &radius_y, &percent_y)) return false;
+    } else {
+        radius_y = radius_x;
+        percent_y = percent_x;
+    }
+
+    int64_t current_specificity = 0;
+    switch (corner_index) {
+        case 0: current_specificity = radius->tl_specificity; break;
+        case 1: current_specificity = radius->tr_specificity; break;
+        case 2: current_specificity = radius->br_specificity; break;
+        case 3: current_specificity = radius->bl_specificity; break;
+    }
+    if (specificity >= current_specificity) {
+        set_corner_radius_values(radius, corner_index, radius_x, percent_x, radius_y, percent_y, specificity);
+    }
+    return true;
+}
+
 // Helper: resolve var() function to get the actual CSS value
 // Returns the resolved value, or the original value if not a var() function
 // Recursively resolves nested var() calls
@@ -7269,145 +7466,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // CSS border-radius shorthand: 1-4 length values
-            // 1 value: all corners
-            // 2 values: top-left/bottom-right, top-right/bottom-left
-            // 3 values: top-left, top-right/bottom-left, bottom-right
-            // 4 values: top-left, top-right, bottom-right, bottom-left
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                // Single value - all corners get same radius
-                float radius = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, value);
-
-                // Check specificity before setting each corner
-                if (specificity >= span->bound->border->radius.tl_specificity) {
-                    span->bound->border->radius.top_left = radius;
-                    span->bound->border->radius.tl_percent = false;
-                    span->bound->border->radius.tl_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.tr_specificity) {
-                    span->bound->border->radius.top_right = radius;
-                    span->bound->border->radius.tr_percent = false;
-                    span->bound->border->radius.tr_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.br_specificity) {
-                    span->bound->border->radius.bottom_right = radius;
-                    span->bound->border->radius.br_percent = false;
-                    span->bound->border->radius.br_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.bl_specificity) {
-                    span->bound->border->radius.bottom_left = radius;
-                    span->bound->border->radius.bl_percent = false;
-                    span->bound->border->radius.bl_specificity = specificity;
-                }
-                log_debug("[CSS] Border-radius (all): %.2f px", radius);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // Single percentage value - store raw percentage, resolve at render time
-                float pct = (float)value->data.percentage.value;
-                if (specificity >= span->bound->border->radius.tl_specificity) {
-                    span->bound->border->radius.top_left = pct;
-                    span->bound->border->radius.tl_percent = true;
-                    span->bound->border->radius.tl_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.tr_specificity) {
-                    span->bound->border->radius.top_right = pct;
-                    span->bound->border->radius.tr_percent = true;
-                    span->bound->border->radius.tr_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.br_specificity) {
-                    span->bound->border->radius.bottom_right = pct;
-                    span->bound->border->radius.br_percent = true;
-                    span->bound->border->radius.br_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->radius.bl_specificity) {
-                    span->bound->border->radius.bottom_left = pct;
-                    span->bound->border->radius.bl_percent = true;
-                    span->bound->border->radius.bl_specificity = specificity;
-                }
-                log_debug("[CSS] Border-radius (all): %.2f%%", pct);
-            } else if (value->type == CSS_VALUE_TYPE_LIST) {
-                // Multi-value border-radius
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-
-                if (count == 2 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top-left/bottom-right, top-right/bottom-left
-                    float diagonal1 = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
-                    float diagonal2 = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
-
-                    if (specificity >= span->bound->border->radius.tl_specificity) {
-                        span->bound->border->radius.top_left = diagonal1;
-                        span->bound->border->radius.tl_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.tr_specificity) {
-                        span->bound->border->radius.top_right = diagonal2;
-                        span->bound->border->radius.tr_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.br_specificity) {
-                        span->bound->border->radius.bottom_right = diagonal1;
-                        span->bound->border->radius.br_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.bl_specificity) {
-                        span->bound->border->radius.bottom_left = diagonal2;
-                        span->bound->border->radius.bl_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-radius (2 values): %.2f %.2f px", diagonal1, diagonal2);
-                } else if (count == 3 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top-left, top-right/bottom-left, bottom-right
-                    float top_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
-                    float diagonal = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
-                    float bottom_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[2]);
-
-                    if (specificity >= span->bound->border->radius.tl_specificity) {
-                        span->bound->border->radius.top_left = top_left;
-                        span->bound->border->radius.tl_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.tr_specificity) {
-                        span->bound->border->radius.top_right = diagonal;
-                        span->bound->border->radius.tr_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.br_specificity) {
-                        span->bound->border->radius.bottom_right = bottom_right;
-                        span->bound->border->radius.br_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.bl_specificity) {
-                        span->bound->border->radius.bottom_left = diagonal;
-                        span->bound->border->radius.bl_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-radius (3 values): %.2f %.2f %.2f px", top_left, diagonal, bottom_right);
-                } else if (count == 4 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[3]->type == CSS_VALUE_TYPE_LENGTH || values[3]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top-left, top-right, bottom-right, bottom-left
-                    float top_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
-                    float top_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
-                    float bottom_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[2]);
-                    float bottom_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[3]);
-
-                    if (specificity >= span->bound->border->radius.tl_specificity) {
-                        span->bound->border->radius.top_left = top_left;
-                        span->bound->border->radius.tl_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.tr_specificity) {
-                        span->bound->border->radius.top_right = top_right;
-                        span->bound->border->radius.tr_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.br_specificity) {
-                        span->bound->border->radius.bottom_right = bottom_right;
-                        span->bound->border->radius.br_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->radius.bl_specificity) {
-                        span->bound->border->radius.bottom_left = bottom_left;
-                        span->bound->border->radius.bl_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-radius (4 values): %.2f %.2f %.2f %.2f px", top_left, top_right, bottom_right, bottom_left);
-                }
-            }
+            apply_border_radius_shorthand(lycon, prop_id, &span->bound->border->radius, value, specificity);
             break;
         }
 
@@ -7420,16 +7479,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            if (specificity >= span->bound->border->radius.tl_specificity) {
-                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    span->bound->border->radius.top_left = (float)value->data.percentage.value;
-                    span->bound->border->radius.tl_percent = true;
-                } else {
-                    span->bound->border->radius.top_left = resolve_length_value(lycon, prop_id, value);
-                    span->bound->border->radius.tl_percent = false;
-                }
-                span->bound->border->radius.tl_specificity = specificity;
-            }
+            apply_corner_radius_value(lycon, prop_id, &span->bound->border->radius, 0, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS: {
@@ -7440,16 +7490,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            if (specificity >= span->bound->border->radius.tr_specificity) {
-                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    span->bound->border->radius.top_right = (float)value->data.percentage.value;
-                    span->bound->border->radius.tr_percent = true;
-                } else {
-                    span->bound->border->radius.top_right = resolve_length_value(lycon, prop_id, value);
-                    span->bound->border->radius.tr_percent = false;
-                }
-                span->bound->border->radius.tr_specificity = specificity;
-            }
+            apply_corner_radius_value(lycon, prop_id, &span->bound->border->radius, 1, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS: {
@@ -7460,16 +7501,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            if (specificity >= span->bound->border->radius.br_specificity) {
-                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    span->bound->border->radius.bottom_right = (float)value->data.percentage.value;
-                    span->bound->border->radius.br_percent = true;
-                } else {
-                    span->bound->border->radius.bottom_right = resolve_length_value(lycon, prop_id, value);
-                    span->bound->border->radius.br_percent = false;
-                }
-                span->bound->border->radius.br_specificity = specificity;
-            }
+            apply_corner_radius_value(lycon, prop_id, &span->bound->border->radius, 2, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS: {
@@ -7480,17 +7512,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            if (specificity >= span->bound->border->radius.bl_specificity) {
-                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    span->bound->border->radius.bottom_left = (float)value->data.percentage.value;
-                    span->bound->border->radius.bl_percent = true;
-                } else {
-                    span->bound->border->radius.bottom_left = resolve_length_value(lycon, prop_id, value);
-                    span->bound->border->radius.bl_percent = false;
-                }
-                span->bound->border->radius.bl_specificity = specificity;
-                span->bound->border->radius.bl_specificity = specificity;
-            }
+            apply_corner_radius_value(lycon, prop_id, &span->bound->border->radius, 3, value, specificity);
             break;
         }
 

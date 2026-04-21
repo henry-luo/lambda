@@ -367,6 +367,21 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
     item->box_blur_region.blur_radius = blur_radius;
 }
 
+void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_BOX_BLUR_INSET;
+    // bounds cover the expanded region for tile culling
+    item->bounds[0] = (float)(rx - pad); item->bounds[1] = (float)(ry - pad);
+    item->bounds[2] = (float)(rw + 2 * pad); item->bounds[3] = (float)(rh + 2 * pad);
+    item->box_blur_inset.rx = rx;
+    item->box_blur_inset.ry = ry;
+    item->box_blur_inset.rw = rw;
+    item->box_blur_inset.rh = rh;
+    item->box_blur_inset.pad = pad;
+    item->box_blur_inset.blur_radius = blur_radius;
+    item->box_blur_inset.bg_color = bg_color;
+}
+
 void dl_video_placeholder(DisplayList* dl, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip) {
@@ -831,6 +846,13 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
         case DL_BOX_BLUR_REGION: {
             DlBoxBlurRegion* r = &item->box_blur_region;
             box_blur_region(scratch, surface, r->rx, r->ry, r->rw, r->rh, r->blur_radius);
+            break;
+        }
+
+        case DL_BOX_BLUR_INSET: {
+            DlBoxBlurInset* r = &item->box_blur_inset;
+            box_blur_region_inset(scratch, surface, r->rx, r->ry, r->rw, r->rh,
+                                  r->pad, r->blur_radius, r->bg_color);
             break;
         }
 

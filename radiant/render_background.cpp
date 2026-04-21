@@ -111,24 +111,22 @@ static const RdtMatrix* get_transform(RenderContext* rdcon) {
 
 // Create a clip path from the render context's clip region
 static RdtPath* create_bg_clip_path(RenderContext* rdcon) {
-    RdtPath* clip = rdt_path_new();
     if (rdcon->block.has_clip_radius) {
         float clip_x = rdcon->block.clip.left;
         float clip_y = rdcon->block.clip.top;
         float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
         float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
-        float r = rdcon->block.clip_radius.top_left;
-        if (rdcon->block.clip_radius.top_right > 0) r = max(r, rdcon->block.clip_radius.top_right);
-        if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
-        if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
-        rdt_path_add_rect(clip, clip_x, clip_y, clip_w, clip_h, r, r);
-        log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f r=%.0f",
-                  clip_x, clip_y, clip_w, clip_h, r);
-    } else {
-        rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
-            rdcon->block.clip.right - rdcon->block.clip.left,
-            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
+        Corner clip_radius = rdcon->block.clip_radius;
+        constrain_corner_radii(&clip_radius, clip_w, clip_h);
+        Rect clip_rect = {clip_x, clip_y, clip_w, clip_h};
+        log_debug("[CLIP] Using rounded clip: (%.0f,%.0f) %.0fx%.0f",
+                  clip_x, clip_y, clip_w, clip_h);
+        return build_rounded_rect_path(clip_rect, &clip_radius);
     }
+    RdtPath* clip = rdt_path_new();
+    rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
+        rdcon->block.clip.right - rdcon->block.clip.left,
+        rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
     log_debug("[CLIP SHAPE] clip_rect created: clip=%.0f,%.0f to %.0f,%.0f has_radius=%d", 
               rdcon->block.clip.left, rdcon->block.clip.top, 
               rdcon->block.clip.right, rdcon->block.clip.bottom,
@@ -311,40 +309,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 }
 
 /**
- * Bezier control point constant for approximating circular arcs
- */
-#define KAPPA 0.5522847498f
-
-/**
- * Build rounded rectangle path with 4 different corner radii
- */
-static void build_rounded_rect_path(RdtPath* p, float x, float y, float w, float h,
-                                     float r_tl, float r_tr, float r_br, float r_bl) {
-    rdt_path_move_to(p, x + r_tl, y);
-    rdt_path_line_to(p, x + w - r_tr, y);
-    if (r_tr > 0) {
-        rdt_path_cubic_to(p, x + w - r_tr + r_tr * KAPPA, y,
-            x + w, y + r_tr - r_tr * KAPPA, x + w, y + r_tr);
-    }
-    rdt_path_line_to(p, x + w, y + h - r_br);
-    if (r_br > 0) {
-        rdt_path_cubic_to(p, x + w, y + h - r_br + r_br * KAPPA,
-            x + w - r_br + r_br * KAPPA, y + h, x + w - r_br, y + h);
-    }
-    rdt_path_line_to(p, x + r_bl, y + h);
-    if (r_bl > 0) {
-        rdt_path_cubic_to(p, x + r_bl - r_bl * KAPPA, y + h,
-            x, y + h - r_bl + r_bl * KAPPA, x, y + h - r_bl);
-    }
-    rdt_path_line_to(p, x, y + r_tl);
-    if (r_tl > 0) {
-        rdt_path_cubic_to(p, x, y + r_tl - r_tl * KAPPA,
-            x + r_tl - r_tl * KAPPA, y, x + r_tl, y);
-    }
-    rdt_path_close(p);
-}
-
-/**
  * Render solid color background
  * Handles border-radius by using ThorVG if needed
  */
@@ -353,8 +317,7 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
         border = view->bound->border;
-        has_radius = (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                     border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+        has_radius = corner_has_radius(&border->radius);
     }
 
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
@@ -362,16 +325,14 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     if (has_radius || needs_rounded_clip || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
         const RdtMatrix* xform = get_transform(rdcon);
 
-        RdtPath* p = rdt_path_new();
-        float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
+        RdtPath* p = nullptr;
         if (has_radius && border) {
             constrain_border_radii(border, rect.width, rect.height);
-            r_tl = border->radius.top_left;
-            r_tr = border->radius.top_right;
-            r_br = border->radius.bottom_right;
-            r_bl = border->radius.bottom_left;
+            p = build_rounded_rect_path(rect, &border->radius);
+        } else {
+            p = rdt_path_new();
+            rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
         }
-        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height, r_tl, r_tr, r_br, r_bl);
 
         RdtPath* clip = create_bg_clip_path(rdcon);
         rc_push_clip(rdcon, clip, NULL);
@@ -443,15 +404,13 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
         border = view->bound->border;
-        has_radius = (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                     border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+        has_radius = corner_has_radius(&border->radius);
     }
 
     if (has_radius) {
         constrain_border_radii(border, rect.width, rect.height);
-        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height,
-            border->radius.top_left, border->radius.top_right,
-            border->radius.bottom_right, border->radius.bottom_left);
+        rdt_path_free(p);
+        p = build_rounded_rect_path(rect, &border->radius);
     } else {
         rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
@@ -539,15 +498,13 @@ void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradien
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
         border = view->bound->border;
-        has_radius = (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                     border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+        has_radius = corner_has_radius(&border->radius);
     }
 
     if (has_radius) {
         constrain_border_radii(border, rect.width, rect.height);
-        build_rounded_rect_path(p, rect.x, rect.y, rect.width, rect.height,
-            border->radius.top_left, border->radius.top_right,
-            border->radius.bottom_right, border->radius.bottom_left);
+        rdt_path_free(p);
+        p = build_rounded_rect_path(rect, &border->radius);
     } else {
         rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
     }
@@ -918,6 +875,91 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
 }
 
 /**
+ * Inset box-shadow blur: blur in a temporary buffer with the element background
+ * color painted in the padding area, then copy the inner rect back to the surface.
+ *
+ * This solves the edge-clamping problem: instead of clamping at the element boundary
+ * (which keeps edges at 100% intensity), the blur kernel samples from the element's
+ * background color outside the element, producing a correct ~50% Gaussian falloff
+ * at edges.  The surface outside the element is never modified.
+ *
+ * @param bg_color  Element background color in surface pixel format (RGBA8888).
+ *                  Used to fill the padding area in the temp buffer so the blur
+ *                  sees the correct base color (not the parent's background).
+ */
+void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
+                           int rx, int ry, int rw, int rh,
+                           int pad, float blur_radius, uint32_t bg_color) {
+    if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
+    if (pad <= 0) {
+        box_blur_region(sa, surface, rx, ry, rw, rh, blur_radius);
+        return;
+    }
+
+    // Expanded region (clamped to surface bounds)
+    int ex = (0 > rx - pad) ? 0 : rx - pad;
+    int ey = (0 > ry - pad) ? 0 : ry - pad;
+    int ex2 = (surface->width < rx + rw + pad) ? surface->width : rx + rw + pad;
+    int ey2 = (surface->height < ry + rh + pad) ? surface->height : ry + rh + pad;
+    int ew = ex2 - ex;
+    int eh = ey2 - ey;
+    if (ew <= 0 || eh <= 0) return;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int stride = surface->pitch / 4;
+
+    // Copy expanded region from surface to temp buffer
+    size_t buf_size = (size_t)ew * eh;
+    uint32_t* buf = (uint32_t*)scratch_alloc(sa, buf_size * sizeof(uint32_t));
+    if (!buf) return;
+
+    for (int row = 0; row < eh; row++) {
+        memcpy(buf + row * ew,
+               pixels + (ey + row) * stride + ex,
+               ew * sizeof(uint32_t));
+    }
+
+    // Fill outer pixels (outside inner rect) with element background color.
+    // This replaces the parent's background (e.g. white) so the blur kernel
+    // at the element edges sees the correct base color.
+    int ix0 = rx - ex;  // inner rect offset within temp buffer
+    int iy0 = ry - ey;
+    int ix1 = ix0 + rw;
+    int iy1 = iy0 + rh;
+
+    for (int row = 0; row < eh; row++) {
+        if (row < iy0 || row >= iy1) {
+            // Entire row is outside inner rect
+            for (int col = 0; col < ew; col++)
+                buf[row * ew + col] = bg_color;
+        } else {
+            // Fill left and right portions
+            for (int col = 0; col < ix0; col++)
+                buf[row * ew + col] = bg_color;
+            for (int col = ix1; col < ew; col++)
+                buf[row * ew + col] = bg_color;
+        }
+    }
+
+    // Blur the temp buffer using a temporary ImageSurface wrapper
+    ImageSurface tmp_surface;
+    tmp_surface.pixels = (uint8_t*)buf;
+    tmp_surface.width = ew;
+    tmp_surface.height = eh;
+    tmp_surface.pitch = ew * 4;
+    box_blur_region(sa, &tmp_surface, 0, 0, ew, eh, blur_radius);
+
+    // Copy inner rect from blurred temp back to surface
+    for (int row = 0; row < rh; row++) {
+        memcpy(pixels + (ry + row) * stride + rx,
+               buf + (iy0 + row) * ew + ix0,
+               rw * sizeof(uint32_t));
+    }
+
+    scratch_free(sa, buf);
+}
+
+/**
  * Render box-shadow effects for an element (CSS Backgrounds Level 3 §7)
  *
  * Multiple shadows are rendered in reverse order (last specified = bottommost).
@@ -1063,11 +1105,15 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  * Render inset box-shadow effects (CSS Backgrounds Level 3 §7)
  *
  * Inset shadows are rendered AFTER the background, inside the element's padding box.
- * The shadow is painted inside the border-box, clipped to the padding area.
  *
- * Algorithm: Render a filled rect covering the entire element, then mask out the
- * inner region (element rect shrunk by offset+spread), producing a shadow ring
- * visible only at the edges. Then apply box blur if blur_radius > 0.
+ * Algorithm:
+ * 1. Fill a ring INSIDE the element: outer = element border-box, inner = element
+ *    rect inset by (blur_radius + spread) and shifted by offset.  The ring provides
+ *    enough material (blur_radius wide) for the Gaussian to produce a smooth gradient.
+ * 2. Use box_blur_region_inset: copies expanded region to a temp buffer, fills the
+ *    outer padding with the element's background color (so blur kernel sees the
+ *    correct base color at element edges), blurs in-place, then copies the inner
+ *    rect back to the surface.  This avoids edge-clamping artifacts.
  */
 void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->bound->box_shadow) return;
@@ -1105,16 +1151,22 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     for (int i = shadow_count - 1; i >= 0; i--) {
         BoxShadow* s = shadows[i];
 
-        // The inset shadow appears inside the element.
-        // The shadow shape is the element rect with offsets applied inward.
-        // spread_radius shrinks/expands the shadow shape.
-        float inner_x = rect.x + s->offset_x + s->spread_radius;
-        float inner_y = rect.y + s->offset_y + s->spread_radius;
-        float inner_w = rect.width - 2 * s->spread_radius;
-        float inner_h = rect.height - 2 * s->spread_radius;
+        // Band width: blur_radius/2 gives the blur enough material for a smooth
+        // gradient while avoiding over-darkening.  With the bg-color padding in
+        // box_blur_region_inset, the blur kernel at the element edge sees the
+        // correct base color, producing ~50% intensity at the boundary.
+        float band = s->blur_radius * 0.5f + s->spread_radius;
+        float inner_x = rect.x + s->offset_x + band;
+        float inner_y = rect.y + s->offset_y + band;
+        float inner_w = rect.width  - 2 * band;
+        float inner_h = rect.height - 2 * band;
+
+        // Use full shadow color (no alpha reduction needed — box_blur_region_inset
+        // handles the edge falloff by painting element bg color in the padding area)
+        Color fill_color = s->color;
 
         if (inner_w <= 0 || inner_h <= 0) {
-            // Spread consumes entire element — fill with shadow color
+            // Shadow band consumes entire element — fill with adjusted shadow color
             RdtPath* fill_path = rdt_path_new();
             rdt_path_add_rect(fill_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
 
@@ -1122,25 +1174,24 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
 
             rc_push_clip(rdcon, clip_path, xform);
-            rc_fill_path(rdcon, fill_path, s->color, RDT_FILL_WINDING, xform);
+            rc_fill_path(rdcon, fill_path, fill_color, RDT_FILL_WINDING, xform);
             rc_pop_clip(rdcon);
             rdt_path_free(fill_path);
             rdt_path_free(clip_path);
             continue;
         }
 
-        // Adjust border radii for inset (shrink by spread)
-        float ir_tl = max(0.0f, r_tl - s->spread_radius);
-        float ir_tr = max(0.0f, r_tr - s->spread_radius);
-        float ir_br = max(0.0f, r_br - s->spread_radius);
-        float ir_bl = max(0.0f, r_bl - s->spread_radius);
+        // Adjust border radii for inner cutout (shrink by band width)
+        float ir_tl = max(0.0f, r_tl - band);
+        float ir_tr = max(0.0f, r_tr - band);
+        float ir_br = max(0.0f, r_br - band);
+        float ir_bl = max(0.0f, r_bl - band);
 
-        log_debug("[BOX-SHADOW INSET] Rendering inset shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f color=#%02x%02x%02x%02x",
-                  s->offset_x, s->offset_y, s->blur_radius, s->spread_radius,
-                  s->color.r, s->color.g, s->color.b, s->color.a);
+        log_debug("[BOX-SHADOW INSET] Rendering inset shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f band=%.1f alpha=%d color=#%02x%02x%02x%02x",
+                  s->offset_x, s->offset_y, s->blur_radius, s->spread_radius, band, fill_color.a,
+                  fill_color.r, fill_color.g, fill_color.b, fill_color.a);
 
-        // Use even-odd fill rule with outer rect (clockwise) + inner rect (counter-clockwise)
-        // to render a ring-shaped shadow that only fills the border area.
+        // Even-odd fill: outer (CW) = element border-box, inner (CCW) = inset cutout
         RdtPath* shadow_path = rdt_path_new();
 
         // Outer path (clockwise): element border-box
@@ -1178,61 +1229,80 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         }
 
         // Inner path (counter-clockwise): the cutout hole
-        if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
-            #define KAPPA_INNER 0.5522847498f
-            rdt_path_move_to(shadow_path, inner_x + ir_tl, inner_y);
-            rdt_path_line_to(shadow_path, inner_x, inner_y + ir_tl);
-            if (ir_tl > 0) rdt_path_cubic_to(shadow_path,
-                inner_x, inner_y + ir_tl - ir_tl * KAPPA_INNER,
-                inner_x + ir_tl - ir_tl * KAPPA_INNER, inner_y,
-                inner_x + ir_tl, inner_y);
-            rdt_path_line_to(shadow_path, inner_x, inner_y + inner_h - ir_bl);
-            if (ir_bl > 0) rdt_path_cubic_to(shadow_path,
-                inner_x, inner_y + inner_h - ir_bl + ir_bl * KAPPA_INNER,
-                inner_x + ir_bl - ir_bl * KAPPA_INNER, inner_y + inner_h,
-                inner_x + ir_bl, inner_y + inner_h);
-            rdt_path_line_to(shadow_path, inner_x + inner_w - ir_br, inner_y + inner_h);
-            if (ir_br > 0) rdt_path_cubic_to(shadow_path,
-                inner_x + inner_w - ir_br + ir_br * KAPPA_INNER, inner_y + inner_h,
-                inner_x + inner_w, inner_y + inner_h - ir_br + ir_br * KAPPA_INNER,
-                inner_x + inner_w, inner_y + inner_h - ir_br);
-            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y + ir_tr);
-            if (ir_tr > 0) rdt_path_cubic_to(shadow_path,
-                inner_x + inner_w, inner_y + ir_tr - ir_tr * KAPPA_INNER,
-                inner_x + inner_w - ir_tr + ir_tr * KAPPA_INNER, inner_y,
-                inner_x + inner_w - ir_tr, inner_y);
-            rdt_path_close(shadow_path);
-            #undef KAPPA_INNER
-        } else {
-            rdt_path_move_to(shadow_path, inner_x, inner_y);
-            rdt_path_line_to(shadow_path, inner_x, inner_y + inner_h);
-            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y + inner_h);
-            rdt_path_line_to(shadow_path, inner_x + inner_w, inner_y);
-            rdt_path_close(shadow_path);
+        {
+            float ix = inner_x, iy = inner_y, iw = inner_w, ih = inner_h;
+            if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
+                #define KAPPA_INNER 0.5522847498f
+                rdt_path_move_to(shadow_path, ix + ir_tl, iy);
+                rdt_path_line_to(shadow_path, ix, iy + ir_tl);
+                if (ir_tl > 0) rdt_path_cubic_to(shadow_path,
+                    ix, iy + ir_tl - ir_tl * KAPPA_INNER,
+                    ix + ir_tl - ir_tl * KAPPA_INNER, iy,
+                    ix + ir_tl, iy);
+                rdt_path_line_to(shadow_path, ix, iy + ih - ir_bl);
+                if (ir_bl > 0) rdt_path_cubic_to(shadow_path,
+                    ix, iy + ih - ir_bl + ir_bl * KAPPA_INNER,
+                    ix + ir_bl - ir_bl * KAPPA_INNER, iy + ih,
+                    ix + ir_bl, iy + ih);
+                rdt_path_line_to(shadow_path, ix + iw - ir_br, iy + ih);
+                if (ir_br > 0) rdt_path_cubic_to(shadow_path,
+                    ix + iw - ir_br + ir_br * KAPPA_INNER, iy + ih,
+                    ix + iw, iy + ih - ir_br + ir_br * KAPPA_INNER,
+                    ix + iw, iy + ih - ir_br);
+                rdt_path_line_to(shadow_path, ix + iw, iy + ir_tr);
+                if (ir_tr > 0) rdt_path_cubic_to(shadow_path,
+                    ix + iw, iy + ir_tr - ir_tr * KAPPA_INNER,
+                    ix + iw - ir_tr + ir_tr * KAPPA_INNER, iy,
+                    ix + iw - ir_tr, iy);
+                rdt_path_close(shadow_path);
+                #undef KAPPA_INNER
+            } else {
+                rdt_path_move_to(shadow_path, ix, iy);
+                rdt_path_line_to(shadow_path, ix, iy + ih);
+                rdt_path_line_to(shadow_path, ix + iw, iy + ih);
+                rdt_path_line_to(shadow_path, ix + iw, iy);
+                rdt_path_close(shadow_path);
+            }
         }
 
-        // Clip to element border-box and fill with even-odd rule
-        RdtPath* clip_path = create_bg_clip_path(rdcon);
+        // Clip to element boundary and fill
+        RdtPath* clip_path = rdt_path_new();
+        rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
         rc_push_clip(rdcon, clip_path, xform);
-        rc_fill_path(rdcon, shadow_path, s->color, RDT_FILL_EVEN_ODD, xform);
+        rc_fill_path(rdcon, shadow_path, fill_color, RDT_FILL_EVEN_ODD, xform);
         rc_pop_clip(rdcon);
         rdt_path_free(shadow_path);
         rdt_path_free(clip_path);
 
-        // Apply software box blur if blur radius > 0
+        // Apply box blur within element rect
         if (s->blur_radius > 0) {
             float blur_px = s->blur_radius;
             int br_x = (int)floorf(rect.x);
             int br_y = (int)floorf(rect.y);
             int br_w = (int)ceilf(rect.width);
             int br_h = (int)ceilf(rect.height);
-            if (rdcon->dl) {
-                dl_box_blur_region(rdcon->dl, br_x, br_y, br_w, br_h, blur_px);
-            } else if (rdcon->ui_context->surface) {
-                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            int pad = (int)ceilf(blur_px);
+
+            // Get element background color for the blur padding area.
+            // This ensures the blur kernel at element edges sees the correct base
+            // color instead of the parent's background.
+            Color bg;
+            bg.r = 255; bg.g = 255; bg.b = 255; bg.a = 255;  // default white
+            if (view->bound && view->bound->background) {
+                bg = view->bound->background->color;
             }
-            log_debug("[BOX-SHADOW INSET] Applied box blur radius=%.1f on region (%d,%d,%d,%d)",
-                      blur_px, br_x, br_y, br_w, br_h);
+            // Convert to surface pixel format (ABGR8888)
+            uint32_t bg_pixel = ((uint32_t)bg.a << 24) | ((uint32_t)bg.b << 16) |
+                                ((uint32_t)bg.g << 8) | (uint32_t)bg.r;
+
+            if (rdcon->dl) {
+                dl_box_blur_inset(rdcon->dl, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
+            } else if (rdcon->ui_context->surface) {
+                box_blur_region_inset(&rdcon->scratch, rdcon->ui_context->surface,
+                                      br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
+            }
+            log_debug("[BOX-SHADOW INSET] Applied inset blur radius=%.1f pad=%d bg=#%08x on region (%d,%d,%d,%d)",
+                      blur_px, pad, bg_pixel, br_x, br_y, br_w, br_h);
         }
     }
 
