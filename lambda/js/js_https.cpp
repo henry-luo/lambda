@@ -95,10 +95,17 @@ extern "C" Item js_get_https_namespace(void) {
 
     js_property_set(https_namespace, make_string_item("createServer"),
                     js_new_function((void*)js_https_createServer, 2));
+    js_property_set(https_namespace, make_string_item("Server"),
+                    js_new_function((void*)js_https_createServer, 2)); // alias
     js_property_set(https_namespace, make_string_item("request"),
                     js_new_function((void*)js_https_request, 2));
     js_property_set(https_namespace, make_string_item("get"),
                     js_new_function((void*)js_https_get, 2));
+
+    // Agent — use http.Agent implementation
+    extern Item js_http_Agent(Item);
+    js_property_set(https_namespace, make_string_item("Agent"),
+                    js_new_function((void*)js_http_Agent, 1));
 
     // globalAgent
     Item agent = js_new_object();

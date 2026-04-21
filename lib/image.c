@@ -365,9 +365,36 @@ static void png_read_from_memory(png_structp png_ptr, png_bytep out_data, png_si
 }
 
 // Load PNG from memory using libpng
+// Custom PNG error handler that treats adler32/checksum errors as warnings
+// so browsers-style tolerance of slightly corrupt PNGs works.
+typedef struct {
+    jmp_buf jmpbuf;
+    bool had_error;
+    bool is_checksum_error;
+} PngErrorContext;
+
+static void png_lenient_error_handler(png_structp png_ptr, png_const_charp message) {
+    PngErrorContext* ctx = (PngErrorContext*)png_get_error_ptr(png_ptr);
+    ctx->had_error = true;
+    if (strstr(message, "incorrect data check") != NULL ||
+        strstr(message, "incorrect header check") != NULL) {
+        log_debug("[PNG] Ignoring checksum error (browser-lenient): %s", message);
+        ctx->is_checksum_error = true;
+    } else {
+        log_error("[PNG] Error: %s", message);
+    }
+    longjmp(ctx->jmpbuf, 1);
+}
+
+static void png_lenient_warning_handler(png_structp png_ptr, png_const_charp message) {
+    log_debug("[PNG] Warning: %s", message);
+}
+
 static unsigned char* load_png_from_memory(const unsigned char* data, size_t length, int* width, int* height, int* channels) {
-    // Create PNG read struct
-    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    // Create PNG read struct with lenient error handling
+    PngErrorContext err_ctx = { .had_error = false, .is_checksum_error = false };
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
+        &err_ctx, png_lenient_error_handler, png_lenient_warning_handler);
     if (!png_ptr) {
         log_error("Failed to create PNG read struct");
         return NULL;
@@ -380,11 +407,28 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
         return NULL;
     }
 
-    if (setjmp(png_jmpbuf(png_ptr))) {
+    unsigned char* image_data = NULL;
+    png_bytep* row_pointers = NULL;
+
+    if (setjmp(err_ctx.jmpbuf)) {
+        // Error handler jumped here. If it's a checksum error and we have image data,
+        // the pixel data was decompressed successfully — return it (browser behavior).
+        if (err_ctx.is_checksum_error && image_data) {
+            log_debug("[PNG] Returning image despite checksum error (%dx%d)", *width, *height);
+            if (row_pointers) mem_free(row_pointers);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+            return image_data;
+        }
+        // Fatal error — clean up and return NULL
+        if (image_data) mem_free(image_data);
+        if (row_pointers) mem_free(row_pointers);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("PNG decompression error");
         return NULL;
     }
+
+    // Tell libpng to be lenient about CRC errors in chunks
+    png_set_crc_action(png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
 
     // Set up memory reading
     PngMemoryReader reader = { .data = data, .size = length, .offset = 0 };
@@ -413,7 +457,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     *channels = 4;
 
     // Allocate memory for image
-    unsigned char* image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("Failed to allocate memory for PNG image");
@@ -421,7 +465,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     }
 
     // Create row pointers
-    png_bytep* row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
     for (int y = 0; y < *height; y++) {
         row_pointers[y] = image_data + y * (*width) * 4;
     }

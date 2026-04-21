@@ -21221,7 +21221,7 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
             "process", "querystring", "events", "buffer",
             "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
             "string_decoder", "assert", "assert/strict",
-            "timers", "console", "worker_threads", "cluster", NULL
+            "timers", "console", "worker_threads", "cluster", "vm", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {

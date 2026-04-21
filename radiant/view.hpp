@@ -351,6 +351,7 @@ typedef enum {
 typedef enum {
     SCALE_MODE_NEAREST = 0,  // Nearest neighbor (fast, pixelated)
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
+    SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
 } ScaleMode;
 
 typedef struct ImageSurface {
@@ -589,6 +590,8 @@ typedef struct {
     float angle;           // in degrees, 0 = to top, 90 = to right
     GradientStop* stops;   // array of color stops
     int stop_count;
+    int is_repeating : 1;  // true for repeating-linear-gradient
+    int stops_in_px : 1;   // true if stop positions are in px (not fractions)
 } LinearGradient;
 
 // Radial gradient shape

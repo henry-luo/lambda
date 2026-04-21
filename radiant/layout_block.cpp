@@ -6078,7 +6078,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
 
-            if (lycon->line.advance_x + block->width > effective_right && !parent_nowrap) {
+            // CSS 2.1 §10.3.9: Use margin box width for overflow check —
+            // inline-block margins are part of the inline flow.
+            float margin_box_width = block->width +
+                (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
+
+            if (lycon->line.advance_x + margin_box_width > effective_right && !parent_nowrap) {
                 if (!lycon->line.is_line_start) {
                     // CSS 2.1 §9.4.2: Break to next line if there's prior content
                     line_break(lycon);
@@ -6091,7 +6096,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // CSS 2.1 §9.5: If the block still doesn't fit on the new line
                     // due to float intrusion, push below the floats
                     if (lycon->line.has_float_intrusion &&
-                        effective_left + block->width > effective_right) {
+                        effective_left + margin_box_width > effective_right) {
                         BlockContext* bfc = block_context_find_bfc(&lycon->block);
                         if (bfc) {
                             float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
@@ -6128,7 +6133,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                     block->x = effective_left;
                 } else if (lycon->line.advance_x > effective_left &&
-                           effective_left + block->width <= effective_right) {
+                           effective_left + margin_box_width <= effective_right) {
                     // advance_x was pushed by a float that no longer intrudes at this y.
                     // Reset to effective_left where the content fits.
                     lycon->line.advance_x = effective_left;

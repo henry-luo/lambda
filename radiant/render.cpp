@@ -822,6 +822,88 @@ static bool is_view_in_selection(SelectionState* sel, View* view) {
     return (view_vs_first >= 0 && view_vs_last <= 0);
 }
 
+// ---------------------------------------------------------------------------
+// text-decoration-skip-ink: auto — compute gaps where glyph ink crosses the
+// decoration line, so the underline/line-through skips around descenders etc.
+// ---------------------------------------------------------------------------
+struct SkipInkGap { float x0, x1; };  // horizontal gap range (physical px)
+
+static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
+                                  TextRect* text_rect, float deco_y_top, float deco_y_bot,
+                                  SkipInkGap* gaps, int max_gaps) {
+    float s = rdcon->scale;
+    float x = rdcon->block.x + text_rect->x * s;
+    float y_base = rdcon->block.y + text_rect->y * s;
+    float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * s;
+    int gap_count = 0;
+    float pad = 1.0f;  // padding around glyph ink for the gap (1px each side)
+
+    unsigned char* p = str + text_rect->start_index;
+    unsigned char* end = p + text_rect->length;
+    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
+
+    while (p < end && gap_count < max_gaps) {
+        if (is_space(*p)) { x += rdcon->font.style->space_width * s; p++; continue; }
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        if (codepoint == 0x00AD) continue;  // skip soft hyphen
+
+        // Apply text-transform (simplified: just first codepoint)
+        uint32_t tt_out[3];
+        CssEnum text_transform = CSS_VALUE_NONE;
+        // We don't need exact text-transform here — the glyph advance will be
+        // close enough for gap positioning even without transform.
+        LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, codepoint, true);
+        if (!glyph) { x += rdcon->font.style->space_width * s; continue; }
+
+        // Glyph ink vertical extent in physical coords
+        float glyph_top = y_base + ascend - glyph->bitmap.bearing_y;
+        float glyph_bot = glyph_top + glyph->bitmap.height;
+        float glyph_left = x + glyph->bitmap.bearing_x;
+        float glyph_right = glyph_left + glyph->bitmap.width;
+
+        // Check if glyph ink overlaps the decoration rect vertically.
+        // Require significant overlap (half the decoration height) to only catch
+        // genuine descenders, not anti-aliasing fuzz at glyph edges.
+        float overlap = fminf(glyph_bot, deco_y_bot) - fmaxf(glyph_top, deco_y_top);
+        float min_overlap = fmaxf((deco_y_bot - deco_y_top) * 0.5f, 2.0f);
+        if (overlap >= min_overlap && glyph->bitmap.width > 0) {
+            gaps[gap_count].x0 = glyph_left - pad;
+            gaps[gap_count].x1 = glyph_right + pad;
+            gap_count++;
+        }
+
+        x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
+    }
+    return gap_count;
+}
+
+// Draw a decoration line with skip-ink gaps.  Calls fill_fn for each visible segment.
+static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
+                                 SkipInkGap* gaps, int gap_count) {
+    float x_start = rect.x;
+    float x_end = rect.x + rect.width;
+    for (int i = 0; i < gap_count; i++) {
+        if (gaps[i].x0 > x_start) {
+            float seg_end = fminf(gaps[i].x0, x_end);
+            if (seg_end > x_start) {
+                Rect seg = {x_start, rect.y, seg_end - x_start, rect.height};
+                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, color,
+                                     &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+            }
+        }
+        x_start = fmaxf(x_start, gaps[i].x1);
+        if (x_start >= x_end) break;
+    }
+    if (x_start < x_end) {
+        Rect seg = {x_start, rect.y, x_end - x_start, rect.height};
+        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, color,
+                             &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+    }
+}
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
@@ -1439,8 +1521,18 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                                     RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
                     rdt_path_free(p);
                 } else {
-                    // Solid (default)
-                    rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                    // Solid (default) — apply skip-ink for underline only
+                    // (browsers default text-decoration-skip-ink: auto for underline,
+                    //  but NOT for line-through or overline)
+                    bool apply_skip_ink = (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE);
+                    if (apply_skip_ink) {
+                        SkipInkGap gaps[64];
+                        int gap_count = collect_skip_ink_gaps(rdcon, str, text_rect,
+                                                              rect.y, rect.y + thickness, gaps, 64);
+                        draw_deco_with_gaps(rdcon, rect, deco_color.c, gaps, gap_count);
+                    } else {
+                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                    }
                 }
             }
         }
@@ -2053,10 +2145,29 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         }
     }
 
-    // Render outline AFTER borders (drawn on top, outside border-box)
-    if (view->bound->outline) {
-        render_outline(rdcon, view, rect);
+    // Note: outline is NOT rendered here. Per CSS spec (Appendix E),
+    // outlines paint after all backgrounds/borders/shadows in the stacking context.
+    // Outlines are rendered in a second pass by the parent's render loop.
+}
+
+/**
+ * Render outline for a view block (called in a deferred pass after all siblings).
+ */
+void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->bound || !view->bound->outline) return;
+    float s = rdcon->scale;
+    BlockBlot saved = rdcon->block;
+    // Compute absolute position for this view
+    rdcon->block.x = saved.x + view->x * s;
+    rdcon->block.y = saved.y + view->y * s;
+    Rect rect;
+    rect.x = rdcon->block.x;  rect.y = rdcon->block.y;
+    rect.width = view->width * s;  rect.height = view->height * s;
+    if (view->bound->border) {
+        resolve_border_radius_percentages(&view->bound->border->radius, view->width, view->height);
     }
+    render_outline(rdcon, view, rect);
+    rdcon->block = saved;
 }
 
 void draw_debug_rect(RenderContext* rdcon, Rect rect, Bound* clip) {
@@ -2088,12 +2199,21 @@ void draw_debug_rect(RenderContext* rdcon, Rect rect, Bound* clip) {
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->scale;
     if (block->scroller->has_clip) {
+        // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
+        float bl = 0, bt = 0, br = 0, bb = 0;
+        if (block->bound && block->bound->border) {
+            BorderProp* border = block->bound->border;
+            bl = border->width.left;
+            bt = border->width.top;
+            br = border->width.right;
+            bb = border->width.bottom;
+        }
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left * s);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top * s);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right * s);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom * s);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroller->clip.left + bl) * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroller->clip.top + bt) * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroller->clip.right - br) * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroller->clip.bottom - bb) * s);
 
         // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
         if (block->bound && block->bound->border) {
@@ -2102,14 +2222,15 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             resolve_border_radius_percentages(&border->radius, block->width, block->height);
             if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
-                rdcon->block.clip_radius.top_left = border->radius.top_left * s;
-                rdcon->block.clip_radius.top_right = border->radius.top_right * s;
-                rdcon->block.clip_radius.bottom_left = border->radius.bottom_left * s;
-                rdcon->block.clip_radius.bottom_right = border->radius.bottom_right * s;
-                rdcon->block.clip_radius.top_left_y = border->radius.top_left_y * s;
-                rdcon->block.clip_radius.top_right_y = border->radius.top_right_y * s;
-                rdcon->block.clip_radius.bottom_left_y = border->radius.bottom_left_y * s;
-                rdcon->block.clip_radius.bottom_right_y = border->radius.bottom_right_y * s;
+                // Use inner radius (outer minus border width) for padding-box clipping
+                rdcon->block.clip_radius.top_left = fmaxf(0, border->radius.top_left - bl) * s;
+                rdcon->block.clip_radius.top_right = fmaxf(0, border->radius.top_right - br) * s;
+                rdcon->block.clip_radius.bottom_left = fmaxf(0, border->radius.bottom_left - bl) * s;
+                rdcon->block.clip_radius.bottom_right = fmaxf(0, border->radius.bottom_right - br) * s;
+                rdcon->block.clip_radius.top_left_y = fmaxf(0, border->radius.top_left_y - bt) * s;
+                rdcon->block.clip_radius.top_right_y = fmaxf(0, border->radius.top_right_y - bt) * s;
+                rdcon->block.clip_radius.bottom_left_y = fmaxf(0, border->radius.bottom_left_y - bb) * s;
+                rdcon->block.clip_radius.bottom_right_y = fmaxf(0, border->radius.bottom_right_y - bb) * s;
                 constrain_corner_radii(&rdcon->block.clip_radius,
                     rdcon->block.clip.right - rdcon->block.clip.left,
                     rdcon->block.clip.bottom - rdcon->block.clip.top);
@@ -2554,6 +2675,20 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             g_render_overflow_clip_time += std::chrono::duration<double, std::milli>(toc2 - toc1).count();
             g_render_overflow_clip_count++;
         }
+
+        // Deferred outline pass: CSS spec says outlines paint after all
+        // backgrounds/borders/shadows in the stacking context. Walk direct
+        // children and render their outlines on top of everything.
+        View* outline_view = block->first_child;
+        while (outline_view) {
+            if ((outline_view->view_type == RDT_VIEW_BLOCK ||
+                 outline_view->view_type == RDT_VIEW_INLINE_BLOCK) &&
+                ((ViewBlock*)outline_view)->bound &&
+                ((ViewBlock*)outline_view)->bound->outline) {
+                render_outline_deferred(rdcon, (ViewBlock*)outline_view);
+            }
+            outline_view = (View*)outline_view->next_sibling;
+        }
     }
     else {
         log_debug("view has no child");
@@ -2802,7 +2937,11 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     // Apply object-fit: compute actual image render rect
     CssEnum object_fit = view->embed->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
-    if (object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) {
+    // SVG images with a viewBox implicitly use preserveAspectRatio="xMidYMid meet"
+    // (equivalent to object-fit: contain) unless object-fit is explicitly set.
+    bool svg_default_contain = (img->format == IMAGE_FORMAT_SVG && !object_fit);
+    if ((object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) ||
+        svg_default_contain) {
         float img_w = (float)img->width;
         float img_h = (float)img->height;
         float box_w = rect.width;
@@ -2811,7 +2950,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         float scale_y = box_h / img_h;
         float scale;
 
-        if (object_fit == CSS_VALUE_CONTAIN) {
+        if (object_fit == CSS_VALUE_CONTAIN || svg_default_contain) {
             scale = (scale_x < scale_y) ? scale_x : scale_y;
         } else if (object_fit == CSS_VALUE_COVER) {
             scale = (scale_x > scale_y) ? scale_x : scale_y;

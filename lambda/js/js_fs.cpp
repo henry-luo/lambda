@@ -537,8 +537,12 @@ extern "C" Item js_fs_mkdtempSync(Item prefix_item) {
     const char* prefix = item_to_cstr(prefix_item, prefix_buf, sizeof(prefix_buf));
     if (!prefix) return ItemNull;
 
+    // Node.js appends XXXXXX to the user-provided prefix for mkdtemp template
+    char tpl[1030];
+    snprintf(tpl, sizeof(tpl), "%sXXXXXX", prefix);
+
     uv_fs_t req;
-    int r = uv_fs_mkdtemp(NULL, &req, prefix, NULL);
+    int r = uv_fs_mkdtemp(NULL, &req, tpl, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
         log_error("fs: mkdtempSync: %s", uv_strerror(r));

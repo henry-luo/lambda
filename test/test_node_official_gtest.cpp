@@ -114,24 +114,29 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"url",            "url",             true,  nullptr},
     {"util",           "util",            true,  nullptr},
     {"zlib",           "zlib",            true,  nullptr},
+    {"async_wrap",     "async-wrap",      true,  nullptr},
+    {"eventsource",    "eventsource",     true,  nullptr},
+    {"stringbytes",    "stringbytes",     true,  nullptr},
+
+    // --- Modules with partial support (enabled for coverage) ---
+    {"http",           "http",            true,  nullptr},
+    {"https",          "https",           true,  nullptr},
+    {"module",         "module",          true,  nullptr},
+    {"net",            "net",             true,  nullptr},
+    {"readline",       "readline",        true,  nullptr},
+    {"timers",         "timers",          true,  nullptr},
+    {"tls",            "tls",             true,  nullptr},
+    {"vm",             "vm",              true,  nullptr},
 
     // --- Unsupported modules (disabled by default) ---
     {"cluster",        "cluster",         false, "clustering not implemented"},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
     {"domain",         "domain",          false, "domain module not implemented"},
-    {"http",           "http",            false, "HTTP server not implemented"},
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
-    {"https",          "https",           false, "HTTPS not implemented"},
     {"inspector",      "inspector",       false, "inspector not implemented"},
-    {"module",         "module",          false, "module system not fully implemented"},
-    {"net",            "net",             false, "TCP sockets not implemented"},
     {"perf_hooks",     "perf-hooks",      false, "performance hooks not implemented"},
-    {"readline",       "readline",        false, "readline not implemented"},
     {"repl",           "repl",            false, "REPL not implemented"},
-    {"timers",         "timers",          false, "timers not fully implemented"},
-    {"tls",            "tls",             false, "TLS not implemented"},
     {"tty",            "tty",             false, "TTY not implemented"},
-    {"vm",             "vm",              false, "VM contexts not implemented"},
     {"wasi",           "wasi",            false, "WASI not implemented"},
     {"worker",         "worker",          false, "worker_threads not implemented"},
 };
@@ -155,7 +160,7 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"test-crypto-fips.js",                        "requires FIPS OpenSSL build"},
 
     // Tests depending on process.execPath being 'node'
-    {"test-process-execpath.js",                   "checks process.execPath === node"},
+    // NOTE: test-process-execpath.js now passes with the common shim
 
     // Non-deterministic tests
     {"test-crypto-random.js",                      "non-deterministic (random output)"},
@@ -170,6 +175,10 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     {"test-zlib-brotli.js",                        "hangs: requires fixtures module + brotli compression"},
     {"test-os-process-priority.js",                "hangs: requires os.constants.priority (not implemented)"},
     {"test-buffer-alloc.js",                       "timeout: 1192-line test, JIT compilation exceeds 30s"},
+
+    // Tests that use child_process.fork which spawns Node binary
+    {"test-child-process-fork-stdio.js",           "uses child_process.fork"},
+    {"test-child-process-fork-exec-argv.js",       "uses child_process.fork"},
 };
 
 // =============================================================================
