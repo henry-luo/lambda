@@ -301,12 +301,24 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
     log_debug("[FILTER] Applied filters to %d pixels", (right - left) * (bottom - top));
 
     // Apply blur filter as a post-processing step (operates on entire region, not per-pixel)
+    // CSS filter: blur() extends the visual effect beyond the element's bounding box
+    // by the blur radius on each side, so we must expand the blur region.
     FilterFunction* blur_func = filter->functions;
     while (blur_func) {
         if (blur_func->type == FILTER_BLUR && blur_func->params.blur_radius > 0) {
-            box_blur_region(sa, surface, left, top, right - left, bottom - top, blur_func->params.blur_radius);
-            log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
-                      blur_func->params.blur_radius, left, top, right - left, bottom - top);
+            float br = blur_func->params.blur_radius;
+            int pad = (int)ceilf(br);
+            int blur_x = std::max(0, left - pad);
+            int blur_y = std::max(0, top - pad);
+            int blur_r = std::min((int)surface->width, right + pad);
+            int blur_b = std::min((int)surface->height, bottom + pad);
+            int blur_w = blur_r - blur_x;
+            int blur_h = blur_b - blur_y;
+            if (blur_w > 0 && blur_h > 0) {
+                box_blur_region(sa, surface, blur_x, blur_y, blur_w, blur_h, br);
+                log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
+                          br, blur_x, blur_y, blur_w, blur_h);
+            }
         }
         blur_func = blur_func->next;
     }
