@@ -1240,8 +1240,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
                 int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
                 int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
-                box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
-                log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d)", max_shadow_blur, bx, by, bw, bh);
+                if (rdcon->dl) {
+                    dl_box_blur_region(rdcon->dl, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
+                } else if (rdcon->ui_context->surface) {
+                    box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
+                }
+                log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d) dl=%d", max_shadow_blur, bx, by, bw, bh, rdcon->dl != nullptr);
             }
         }
 
