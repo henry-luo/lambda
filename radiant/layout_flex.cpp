@@ -4677,7 +4677,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
             // Add non-auto end margin
             if (!right_auto && item->bound) {
-                int margin_end = is_main_axis_horizontal(flex_layout) ?
+                float margin_end = is_main_axis_horizontal(flex_layout) ?
                     item->bound->margin.right : item->bound->margin.bottom;
                 current_pos += margin_end;
             }
@@ -4690,10 +4690,10 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         } else {
             // *** FIX 5: Set position with margins ***
             // CSS Flexbox: item position includes its margin-start offset
-            int item_size = get_main_axis_size(item, flex_layout);
+            float item_size = get_main_axis_size(item, flex_layout);
 
             // Get item margins in main axis direction
-            int margin_start = 0, margin_end = 0;
+            float margin_start = 0, margin_end = 0;
             if (item->bound) {
                 if (is_main_axis_horizontal(flex_layout)) {
                     margin_start = item->bound->margin.left;
@@ -4707,11 +4707,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             // Add margin-start before positioning
             current_pos += margin_start;
 
-            int order_val = item && item->fi ? item->fi->order : -999;
-            log_debug("align_items_main_axis: Positioning item %d (order=%d, ptr=%p) at position %d (margin_start=%d), size=%d",
+            int order_val = item && item->fi ? item->fi->order : -999; // INT_CAST_OK: order is integer
+            log_debug("align_items_main_axis: Positioning item %d (order=%d, ptr=%p) at position %.1f (margin_start=%.1f), size=%.1f",
                       i, order_val, item, current_pos, margin_start, item_size);
             set_main_axis_position(item, current_pos, flex_layout);
-            log_debug("align_items_main_axis: After set, item->x=%d, item->y=%d", item->x, item->y);
+            log_debug("align_items_main_axis: After set, item->x=%.1f, item->y=%.1f", item->x, item->y);
 
             // Advance by item size + margin-end
             current_pos += item_size + margin_end;
@@ -4728,11 +4728,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             // via alignment_fallback_for_overflow, and gaps should still apply between items.
             bool skip_gap = (flex_layout->justify == CSS_VALUE_SPACE_BETWEEN && free_space >= 0);
             if (i < line->item_count - 1 && !skip_gap) {
-                int gap = is_main_axis_horizontal(flex_layout) ?
+                float gap = is_main_axis_horizontal(flex_layout) ?
                          flex_layout->column_gap : flex_layout->row_gap;
                 if (gap > 0) {
                     current_pos += gap;
-                    log_debug("Added gap=%d between items %d and %d", gap, i, i+1);
+                    log_debug("Added gap=%.1f between items %d and %d", gap, i, i+1);
                 }
             }
         }

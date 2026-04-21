@@ -446,11 +446,11 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
     log_debug("fill rect: x:%.0f, y:%.0f, wd:%.0f, hg:%.0f, color:%x", rect->x, rect->y, rect->width, rect->height, color);
 
-    // Use explicit std::max/min to avoid template resolution issues
-    int left = (int)std::max(clip->left, rect->x);
-    int right = (int)std::min(clip->right, rect->x + rect->width);
-    int top = (int)std::max(clip->top, rect->y);
-    int bottom = (int)std::min(clip->bottom, rect->y + rect->height);
+    // Pixel-snap: round edges to nearest pixel for subpixel accuracy
+    int left = (int)roundf(std::max(clip->left, rect->x));
+    int right = (int)roundf(std::min(clip->right, rect->x + rect->width));
+    int top = (int)roundf(std::max(clip->top, rect->y));
+    int bottom = (int)roundf(std::min(clip->bottom, rect->y + rect->height));
     if (left >= right || top >= bottom) return; // rect outside clip
 
     int y_off = surface->tile_offset_y;  // subtract to get tile-relative row index

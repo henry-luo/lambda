@@ -129,6 +129,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800, float scale = 1.0f, float pixel_ratio = 1.0f);
 
+// Batch render command: reads jobs from stdin, shares one UiContext for efficiency
+int cmd_render_batch(int argc, char** argv);
+
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
@@ -1921,6 +1924,13 @@ int main(int argc, char *argv[]) {
         printf("Use: %s run <script.ls> to render math formulas.\n", argv[0]);
         log_finish();
         return 1;
+    }
+
+    // Handle render-batch command (shared UiContext for all renders)
+    if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
+        int result = cmd_render_batch(argc - 2, argv + 2);
+        log_finish();
+        return result;
     }
 
     // Handle render command
