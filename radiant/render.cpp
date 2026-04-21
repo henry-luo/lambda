@@ -2088,12 +2088,21 @@ void draw_debug_rect(RenderContext* rdcon, Rect rect, Bound* clip) {
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->scale;
     if (block->scroller->has_clip) {
+        // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
+        float bl = 0, bt = 0, br = 0, bb = 0;
+        if (block->bound && block->bound->border) {
+            BorderProp* border = block->bound->border;
+            bl = border->width.left;
+            bt = border->width.top;
+            br = border->width.right;
+            bb = border->width.bottom;
+        }
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left * s);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top * s);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right * s);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom * s);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroller->clip.left + bl) * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroller->clip.top + bt) * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroller->clip.right - br) * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroller->clip.bottom - bb) * s);
 
         // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
         if (block->bound && block->bound->border) {
@@ -2102,14 +2111,15 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             resolve_border_radius_percentages(&border->radius, block->width, block->height);
             if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
-                rdcon->block.clip_radius.top_left = border->radius.top_left * s;
-                rdcon->block.clip_radius.top_right = border->radius.top_right * s;
-                rdcon->block.clip_radius.bottom_left = border->radius.bottom_left * s;
-                rdcon->block.clip_radius.bottom_right = border->radius.bottom_right * s;
-                rdcon->block.clip_radius.top_left_y = border->radius.top_left_y * s;
-                rdcon->block.clip_radius.top_right_y = border->radius.top_right_y * s;
-                rdcon->block.clip_radius.bottom_left_y = border->radius.bottom_left_y * s;
-                rdcon->block.clip_radius.bottom_right_y = border->radius.bottom_right_y * s;
+                // Use inner radius (outer minus border width) for padding-box clipping
+                rdcon->block.clip_radius.top_left = fmaxf(0, border->radius.top_left - bl) * s;
+                rdcon->block.clip_radius.top_right = fmaxf(0, border->radius.top_right - br) * s;
+                rdcon->block.clip_radius.bottom_left = fmaxf(0, border->radius.bottom_left - bl) * s;
+                rdcon->block.clip_radius.bottom_right = fmaxf(0, border->radius.bottom_right - br) * s;
+                rdcon->block.clip_radius.top_left_y = fmaxf(0, border->radius.top_left_y - bt) * s;
+                rdcon->block.clip_radius.top_right_y = fmaxf(0, border->radius.top_right_y - bt) * s;
+                rdcon->block.clip_radius.bottom_left_y = fmaxf(0, border->radius.bottom_left_y - bb) * s;
+                rdcon->block.clip_radius.bottom_right_y = fmaxf(0, border->radius.bottom_right_y - bb) * s;
                 constrain_corner_radii(&rdcon->block.clip_radius,
                     rdcon->block.clip.right - rdcon->block.clip.left,
                     rdcon->block.clip.bottom - rdcon->block.clip.top);
@@ -2802,7 +2812,11 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     // Apply object-fit: compute actual image render rect
     CssEnum object_fit = view->embed->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
-    if (object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) {
+    // SVG images with a viewBox implicitly use preserveAspectRatio="xMidYMid meet"
+    // (equivalent to object-fit: contain) unless object-fit is explicitly set.
+    bool svg_default_contain = (img->format == IMAGE_FORMAT_SVG && !object_fit);
+    if ((object_fit && object_fit != CSS_VALUE_FILL && img->width > 0 && img->height > 0) ||
+        svg_default_contain) {
         float img_w = (float)img->width;
         float img_h = (float)img->height;
         float box_w = rect.width;
@@ -2811,7 +2825,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         float scale_y = box_h / img_h;
         float scale;
 
-        if (object_fit == CSS_VALUE_CONTAIN) {
+        if (object_fit == CSS_VALUE_CONTAIN || svg_default_contain) {
             scale = (scale_x < scale_y) ? scale_x : scale_y;
         } else if (object_fit == CSS_VALUE_COVER) {
             scale = (scale_x > scale_y) ? scale_x : scale_y;
