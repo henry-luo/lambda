@@ -421,6 +421,7 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
     calc_linear_gradient_points(gradient->angle, rect, &x1, &y1, &x2, &y2);
 
     // Build gradient stops
+    int stop_count = gradient->stop_count;
     RdtGradientStop* stops = (RdtGradientStop*)alloca(gradient->stop_count * sizeof(RdtGradientStop));
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
@@ -433,9 +434,53 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
                   i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
+    // Handle repeating-linear-gradient: convert px positions and replicate stops
+    RdtGradientStop* final_stops = stops;
+    int final_stop_count = stop_count;
+    if (gradient->is_repeating && stop_count >= 2) {
+        // Convert px positions to fractions of gradient line length
+        if (gradient->stops_in_px) {
+            float grad_len = sqrtf((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+            if (grad_len > 0) {
+                for (int i = 0; i < stop_count; i++) {
+                    if (gradient->stops[i].position >= 0) {
+                        stops[i].offset = gradient->stops[i].position / grad_len;
+                    }
+                }
+            }
+        }
+        float first_pos = stops[0].offset;
+        float last_pos = stops[stop_count - 1].offset;
+        float unit = last_pos - first_pos;
+        if (unit > 0.001f && unit < 0.999f) {
+            // replicate stops to fill 0.0 - 1.0 range
+            int start_rep = (int)floorf((0.0f - first_pos) / unit);
+            int end_rep = (int)ceilf((1.0f - first_pos) / unit);
+            int num_reps = end_rep - start_rep;
+            int max_stops = num_reps * stop_count;
+            RdtGradientStop* rep_stops = (RdtGradientStop*)alloca(max_stops * sizeof(RdtGradientStop));
+            int idx = 0;
+            for (int r = start_rep; r < end_rep; r++) {
+                for (int i = 0; i < stop_count; i++) {
+                    float offset = stops[i].offset + r * unit;
+                    if (offset < -0.001f || offset > 1.001f) continue;
+                    rep_stops[idx] = stops[i];
+                    rep_stops[idx].offset = fmaxf(0.0f, fminf(1.0f, offset));
+                    idx++;
+                }
+            }
+            if (idx >= 2) {
+                final_stops = rep_stops;
+                final_stop_count = idx;
+                log_debug("[GRADIENT] Repeating: replicated %d stops to %d (unit=%.3f)",
+                          stop_count, idx, unit);
+            }
+        }
+    }
+
     RdtPath* clip = create_bg_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
-    rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, stops, gradient->stop_count,
+    rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, final_stops, final_stop_count,
                              RDT_FILL_WINDING, xform);
     rc_pop_clip(rdcon);
     rdt_path_free(clip);

@@ -10999,6 +10999,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Allocate LinearGradient
                     LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
                     span->bound->background->linear_gradient = lg;
+                    lg->is_repeating = (strcmp(func_name, "repeating-linear-gradient") == 0);
 
                     // Parse arguments
                     CssFunction* func = value->data.function;
@@ -11113,6 +11114,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                         lg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
                                     } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
                                         lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
+                                    } else if (pos_val->type == CSS_VALUE_TYPE_LENGTH) {
+                                        lg->stops[stop_idx].position = pos_val->data.length.value;
+                                        lg->stops_in_px = true;
                                     }
                                 }
 
@@ -11126,7 +11130,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     lg->stop_count = stop_idx;
 
                     // Auto-distribute positions if not specified
-                    if (lg->stop_count > 0) {
+                    if (lg->stop_count > 0 && !lg->stops_in_px) {
                         for (int i = 0; i < lg->stop_count; i++) {
                             if (lg->stops[i].position < 0) {
                                 lg->stops[i].position = (float)i / (float)(lg->stop_count - 1);
