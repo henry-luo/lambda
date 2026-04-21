@@ -8380,31 +8380,6 @@ extern "C" Item js_get_global_this() {
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
-
-        // DOM: Node constants (Node.ELEMENT_NODE, etc.)
-        {
-            Item node_obj = js_new_object();
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ELEMENT_NODE", 12))}, (Item){.item = i2it(1)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("ATTRIBUTE_NODE", 14))}, (Item){.item = i2it(2)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("TEXT_NODE", 9))}, (Item){.item = i2it(3)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("CDATA_SECTION_NODE", 18))}, (Item){.item = i2it(4)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("COMMENT_NODE", 12))}, (Item){.item = i2it(8)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_NODE", 13))}, (Item){.item = i2it(9)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_TYPE_NODE", 18))}, (Item){.item = i2it(10)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_FRAGMENT_NODE", 22))}, (Item){.item = i2it(11)});
-            // document position bitmask
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_DISCONNECTED", 30))}, (Item){.item = i2it(1)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_PRECEDING", 27))}, (Item){.item = i2it(2)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_FOLLOWING", 27))}, (Item){.item = i2it(4)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINS", 26))}, (Item){.item = i2it(8)});
-            js_property_set(node_obj, (Item){.item = s2it(heap_create_name("DOCUMENT_POSITION_CONTAINED_BY", 30))}, (Item){.item = i2it(16)});
-            // make Node also usable as a prototype-like check (Node.prototype = Node for typeof == 'function' checks)
-            js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Node", 4))}, node_obj);
-        }
-
-        // DOM: window.innerWidth / innerHeight (headless defaults)
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerWidth", 10))}, (Item){.item = i2it(1024)});
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("innerHeight", 11))}, (Item){.item = i2it(768)});
     }
     return js_global_this_obj;
 }
