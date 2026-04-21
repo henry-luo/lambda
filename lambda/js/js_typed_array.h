@@ -33,6 +33,7 @@ typedef struct JsArrayBuffer {
     void* data;         // heap-allocated byte buffer
     int byte_length;    // total bytes
     bool detached;      // true after ArrayBuffer has been detached
+    bool is_shared;     // true for SharedArrayBuffer
 } JsArrayBuffer;
 
 // DataView: structured access into an ArrayBuffer
@@ -81,8 +82,13 @@ Item js_arraybuffer_is_view_item(Item val);
 void js_arraybuffer_detach(Item val);
 bool js_arraybuffer_is_detached(Item val);
 
+// SharedArrayBuffer
+Item js_sharedarraybuffer_construct(Item length_arg);
+bool js_is_sharedarraybuffer(Item val);
+Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc);
+
 // DataView operations
-Item js_dataview_new(Item buffer, int byte_offset, int byte_length);
+Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
 bool js_is_dataview(Item val);
 Item js_dataview_method(Item dv, Item method_name, Item* args, int argc);
 

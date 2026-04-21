@@ -35,6 +35,7 @@ static JsTypedArray* validate_typed_array(Item ta_item) {
 // Sentinel markers for type identification
 static TypeMap js_typed_array_type_marker = {};
 static TypeMap js_arraybuffer_type_marker = {};
+static int js_sharedarraybuffer_type_marker = 0;
 static TypeMap js_dataview_type_marker = {};
 char js_typed_array_marker = 'T';
 
@@ -83,6 +84,7 @@ static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     ab->byte_length = byte_length;
     ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
     ab->detached = false;
+    ab->is_shared = false;
     return ab;
 }
 
@@ -154,7 +156,8 @@ extern "C" bool js_is_arraybuffer(Item val) {
 // Original: m->data holds JsArrayBuffer* directly (m->type == &js_arraybuffer_type_marker).
 // Upgraded: JsArrayBuffer* is stored as __ab__ int64 property (after first user property write).
 static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
-    if (m->type == (void*)&js_arraybuffer_type_marker)
+    if (m->type == (void*)&js_arraybuffer_type_marker ||
+        m->type == (void*)&js_sharedarraybuffer_type_marker)
         return (JsArrayBuffer*)m->data;
     // Upgraded: retrieve from __ab__ internal property
     bool found = false;
@@ -184,6 +187,11 @@ extern "C" int js_arraybuffer_byte_length(Item val) {
 
 extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
+    // ES spec: ArrayBuffer.prototype.slice must throw TypeError for SharedArrayBuffer
+    if (js_is_sharedarraybuffer(val)) {
+        js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
+        return ItemNull;
+    }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
 
@@ -226,6 +234,117 @@ extern "C" bool js_arraybuffer_is_detached(Item val) {
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return false;
     return ab->detached;
+}
+
+// ============================================================================
+// SharedArrayBuffer
+// ============================================================================
+
+extern "C" Item js_sharedarraybuffer_construct(Item length_arg) {
+    // ToIndex: undefined/null → 0
+    TypeId type = get_type_id(length_arg);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
+        length_arg = (Item){.item = i2it(0)};
+        type = LMD_TYPE_INT;
+    }
+
+    // Symbol → TypeError (cannot convert to number)
+    if (type == LMD_TYPE_INT && it2i(length_arg) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
+
+    // Convert to number
+    Item num = js_to_number(length_arg);
+    if (js_check_exception()) return ItemNull;
+    type = get_type_id(num);
+
+    double dval;
+    if (type == LMD_TYPE_FLOAT) {
+        dval = *((double*)((uintptr_t)num.item & 0x00FFFFFFFFFFFFFF));
+    } else {
+        dval = (double)it2i(num);
+    }
+
+    if (std::isnan(dval)) dval = 0;
+    dval = std::trunc(dval);
+
+    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
+        return js_throw_range_error("Invalid shared array buffer length");
+    }
+
+    int64_t ival = (int64_t)dval;
+    if (ival > 1073741824) {
+        return js_throw_range_error("Shared array buffer allocation failed");
+    }
+
+    int byte_length = (int)ival;
+    JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
+    ab->byte_length = byte_length;
+    ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
+    ab->detached = false;
+    ab->is_shared = true;
+
+    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+    m->map_kind = MAP_KIND_ARRAYBUFFER;
+    m->type = (void*)&js_sharedarraybuffer_type_marker;
+    m->data = ab;
+    m->data_cap = 0;
+
+    return (Item){.map = m};
+}
+
+extern "C" bool js_is_sharedarraybuffer(Item val) {
+    TypeId type = get_type_id(val);
+    if (type != LMD_TYPE_MAP) return false;
+    Map* m = val.map;
+    if (!m || m->map_kind != MAP_KIND_ARRAYBUFFER) return false;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(m);
+    return ab && ab->is_shared;
+}
+
+extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc) {
+    if (!js_is_sharedarraybuffer(sab)) return ItemNull;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(sab.map);
+    if (!ab) return ItemNull;
+
+    String* mname = it2s(method_name);
+    if (!mname) return ItemNull;
+
+    // slice(begin, end)
+    if (mname->len == 5 && strncmp(mname->chars, "slice", 5) == 0) {
+        int begin = 0, end = ab->byte_length;
+        if (argc > 0) {
+            Item b = js_to_number(args[0]);
+            if (js_check_exception()) return ItemNull;
+            begin = (int)(get_type_id(b) == LMD_TYPE_FLOAT ? it2d(b) : (double)it2i(b));
+            if (begin < 0) begin = ab->byte_length + begin;
+            if (begin < 0) begin = 0;
+            if (begin > ab->byte_length) begin = ab->byte_length;
+        }
+        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            Item e = js_to_number(args[1]);
+            if (js_check_exception()) return ItemNull;
+            end = (int)(get_type_id(e) == LMD_TYPE_FLOAT ? it2d(e) : (double)it2i(e));
+            if (end < 0) end = ab->byte_length + end;
+            if (end < 0) end = 0;
+            if (end > ab->byte_length) end = ab->byte_length;
+        }
+        if (end < begin) end = begin;
+        int new_len = end - begin;
+
+        // Create a new SharedArrayBuffer for the slice
+        Item result_item = js_sharedarraybuffer_construct((Item){.item = i2it(new_len)});
+        if (js_check_exception()) return ItemNull;
+        JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
+        if (rab && new_len > 0) {
+            memcpy(rab->data, (char*)ab->data + begin, new_len);
+        }
+        return result_item;
+    }
+
+    return ItemNull;
 }
 
 // ============================================================================
@@ -708,22 +827,46 @@ static JsDataView* js_get_dataview_ptr(Map* m) {
     return NULL;
 }
 
-extern "C" Item js_dataview_new(Item buffer, int byte_offset, int byte_length) {
+extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item) {
     if (!js_is_arraybuffer(buffer)) {
-        log_error("DataView: first argument must be an ArrayBuffer");
-        return (Item){.item = ITEM_NULL};
+        js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
+        return ItemNull;
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
 
-    if (byte_offset < 0) byte_offset = 0;
-    if (byte_offset > ab->byte_length) byte_offset = ab->byte_length;
+    // Convert offset to integer (default 0)
+    int byte_offset = 0;
+    TypeId ot = get_type_id(offset_item);
+    if (ot == LMD_TYPE_INT) byte_offset = (int)it2i(offset_item);
+    else if (ot == LMD_TYPE_FLOAT) {
+        double d = it2d(offset_item);
+        if (d != d) byte_offset = 0; // NaN → 0 (will trigger range error if buffer non-empty)
+        else byte_offset = (int)d;
+    }
 
-    if (byte_length < 0) {
-        // auto: rest of buffer
+    if (byte_offset < 0 || byte_offset > ab->byte_length) {
+        js_throw_range_error("Start offset is outside the bounds of the buffer");
+        return ItemNull;
+    }
+
+    // Convert length to integer (default: rest of buffer)
+    int byte_length;
+    TypeId lt = get_type_id(length_item);
+    if (lt == LMD_TYPE_UNDEFINED || lt == LMD_TYPE_NULL) {
+        byte_length = ab->byte_length - byte_offset;
+    } else if (lt == LMD_TYPE_INT) {
+        byte_length = (int)it2i(length_item);
+    } else if (lt == LMD_TYPE_FLOAT) {
+        double d = it2d(length_item);
+        if (d != d) byte_length = 0;
+        else byte_length = (int)d;
+    } else {
         byte_length = ab->byte_length - byte_offset;
     }
-    if (byte_offset + byte_length > ab->byte_length) {
-        byte_length = ab->byte_length - byte_offset;
+
+    if (byte_length < 0 || byte_offset + byte_length > ab->byte_length) {
+        js_throw_range_error("Invalid DataView length");
+        return ItemNull;
     }
 
     JsDataView* dv = (JsDataView*)mem_alloc(sizeof(JsDataView), MEM_CAT_JS_RUNTIME);

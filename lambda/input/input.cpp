@@ -106,6 +106,11 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(int64_t*)field_ptr = int_val;
         break;
     }
+    case LMD_TYPE_BIGINT: {
+        int64_t int_val = value.get_int56();
+        *(int64_t*)field_ptr = int_val;
+        break;
+    }
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;

@@ -44,6 +44,13 @@ extern int64_t js_key_is_symbol_c(Item key);
 
 // v90: BigInt constructor (js_runtime.cpp)
 extern Item js_bigint_constructor(Item value);
+extern Item js_to_numeric(Item value);
+extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
+extern Item js_bigint_not_constructor(void);
+extern Item js_increment(Item value);
+extern Item js_decrement(Item value);
+extern Item js_number_function(Item value);
 
 // view/edit template apply
 extern Item fn_apply1(Item target);
@@ -1168,11 +1175,15 @@ JitImport jit_runtime_imports[] = {
     // JavaScript runtime functions
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
+    {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},
     {"js_to_object", FPTR(js_to_object)},
     {"js_is_truthy", FPTR(js_is_truthy)},
     {"js_is_nullish", FPTR(js_is_nullish)},
+    {"js_increment", FPTR(js_increment)},
+    {"js_decrement", FPTR(js_decrement)},
+    {"js_number_function", FPTR(js_number_function)},
     {"js_add", FPTR(js_add)},
     {"js_subtract", FPTR(js_subtract)},
     {"js_multiply", FPTR(js_multiply)},
@@ -1201,6 +1212,9 @@ JitImport jit_runtime_imports[] = {
     {"js_unary_plus", FPTR(js_unary_plus)},
     {"js_unary_minus", FPTR(js_unary_minus)},
     {"js_bigint_constructor", FPTR(js_bigint_constructor)},
+    {"js_bigint_as_int_n", FPTR(js_bigint_as_int_n)},
+    {"js_bigint_as_uint_n", FPTR(js_bigint_as_uint_n)},
+    {"js_bigint_not_constructor", FPTR(js_bigint_not_constructor)},
     {"js_typeof", FPTR(js_typeof)},
     {"js_typeof_is", FPTR(js_typeof_is)},
     {"js_lt_raw", FPTR(js_lt_raw)},
@@ -1463,6 +1477,10 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_new", FPTR(js_dataview_new)},
     {"js_is_dataview", FPTR(js_is_dataview)},
     {"js_dataview_method", FPTR(js_dataview_method)},
+    // SharedArrayBuffer
+    {"js_sharedarraybuffer_construct", FPTR(js_sharedarraybuffer_construct)},
+    {"js_is_sharedarraybuffer", FPTR(js_is_sharedarraybuffer)},
+    {"js_sharedarraybuffer_method", FPTR(js_sharedarraybuffer_method)},
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},

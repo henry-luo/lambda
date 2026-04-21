@@ -449,6 +449,7 @@ extern Type TYPE_UNDEFINED;  // JavaScript undefined
 extern Type TYPE_BOOL;
 extern Type TYPE_INT;
 extern Type TYPE_INT64;
+extern Type TYPE_BIGINT;
 extern Type TYPE_FLOAT;
 extern Type TYPE_DECIMAL;
 extern Type TYPE_NUMBER;
