@@ -1362,7 +1362,7 @@ static char* resolve_font_via_database(FontContext* font_ctx, const char* family
 }
 
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
-                                    FontContext* font_ctx = nullptr) {
+                                    FontContext* font_ctx = nullptr, int weight = 400) {
     // default font name
     const char* used_font_name = font_family;
 
@@ -1370,6 +1370,34 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         // default to a common sans-serif font
         font_family = "Arial";
         used_font_name = "Arial";
+    }
+
+    // For bold/non-normal weights, try font database best-match first
+    if (weight >= 600 && font_ctx) {
+        FontMatchResult match = font_find_best_match(font_ctx, font_family, weight, FONT_SLANT_NORMAL);
+        if (match.found && match.file_path) {
+            // skip TTC files
+            if (!strstr(match.file_path, ".ttc")) {
+                char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
+                // ThorVG registers fonts by filename without extension (e.g. "Arial Bold.ttf" -> "Arial Bold")
+                // We must use this as the font name, not the family name ("Arial")
+                if (out_font_name) {
+                    const char* slash = strrchr(match.file_path, '/');
+                    if (!slash) slash = strrchr(match.file_path, '\\');
+                    const char* base = slash ? slash + 1 : match.file_path;
+                    const char* dot = strrchr(base, '.');
+                    static char bold_font_name[256];
+                    int name_len = dot ? (int)(dot - base) : (int)strlen(base);
+                    if (name_len > 255) name_len = 255;
+                    memcpy(bold_font_name, base, name_len);
+                    bold_font_name[name_len] = '\0';
+                    *out_font_name = bold_font_name;
+                }
+                log_debug("[SVG] font resolved via best-match (weight=%d): %s -> %s (name='%s')",
+                          weight, font_family, path, out_font_name ? *out_font_name : "?");
+                return path;
+            }
+        }
     }
 
     // try platform font lookup first (works on macOS/Windows)
@@ -1590,14 +1618,32 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
 }
 
 /**
- * Estimate text width for horizontal positioning of tspans
- * This is approximate - proper metrics would require ThorVG API or font metrics
+ * Measure text width using the font system for accurate positioning.
+ * Falls back to rough estimate if font handle unavailable.
  */
-static float estimate_text_width(const char* text, float font_size) {
-    if (!text) return 0;
-    // rough estimate: average character width is about 0.5-0.6 of font size
+static float measure_svg_text_width(const char* text, float font_size_px,
+                                    FontContext* font_ctx, const char* font_family, int weight) {
+    if (!text || !*text) return 0;
+
+    // try measuring with the font system
+    if (font_ctx && font_family) {
+        FontStyleDesc style = {};
+        style.family = font_family;
+        style.size_px = font_size_px;
+        style.weight = (FontWeight)weight;
+        style.slant = FONT_SLANT_NORMAL;
+
+        FontHandle* handle = font_resolve(font_ctx, &style);
+        if (handle) {
+            TextExtents ext = font_measure_text(handle, text, (int)strlen(text));
+            font_handle_release(handle);
+            if (ext.width > 0) return ext.width;
+        }
+    }
+
+    // fallback: rough estimate
     size_t len = strlen(text);
-    return len * font_size * 0.55f;
+    return len * font_size_px * 0.55f;
 }
 
 /**
@@ -1627,9 +1673,21 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     if (!parent_fill) parent_fill = "black";
     Color default_fill = parse_svg_color(parent_fill);
 
+    // parse font-weight: normal (400), bold (700), or numeric
+    const char* font_weight_str = get_svg_attr(elem, "font-weight");
+    int font_weight = 400;
+    if (font_weight_str) {
+        if (strcmp(font_weight_str, "bold") == 0) font_weight = 700;
+        else if (strcmp(font_weight_str, "bolder") == 0) font_weight = 700;
+        else if (strcmp(font_weight_str, "lighter") == 0) font_weight = 300;
+        else if (strcmp(font_weight_str, "normal") == 0) font_weight = 400;
+        else font_weight = atoi(font_weight_str);
+        if (font_weight <= 0) font_weight = 400;
+    }
+
     // resolve font path and name
     const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx);
+    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx, font_weight);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return;
@@ -1664,12 +1722,30 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         return;
     }
 
+    // resolve font handle once for accurate metrics
+    float font_ascent_ratio = 0.8f;  // fallback
+    if (ctx->font_ctx && font_family) {
+        FontStyleDesc style = {};
+        style.family = font_family;
+        style.size_px = font_size;
+        style.weight = (FontWeight)font_weight;
+        style.slant = FONT_SLANT_NORMAL;
+        FontHandle* handle = font_resolve(ctx->font_ctx, &style);
+        if (handle) {
+            const FontMetrics* fm = font_get_metrics(handle);
+            if (fm && fm->ascender > 0 && font_size > 0) {
+                font_ascent_ratio = fm->ascender / font_size;
+            }
+            font_handle_release(handle);
+        }
+    }
+
     // helper lambda to wrap and draw a ThorVG text paint
     // text position (tx, ty) is composed into the transform since
     // tvg_paint_set_transform in rdt_picture_draw overwrites any prior tvg_paint_translate
     auto draw_text_paint = [&](Tvg_Paint tvg_text, float tx, float ty, float fs_px) {
         if (!tvg_text) return;
-        float ascent = fs_px * 0.8f;
+        float ascent = fs_px * font_ascent_ratio;
         float adj_y = ty - ascent;
         RdtMatrix pos = rdt_matrix_translate(tx, adj_y);
         RdtMatrix final_m = rdt_matrix_multiply(&m, &pos);
@@ -1702,17 +1778,24 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         TypeId type = get_type_id(child);
 
         if (type == LMD_TYPE_STRING) {
-            // direct text node - skip whitespace-only
+            // direct text node
             String* str = child.get_string();
             if (str && str->chars && str->len > 0) {
-                if (is_whitespace_only(str->chars, str->len)) continue;
+                if (is_whitespace_only(str->chars, str->len)) {
+                    // SVG spec: whitespace between tspans collapses to a single space
+                    if (has_tspan) {
+                        cur_x += measure_svg_text_width(" ", font_size, ctx->font_ctx, font_family, font_weight);
+                    }
+                    continue;
+                }
                 char* text_copy = trim_whitespace(str->chars, str->len);
                 if (text_copy) {
                     Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
                                                               font_path, font_name, font_size, default_fill);
                     if (text_obj) {
+                        float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, font_family, font_weight);
                         draw_text_paint(text_obj, cur_x, cur_y, font_size);
-                        cur_x += estimate_text_width(text_copy, font_size);
+                        cur_x += w;
                     }
                     mem_free(text_copy);
                 }
@@ -1757,8 +1840,9 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
                                                               font_path, font_name, tspan_font_size, fill);
                     if (text_obj) {
+                        float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, font_family, font_weight);
                         draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
-                        cur_x += estimate_text_width(text_content, tspan_font_size);
+                        cur_x += w;
                     }
                     mem_free((void*)text_content);
                 }
