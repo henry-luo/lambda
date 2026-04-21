@@ -2062,13 +2062,19 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             BorderProp* border = block->bound->border;
             // resolve percentage border-radius if not yet resolved
             resolve_border_radius_percentages(&border->radius, block->width, block->height);
-            if (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                border->radius.bottom_left > 0 || border->radius.bottom_right > 0) {
+            if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
                 rdcon->block.clip_radius.top_left = border->radius.top_left * s;
                 rdcon->block.clip_radius.top_right = border->radius.top_right * s;
                 rdcon->block.clip_radius.bottom_left = border->radius.bottom_left * s;
                 rdcon->block.clip_radius.bottom_right = border->radius.bottom_right * s;
+                rdcon->block.clip_radius.top_left_y = border->radius.top_left_y * s;
+                rdcon->block.clip_radius.top_right_y = border->radius.top_right_y * s;
+                rdcon->block.clip_radius.bottom_left_y = border->radius.bottom_left_y * s;
+                rdcon->block.clip_radius.bottom_right_y = border->radius.bottom_right_y * s;
+                constrain_corner_radii(&rdcon->block.clip_radius,
+                    rdcon->block.clip.right - rdcon->block.clip.left,
+                    rdcon->block.clip.bottom - rdcon->block.clip.top);
                 log_debug("setup rounded clip: tl=%f, tr=%f, bl=%f, br=%f",
                     rdcon->block.clip_radius.top_left, rdcon->block.clip_radius.top_right,
                     rdcon->block.clip_radius.bottom_left, rdcon->block.clip_radius.bottom_right);

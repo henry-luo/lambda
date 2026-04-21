@@ -50,6 +50,7 @@ typedef enum {
     DL_WEBVIEW_LAYER_PLACEHOLDER,
     // box-shadow blur (deferred so it runs after the shadow fill is rasterised)
     DL_BOX_BLUR_REGION,
+    DL_BOX_BLUR_INSET,       // inset shadow blur: blur expanded region, restore outer pixels
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -196,7 +197,17 @@ typedef struct {
 typedef struct {
     int rx, ry, rw, rh;      // pixel region to blur
     float blur_radius;        // CSS blur radius in pixels
+    int clip_type;            // ClipShapeType (0 = none, clips blur to CSS clip-path)
+    float clip_params[8];    // serialized clip shape parameters
 } DlBoxBlurRegion;
+
+// Inset box-shadow blur: blur expanded region, restore pixels outside inner rect
+typedef struct {
+    int rx, ry, rw, rh;      // inner write region (element rect)
+    int pad;                  // read padding (blur extends this far beyond inner rect)
+    float blur_radius;        // CSS blur radius in pixels
+    uint32_t bg_color;        // element background color (surface pixel format)
+} DlBoxBlurInset;
 
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
 // The actual video frame pixels are blitted after tile compositing in the render loop.
@@ -242,6 +253,7 @@ typedef struct DisplayItem {
         DlApplyBlendMode     apply_blend_mode;
         DlApplyFilter        apply_filter;
         DlBoxBlurRegion      box_blur_region;
+        DlBoxBlurInset       box_blur_inset;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
     };
@@ -340,7 +352,10 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip);
 
-void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius);
+void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
+                        int clip_type, const float* clip_params);
+
+void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color);
 
 // Video placeholder (rect + clip only; actual blit is post-composite)
 void dl_video_placeholder(DisplayList* dl, void* video,

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "view.hpp"
+#include "../lambda/input/css/css_value.hpp"
 #include "font_face.h"
 
 #include "../lib/log.h"
@@ -74,6 +75,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
                     fprop->descender   = _lh_desc;
                     fprop->font_height = m->hhea_line_height;
                     fprop->has_kerning = m->has_kerning;
+                    if (fprop->font_kerning == CSS_VALUE_NONE) {
+                        fprop->has_kerning = false;
+                    }
                 }
                 return;
             }
@@ -116,6 +120,10 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             fprop->descender   = _lh_desc;
             fprop->font_height = m->hhea_line_height;
             fprop->has_kerning = m->has_kerning;
+            // CSS font-kerning: none disables kerning regardless of font capability
+            if (fprop->font_kerning == CSS_VALUE_NONE) {
+                fprop->has_kerning = false;
+            }
         }
         return;
     }

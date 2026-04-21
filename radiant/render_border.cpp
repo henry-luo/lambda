@@ -59,24 +59,61 @@ static const RdtMatrix* get_transform(RenderContext* rdcon) {
     return &rdcon->transform;
 }
 
+static Corner corner_scaled(const Corner* radius, float scale) {
+    Corner out = *radius;
+    out.top_left *= scale;
+    out.top_right *= scale;
+    out.bottom_right *= scale;
+    out.bottom_left *= scale;
+    out.top_left_y *= scale;
+    out.top_right_y *= scale;
+    out.bottom_right_y *= scale;
+    out.bottom_left_y *= scale;
+    return out;
+}
+
+static Corner corner_inset(const Corner* radius, float inset_x, float inset_y) {
+    Corner out = *radius;
+    out.top_left = max(0.0f, out.top_left - inset_x);
+    out.top_right = max(0.0f, out.top_right - inset_x);
+    out.bottom_right = max(0.0f, out.bottom_right - inset_x);
+    out.bottom_left = max(0.0f, out.bottom_left - inset_x);
+    out.top_left_y = max(0.0f, out.top_left_y - inset_y);
+    out.top_right_y = max(0.0f, out.top_right_y - inset_y);
+    out.bottom_right_y = max(0.0f, out.bottom_right_y - inset_y);
+    out.bottom_left_y = max(0.0f, out.bottom_left_y - inset_y);
+    return out;
+}
+
+static Corner corner_expand(const Corner* radius, float expand_x, float expand_y) {
+    Corner out = *radius;
+    out.top_left = max(0.0f, out.top_left + expand_x);
+    out.top_right = max(0.0f, out.top_right + expand_x);
+    out.bottom_right = max(0.0f, out.bottom_right + expand_x);
+    out.bottom_left = max(0.0f, out.bottom_left + expand_x);
+    out.top_left_y = max(0.0f, out.top_left_y + expand_y);
+    out.top_right_y = max(0.0f, out.top_right_y + expand_y);
+    out.bottom_right_y = max(0.0f, out.bottom_right_y + expand_y);
+    out.bottom_left_y = max(0.0f, out.bottom_left_y + expand_y);
+    return out;
+}
+
 // Create a clip path from the render context's clip region
 static RdtPath* create_border_clip_path(RenderContext* rdcon) {
-    RdtPath* clip = rdt_path_new();
     if (rdcon->block.has_clip_radius) {
         float clip_x = rdcon->block.clip.left;
         float clip_y = rdcon->block.clip.top;
         float clip_w = rdcon->block.clip.right - rdcon->block.clip.left;
         float clip_h = rdcon->block.clip.bottom - rdcon->block.clip.top;
-        float r = rdcon->block.clip_radius.top_left;
-        if (rdcon->block.clip_radius.top_right > 0) r = max(r, rdcon->block.clip_radius.top_right);
-        if (rdcon->block.clip_radius.bottom_left > 0) r = max(r, rdcon->block.clip_radius.bottom_left);
-        if (rdcon->block.clip_radius.bottom_right > 0) r = max(r, rdcon->block.clip_radius.bottom_right);
-        rdt_path_add_rect(clip, clip_x, clip_y, clip_w, clip_h, r, r);
-    } else {
-        rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
-            rdcon->block.clip.right - rdcon->block.clip.left,
-            rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
+        Corner clip_radius = rdcon->block.clip_radius;
+        constrain_corner_radii(&clip_radius, clip_w, clip_h);
+        Rect clip_rect = {clip_x, clip_y, clip_w, clip_h};
+        return build_rounded_rect_path(clip_rect, &clip_radius);
     }
+    RdtPath* clip = rdt_path_new();
+    rdt_path_add_rect(clip, rdcon->block.clip.left, rdcon->block.clip.top,
+        rdcon->block.clip.right - rdcon->block.clip.left,
+        rdcon->block.clip.bottom - rdcon->block.clip.top, 0, 0);
     return clip;
 }
 
@@ -380,13 +417,13 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 /**
  * Constrain border radii to prevent overlapping per CSS Backgrounds Level 3 §5.5
  */
-void constrain_border_radii(BorderProp* border, float width, float height) {
-    if (!border) return;
+void constrain_corner_radii(Corner* radius, float width, float height) {
+    if (!radius) return;
 
-    float horizontal_sum_top = border->radius.top_left + border->radius.top_right;
-    float horizontal_sum_bottom = border->radius.bottom_left + border->radius.bottom_right;
-    float vertical_sum_left = border->radius.top_left + border->radius.bottom_left;
-    float vertical_sum_right = border->radius.top_right + border->radius.bottom_right;
+    float horizontal_sum_top = radius->top_left + radius->top_right;
+    float horizontal_sum_bottom = radius->bottom_left + radius->bottom_right;
+    float vertical_sum_left = radius->top_left_y + radius->bottom_left_y;
+    float vertical_sum_right = radius->top_right_y + radius->bottom_right_y;
 
     float f = 1.0f;
     if (horizontal_sum_top > width) f = min(f, width / horizontal_sum_top);
@@ -396,41 +433,70 @@ void constrain_border_radii(BorderProp* border, float width, float height) {
 
     if (f < 1.0f) {
         log_debug("[BORDER RADIUS] Constraining radii by factor %.2f", f);
-        border->radius.top_left *= f;
-        border->radius.top_right *= f;
-        border->radius.bottom_right *= f;
-        border->radius.bottom_left *= f;
+        radius->top_left *= f;
+        radius->top_right *= f;
+        radius->bottom_right *= f;
+        radius->bottom_left *= f;
+        radius->top_left_y *= f;
+        radius->top_right_y *= f;
+        radius->bottom_right_y *= f;
+        radius->bottom_left_y *= f;
     }
+}
+
+void constrain_border_radii(BorderProp* border, float width, float height) {
+    if (!border) return;
+    constrain_corner_radii(&border->radius, width, height);
 }
 
 /**
  * Resolve percentage border-radius values to pixels.
  * CSS Backgrounds 3 §5.3: percentages resolve against element dimensions.
- * Uses min(width, height) since we store a single radius per corner.
  */
 void resolve_border_radius_percentages(Corner* radius, float width, float height) {
-    float dim = min(width, height);
     if (radius->tl_percent) {
-        radius->top_left = radius->top_left * dim / 100.0f;
+        radius->top_left = radius->top_left * width / 100.0f;
         radius->tl_percent = false;
     }
     if (radius->tr_percent) {
-        radius->top_right = radius->top_right * dim / 100.0f;
+        radius->top_right = radius->top_right * width / 100.0f;
         radius->tr_percent = false;
     }
     if (radius->br_percent) {
-        radius->bottom_right = radius->bottom_right * dim / 100.0f;
+        radius->bottom_right = radius->bottom_right * width / 100.0f;
         radius->br_percent = false;
     }
     if (radius->bl_percent) {
-        radius->bottom_left = radius->bottom_left * dim / 100.0f;
+        radius->bottom_left = radius->bottom_left * width / 100.0f;
         radius->bl_percent = false;
+    }
+    if (radius->tl_percent_y) {
+        radius->top_left_y = radius->top_left_y * height / 100.0f;
+        radius->tl_percent_y = false;
+    }
+    if (radius->tr_percent_y) {
+        radius->top_right_y = radius->top_right_y * height / 100.0f;
+        radius->tr_percent_y = false;
+    }
+    if (radius->br_percent_y) {
+        radius->bottom_right_y = radius->bottom_right_y * height / 100.0f;
+        radius->br_percent_y = false;
+    }
+    if (radius->bl_percent_y) {
+        radius->bottom_left_y = radius->bottom_left_y * height / 100.0f;
+        radius->bl_percent_y = false;
     }
 }
 
+bool corner_has_radius(const Corner* radius) {
+    return radius && (radius->top_left > 0 || radius->top_right > 0 ||
+           radius->bottom_right > 0 || radius->bottom_left > 0 ||
+           radius->top_left_y > 0 || radius->top_right_y > 0 ||
+           radius->bottom_right_y > 0 || radius->bottom_left_y > 0);
+}
+
 static inline bool has_border_radius(BorderProp* border) {
-    return border->radius.top_left > 0 || border->radius.top_right > 0 ||
-           border->radius.bottom_right > 0 || border->radius.bottom_left > 0;
+    return border && corner_has_radius(&border->radius);
 }
 
 static inline bool needs_vector_rendering(CssEnum style) {
@@ -449,11 +515,7 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->bound->border;
     float s = rdcon->scale;
 
-    Corner scaled_radius = border->radius;
-    scaled_radius.top_left *= s;
-    scaled_radius.top_right *= s;
-    scaled_radius.bottom_right *= s;
-    scaled_radius.bottom_left *= s;
+    Corner scaled_radius = corner_scaled(&border->radius, s);
     Corner orig_radius = border->radius;
     border->radius = scaled_radius;
     constrain_border_radii(border, rect.width, rect.height);
@@ -474,7 +536,10 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     border->width.bottom *= s;
     border->width.left *= s;
 
-    if (needs_vector || rdcon->has_transform) {
+    // Force vector path when CSS clip-path is active — the direct-pixel path
+    // (render_straight_border) bypasses the ThorVG clip stack, so clip-path
+    // shapes would not be applied to the borders.
+    if (needs_vector || rdcon->has_transform || rdcon->clip_shape_depth > 0) {
         render_rounded_border(rdcon, view, rect);
     } else {
         render_straight_border(rdcon, view, rect);
@@ -523,9 +588,9 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 }
 
 /**
- * Build rounded rectangle path with Bezier curves
+ * Build rounded rectangle path with per-corner elliptical radii.
  */
-static RdtPath* build_rounded_border_path(Rect rect, BorderProp* border) {
+RdtPath* build_rounded_rect_path(Rect rect, const Corner* radius) {
     RdtPath* p = rdt_path_new();
 
     float x = rect.x;
@@ -533,56 +598,60 @@ static RdtPath* build_rounded_border_path(Rect rect, BorderProp* border) {
     float w = rect.width;
     float h = rect.height;
 
-    float r_tl = border->radius.top_left;
-    float r_tr = border->radius.top_right;
-    float r_br = border->radius.bottom_right;
-    float r_bl = border->radius.bottom_left;
+    float rx_tl = radius->top_left;
+    float rx_tr = radius->top_right;
+    float rx_br = radius->bottom_right;
+    float rx_bl = radius->bottom_left;
+    float ry_tl = radius->top_left_y;
+    float ry_tr = radius->top_right_y;
+    float ry_br = radius->bottom_right_y;
+    float ry_bl = radius->bottom_left_y;
 
     // Start from top-left corner (after the radius)
-    rdt_path_move_to(p, x + r_tl, y);
+    rdt_path_move_to(p, x + rx_tl, y);
 
     // Top edge
-    rdt_path_line_to(p, x + w - r_tr, y);
+    rdt_path_line_to(p, x + w - rx_tr, y);
 
     // Top-right corner (Bezier curve)
-    if (r_tr > 0) {
+    if (rx_tr > 0 || ry_tr > 0) {
         rdt_path_cubic_to(p,
-            x + w - r_tr + r_tr * KAPPA, y,
-            x + w, y + r_tr - r_tr * KAPPA,
-            x + w, y + r_tr);
+            x + w - rx_tr + rx_tr * KAPPA, y,
+            x + w, y + ry_tr - ry_tr * KAPPA,
+            x + w, y + ry_tr);
     }
 
     // Right edge
-    rdt_path_line_to(p, x + w, y + h - r_br);
+    rdt_path_line_to(p, x + w, y + h - ry_br);
 
     // Bottom-right corner (Bezier curve)
-    if (r_br > 0) {
+    if (rx_br > 0 || ry_br > 0) {
         rdt_path_cubic_to(p,
-            x + w, y + h - r_br + r_br * KAPPA,
-            x + w - r_br + r_br * KAPPA, y + h,
-            x + w - r_br, y + h);
+            x + w, y + h - ry_br + ry_br * KAPPA,
+            x + w - rx_br + rx_br * KAPPA, y + h,
+            x + w - rx_br, y + h);
     }
 
     // Bottom edge
-    rdt_path_line_to(p, x + r_bl, y + h);
+    rdt_path_line_to(p, x + rx_bl, y + h);
 
     // Bottom-left corner (Bezier curve)
-    if (r_bl > 0) {
+    if (rx_bl > 0 || ry_bl > 0) {
         rdt_path_cubic_to(p,
-            x + r_bl - r_bl * KAPPA, y + h,
-            x, y + h - r_bl + r_bl * KAPPA,
-            x, y + h - r_bl);
+            x + rx_bl - rx_bl * KAPPA, y + h,
+            x, y + h - ry_bl + ry_bl * KAPPA,
+            x, y + h - ry_bl);
     }
 
     // Left edge
-    rdt_path_line_to(p, x, y + r_tl);
+    rdt_path_line_to(p, x, y + ry_tl);
 
     // Top-left corner (Bezier curve)
-    if (r_tl > 0) {
+    if (rx_tl > 0 || ry_tl > 0) {
         rdt_path_cubic_to(p,
-            x, y + r_tl - r_tl * KAPPA,
-            x + r_tl - r_tl * KAPPA, y,
-            x + r_tl, y);
+            x, y + ry_tl - ry_tl * KAPPA,
+            x + rx_tl - rx_tl * KAPPA, y,
+            x + rx_tl, y);
     }
 
     rdt_path_close(p);
@@ -660,11 +729,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Corner orig_r = border->radius;
             Rect outer_rect = {rect.x + half_lw, rect.y + half_lw,
                                rect.width - line_w, rect.height - line_w};
-            border->radius.top_left = max(0.0f, orig_r.top_left - half_lw);
-            border->radius.top_right = max(0.0f, orig_r.top_right - half_lw);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_lw);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_lw);
-            RdtPath* outer = build_rounded_border_path(outer_rect, border);
+            Corner outer_radius = corner_inset(&orig_r, half_lw, half_lw);
+            RdtPath* outer = build_rounded_rect_path(outer_rect, &outer_radius);
             rc_stroke_path(rdcon, outer, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
@@ -672,12 +738,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             float inner_inset = w - half_lw;
             Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
                                rect.width - inner_inset * 2, rect.height - inner_inset * 2};
-            border->radius.top_left = max(0.0f, orig_r.top_left - inner_inset);
-            border->radius.top_right = max(0.0f, orig_r.top_right - inner_inset);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inner_inset);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inner_inset);
-            RdtPath* inner = build_rounded_border_path(inner_rect, border);
-            border->radius = orig_r;
+            Corner inner_radius = corner_inset(&orig_r, inner_inset, inner_inset);
+            RdtPath* inner = build_rounded_rect_path(inner_rect, &inner_radius);
             rc_stroke_path(rdcon, inner, c, line_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
@@ -696,11 +758,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Corner orig_r = border->radius;
             Rect outer_rect = {rect.x + quarter_w, rect.y + quarter_w,
                                rect.width - half_w, rect.height - half_w};
-            border->radius.top_left = max(0.0f, orig_r.top_left - quarter_w);
-            border->radius.top_right = max(0.0f, orig_r.top_right - quarter_w);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - quarter_w);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - quarter_w);
-            RdtPath* outer = build_rounded_border_path(outer_rect, border);
+            Corner outer_radius = corner_inset(&orig_r, quarter_w, quarter_w);
+            RdtPath* outer = build_rounded_rect_path(outer_rect, &outer_radius);
             rc_stroke_path(rdcon, outer, outer_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(outer);
 
@@ -708,12 +767,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             float inner_inset = quarter_w * 3.0f;
             Rect inner_rect = {rect.x + inner_inset, rect.y + inner_inset,
                                rect.width - inner_inset * 2, rect.height - inner_inset * 2};
-            border->radius.top_left = max(0.0f, orig_r.top_left - inner_inset);
-            border->radius.top_right = max(0.0f, orig_r.top_right - inner_inset);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inner_inset);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inner_inset);
-            RdtPath* inner = build_rounded_border_path(inner_rect, border);
-            border->radius = orig_r;
+            Corner inner_radius = corner_inset(&orig_r, inner_inset, inner_inset);
+            RdtPath* inner = build_rounded_rect_path(inner_rect, &inner_radius);
             rc_stroke_path(rdcon, inner, inner_c, half_w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
             rdt_path_free(inner);
 
@@ -721,8 +776,7 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Color tl_color, br_color;
             inset_outset_side_colors(c, style, &tl_color, NULL, &br_color, NULL);
 
-            bool has_radius = (border->radius.top_left > 0 || border->radius.top_right > 0 ||
-                               border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+            bool has_radius = corner_has_radius(&border->radius);
 
             if (!has_radius) {
                 rc_pop_clip(rdcon);
@@ -735,12 +789,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                 Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
                                     rect.width - w, rect.height - w};
                 Corner orig_r = border->radius;
-                border->radius.top_left = max(0.0f, orig_r.top_left - half_w);
-                border->radius.top_right = max(0.0f, orig_r.top_right - half_w);
-                border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_w);
-                border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_w);
-                RdtPath* shape = build_rounded_border_path(stroke_rect, border);
-                border->radius = orig_r;
+                Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
+                RdtPath* shape = build_rounded_rect_path(stroke_rect, &stroke_radius);
                 rc_stroke_path(rdcon, shape, tl_color, w, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, xform);
                 rdt_path_free(shape);
             }
@@ -752,12 +802,8 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             Rect stroke_rect = {rect.x + half_w, rect.y + half_w,
                                 rect.width - w, rect.height - w};
             Corner orig_r = border->radius;
-            border->radius.top_left = max(0.0f, orig_r.top_left - half_w);
-            border->radius.top_right = max(0.0f, orig_r.top_right - half_w);
-            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - half_w);
-            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - half_w);
-            RdtPath* shape = build_rounded_border_path(stroke_rect, border);
-            border->radius = orig_r;
+            Corner stroke_radius = corner_inset(&orig_r, half_w, half_w);
+            RdtPath* shape = build_rounded_rect_path(stroke_rect, &stroke_radius);
             float dash[2];
             RdtStrokeCap cap;
             int dash_count = get_dash_pattern(style, w, dash, &cap);
@@ -804,58 +850,19 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     RdtVector* vec = &rdcon->vec;
     const RdtMatrix* xform = get_transform(rdcon);
-    RdtPath* p = rdt_path_new();
+    RdtPath* p = nullptr;
 
     // If border-radius exists, use rounded outline path
-    bool has_radius = view->bound->border &&
-        (view->bound->border->radius.top_left > 0 || view->bound->border->radius.top_right > 0 ||
-         view->bound->border->radius.bottom_right > 0 || view->bound->border->radius.bottom_left > 0);
+    bool has_radius = view->bound->border && corner_has_radius(&view->bound->border->radius);
 
     if (has_radius) {
         BorderProp* border = view->bound->border;
-        float r_tl = (border->radius.top_left * s + expand);
-        float r_tr = (border->radius.top_right * s + expand);
-        float r_br = (border->radius.bottom_right * s + expand);
-        float r_bl = (border->radius.bottom_left * s + expand);
-        if (r_tl < 0) r_tl = 0;
-        if (r_tr < 0) r_tr = 0;
-        if (r_br < 0) r_br = 0;
-        if (r_bl < 0) r_bl = 0;
-
-        float x = outline_rect.x, y = outline_rect.y;
-        float ow = outline_rect.width, oh = outline_rect.height;
-
-        rdt_path_move_to(p, x + r_tl, y);
-        rdt_path_line_to(p, x + ow - r_tr, y);
-        if (r_tr > 0) {
-            rdt_path_cubic_to(p,
-                x + ow - r_tr + r_tr * KAPPA, y,
-                x + ow, y + r_tr - r_tr * KAPPA,
-                x + ow, y + r_tr);
-        }
-        rdt_path_line_to(p, x + ow, y + oh - r_br);
-        if (r_br > 0) {
-            rdt_path_cubic_to(p,
-                x + ow, y + oh - r_br + r_br * KAPPA,
-                x + ow - r_br + r_br * KAPPA, y + oh,
-                x + ow - r_br, y + oh);
-        }
-        rdt_path_line_to(p, x + r_bl, y + oh);
-        if (r_bl > 0) {
-            rdt_path_cubic_to(p,
-                x + r_bl - r_bl * KAPPA, y + oh,
-                x, y + oh - r_bl + r_bl * KAPPA,
-                x, y + oh - r_bl);
-        }
-        rdt_path_line_to(p, x, y + r_tl);
-        if (r_tl > 0) {
-            rdt_path_cubic_to(p,
-                x, y + r_tl - r_tl * KAPPA,
-                x + r_tl - r_tl * KAPPA, y,
-                x + r_tl, y);
-        }
-        rdt_path_close(p);
+        Corner scaled_radius = corner_scaled(&border->radius, s);
+        Corner outline_radius = corner_expand(&scaled_radius, expand, expand);
+        constrain_corner_radii(&outline_radius, outline_rect.width, outline_rect.height);
+        p = build_rounded_rect_path(outline_rect, &outline_radius);
     } else {
+        p = rdt_path_new();
         rdt_path_add_rect(p, outline_rect.x, outline_rect.y,
             outline_rect.width, outline_rect.height, 0, 0);
     }
