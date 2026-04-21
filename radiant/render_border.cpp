@@ -177,6 +177,14 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
     RdtVector* vec = &rdcon->vec;
     const RdtMatrix* xform = get_transform(rdcon);
 
+    // If border-radius is present, clip all per-side trapezoids to the outer rounded rect
+    bool has_radius = corner_has_radius(&border->radius);
+    RdtPath* radius_clip = nullptr;
+    if (has_radius) {
+        radius_clip = build_rounded_rect_path(rect, &border->radius);
+        rc_push_clip(rdcon, radius_clip, NULL);
+    }
+
     // Helper lambda (as inline struct) for rendering one side's trapezoid with a color
     struct SideDraw {
         static void top(RenderContext* rdcon, Rect rect, float bwt, float bwr, float bwl, Color c) {
@@ -373,6 +381,25 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             float half_w = w / 2.0f;
             const RdtMatrix* xform = get_transform(rdcon);
 
+            // For non-radiused boxes, adjust gap so dashes appear at both ends
+            // of the side and use phase=0 (matches browser per-side rendering).
+            // For radiused boxes, keep the original phase=half_w.
+            float phase = half_w;
+            if (!has_radius && dash_count == 2 && st == CSS_VALUE_DASHED) {
+                float side_len = (side == 0 || side == 2) ? W : H;
+                if (side_len > 0) {
+                    float base_dash = dash[0];
+                    float period = dash[0] + dash[1];
+                    int n_dashes = (int)roundf(side_len / period);
+                    if (n_dashes < 1) n_dashes = 1;
+                    if (n_dashes > 1) {
+                        float adj_gap = (side_len - n_dashes * base_dash) / (float)(n_dashes - 1);
+                        if (adj_gap > 0) dash[1] = adj_gap;
+                    }
+                }
+                phase = 0;
+            }
+
             RdtPath* clip = create_border_clip_path(rdcon);
             rc_push_clip(rdcon, clip, NULL);
 
@@ -396,7 +423,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                     break;
             }
             rc_stroke_path(rdcon, p, c, w, cap, RDT_JOIN_MITER,
-                            dash, dash_count, xform, half_w);
+                            dash, dash_count, xform, phase);
             rdt_path_free(p);
 
             rc_pop_clip(rdcon);
@@ -411,6 +438,11 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
                 case 3: SideDraw::left(rdcon, rect, w, bwt, bwb, c); break;
             }
         }
+    }
+
+    if (radius_clip) {
+        rc_pop_clip(rdcon);
+        rdt_path_free(radius_clip);
     }
 }
 
@@ -701,8 +733,13 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     // Groove/ridge need per-side color variation (top/left vs bottom/right),
     // so they must always use per-side rendering even when uniform.
+    // Dashed/dotted without border-radius also use per-side rendering so that
+    // each side gets an independently adjusted dash pattern (matches browsers).
+    bool has_radius = corner_has_radius(&border->radius);
     bool needs_per_side = (border->top_style == CSS_VALUE_GROOVE ||
-                           border->top_style == CSS_VALUE_RIDGE);
+                           border->top_style == CSS_VALUE_RIDGE ||
+                           (!has_radius && (border->top_style == CSS_VALUE_DASHED ||
+                                            border->top_style == CSS_VALUE_DOTTED)));
 
     if (uniform_width && uniform_style && uniform_color && !needs_per_side &&
         border->width.top > 0 &&

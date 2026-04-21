@@ -351,6 +351,7 @@ typedef enum {
 typedef enum {
     SCALE_MODE_NEAREST = 0,  // Nearest neighbor (fast, pixelated)
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
+    SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
 } ScaleMode;
 
 typedef struct ImageSurface {
