@@ -602,6 +602,19 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             resolve_css_styles(dom_elem, lycon);
 
+            // CSS Display: The display property is resolved separately (not in the
+            // CSS property loop which is a no-op for display). When UA defaults from
+            // apply_element_default_style set a display (e.g., button → inline-block/flow),
+            // the CSS-specified display must override it. Re-resolve display here so
+            // author CSS like "display: inline-flex" overrides UA defaults.
+            if (dom_elem->specified_style && dom_elem->specified_style->tree) {
+                AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
+                if (display_node) {
+                    DisplayValue resolved = resolve_display_value(dom_elem);
+                    dom_elem->display = resolved;
+                }
+            }
+
             // CSS Animations: check if element has animation-name and start animations
             if (lycon->ui_context) {
                 css_animation_resolve(dom_elem, lycon);

@@ -1097,7 +1097,14 @@ Item bigint_from_string(const char* str, int len) {
 int64_t bigint_to_int64(Item bi) {
     mpd_t* m = bigint_get_mpd(bi);
     if (!m) return 0;
-    return mpd_get_ssize(m, bigint_context());
+    // Use quiet version to avoid SIGFPE trap when value exceeds int64 range
+    uint32_t status = 0;
+    mpd_ssize_t result = mpd_qget_ssize(m, &status);
+    if (status & MPD_Invalid_operation) {
+        // value doesn't fit in int64; return clamped
+        return mpd_isnegative(m) ? INT64_MIN : INT64_MAX;
+    }
+    return (int64_t)result;
 }
 
 double bigint_to_double(Item bi) {
@@ -1267,44 +1274,187 @@ Item bigint_dec(Item a) {
 
 // ─── Bitwise ─────────────────────────────────────────────────────────
 
-// For bitwise ops, extract to int64 (ES spec defines BigInt bitwise
-// on the mathematical integer value using two's complement).
-// For values that don't fit in int64, this truncates — matching the
-// practical limit of 64-bit bitwise operations.
+// Arbitrary-precision BigInt bitwise operation following the ES spec:
+//   BitwiseOp(op, x, y)
+//   1. result = 0, shift = 0
+//   2. Repeat until (x == 0 || x == -1) && (y == 0 || y == -1):
+//      a. xDigit = x mod 2, yDigit = y mod 2
+//      b. result += 2^shift * op(xDigit, yDigit)
+//      c. shift++, x = (x - xDigit) / 2, y = (y - yDigit) / 2
+//   3. If op(x mod 2, y mod 2) != 0, result -= 2^shift (sign extension)
+// op: 0=AND, 1=OR, 2=XOR
+static Item bigint_bitwise_op(Item a, Item b, int op) {
+    mpd_t* x = bigint_get_mpd(a);
+    mpd_t* y = bigint_get_mpd(b);
+    if (!x || !y) return ItemError;
+
+    mpd_context_t* ctx = bigint_context();
+
+    // working copies
+    mpd_t* xw = mpd_new(ctx);
+    mpd_t* yw = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    mpd_t* shift_val = mpd_new(ctx);
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* neg_one = mpd_new(ctx);
+    mpd_t* xdigit = mpd_new(ctx);
+    mpd_t* ydigit = mpd_new(ctx);
+    if (!xw || !yw || !result || !shift_val || !two || !neg_one || !xdigit || !ydigit) {
+        if (xw) mpd_del(xw); if (yw) mpd_del(yw);
+        if (result) mpd_del(result); if (shift_val) mpd_del(shift_val);
+        if (two) mpd_del(two); if (neg_one) mpd_del(neg_one);
+        if (xdigit) mpd_del(xdigit); if (ydigit) mpd_del(ydigit);
+        return ItemError;
+    }
+
+    mpd_copy(xw, x, ctx);
+    mpd_copy(yw, y, ctx);
+    mpd_set_i32(result, 0, ctx);
+    mpd_set_i32(shift_val, 1, ctx);
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(neg_one, -1, ctx);
+
+    // loop until both x and y are 0 or -1
+    while (!((mpd_iszero(xw) || mpd_cmp(xw, neg_one, ctx) == 0) &&
+             (mpd_iszero(yw) || mpd_cmp(yw, neg_one, ctx) == 0))) {
+        // xDigit = x mod 2 (mathematical modulo: always 0 or 1)
+        mpd_rem(xdigit, xw, two, ctx);
+        if (mpd_isnegative(xdigit) && !mpd_iszero(xdigit))
+            mpd_add(xdigit, xdigit, two, ctx);
+        // yDigit = y mod 2
+        mpd_rem(ydigit, yw, two, ctx);
+        if (mpd_isnegative(ydigit) && !mpd_iszero(ydigit))
+            mpd_add(ydigit, ydigit, two, ctx);
+
+        int xd = mpd_iszero(xdigit) ? 0 : 1;
+        int yd = mpd_iszero(ydigit) ? 0 : 1;
+        int bit;
+        switch (op) {
+            case 0: bit = xd & yd; break;
+            case 1: bit = xd | yd; break;
+            case 2: bit = xd ^ yd; break;
+            default: bit = 0;
+        }
+        if (bit) mpd_add(result, result, shift_val, ctx);
+
+        mpd_mul(shift_val, shift_val, two, ctx);
+        // x = (x - xDigit) / 2
+        mpd_sub(xw, xw, xdigit, ctx);
+        mpd_divint(xw, xw, two, ctx);
+        // y = (y - yDigit) / 2
+        mpd_sub(yw, yw, ydigit, ctx);
+        mpd_divint(yw, yw, two, ctx);
+    }
+
+    // sign extension
+    int xmod2 = mpd_iszero(xw) ? 0 : 1;
+    int ymod2 = mpd_iszero(yw) ? 0 : 1;
+    int sign_bit;
+    switch (op) {
+        case 0: sign_bit = xmod2 & ymod2; break;
+        case 1: sign_bit = xmod2 | ymod2; break;
+        case 2: sign_bit = xmod2 ^ ymod2; break;
+        default: sign_bit = 0;
+    }
+    if (sign_bit) mpd_sub(result, result, shift_val, ctx);
+
+    mpd_del(xw); mpd_del(yw); mpd_del(shift_val);
+    mpd_del(two); mpd_del(neg_one);
+    mpd_del(xdigit); mpd_del(ydigit);
+    return bigint_push_result(result);
+}
 
 Item bigint_bitwise_and(Item a, Item b) {
-    int64_t va = bigint_to_int64(a);
-    int64_t vb = bigint_to_int64(b);
-    return bigint_from_int64(va & vb);
+    return bigint_bitwise_op(a, b, 0);
 }
 
 Item bigint_bitwise_or(Item a, Item b) {
-    int64_t va = bigint_to_int64(a);
-    int64_t vb = bigint_to_int64(b);
-    return bigint_from_int64(va | vb);
+    return bigint_bitwise_op(a, b, 1);
 }
 
 Item bigint_bitwise_xor(Item a, Item b) {
-    int64_t va = bigint_to_int64(a);
-    int64_t vb = bigint_to_int64(b);
-    return bigint_from_int64(va ^ vb);
+    return bigint_bitwise_op(a, b, 2);
 }
 
 Item bigint_bitwise_not(Item a) {
-    int64_t va = bigint_to_int64(a);
-    return bigint_from_int64(~va);
+    // ~x = -(x + 1) for BigInt (two's complement identity)
+    mpd_t* m = bigint_get_mpd(a);
+    if (!m) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* one = mpd_new(ctx);
+    if (!one) return ItemError;
+    mpd_set_i32(one, 1, ctx);
+    mpd_t* r = mpd_new(ctx);
+    if (!r) { mpd_del(one); return ItemError; }
+    mpd_add(r, m, one, ctx);
+    mpd_minus(r, r, ctx);
+    mpd_del(one);
+    return bigint_push_result(r);
 }
 
 Item bigint_left_shift(Item a, Item b) {
-    int64_t va = bigint_to_int64(a);
-    int64_t vb = bigint_to_int64(b);
-    return bigint_from_int64(va << (vb & 0x3F));
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    // shift amount must fit in a reasonable range
+    uint32_t status = 0;
+    mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
+    if (status & MPD_Invalid_operation) return ItemError;
+    if (shift < 0 || shift > 100000) return ItemError;
+    // x << y = x * 2^y
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* shift_mpd = mpd_new(ctx);
+    mpd_t* power = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    if (!two || !shift_mpd || !power || !result) {
+        if (two) mpd_del(two); if (shift_mpd) mpd_del(shift_mpd);
+        if (power) mpd_del(power); if (result) mpd_del(result);
+        return ItemError;
+    }
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(shift_mpd, shift, ctx);
+    mpd_pow(power, two, shift_mpd, ctx);
+    mpd_mul(result, ma, power, ctx);
+    mpd_del(two); mpd_del(shift_mpd); mpd_del(power);
+    return bigint_push_result(result);
 }
 
 Item bigint_right_shift(Item a, Item b) {
-    int64_t va = bigint_to_int64(a);
-    int64_t vb = bigint_to_int64(b);
-    return bigint_from_int64(va >> (vb & 0x3F));
+    mpd_t* ma = bigint_get_mpd(a);
+    mpd_t* mb = bigint_get_mpd(b);
+    if (!ma || !mb) return ItemError;
+    mpd_context_t* ctx = bigint_context();
+    uint32_t status = 0;
+    mpd_ssize_t shift = mpd_qget_ssize(mb, &status);
+    if (status & MPD_Invalid_operation) return ItemError;
+    if (shift < 0 || shift > 100000) return ItemError;
+    // x >> y = floor(x / 2^y)
+    mpd_t* two = mpd_new(ctx);
+    mpd_t* shift_mpd = mpd_new(ctx);
+    mpd_t* power = mpd_new(ctx);
+    mpd_t* result = mpd_new(ctx);
+    mpd_t* rem = mpd_new(ctx);
+    if (!two || !shift_mpd || !power || !result || !rem) {
+        if (two) mpd_del(two); if (shift_mpd) mpd_del(shift_mpd);
+        if (power) mpd_del(power); if (result) mpd_del(result);
+        if (rem) mpd_del(rem);
+        return ItemError;
+    }
+    mpd_set_i32(two, 2, ctx);
+    mpd_set_ssize(shift_mpd, shift, ctx);
+    mpd_pow(power, two, shift_mpd, ctx);
+    mpd_divint(result, ma, power, ctx);
+    // floor division: if negative and remainder != 0, subtract 1
+    mpd_rem(rem, ma, power, ctx);
+    if (mpd_isnegative(ma) && !mpd_iszero(rem)) {
+        mpd_t* one = mpd_new(ctx);
+        mpd_set_i32(one, 1, ctx);
+        mpd_sub(result, result, one, ctx);
+        mpd_del(one);
+    }
+    mpd_del(two); mpd_del(shift_mpd); mpd_del(power); mpd_del(rem);
+    return bigint_push_result(result);
 }
 
 // ─── String Conversion ───────────────────────────────────────────────

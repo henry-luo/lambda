@@ -125,8 +125,8 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
 
         // Draw the glyph
         draw_glyph(rdcon, &glyph->bitmap,
-                   (int)(pen_x + glyph->bitmap.bearing_x),
-                   (int)(y + ascender - glyph->bitmap.bearing_y));
+                   lroundf(pen_x + glyph->bitmap.bearing_x),
+                   lroundf(y + ascender - glyph->bitmap.bearing_y));
 
         // Advance pen position
         pen_x += glyph->advance_x;
@@ -358,9 +358,10 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Check if button has CSS-specified background (from author stylesheet)
-    bool has_css_background = block->bound && block->bound->background &&
-                              block->bound->background->color.c != 0;
+    // Check if button has CSS-specified background (from author stylesheet).
+    // The background prop is only allocated when author CSS sets it, so its
+    // existence alone means the author specified a background (including transparent).
+    bool has_css_background = block->bound && block->bound->background;
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
@@ -824,8 +825,8 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
                     }
 
                     draw_glyph(rdcon, &glyph->bitmap,
-                               (int)(pen_x + glyph->bitmap.bearing_x),
-                               (int)(pen_y + ascender - glyph->bitmap.bearing_y));
+                               lroundf(pen_x + glyph->bitmap.bearing_x),
+                               lroundf(pen_y + ascender - glyph->bitmap.bearing_y));
                     pen_x += glyph->advance_x;
                 }
 

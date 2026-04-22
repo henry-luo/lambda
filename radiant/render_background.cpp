@@ -214,6 +214,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     bool has_blend = (bg->blend_mode != 0 && bg->blend_mode != CSS_VALUE_NORMAL);
     bool has_upper_layers = bg->image ||
         (bg->radial_layers && bg->radial_layer_count > 0) ||
+        (bg->linear_layers && bg->linear_layer_count > 0) ||
         (bg->gradient_type != GRADIENT_NONE &&
          (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient));
 
@@ -262,6 +263,16 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Render background image positioned within pos_rect, painted within paint_rect (via clip)
     if (bg->image) {
         render_background_image(rdcon, view, bg, pos_rect);
+    }
+
+    // Render all linear gradient layers (stacked bottom-to-top)
+    if (bg->linear_layers && bg->linear_layer_count > 0) {
+        for (int i = 0; i < bg->linear_layer_count; i++) {
+            if (bg->linear_layers[i]) {
+                log_debug("[GRADIENT] Rendering linear gradient layer %d/%d", i + 1, bg->linear_layer_count);
+                render_linear_gradient(rdcon, view, bg->linear_layers[i], paint_rect);
+            }
+        }
     }
 
     // Render all radial gradient layers (stacked bottom-to-top)
@@ -932,11 +943,24 @@ void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
     tmp_surface.pitch = ew * 4;
     box_blur_region(sa, &tmp_surface, 0, 0, ew, eh, blur_radius);
 
-    // Copy inner rect from blurred temp back to surface
-    for (int row = 0; row < rh; row++) {
-        memcpy(pixels + (ry + row) * stride + rx,
-               buf + (iy0 + row) * ew + ix0,
-               rw * sizeof(uint32_t));
+    // Copy inner rect from blurred temp back to surface (clamped to surface bounds).
+    // When called from tiled rendering, (rx, ry) can be negative after tile-local
+    // translation, so we must only copy the intersection with the surface.
+    int cpy_x = (rx > 0) ? rx : 0;
+    int cpy_y = (ry > 0) ? ry : 0;
+    int cpy_x2 = ((rx + rw) < surface->width) ? (rx + rw) : surface->width;
+    int cpy_y2 = ((ry + rh) < surface->height) ? (ry + rh) : surface->height;
+    int cpy_w = cpy_x2 - cpy_x;
+    int cpy_h = cpy_y2 - cpy_y;
+
+    if (cpy_w > 0 && cpy_h > 0) {
+        int buf_x = cpy_x - ex;
+        int buf_y = cpy_y - ey;
+        for (int row = 0; row < cpy_h; row++) {
+            memcpy(pixels + (cpy_y + row) * stride + cpy_x,
+                   buf + (buf_y + row) * ew + buf_x,
+                   cpy_w * sizeof(uint32_t));
+        }
     }
 
     scratch_free(sa, buf);

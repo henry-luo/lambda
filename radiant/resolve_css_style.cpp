@@ -10962,70 +10962,91 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
 
-                // Count radial-gradient layers
+                // Count gradient layers by type
                 int radial_count = 0;
+                int linear_count = 0;
                 for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
                     CssValue* layer = layers[i];
                     if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                        layer->data.function && layer->data.function->name &&
-                        (str_ieq_const(layer->data.function->name, strlen(layer->data.function->name), "radial-gradient") ||
-                         str_ieq_const(layer->data.function->name, strlen(layer->data.function->name), "repeating-radial-gradient"))) {
+                        layer->data.function && layer->data.function->name) {
+                        const char* fn = layer->data.function->name;
+                        if (str_ieq_const(fn, strlen(fn), "radial-gradient") ||
+                            str_ieq_const(fn, strlen(fn), "repeating-radial-gradient")) {
+                            radial_count++;
+                        } else if (str_ieq_const(fn, strlen(fn), "linear-gradient") ||
+                                   str_ieq_const(fn, strlen(fn), "repeating-linear-gradient")) {
+                            linear_count++;
+                        }
+                    }
+                }
+
+                // Also check if the last layer is a gradient (not a solid color)
+                if (last_layer && last_layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                    last_layer->data.function && last_layer->data.function->name) {
+                    const char* fn = last_layer->data.function->name;
+                    if (str_ieq_const(fn, strlen(fn), "linear-gradient") ||
+                        str_ieq_const(fn, strlen(fn), "repeating-linear-gradient")) {
+                        linear_count++;
+                    } else if (str_ieq_const(fn, strlen(fn), "radial-gradient") ||
+                               str_ieq_const(fn, strlen(fn), "repeating-radial-gradient")) {
                         radial_count++;
                     }
                 }
 
-                // Allocate array for radial gradient layers if we have multiple
+                // Allocate arrays for gradient layers
                 if (radial_count > 0) {
                     bg->radial_layers = (RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count);
-                    bg->radial_layer_count = 0;  // will be incremented as we parse each one
+                    bg->radial_layer_count = 0;
+                }
+                if (linear_count > 0) {
+                    bg->linear_layers = (LinearGradient**)alloc_prop(lycon, sizeof(LinearGradient*) * linear_count);
+                    bg->linear_layer_count = 0;
+                }
 
-                    // Process all gradient layers (from bottom to top visually, i.e., last-to-first in CSS)
-                    for (int i = count - 2; i >= 0; i--) {
-                        CssValue* layer = layers[i];
-                        if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                            layer->data.function && layer->data.function->name) {
-                            const char* func_name = layer->data.function->name;
+                // Process all gradient layers (from bottom to top visually, i.e., last-to-first in CSS)
+                for (int i = count - 1; i >= 0; i--) {
+                    CssValue* layer = layers[i];
+                    if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
+                        layer->data.function && layer->data.function->name) {
+                        const char* func_name = layer->data.function->name;
 
-                            if (str_ieq_const(func_name, strlen(func_name), "radial-gradient") ||
-                                str_ieq_const(func_name, strlen(func_name), "repeating-radial-gradient")) {
-                                // Parse this radial gradient into a new layer
+                        if (str_ieq_const(func_name, strlen(func_name), "radial-gradient") ||
+                            str_ieq_const(func_name, strlen(func_name), "repeating-radial-gradient")) {
+                            CssDeclaration gradient_decl = *decl;
+                            gradient_decl.value = layer;
+                            log_debug("[Lambda CSS Background] Processing radial gradient layer %d: %s", i, func_name);
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+
+                            if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
+                                bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
+                                bg->radial_gradient = nullptr;
+                            }
+                        } else if (str_ieq_const(func_name, strlen(func_name), "linear-gradient") ||
+                                   str_ieq_const(func_name, strlen(func_name), "repeating-linear-gradient")) {
+                            CssDeclaration gradient_decl = *decl;
+                            gradient_decl.value = layer;
+                            log_debug("[Lambda CSS Background] Processing linear gradient layer %d: %s", i, func_name);
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+
+                            if (bg->linear_gradient && bg->linear_layer_count < linear_count) {
+                                bg->linear_layers[bg->linear_layer_count++] = bg->linear_gradient;
+                                bg->linear_gradient = nullptr;
+                                bg->gradient_type = GRADIENT_NONE;
+                            }
+                        } else if (str_ieq_const(func_name, strlen(func_name), "conic-gradient") ||
+                                   str_ieq_const(func_name, strlen(func_name), "repeating-conic-gradient")) {
+                            if (!bg->conic_gradient) {
                                 CssDeclaration gradient_decl = *decl;
                                 gradient_decl.value = layer;
-                                log_debug("[Lambda CSS Background] Processing radial gradient layer %d: %s", i, func_name);
+                                log_debug("[Lambda CSS Background] Processing conic gradient layer %d: %s", i, func_name);
                                 resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-
-                                // After parsing, the radial_gradient is set on bg
-                                // Move it to the layers array
-                                if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
-                                    bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
-                                    bg->radial_gradient = nullptr;  // will be set again by next parse
-                                }
-                            } else if (str_ieq_const(func_name, strlen(func_name), "linear-gradient") ||
-                                       str_ieq_const(func_name, strlen(func_name), "conic-gradient")) {
-                                // For now, only handle the first non-radial gradient
-                                if (!bg->linear_gradient && !bg->conic_gradient) {
-                                    CssDeclaration gradient_decl = *decl;
-                                    gradient_decl.value = layer;
-                                    log_debug("[Lambda CSS Background] Processing gradient layer %d: %s", i, func_name);
-                                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-                                }
                             }
                         }
                     }
-
-                    log_debug("[Lambda CSS Background] Parsed %d radial gradient layers", bg->radial_layer_count);
-                } else {
-                    // No radial gradients, process first gradient layer as before
-                    CssValue* first_layer = layers[0];
-                    if (first_layer && first_layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                        first_layer->data.function && first_layer->data.function->name) {
-                        CssDeclaration gradient_decl = *decl;
-                        gradient_decl.value = first_layer;
-                        log_debug("[Lambda CSS Background] Processing first layer gradient: %s",
-                            first_layer->data.function->name);
-                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-                    }
                 }
+
+                log_debug("[Lambda CSS Background] Parsed %d radial, %d linear gradient layers",
+                    bg->radial_layer_count, bg->linear_layer_count);
                 return;
             }
 
@@ -11213,6 +11234,29 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     }
 
+                    // CSS Color Level 4: fix transparent stops for correct interpolation.
+                    // 'transparent' parses as rgba(0,0,0,0). Gradient interpolation in
+                    // premultiplied alpha space makes this correct, but deviceRGB may
+                    // not premultiply. Inherit the RGB from the nearest opaque neighbor
+                    // so the gradient fades through the correct hue.
+                    for (int i = 0; i < lg->stop_count; i++) {
+                        GradientStop* s = &lg->stops[i];
+                        if (s->color.a == 0 && s->color.r == 0 && s->color.g == 0 && s->color.b == 0) {
+                            // find nearest non-transparent neighbor
+                            GradientStop* neighbor = nullptr;
+                            if (i > 0 && lg->stops[i - 1].color.a > 0) {
+                                neighbor = &lg->stops[i - 1];
+                            } else if (i + 1 < lg->stop_count && lg->stops[i + 1].color.a > 0) {
+                                neighbor = &lg->stops[i + 1];
+                            }
+                            if (neighbor) {
+                                s->color.r = neighbor->color.r;
+                                s->color.g = neighbor->color.g;
+                                s->color.b = neighbor->color.b;
+                            }
+                        }
+                    }
+
                     log_debug("[Lambda CSS Shorthand] Parsed linear-gradient with %d stops, angle=%.1f",
                         lg->stop_count, lg->angle);
                     return;
@@ -11364,6 +11408,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         for (int i = 0; i < rg->stop_count; i++) {
                             if (rg->stops[i].position < 0) {
                                 rg->stops[i].position = (float)i / (float)(rg->stop_count - 1);
+                            }
+                        }
+                    }
+
+                    // CSS Color Level 4: fix transparent stops (same as linear gradient)
+                    for (int i = 0; i < rg->stop_count; i++) {
+                        GradientStop* s = &rg->stops[i];
+                        if (s->color.a == 0 && s->color.r == 0 && s->color.g == 0 && s->color.b == 0) {
+                            GradientStop* neighbor = nullptr;
+                            if (i > 0 && rg->stops[i - 1].color.a > 0) {
+                                neighbor = &rg->stops[i - 1];
+                            } else if (i + 1 < rg->stop_count && rg->stops[i + 1].color.a > 0) {
+                                neighbor = &rg->stops[i + 1];
+                            }
+                            if (neighbor) {
+                                s->color.r = neighbor->color.r;
+                                s->color.g = neighbor->color.g;
+                                s->color.b = neighbor->color.b;
                             }
                         }
                     }
