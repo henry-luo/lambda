@@ -5756,31 +5756,35 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // CSS 2.1 §10.3.7: For absolutely positioned elements whose specified display
-    // was inline (blockified by §9.7), the static position is the inline cursor.
-    // Skip line_break to preserve the inline cursor in pa_line->advance_x.
-    // For originally block-level abs-pos elements, line_break is needed so the
-    // static position is at the start of a new line.
+    // was inline-level (inline or inline-block, blockified by §9.7), the static
+    // position is the inline cursor. Skip line_break to preserve the inline
+    // cursor in pa_line->advance_x. For originally block-level abs-pos elements,
+    // line_break is needed so the static position is at the start of a new line.
     // NOTE: elem->display and elem->position may not be resolved yet (dom_node_resolve_style
     // runs after this check), so we also check the specified_style tree.
     bool is_blockified_inline_abspos = false;
     if (elmt->is_element()) {
         DomElement* elem = elmt->as_element();
         // Try already-resolved properties first
-        bool was_inline = false;
+        bool was_inline_level = false;
         bool is_abspos = false;
         if (elem->styles_resolved && elem->display.inner != 0) {
-            was_inline = (elem->display.outer == CSS_VALUE_INLINE);
+            was_inline_level = (elem->display.outer == CSS_VALUE_INLINE ||
+                                elem->display.outer == CSS_VALUE_INLINE_BLOCK);
         } else if (elem->specified_style && elem->specified_style->tree) {
             AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
             if (disp_node) {
                 StyleNode* sn = (StyleNode*)disp_node->declaration;
                 if (sn && sn->winning_decl && sn->winning_decl->value &&
                     sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    was_inline = (sn->winning_decl->value->data.keyword == CSS_VALUE_INLINE);
+                    CssEnum kw = sn->winning_decl->value->data.keyword;
+                    was_inline_level = (kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK);
                 }
             } else {
-                // No explicit display in style — use tag default. <span> etc. default to inline.
-                was_inline = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
+                // No explicit display in style — use tag default.
+                // Inline tags (span, a, em, etc.) and inline-block tags (input,
+                // select, textarea, img, button, etc.) are all inline-level.
+                was_inline_level = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
                               elem->tag_id == HTM_TAG_EM || elem->tag_id == HTM_TAG_STRONG ||
                               elem->tag_id == HTM_TAG_B || elem->tag_id == HTM_TAG_I ||
                               elem->tag_id == HTM_TAG_U || elem->tag_id == HTM_TAG_S ||
@@ -5789,7 +5793,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                               elem->tag_id == HTM_TAG_ABBR || elem->tag_id == HTM_TAG_CITE ||
                               elem->tag_id == HTM_TAG_Q || elem->tag_id == HTM_TAG_VAR ||
                               elem->tag_id == HTM_TAG_TIME || elem->tag_id == HTM_TAG_MARK ||
-                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI);
+                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI ||
+                              elem->tag_id == HTM_TAG_IMG || elem->tag_id == HTM_TAG_INPUT ||
+                              elem->tag_id == HTM_TAG_SELECT || elem->tag_id == HTM_TAG_TEXTAREA ||
+                              elem->tag_id == HTM_TAG_BUTTON || elem->tag_id == HTM_TAG_VIDEO ||
+                              elem->tag_id == HTM_TAG_IFRAME || elem->tag_id == HTM_TAG_CANVAS ||
+                              elem->tag_id == HTM_TAG_METER || elem->tag_id == HTM_TAG_PROGRESS ||
+                              elem->tag_id == HTM_TAG_EMBED || elem->tag_id == HTM_TAG_OBJECT ||
+                              elem->tag_id == HTM_TAG_SVG || elem->tag_id == HTM_TAG_LABEL);
             }
         }
         if (elem->position) {
@@ -5806,7 +5817,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
         }
-        if (was_inline && is_abspos) {
+        if (was_inline_level && is_abspos) {
             is_blockified_inline_abspos = true;
         }
     }

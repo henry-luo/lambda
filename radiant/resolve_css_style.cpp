@@ -985,9 +985,11 @@ DisplayValue resolve_display_value(void* child) {
         // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
         // HTML §4.8.7: <object> is replaced only when it has a data attribute
         // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
+        // Note: <button> is NOT replaced — it contains flow content (text, spans, etc.)
+        // per HTML spec. Its children are laid out normally via CSS_VALUE_FLOW.
         bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-                            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+                            tag_id == HTM_TAG_TEXTAREA ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
                             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
@@ -1282,7 +1284,7 @@ DisplayValue resolve_display_value(void* child) {
             display.list_item = true;
         } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+            tag_id == HTM_TAG_TEXTAREA ||
             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
             tag_id == HTM_TAG_WEBVIEW ||
@@ -1291,6 +1293,10 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_BUTTON) {
+            // <button> is inline-block with flow children (not replaced)
+            display.outer = CSS_VALUE_INLINE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
         } else if (tag_id == HTM_TAG_OBJECT) {
             // <object> without data attribute: inline flow (renders fallback children)
             display.outer = CSS_VALUE_INLINE;
@@ -8714,6 +8720,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // grid-row-gap is the legacy name for row-gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_ROW_GAP:
         case CSS_PROPERTY_ROW_GAP: {
             log_debug("[CSS] Processing row-gap property");
             if (!block) {
@@ -8746,6 +8754,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // grid-column-gap is the legacy name for column-gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_COLUMN_GAP:
         case CSS_PROPERTY_COLUMN_GAP: {
             log_debug("[CSS] Processing column-gap property");
             if (!block) {
@@ -11663,6 +11673,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             return;
         }
 
+        // grid-gap is the legacy name for gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_GAP:
         case CSS_PROPERTY_GAP: {
             // gap shorthand: 1-2 values (row-gap column-gap)
             // If only one value is specified, it's used for both row and column gap

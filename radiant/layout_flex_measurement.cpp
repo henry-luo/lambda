@@ -1620,6 +1620,28 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 min_width = widths.min_content;
                 max_width = widths.max_content;
 
+                // CSS Generated Content: add ::before/::after pseudo-element content widths.
+                // These inline pseudo-elements participate in the element's inline formatting
+                // context and contribute to its intrinsic size (CSS Sizing §5.1).
+                {
+                    DomElement* elem = item;
+                    for (int pi = 0; pi < 2; pi++) {
+                        bool is_before = (pi == 0);
+                        bool has_pseudo = is_before ? dom_element_has_before_content(elem)
+                                                    : dom_element_has_after_content(elem);
+                        if (!has_pseudo) continue;
+                        const char* pc = dom_element_get_pseudo_element_content(elem,
+                            is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER);
+                        if (pc && *pc) {
+                            TextIntrinsicWidths pw = measure_text_intrinsic_widths(lycon, pc, strlen(pc));
+                            max_width += pw.max_content;
+                            if (pw.min_content > min_width) min_width = pw.min_content;
+                            log_debug("calculate_item_intrinsic_sizes: %s content '%s' -> +%.1fpx width",
+                                      is_before ? "::before" : "::after", pc, pw.max_content);
+                        }
+                    }
+                }
+
                 // Calculate height using CSS line-height if available, otherwise font metrics
                 // Line-height is inherited, so walk up the parent chain to find it
                 float resolved_line_height = 0;
