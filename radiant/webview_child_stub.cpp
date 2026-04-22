@@ -1,8 +1,9 @@
 // webview_child_stub.cpp — no-op stub for platforms without native web view support
 //
-// Compiled on Linux/Windows (until those backends are implemented) and headless builds.
+// Compiled on Windows (until that backend is implemented) and headless builds.
+// Linux uses webview_child_linux.cpp; macOS uses webview_child_mac.mm.
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(__linux__)
 
 #include "webview.h"
 
@@ -43,4 +44,4 @@ void webview_platform_set_visible(WebViewHandle* handle, bool visible) {
     (void)handle; (void)visible;
 }
 
-#endif // !__APPLE__
+#endif // !defined(__APPLE__) && !defined(__linux__)

@@ -1,9 +1,9 @@
 // webview_layer_stub.cpp — no-op stub for offscreen layer mode
 //
-// Compiled on platforms without native offscreen web view support
-// (Linux/Windows until those backends are implemented, and headless builds).
+// Compiled on Windows (until that backend is implemented) and headless builds.
+// Linux uses webview_layer_linux.cpp; macOS uses webview_layer_mac.mm.
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(__linux__)
 
 #include "webview.h"
 
@@ -71,4 +71,4 @@ void webview_layer_platform_inject_scroll(WebViewHandle* handle,
     (void)handle; (void)dx; (void)dy; (void)x; (void)y;
 }
 
-#endif // !__APPLE__
+#endif // !defined(__APPLE__) && !defined(__linux__)
