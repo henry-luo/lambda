@@ -2374,7 +2374,13 @@ public:
                 printf("\n⚠️  REGRESSIONS (%zu tests that previously passed now fail):\n", regressions.size());
                 std::sort(regressions.begin(), regressions.end());
                 for (auto& r : regressions) {
-                    printf("  - %s\n", r.c_str());
+                    std::lock_guard<std::mutex> lock(g_results_mutex);
+                    auto rit = g_cached_results.find(r);
+                    if (rit != g_cached_results.end() && !rit->second.message.empty()) {
+                        printf("  - %s  [%s]\n", r.c_str(), rit->second.message.c_str());
+                    } else {
+                        printf("  - %s\n", r.c_str());
+                    }
                 }
             }
             if (!improvements.empty() && improvements.size() <= 50) {
@@ -2842,7 +2848,14 @@ int main(int argc, char** argv) {
             if (!regressions.empty()) {
                 printf("\n⚠️  REGRESSIONS (%zu tests):\n", regressions.size());
                 std::sort(regressions.begin(), regressions.end());
-                for (auto& r : regressions) printf("  - %s\n", r.c_str());
+                for (auto& r : regressions) {
+                    auto rit = g_cached_results.find(r);
+                    if (rit != g_cached_results.end()) {
+                        printf("  - %s  [result=%d msg=%s]\n", r.c_str(), (int)rit->second.result, rit->second.message.c_str());
+                    } else {
+                        printf("  - %s  [NOT IN CACHE]\n", r.c_str());
+                    }
+                }
             }
             if (!improvements.empty() && improvements.size() <= 50) {
                 printf("\n✅  IMPROVEMENTS (%zu tests):\n", improvements.size());

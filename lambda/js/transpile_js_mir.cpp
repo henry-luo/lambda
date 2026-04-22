@@ -2357,7 +2357,23 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
 // Helper: emit js_set_function_name call if name is non-empty, and formal_length if needed
 static void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length = -1) {
     if (name && name[0]) {
-        MIR_reg_t name_reg = jm_box_string_literal(mt, name, strlen(name));
+        // Convert __private_X back to #X for ES spec compliance
+        char priv_buf[256];
+        const char* display_name = name;
+        if (strncmp(name, "__private_", 10) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", name + 10);
+            display_name = priv_buf;
+            (void)len;
+        } else if (strncmp(name, "get __private_", 14) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", name + 14);
+            display_name = priv_buf;
+            (void)len;
+        } else if (strncmp(name, "set __private_", 14) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", name + 14);
+            display_name = priv_buf;
+            (void)len;
+        }
+        MIR_reg_t name_reg = jm_box_string_literal(mt, display_name, strlen(display_name));
         jm_call_void_2(mt, "js_set_function_name",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
@@ -7456,7 +7472,6 @@ static void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_no
         chk = chk->next;
     }
     // Convert iterable to array (handles strings, generators, Maps, Sets, custom iterables)
-    // Only do this if pattern actually needs to extract elements
     if (has_real_elements) {
         src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, src));
@@ -21254,12 +21269,16 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
 
         // skip known built-in module names (prefer engine built-ins over npm polyfills)
         static const char* builtin_names[] = {
-            "fs", "child_process", "path", "path/posix", "path/win32",
-            "os", "url", "util",
+            "fs", "fs/promises", "child_process", "path", "path/posix", "path/win32",
+            "os", "url", "util", "util/types",
             "process", "querystring", "events", "buffer",
-            "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
+            "crypto", "dns", "dns/promises", "zlib", "readline",
+            "stream", "stream/promises", "stream/web", "stream/consumers", "stream/iter",
+            "net", "tls", "http", "https",
             "string_decoder", "assert", "assert/strict",
-            "timers", "console", "worker_threads", "cluster", "vm", NULL
+            "timers", "timers/promises", "console", "module",
+            "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
+            "diagnostics_channel", "async_hooks", "domain", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {
@@ -21292,6 +21311,7 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
 
         // fallback: use as-is (will be checked as builtin by js_module_get)
         snprintf(out, out_size, "%.*s", spec_len, specifier);
+        if (is_builtin) return;  // builtins don't need .js extension
     }
 
     // If doesn't end in a known JS extension, try adding .js
@@ -27165,7 +27185,8 @@ extern "C" Item js_require(Item specifier) {
         // Extract the default export (which is module.exports)
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(existing, def_key);
-        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        TypeId dt = get_type_id(def_val);
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
         return existing;
     }
 
@@ -27186,6 +27207,11 @@ extern "C" Item js_require(Item specifier) {
     }
     if (!source) {
         log_error("require: cannot read module '%s'", path_buf);
+        // For internal/* modules, return empty object to prevent destructure crashes
+        if (strncmp(path_buf, "internal/", 9) == 0 || 
+            (spec->len > 9 && memcmp(spec->chars, "internal/", 9) == 0)) {
+            return js_new_object();
+        }
         return ItemNull;
     }
 
@@ -27218,7 +27244,8 @@ extern "C" Item js_require(Item specifier) {
     if (js_is_cjs_file(path_buf)) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(ns, def_key);
-        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        TypeId dt = get_type_id(def_val);
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
     }
 
     return ns;

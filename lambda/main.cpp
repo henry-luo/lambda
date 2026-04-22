@@ -3078,6 +3078,11 @@ int main(int argc, char *argv[]) {
                 if (preamble.mir_ctx) {
                     has_preamble = true;
                     preamble_var_checkpoint = preamble.module_var_count;
+                    // Reset runtime state after preamble compilation so the first
+                    // test in the batch starts with a clean environment.  Without
+                    // this, stale cached globals / constructor prototypes left by
+                    // the preamble can cause the first test to fail.
+                    js_batch_reset_to(preamble_var_checkpoint);
                 }
                 continue;
             }
@@ -3296,6 +3301,8 @@ int main(int argc, char *argv[]) {
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
+                            // Reset runtime state after preamble recompilation
+                            js_batch_reset_to(preamble_var_checkpoint);
                         }
                     }
                 } else if (rss_after > RSS_LIMIT) {

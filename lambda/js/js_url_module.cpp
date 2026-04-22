@@ -331,6 +331,395 @@ extern "C" Item js_url_pathToFileURL(Item path_item) {
 }
 
 // =============================================================================
+// URLSearchParams Implementation
+// =============================================================================
+
+// internal: parse query string "key=value&key2=value2" into entries array
+static Item parse_query_entries(const char* qs, int qs_len) {
+    Item entries = js_array_new(0);
+    if (!qs || qs_len == 0) return entries;
+
+    char buf[4096];
+    if (qs_len >= (int)sizeof(buf)) qs_len = (int)sizeof(buf) - 1;
+    memcpy(buf, qs, qs_len);
+    buf[qs_len] = '\0';
+
+    // URL-decode a string in-place
+    auto url_decode = [](char* s) {
+        char* out = s;
+        for (char* p = s; *p; p++) {
+            if (*p == '+') {
+                *out++ = ' ';
+            } else if (*p == '%' && p[1] && p[2]) {
+                auto hex = [](char c) -> int {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+                    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+                    return 0;
+                };
+                *out++ = (char)((hex(p[1]) << 4) | hex(p[2]));
+                p += 2;
+            } else {
+                *out++ = *p;
+            }
+        }
+        *out = '\0';
+    };
+
+    char* saveptr = NULL;
+    char* pair = strtok_r(buf, "&", &saveptr);
+    while (pair) {
+        char* eq = strchr(pair, '=');
+        Item entry = js_array_new(0);
+        if (eq) {
+            *eq = '\0';
+            url_decode(pair);
+            url_decode(eq + 1);
+            js_array_push(entry, make_string_item(pair));
+            js_array_push(entry, make_string_item(eq + 1));
+        } else {
+            url_decode(pair);
+            js_array_push(entry, make_string_item(pair));
+            js_array_push(entry, make_string_item(""));
+        }
+        js_array_push(entries, entry);
+        pair = strtok_r(NULL, "&", &saveptr);
+    }
+    return entries;
+}
+
+// URLSearchParams instance: stores entries as array of [key, value] pairs in __entries__
+
+// URLSearchParams.prototype.append(name, value)
+extern "C" Item js_usp_append(Item name_item, Item value_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    Item value_str = js_to_string(value_item);
+    Item entry = js_array_new(0);
+    js_array_push(entry, name_str);
+    js_array_push(entry, value_str);
+    js_array_push(entries, entry);
+    return make_js_undefined();
+}
+
+// URLSearchParams.prototype.delete(name[, value])
+extern "C" Item js_usp_delete(Item name_item, Item value_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    bool check_value = get_type_id(value_item) != LMD_TYPE_UNDEFINED;
+    Item value_str = check_value ? js_to_string(value_item) : (Item){0};
+
+    Item new_entries = js_array_new(0);
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item match = js_strict_equal(ek, name_str);
+        if (js_is_truthy(match)) {
+            if (check_value) {
+                Item ev = js_array_get_int(entry, 1);
+                Item vm = js_strict_equal(ev, value_str);
+                if (js_is_truthy(vm)) continue; // delete matching
+                js_array_push(new_entries, entry);
+            }
+            continue; // delete
+        }
+        js_array_push(new_entries, entry);
+    }
+    js_property_set(self, make_string_item("__entries__"), new_entries);
+    return make_js_undefined();
+}
+
+// URLSearchParams.prototype.get(name)
+extern "C" Item js_usp_get(Item name_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item match = js_strict_equal(ek, name_str);
+        if (js_is_truthy(match)) return js_array_get_int(entry, 1);
+    }
+    return ItemNull;
+}
+
+// URLSearchParams.prototype.getAll(name)
+extern "C" Item js_usp_getAll(Item name_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    Item result = js_array_new(0);
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item match = js_strict_equal(ek, name_str);
+        if (js_is_truthy(match)) js_array_push(result, js_array_get_int(entry, 1));
+    }
+    return result;
+}
+
+// URLSearchParams.prototype.has(name[, value])
+extern "C" Item js_usp_has(Item name_item, Item value_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    bool check_value = get_type_id(value_item) != LMD_TYPE_UNDEFINED;
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item match = js_strict_equal(ek, name_str);
+        if (js_is_truthy(match)) {
+            if (check_value) {
+                Item ev = js_array_get_int(entry, 1);
+                Item value_str = js_to_string(value_item);
+                Item vm = js_strict_equal(ev, value_str);
+                if (js_is_truthy(vm)) return (Item){.item = b2it(true)};
+            } else {
+                return (Item){.item = b2it(true)};
+            }
+        }
+    }
+    return (Item){.item = b2it(false)};
+}
+
+// URLSearchParams.prototype.set(name, value)
+extern "C" Item js_usp_set(Item name_item, Item value_item) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    Item name_str = js_to_string(name_item);
+    Item value_str = js_to_string(value_item);
+    bool found = false;
+    Item new_entries = js_array_new(0);
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item match = js_strict_equal(ek, name_str);
+        if (js_is_truthy(match)) {
+            if (!found) {
+                Item new_entry = js_array_new(0);
+                js_array_push(new_entry, name_str);
+                js_array_push(new_entry, value_str);
+                js_array_push(new_entries, new_entry);
+                found = true;
+            }
+            // skip duplicate entries
+        } else {
+            js_array_push(new_entries, entry);
+        }
+    }
+    if (!found) {
+        Item new_entry = js_array_new(0);
+        js_array_push(new_entry, name_str);
+        js_array_push(new_entry, value_str);
+        js_array_push(new_entries, new_entry);
+    }
+    js_property_set(self, make_string_item("__entries__"), new_entries);
+    return make_js_undefined();
+}
+
+// URLSearchParams.prototype.sort()
+extern "C" Item js_usp_sort(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    // simple bubble sort by key
+    int64_t len = js_array_length(entries);
+    for (int64_t i = 0; i < len - 1; i++) {
+        for (int64_t j = 0; j < len - 1 - i; j++) {
+            Item a = js_array_get_int(entries, j);
+            Item b = js_array_get_int(entries, j + 1);
+            Item ak = js_array_get_int(a, 0);
+            Item bk = js_array_get_int(b, 0);
+            String* sa = it2s(ak);
+            String* sb = it2s(bk);
+            if (sa && sb) {
+                int cmp_len = sa->len < sb->len ? sa->len : sb->len;
+                int cmp = memcmp(sa->chars, sb->chars, cmp_len);
+                if (cmp > 0 || (cmp == 0 && sa->len > sb->len)) {
+                    js_array_set_int(entries, j, b);
+                    js_array_set_int(entries, j + 1, a);
+                }
+            }
+        }
+    }
+    return make_js_undefined();
+}
+
+// URLSearchParams.prototype.toString()
+extern "C" Item js_usp_toString(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    int64_t len = js_array_length(entries);
+    if (len == 0) return make_string_item("", 0);
+
+    char buf[8192];
+    int pos = 0;
+    for (int64_t i = 0; i < len && pos < (int)sizeof(buf) - 100; i++) {
+        if (i > 0) buf[pos++] = '&';
+        Item entry = js_array_get_int(entries, i);
+        Item ek = js_array_get_int(entry, 0);
+        Item ev = js_array_get_int(entry, 1);
+        // URL-encode key and value
+        auto url_encode = [&](Item s) {
+            if (get_type_id(s) != LMD_TYPE_STRING) return;
+            String* str = it2s(s);
+            if (!str) return;
+            for (int j = 0; j < (int)str->len && pos < (int)sizeof(buf) - 4; j++) {
+                char c = str->chars[j];
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '!' ||
+                    c == '~' || c == '*' || c == '\'' || c == '(' || c == ')') {
+                    buf[pos++] = c;
+                } else if (c == ' ') {
+                    buf[pos++] = '+';
+                } else {
+                    static const char hex[] = "0123456789ABCDEF";
+                    buf[pos++] = '%';
+                    buf[pos++] = hex[(unsigned char)c >> 4];
+                    buf[pos++] = hex[(unsigned char)c & 0x0F];
+                }
+            }
+        };
+        url_encode(ek);
+        buf[pos++] = '=';
+        url_encode(ev);
+    }
+    buf[pos] = '\0';
+    return make_string_item(buf, pos);
+}
+
+// URLSearchParams.prototype.forEach(callback[, thisArg])
+extern "C" Item js_usp_forEach(Item callback, Item this_arg) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    int64_t len = js_array_length(entries);
+    Item this_val = get_type_id(this_arg) != LMD_TYPE_UNDEFINED ? this_arg : self;
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        Item value = js_array_get_int(entry, 1);
+        Item key = js_array_get_int(entry, 0);
+        Item args[3] = {value, key, self};
+        js_call_function(callback, this_val, args, 3);
+    }
+    return make_js_undefined();
+}
+
+// URLSearchParams.prototype.keys() — returns iterator
+extern "C" Item js_usp_keys(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    int64_t len = js_array_length(entries);
+    Item result = js_array_new(0);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        js_array_push(result, js_array_get_int(entry, 0));
+    }
+    return result;
+}
+
+// URLSearchParams.prototype.values() — returns iterator
+extern "C" Item js_usp_values(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    int64_t len = js_array_length(entries);
+    Item result = js_array_new(0);
+    for (int64_t i = 0; i < len; i++) {
+        Item entry = js_array_get_int(entries, i);
+        js_array_push(result, js_array_get_int(entry, 1));
+    }
+    return result;
+}
+
+// URLSearchParams.prototype.entries() — returns iterator
+extern "C" Item js_usp_entries(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    return entries;
+}
+
+// URLSearchParams.prototype[Symbol.iterator]() — same as entries
+// (handled by setting Symbol.iterator to entries)
+
+// size getter
+extern "C" Item js_usp_size(void) {
+    Item self = js_get_this();
+    Item entries = js_property_get(self, make_string_item("__entries__"));
+    return (Item){.item = i2it((int)js_array_length(entries))};
+}
+
+// new URLSearchParams([init])
+extern "C" Item js_url_search_params_new(Item init) {
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("__class_name__"), make_string_item("URLSearchParams"));
+
+    Item entries;
+    TypeId init_type = get_type_id(init);
+
+    if (init_type == LMD_TYPE_STRING) {
+        String* s = it2s(init);
+        const char* qs = s->chars;
+        int qs_len = (int)s->len;
+        if (qs_len > 0 && qs[0] == '?') { qs++; qs_len--; }
+        entries = parse_query_entries(qs, qs_len);
+    } else if (init_type == LMD_TYPE_MAP) {
+        entries = js_array_new(0);
+        Item keys = js_object_keys(init);
+        int64_t klen = js_array_length(keys);
+        for (int64_t i = 0; i < klen; i++) {
+            Item key = js_array_get_int(keys, i);
+            Item val = js_property_get(init, key);
+            Item entry = js_array_new(0);
+            js_array_push(entry, js_to_string(key));
+            js_array_push(entry, js_to_string(val));
+            js_array_push(entries, entry);
+        }
+    } else if (init_type == LMD_TYPE_ARRAY) {
+        entries = js_array_new(0);
+        int64_t len = js_array_length(init);
+        for (int64_t i = 0; i < len; i++) {
+            Item pair = js_array_get_int(init, i);
+            Item entry = js_array_new(0);
+            js_array_push(entry, js_to_string(js_array_get_int(pair, 0)));
+            js_array_push(entry, js_to_string(js_array_get_int(pair, 1)));
+            js_array_push(entries, entry);
+        }
+    } else {
+        entries = js_array_new(0);
+    }
+
+    js_property_set(obj, make_string_item("__entries__"), entries);
+
+    // set methods
+    auto usp_method = [&](const char* name, void* fn, int params) {
+        js_property_set(obj, make_string_item(name), js_new_function(fn, params));
+    };
+    usp_method("append",  (void*)js_usp_append, 2);
+    usp_method("delete",  (void*)js_usp_delete, 2);
+    usp_method("get",     (void*)js_usp_get, 1);
+    usp_method("getAll",  (void*)js_usp_getAll, 1);
+    usp_method("has",     (void*)js_usp_has, 2);
+    usp_method("set",     (void*)js_usp_set, 2);
+    usp_method("sort",    (void*)js_usp_sort, 0);
+    usp_method("toString",(void*)js_usp_toString, 0);
+    usp_method("forEach", (void*)js_usp_forEach, 2);
+    usp_method("keys",    (void*)js_usp_keys, 0);
+    usp_method("values",  (void*)js_usp_values, 0);
+    usp_method("entries",  (void*)js_usp_entries, 0);
+
+    // size as getter
+    int64_t sz = js_array_length(entries);
+    js_property_set(obj, make_string_item("size"), (Item){.item = i2it((int)sz)});
+
+    return obj;
+}
+
+// =============================================================================
 // url Module Namespace Object
 // =============================================================================
 
@@ -358,6 +747,9 @@ extern "C" Item js_get_url_namespace(void) {
     // file URL conversion
     js_url_set_method(url_module_namespace, "fileURLToPath", (void*)js_url_fileURLToPath, 1);
     js_url_set_method(url_module_namespace, "pathToFileURL", (void*)js_url_pathToFileURL, 1);
+
+    // URLSearchParams constructor
+    js_url_set_method(url_module_namespace, "URLSearchParams", (void*)js_url_search_params_new, 1);
 
     // default export
     Item default_key = make_string_item("default");
