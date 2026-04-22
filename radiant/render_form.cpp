@@ -125,8 +125,8 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
 
         // Draw the glyph
         draw_glyph(rdcon, &glyph->bitmap,
-                   (int)(pen_x + glyph->bitmap.bearing_x),
-                   (int)(y + ascender - glyph->bitmap.bearing_y));
+                   lroundf(pen_x + glyph->bitmap.bearing_x),
+                   lroundf(y + ascender - glyph->bitmap.bearing_y));
 
         // Advance pen position
         pen_x += glyph->advance_x;
@@ -825,8 +825,8 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
                     }
 
                     draw_glyph(rdcon, &glyph->bitmap,
-                               (int)(pen_x + glyph->bitmap.bearing_x),
-                               (int)(pen_y + ascender - glyph->bitmap.bearing_y));
+                               lroundf(pen_x + glyph->bitmap.bearing_x),
+                               lroundf(pen_y + ascender - glyph->bitmap.bearing_y));
                     pen_x += glyph->advance_x;
                 }
 

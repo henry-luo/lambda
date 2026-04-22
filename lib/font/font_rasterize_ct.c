@@ -145,16 +145,18 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     // apply pixel_ratio for physical pixel rendering
     float render_scale = pixel_ratio;
 
-    // Compute pixel-space bounding box using roundOut + outset(1,1), matching
-    // Skia/Chrome: skBounds.roundOut(&mx.bounds); mx.bounds.outset(1, 1);
-    // roundOut: floor for left/bottom, ceil for right/top → integer boundaries
-    // outset(1,1): extend each edge by 1 pixel for AA bleed margins
-    // This ensures the glyph baseline lands at an integer CG pixel position,
-    // preventing sub-pixel AA bleed that causes round-bottom glyphs (e, c, o)
-    // to appear 1px lower than flat-bottom glyphs.
-    int px_left   = (int)floorf((float)bbox.origin.x * render_scale) - 1;
+    // Compute pixel-space bounding box using roundOut (floor/ceil to integer
+    // boundaries).  Skia/Chrome applies an additional outset(1,1) on top of
+    // roundOut, but that extra pixel causes adjacent glyph bitmaps to overlap
+    // when composited individually — producing visible darkness in gaps (e.g.
+    // 'o' and 'l' in "Bold" merging at 18px).  Since we blit glyph bitmaps
+    // one at a time, roundOut alone provides adequate AA coverage: the worst
+    // case is bbox.origin near an integer (e.g. 3.01 → floor=3, margin=0.01),
+    // but font smoothing bleed at the extreme edge is sub-perceptual.  Keep
+    // vertical outset(0,1) to capture descender/ascender AA on round glyphs.
+    int px_left   = (int)floorf((float)bbox.origin.x * render_scale);
     int px_bottom = (int)floorf((float)bbox.origin.y * render_scale) - 1;
-    int px_right  = (int)ceilf((float)(bbox.origin.x + bbox.size.width) * render_scale) + 1;
+    int px_right  = (int)ceilf((float)(bbox.origin.x + bbox.size.width) * render_scale);
     int px_top    = (int)ceilf((float)(bbox.origin.y + bbox.size.height) * render_scale) + 1;
 
     int bmp_width  = px_right - px_left;

@@ -1246,7 +1246,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         rdcon->color = ts->color;
                         float gsx = sx_pos + s_glyph->bitmap.bearing_x + ts->offset_x * s;
                         float gsy = y + s_ascend - s_glyph->bitmap.bearing_y + ts->offset_y * s;
-                        draw_glyph(rdcon, &s_glyph->bitmap, gsx, gsy);
+                        draw_glyph(rdcon, &s_glyph->bitmap, lroundf(gsx), lroundf(gsy));
                         ts = ts->next;
                     }
                     rdcon->color = saved_color;
@@ -1425,13 +1425,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                             rdcon->color = ts->color;
                             float sx = x + glyph->bitmap.bearing_x + ts->offset_x * s;
                             float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * s;
-                            draw_glyph(rdcon, &glyph->bitmap, sx, sy);
+                            draw_glyph(rdcon, &glyph->bitmap, lroundf(sx), lroundf(sy));
                             ts = ts->next;
                         }
                         rdcon->color = saved_shadow_color;
                     }
 
-                    draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
+                    draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                     auto t4 = std::chrono::high_resolution_clock::now();
                     g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
                     g_render_draw_count++;
@@ -1447,7 +1447,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             LoadedGlyph* h_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_h, '-', true);
             if (h_glyph) {
                 float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
-                draw_glyph(rdcon, &h_glyph->bitmap, x + h_glyph->bitmap.bearing_x, y + ascend - h_glyph->bitmap.bearing_y);
+                draw_glyph(rdcon, &h_glyph->bitmap, lroundf(x + h_glyph->bitmap.bearing_x), lroundf(y + ascend - h_glyph->bitmap.bearing_y));
                 x += h_glyph->advance_x;
             }
         }
@@ -1457,7 +1457,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             LoadedGlyph* e_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_e, 0x2026, true);
             if (e_glyph) {
                 float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
-                draw_glyph(rdcon, &e_glyph->bitmap, x + e_glyph->bitmap.bearing_x, y + ascend - e_glyph->bitmap.bearing_y);
+                draw_glyph(rdcon, &e_glyph->bitmap, lroundf(x + e_glyph->bitmap.bearing_x), lroundf(y + ascend - e_glyph->bitmap.bearing_y));
             }
         }
         // render text deco (positions in physical pixels)
@@ -1850,7 +1850,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
                     LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, cp, true);
                     if (glyph) {
-                        draw_glyph(rdcon, &glyph->bitmap, tx + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
+                        draw_glyph(rdcon, &glyph->bitmap, lroundf(tx + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                         tx += glyph->advance_x + rdcon->font.style->letter_spacing * s;
                     } else {
                         tx += rdcon->font.style->space_width * s;
