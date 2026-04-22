@@ -10,8 +10,12 @@
  *   2. Convert quadratic Bézier → cubic Bézier (ThorVG only has cubicTo)
  *   3. Build ThorVG Shape from contours
  *   4. Rasterize via SwCanvas to ABGR8888 buffer
- *   5. Extract alpha channel → 8-bit grayscale
- *   6. Apply γ² linearization (matching CoreText Phase 5 pipeline)
+ *   5. Extract alpha channel → 8-bit grayscale (linear coverage, no gamma)
+ *
+ * Note: unlike the CoreText path, NO γ² correction is applied here. ThorVG
+ * outputs linear coverage values directly. The γ² formula in font_rasterize_ct.c
+ * undoes CoreGraphics' internal gamma encoding — that encoding does not exist
+ * in ThorVG's software rasterizer.
  *
  * Copyright (c) 2026 Lambda Script Project
  */
@@ -105,7 +109,7 @@ static bool ensure_buffer(TvgRasterCtx* ctx, int w, int h) {
 
 static Tvg_Paint build_shape_from_outline(GlyphOutline* outline, float scale,
                                            float offset_x, float offset_y,
-                                           float bmp_h) {
+                                           float bmp_h, float synth_bold_stroke) {
     Tvg_Paint shape = tvg_shape_new();
     if (!shape) return NULL;
 
@@ -177,6 +181,15 @@ static Tvg_Paint build_shape_from_outline(GlyphOutline* outline, float scale,
     // white fill with non-zero winding rule (standard for TrueType)
     tvg_shape_set_fill_color(shape, 255, 255, 255, 255);
     tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_NON_ZERO);
+
+    // synthetic bold: thicken strokes when no true bold font variant was found.
+    // stroke_width ≈ 1/14th em in pixels (~0.07*size_px), matching Chrome's approach.
+    if (synth_bold_stroke > 0.0f) {
+        tvg_shape_set_stroke_width(shape, synth_bold_stroke);
+        tvg_shape_set_stroke_color(shape, 255, 255, 255, 255);
+        tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_ROUND);
+        tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_ROUND);
+    }
 
     return shape;
 }
@@ -295,7 +308,8 @@ static GlyphBitmap* render_colr_glyph(TvgRasterCtx* ctx, FontTables* tables,
         if (outline.num_contours == 0) continue;
 
         Tvg_Paint shape = build_shape_from_outline(&outline, total_scale,
-                                                    offset_x, offset_y, bmp_h_f);
+                                                    offset_x, offset_y, bmp_h_f,
+                                                    0.0f);  // no synth bold for color layers
         if (!shape) continue;
 
         // override fill color with CPAL layer color
@@ -403,6 +417,7 @@ extern "C" bool font_rasterize_tvg_metrics(FontTables* tables, uint32_t codepoin
 extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tables,
                                                     uint32_t codepoint, float size_px,
                                                     float bitmap_scale, float pixel_ratio,
+                                                    float synth_bold_stroke,
                                                     Arena* arena) {
     if (!tvg_ctx || !tables || !arena) return NULL;
     TvgRasterCtx* ctx = (TvgRasterCtx*)tvg_ctx;
@@ -493,7 +508,8 @@ extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tab
     float bmp_h_f = (float)bmp_h;
 
     Tvg_Paint shape = build_shape_from_outline(&outline, total_scale,
-                                                offset_x, offset_y, bmp_h_f);
+                                                offset_x, offset_y, bmp_h_f,
+                                                synth_bold_stroke);
     if (!shape) return NULL;
 
     // render
@@ -513,8 +529,11 @@ extern "C" GlyphBitmap* font_rasterize_tvg_render(void* tvg_ctx, FontTables* tab
             // ABGR8888: alpha is in the highest byte
             uint32_t pixel = ctx->pixel_buf[row * bmp_w + col];
             uint8_t alpha = (uint8_t)(pixel >> 24);
-            // gamma² linearization: new = (old * old + 128) / 255
-            gray_buf[row * pitch + col] = (uint8_t)((alpha * alpha + 128) / 255);
+            // ThorVG outputs linear coverage values directly (no gamma encoding),
+            // so no gamma correction is needed here. The γ² formula used in the
+            // CoreText path is only needed to undo CoreGraphics' internal gamma ~2.0
+            // encoding in offscreen grayscale contexts — it does NOT apply here.
+            gray_buf[row * pitch + col] = alpha;
         }
     }
 
