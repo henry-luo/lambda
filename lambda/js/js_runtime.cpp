@@ -8708,10 +8708,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         // Map class names to ES spec builtinTag
                         const char* tag = NULL;
                         int tag_len = 0;
-                        // Error and subclasses → "Error"
+                        // Error and subclasses → "Error" (only for instances, not prototypes)
                         if ((cl >= 5 && strncmp(c + cl - 5, "Error", 5) == 0) ||
                             (cl == 14 && strncmp(c, "AggregateError", 14) == 0)) {
-                            tag = "Error"; tag_len = 5;
+                            // ES spec: [[ErrorData]] is only on error instances, not prototypes
+                            bool is_proto = false;
+                            js_map_get_fast(m, "__is_proto__", 12, &is_proto);
+                            if (!is_proto) {
+                                tag = "Error"; tag_len = 5;
+                            }
                         }
                         // Date → "Date" (only for actual Date instances with __date_ms__)
                         else if (cl == 4 && strncmp(c, "Date", 4) == 0) {
@@ -8827,15 +8832,20 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     if (cns) {
                         if (cns->len == 4 && memcmp(cns->chars, "Date", 4) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Date]", 13))};
-                        if (cns->len == 5 && memcmp(cns->chars, "Error", 5) == 0)
-                            return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
+                        // ES spec: [[ErrorData]] is only on error instances, not prototypes
+                        bool is_proto = false;
+                        js_map_get_fast(m, "__is_proto__", 12, &is_proto);
+                        if (!is_proto) {
+                            if (cns->len == 5 && memcmp(cns->chars, "Error", 5) == 0)
+                                return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
+                            // Check for error subtypes
+                            if (cns->len >= 5 && memcmp(cns->chars + cns->len - 5, "Error", 5) == 0)
+                                return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
+                        }
                         if (cns->len == 3 && memcmp(cns->chars, "Map", 3) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Map]", 12))};
                         if (cns->len == 3 && memcmp(cns->chars, "Set", 3) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Set]", 12))};
-                        // Check for error subtypes
-                        if (cns->len >= 5 && memcmp(cns->chars + cns->len - 5, "Error", 5) == 0)
-                            return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
                     }
                 }
                 // Check for Math object
