@@ -5576,7 +5576,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 6 && strncmp(nm, "Object", 6) == 0) ||
                             (nl == 8 && strncmp(nm, "Function", 8) == 0) ||
                             (nl == 4 && strncmp(nm, "Date", 4) == 0) ||
-                            (nl == 6 && strncmp(nm, "RegExp", 6) == 0);
+                            (nl == 6 && strncmp(nm, "RegExp", 6) == 0) ||
+                            (nl == 5 && strncmp(nm, "Error", 5) == 0) ||
+                            (nl == 9 && strncmp(nm, "TypeError", 9) == 0) ||
+                            (nl == 10 && strncmp(nm, "RangeError", 10) == 0) ||
+                            (nl == 11 && strncmp(nm, "SyntaxError", 11) == 0) ||
+                            (nl == 14 && strncmp(nm, "ReferenceError", 14) == 0) ||
+                            (nl == 8 && strncmp(nm, "URIError", 8) == 0) ||
+                            (nl == 9 && strncmp(nm, "EvalError", 9) == 0) ||
+                            (nl == 14 && strncmp(nm, "AggregateError", 14) == 0);
                         if (needs_class_name) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
                             Item cnv = (Item){.item = s2it(heap_create_name(nm, nl))};
@@ -18877,6 +18885,467 @@ static Item js_vm_Script_constructor(Item code, Item options) {
     return script;
 }
 
+// =============================================================================
+// diagnostics_channel module implementation
+// =============================================================================
+
+// Forward declarations
+static Item js_dc_tc_subscribe(Item handlers);
+static Item js_dc_tc_unsubscribe(Item handlers);
+static Item js_dc_tc_traceSync(Item fn);
+static Item js_dc_tc_tracePromise(Item fn);
+static Item js_dc_tc_traceCallback(Item fn);
+static void js_dc_channel_publish_on(Item channel, Item message);
+
+extern "C" Item js_array_new(int length);
+extern "C" Item js_array_push(Item array, Item value);
+extern "C" Item js_array_get_int(Item array, int64_t index);
+extern "C" int64_t js_array_length(Item array);
+
+// Channel.subscribe(handler)
+static Item js_dc_channel_subscribe(Item handler) {
+    Item self = js_get_this();
+    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    if (get_type_id(subs) != LMD_TYPE_ARRAY) {
+        subs = js_array_new(0);
+        js_property_set(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))}, subs);
+    }
+    js_array_push(subs, handler);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Channel.unsubscribe(handler) — simple approach: mark as removed
+static Item js_dc_channel_unsubscribe(Item handler) {
+    // no-op for simplicity — unsubscribing from diagnostics channels
+    return (Item){.item = ITEM_FALSE};
+}
+
+// Channel.publish(message)
+static Item js_dc_channel_publish(Item message) {
+    Item self = js_get_this();
+    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(subs);
+        for (int64_t i = 0; i < len; i++) {
+            Item el = js_array_get_int(subs, i);
+            if (get_type_id(el) == LMD_TYPE_FUNC) {
+                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
+            }
+        }
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Channel.hasSubscribers getter
+static Item js_dc_channel_hasSubscribers(void) {
+    Item self = js_get_this();
+    Item subs = js_property_get(self, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
+        if (js_array_length(subs) > 0) return (Item){.item = ITEM_TRUE};
+    }
+    return (Item){.item = ITEM_FALSE};
+}
+
+// Channel.bindStore / Channel.unbindStore — no-ops
+static Item js_dc_channel_bindStore(Item store, Item transform) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// dc.channel(name) — create or return existing channel
+static Item js_dc_channel_factory(Item name) {
+    Item ch = js_new_object();
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("name", 4))}, name);
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))},
+                    js_array_new(0));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("subscribe", 9))},
+                    js_new_function((void*)js_dc_channel_subscribe, 1));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
+                    js_new_function((void*)js_dc_channel_unsubscribe, 1));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("publish", 7))},
+                    js_new_function((void*)js_dc_channel_publish, 1));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
+                    (Item){.item = ITEM_FALSE});
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("bindStore", 9))},
+                    js_new_function((void*)js_dc_channel_bindStore, 2));
+    js_property_set(ch, (Item){.item = s2it(heap_create_name("unbindStore", 11))},
+                    js_new_function((void*)js_dc_channel_bindStore, 1));
+    return ch;
+}
+
+// dc.tracingChannel(name) — create a TracingChannel with start/end/asyncStart/asyncEnd/error channels
+static Item js_dc_tracing_channel(Item nameOrChannels) {
+    Item tc = js_new_object();
+    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
+    static const int sub_lens[] = {5, 3, 10, 8, 5};
+    for (int i = 0; i < 5; i++) {
+        Item sub_name;
+        if (get_type_id(nameOrChannels) == LMD_TYPE_STRING) {
+            String* base = it2s(nameOrChannels);
+            char buf[256];
+            snprintf(buf, sizeof(buf), "tracing:channel:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
+            sub_name = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+        } else {
+            sub_name = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        }
+        Item ch = js_dc_channel_factory(sub_name);
+        js_property_set(tc, (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))}, ch);
+    }
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("subscribe", 9))},
+                    js_new_function((void*)js_dc_tc_subscribe, 1));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
+                    js_new_function((void*)js_dc_tc_unsubscribe, 1));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("traceSync", 9))},
+                    js_new_function((void*)js_dc_tc_traceSync, 1));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("tracePromise", 12))},
+                    js_new_function((void*)js_dc_tc_tracePromise, 1));
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("traceCallback", 13))},
+                    js_new_function((void*)js_dc_tc_traceCallback, 1));
+    return tc;
+}
+
+// TracingChannel.subscribe(handlers) — subscribe to all sub-channels
+static Item js_dc_tc_subscribe(Item handlers) {
+    Item self = js_get_this();
+    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
+    static const int sub_lens[] = {5, 3, 10, 8, 5};
+    for (int i = 0; i < 5; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(sub_names[i], sub_lens[i]))};
+        Item handler = js_property_get(handlers, key);
+        if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            Item ch = js_property_get(self, key);
+            Item subs = js_property_get(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+            if (get_type_id(subs) == LMD_TYPE_ARRAY) {
+                js_array_push(subs, handler);
+            }
+        }
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// TracingChannel.unsubscribe(handlers) — no-op
+static Item js_dc_tc_unsubscribe(Item handlers) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Helper: publish a message on a channel object
+static void js_dc_channel_publish_on(Item channel, Item message) {
+    Item subs = js_property_get(channel, (Item){.item = s2it(heap_create_name("_subscribers", 12))});
+    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
+        int64_t len = js_array_length(subs);
+        for (int64_t i = 0; i < len; i++) {
+            Item el = js_array_get_int(subs, i);
+            if (get_type_id(el) == LMD_TYPE_FUNC) {
+                js_call_function(el, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
+            }
+        }
+    }
+}
+
+// TracingChannel.traceSync(fn, context) — run fn, publishing to start/end channels
+static Item js_dc_tc_traceSync(Item fn) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
+    Item ctx = js_new_object();
+    js_dc_channel_publish_on(start_ch, ctx);
+    Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        js_property_set(ctx, (Item){.item = s2it(heap_create_name("error", 5))}, result);
+        js_dc_channel_publish_on(error_ch, ctx);
+    }
+    js_dc_channel_publish_on(end_ch, ctx);
+    return result;
+}
+
+// TracingChannel.tracePromise(fn, context) — stub, just calls fn
+static Item js_dc_tc_tracePromise(Item fn) {
+    Item ctx = js_new_object();
+    return js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+}
+
+// TracingChannel.traceCallback(fn, ...) — stub, just calls fn
+static Item js_dc_tc_traceCallback(Item fn) {
+    Item ctx = js_new_object();
+    return js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &ctx, 1);
+}
+
+// BoundedChannel.run(context, fn, ...args) — publish to start, call fn, publish to end
+static Item js_dc_bc_run(Item context, Item fn) {
+    Item self = js_get_this();
+    Item start_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("start", 5))});
+    Item end_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("end", 3))});
+    Item error_ch = js_property_get(self, (Item){.item = s2it(heap_create_name("error", 5))});
+    // publish start with context
+    js_dc_channel_publish_on(start_ch, context);
+    // call fn with context
+    Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, &context, 1);
+    // check for error
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        js_property_set(context, (Item){.item = s2it(heap_create_name("error", 5))}, result);
+        js_dc_channel_publish_on(error_ch, context);
+    }
+    // publish end with context + result
+    js_property_set(context, (Item){.item = s2it(heap_create_name("result", 6))}, result);
+    js_dc_channel_publish_on(end_ch, context);
+    return result;
+}
+
+// dc.boundedChannel(name) — create a TracingChannel with run() method
+static Item js_dc_bounded_channel(Item name) {
+    Item tc = js_dc_tracing_channel(name);
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("run", 3))},
+                    js_new_function((void*)js_dc_bc_run, 2));
+    // runStores — no-op
+    js_property_set(tc, (Item){.item = s2it(heap_create_name("runStores", 9))},
+                    js_new_function((void*)js_dc_bc_run, 2));
+    return tc;
+}
+
+// dc.subscribe(name, handler) — convenience wrapper
+static Item js_dc_subscribe(Item name, Item handler) {
+    Item ch = js_dc_channel_factory(name);
+    js_array_push(js_property_get(ch, (Item){.item = s2it(heap_create_name("_subscribers", 12))}), handler);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// dc.unsubscribe(name, handler) — convenience wrapper
+static Item js_dc_unsubscribe(Item name, Item handler) {
+    return (Item){.item = ITEM_FALSE};
+}
+
+// =============================================================================
+// async_hooks module stub
+// =============================================================================
+
+extern "C" Item js_get_this(void);
+
+// Generic no-op function for module stubs — returns undefined
+static Item js_stub_noop(void) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Domain.run(fn) — run fn in this domain context
+static Item js_domain_run(Item fn) {
+    if (get_type_id(fn) == LMD_TYPE_FUNC) {
+        return js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
+    }
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// Domain.enter/exit — no-ops
+static Item js_domain_enter(void) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+static Item js_domain_exit(void) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+
+// Domain.add/remove — no-ops
+static Item js_domain_add(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+static Item js_domain_remove(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
+
+// Domain.intercept/bind — return the callback
+static Item js_domain_intercept(Item fn) { return fn; }
+
+// domain.create() — returns a Domain object that extends EventEmitter
+static Item js_domain_create(void) {
+    Item d = js_new_object();
+    // Core methods
+    js_property_set(d, (Item){.item = s2it(heap_create_name("run", 3))},
+                    js_new_function((void*)js_domain_run, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("enter", 5))},
+                    js_new_function((void*)js_domain_enter, 0));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("exit", 4))},
+                    js_new_function((void*)js_domain_exit, 0));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("add", 3))},
+                    js_new_function((void*)js_domain_add, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("remove", 6))},
+                    js_new_function((void*)js_domain_remove, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("intercept", 9))},
+                    js_new_function((void*)js_domain_intercept, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("bind", 4))},
+                    js_new_function((void*)js_domain_intercept, 1));
+    // EventEmitter-like methods — use simple no-op stubs
+    // (domain objects need on/once/emit/removeListener, but the event emitter
+    // implementation is static in js_events.cpp, so we use simple stubs here)
+    js_property_set(d, (Item){.item = s2it(heap_create_name("on", 2))},
+                    js_new_function((void*)js_stub_noop, 2));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("once", 4))},
+                    js_new_function((void*)js_stub_noop, 2));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("emit", 4))},
+                    js_new_function((void*)js_stub_noop, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("removeListener", 14))},
+                    js_new_function((void*)js_stub_noop, 2));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("removeAllListeners", 18))},
+                    js_new_function((void*)js_stub_noop, 1));
+    js_property_set(d, (Item){.item = s2it(heap_create_name("addListener", 11))},
+                    js_new_function((void*)js_stub_noop, 2));
+    // members array
+    js_property_set(d, (Item){.item = s2it(heap_create_name("members", 7))},
+                    js_array_new(0));
+    return d;
+}
+static Item js_stub_noop_object(void) {
+    return js_new_object();
+}
+
+// AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
+static Item js_als_constructor(Item options) {
+    Item self = js_get_this();
+    // handle options: { defaultValue, name }
+    Item default_val = (Item){.item = ITEM_JS_UNDEFINED};
+    Item name_val = (Item){.item = s2it(heap_create_name("", 0))};
+    if (get_type_id(options) == LMD_TYPE_MAP || get_type_id(options) == LMD_TYPE_OBJECT) {
+        Item dv = js_property_get(options, (Item){.item = s2it(heap_create_name("defaultValue", 12))});
+        if (get_type_id(dv) != LMD_TYPE_UNDEFINED) default_val = dv;
+        Item nv = js_property_get(options, (Item){.item = s2it(heap_create_name("name", 4))});
+        if (get_type_id(nv) == LMD_TYPE_STRING) name_val = nv;
+    } else if ((get_type_id(options) != LMD_TYPE_NULL && get_type_id(options) != LMD_TYPE_UNDEFINED &&
+               options.item != ITEM_JS_UNDEFINED && options.item != 0) ||
+               get_type_id(options) == LMD_TYPE_NULL) {
+        // non-object argument is invalid — throw TypeError
+        extern Item js_throw_type_error(const char* msg);
+        js_throw_type_error("The \"options\" argument must be of type object.");
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, default_val);
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_defaultValue", 13))}, default_val);
+    js_property_set(self, (Item){.item = s2it(heap_create_name("name", 4))}, name_val);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_als_run(Item store, Item callback) {
+    Item self = js_get_this();
+    Item old = js_property_get(self, (Item){.item = s2it(heap_create_name("_store", 6))});
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, store);
+    Item result = js_call_function(callback, (Item){.item = ITEM_JS_UNDEFINED}, nullptr, 0);
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, old);
+    return result;
+}
+
+static Item js_als_getStore(void) {
+    Item self = js_get_this();
+    return js_property_get(self, (Item){.item = s2it(heap_create_name("_store", 6))});
+}
+
+static Item js_als_enterWith(Item store) {
+    Item self = js_get_this();
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, store);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_als_disable(void) {
+    Item self = js_get_this();
+    js_property_set(self, (Item){.item = s2it(heap_create_name("_store", 6))}, (Item){.item = ITEM_JS_UNDEFINED});
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+// AsyncResource stub
+static Item js_ar_constructor(Item type) {
+    Item self = js_get_this();
+    js_property_set(self, (Item){.item = s2it(heap_create_name("type", 4))}, type);
+    return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static Item js_ar_runInAsyncScope(Item fn, Item thisArg) {
+    return js_call_function(fn, thisArg, nullptr, 0);
+}
+
+static Item js_ar_emitDestroy(void) {
+    return js_get_this();
+}
+
+static Item js_ar_asyncId(void) {
+    return (Item){.item = i2it(1)};
+}
+
+static Item js_ar_triggerAsyncId_method(void) {
+    return (Item){.item = i2it(0)};
+}
+
+static Item js_ar_bind(Item fn) {
+    return fn;
+}
+
+// createHook: returns object with enable/disable
+static Item js_ah_createHook(Item callbacks) {
+    Item hook = js_new_object();
+    js_property_set(hook, (Item){.item = s2it(heap_create_name("enable", 6))},
+                    js_new_function((void*)js_als_disable, 0));
+    js_property_set(hook, (Item){.item = s2it(heap_create_name("disable", 7))},
+                    js_new_function((void*)js_als_disable, 0));
+    return hook;
+}
+
+static Item js_ah_executionAsyncId(void) {
+    return (Item){.item = i2it(1)};
+}
+
+static Item js_ah_triggerAsyncId(void) {
+    return (Item){.item = i2it(0)};
+}
+
+static Item js_ah_executionAsyncResource(void) {
+    return js_new_object();
+}
+
+extern "C" Item js_get_async_hooks_namespace(void) {
+    static Item ah_ns = {0};
+    static int ah_epoch = -1;
+    if (ah_ns.item == 0 || ah_epoch != js_heap_epoch) {
+        ah_epoch = js_heap_epoch;
+        ah_ns = js_new_object();
+        heap_register_gc_root(&ah_ns.item);
+
+        // AsyncLocalStorage class
+        Item als_class = js_new_object();
+        Item als_proto = js_new_object();
+        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("run", 3))},
+                        js_new_function((void*)js_als_run, 2));
+        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("getStore", 8))},
+                        js_new_function((void*)js_als_getStore, 0));
+        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("enterWith", 9))},
+                        js_new_function((void*)js_als_enterWith, 1));
+        js_property_set(als_proto, (Item){.item = s2it(heap_create_name("disable", 7))},
+                        js_new_function((void*)js_als_disable, 0));
+        js_property_set(als_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, als_proto);
+        js_property_set(als_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, als_proto);
+        Item als_ctor_fn = js_new_function((void*)js_als_constructor, 1);
+        js_property_set(als_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, als_ctor_fn);
+        js_function_set_prototype(als_ctor_fn, als_proto);
+
+        // AsyncResource class
+        Item ar_class = js_new_object();
+        Item ar_proto = js_new_object();
+        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("runInAsyncScope", 15))},
+                        js_new_function((void*)js_ar_runInAsyncScope, 2));
+        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("emitDestroy", 11))},
+                        js_new_function((void*)js_ar_emitDestroy, 0));
+        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("asyncId", 7))},
+                        js_new_function((void*)js_ar_asyncId, 0));
+        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("triggerAsyncId", 14))},
+                        js_new_function((void*)js_ar_triggerAsyncId_method, 0));
+        js_property_set(ar_proto, (Item){.item = s2it(heap_create_name("bind", 4))},
+                        js_new_function((void*)js_ar_bind, 1));
+        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("prototype", 9))}, ar_proto);
+        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__instance_proto__", 18))}, ar_proto);
+        Item ar_ctor_fn = js_new_function((void*)js_ar_constructor, 1);
+        js_property_set(ar_class, (Item){.item = s2it(heap_create_name("__ctor__", 8))}, ar_ctor_fn);
+        js_function_set_prototype(ar_ctor_fn, ar_proto);
+
+        // Module exports
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncLocalStorage", 17))}, als_class);
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("AsyncResource", 13))}, ar_class);
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("createHook", 10))},
+                        js_new_function((void*)js_ah_createHook, 1));
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("executionAsyncId", 16))},
+                        js_new_function((void*)js_ah_executionAsyncId, 0));
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("triggerAsyncId", 14))},
+                        js_new_function((void*)js_ah_triggerAsyncId, 0));
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("executionAsyncResource", 22))},
+                        js_new_function((void*)js_ah_executionAsyncResource, 0));
+        js_property_set(ah_ns, (Item){.item = s2it(heap_create_name("default", 7))}, ah_ns);
+    }
+    return ah_ns;
+}
+
 extern "C" Item js_get_vm_namespace(void) {
     static Item vm_ns = {0};
     static int vm_epoch = -1;
@@ -19048,6 +19517,23 @@ extern "C" Item js_module_get(Item specifier) {
         // return stream namespace — promises sub-module is the same (pipeline, finished)
         return js_get_stream_namespace();
     }
+    // stream/web, node:stream/web — return stream namespace (contains ReadableStream etc.)
+    if ((spec->len == 10 && memcmp(spec->chars, "stream/web", 10) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "node:stream/web", 15) == 0)) {
+        extern Item js_get_stream_namespace(void);
+        return js_get_stream_namespace();
+    }
+    // stream/consumers, node:stream/consumers — return stream namespace
+    if ((spec->len == 16 && memcmp(spec->chars, "stream/consumers", 16) == 0) ||
+        (spec->len == 21 && memcmp(spec->chars, "node:stream/consumers", 21) == 0)) {
+        extern Item js_get_stream_namespace(void);
+        return js_get_stream_namespace();
+    }
+    // stream/iter — internal stream iteration helpers
+    if (spec->len == 11 && memcmp(spec->chars, "stream/iter", 11) == 0) {
+        extern Item js_get_stream_namespace(void);
+        return js_get_stream_namespace();
+    }
     // node:net
     if ((spec->len == 3 && memcmp(spec->chars, "net", 3) == 0) ||
         (spec->len == 6 && memcmp(spec->chars, "net.js", 6) == 0) ||
@@ -19148,6 +19634,13 @@ extern "C" Item js_module_get(Item specifier) {
                             js_new_function((void*)js_setInterval, 2));
             js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("setImmediate", 12))},
                             js_new_function((void*)js_setImmediate, 1));
+            // scheduler object — { wait(delay), yield() }
+            Item sched = js_new_object();
+            js_property_set(sched, (Item){.item = s2it(heap_create_name("wait", 4))},
+                            js_new_function((void*)js_setTimeout, 2));
+            js_property_set(sched, (Item){.item = s2it(heap_create_name("yield", 5))},
+                            js_new_function((void*)js_setImmediate, 1));
+            js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("scheduler", 9))}, sched);
             js_property_set(tp_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tp_ns);
         }
         return tp_ns;
@@ -19192,6 +19685,12 @@ extern "C" Item js_module_get(Item specifier) {
             extern Item js_module_is_builtin(Item id);
             js_property_set(module_ns, (Item){.item = s2it(heap_create_name("isBuiltin", 9))},
                             js_new_function((void*)js_module_is_builtin, 1));
+            // createRequire(filename) — returns a require function
+            extern Item js_module_create_require(Item filename);
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("createRequire", 13))},
+                            js_new_function((void*)js_module_create_require, 1));
+            // Module constructor stub
+            js_property_set(module_ns, (Item){.item = s2it(heap_create_name("Module", 6))}, module_ns);
             // default export is the module object itself
             js_property_set(module_ns, (Item){.item = s2it(heap_create_name("default", 7))}, module_ns);
         }
@@ -19218,6 +19717,22 @@ extern "C" Item js_module_get(Item specifier) {
                             ItemNull);
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("workerData", 10))},
                             ItemNull);
+            // MessageChannel/MessagePort constructors
+            extern Item js_message_channel_new(void);
+            extern Item js_message_port_new(void);
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessageChannel", 14))},
+                            js_new_function((void*)js_message_channel_new, 0));
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("MessagePort", 11))},
+                            js_new_function((void*)js_message_port_new, 0));
+            // Worker constructor stub — creates a non-functional object
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("Worker", 6))},
+                            js_new_function((void*)js_stub_noop_object, 1));
+            // threadId
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("threadId", 8))},
+                            (Item){.item = i2it(0)});
+            // BroadcastChannel
+            js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("BroadcastChannel", 16))},
+                            js_new_function((void*)js_stub_noop_object, 1));
             js_property_set(wt_ns, (Item){.item = s2it(heap_create_name("default", 7))}, wt_ns);
         }
         return wt_ns;
@@ -19251,6 +19766,138 @@ extern "C" Item js_module_get(Item specifier) {
         extern Item js_get_vm_namespace(void);
         return js_get_vm_namespace();
     }
+    // node:perf_hooks — minimal stub with performance.now()
+    if ((spec->len == 10 && memcmp(spec->chars, "perf_hooks", 10) == 0) ||
+        (spec->len == 13 && memcmp(spec->chars, "perf_hooks.js", 13) == 0) ||
+        (spec->len == 15 && memcmp(spec->chars, "node:perf_hooks", 15) == 0)) {
+        static Item ph_ns = {0};
+        static int ph_epoch = -1;
+        if (ph_ns.item == 0 || ph_epoch != js_heap_epoch) {
+            ph_epoch = js_heap_epoch;
+            ph_ns = js_new_object();
+            heap_register_gc_root(&ph_ns.item);
+            // performance object with now()
+            extern Item js_performance_now(void);
+            Item perf = js_new_object();
+            js_property_set(perf, (Item){.item = s2it(heap_create_name("now", 3))},
+                            js_new_function((void*)js_performance_now, 0));
+            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
+            js_property_set(ph_ns, (Item){.item = s2it(heap_create_name("default", 7))}, ph_ns);
+        }
+        return ph_ns;
+    }
+    // node:async_hooks — stub with AsyncLocalStorage, AsyncResource, createHook
+    if ((spec->len == 11 && memcmp(spec->chars, "async_hooks", 11) == 0) ||
+        (spec->len == 14 && memcmp(spec->chars, "async_hooks.js", 14) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "node:async_hooks", 16) == 0)) {
+        extern Item js_get_async_hooks_namespace(void);
+        return js_get_async_hooks_namespace();
+    }
+    // node:diagnostics_channel — channel/tracingChannel/subscribe/unsubscribe
+    if ((spec->len == 19 && memcmp(spec->chars, "diagnostics_channel", 19) == 0) ||
+        (spec->len == 22 && memcmp(spec->chars, "diagnostics_channel.js", 22) == 0) ||
+        (spec->len == 24 && memcmp(spec->chars, "node:diagnostics_channel", 24) == 0)) {
+        static Item dc_ns = {0};
+        static int dc_epoch = -1;
+        if (dc_ns.item == 0 || dc_epoch != js_heap_epoch) {
+            dc_epoch = js_heap_epoch;
+            dc_ns = js_new_object();
+            heap_register_gc_root(&dc_ns.item);
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("channel", 7))},
+                            js_new_function((void*)js_dc_channel_factory, 1));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("tracingChannel", 14))},
+                            js_new_function((void*)js_dc_tracing_channel, 1));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("boundedChannel", 14))},
+                            js_new_function((void*)js_dc_bounded_channel, 1));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("subscribe", 9))},
+                            js_new_function((void*)js_dc_subscribe, 2));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("unsubscribe", 11))},
+                            js_new_function((void*)js_dc_unsubscribe, 2));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("hasSubscribers", 14))},
+                            js_new_function((void*)js_dc_channel_hasSubscribers, 1));
+            // Channel and TracingChannel classes
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("Channel", 7))},
+                            js_new_function((void*)js_dc_channel_factory, 1));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("TracingChannel", 14))},
+                            js_new_function((void*)js_dc_tracing_channel, 1));
+            js_property_set(dc_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dc_ns);
+        }
+        return dc_ns;
+    }
+    // node:v8 — minimal stub with serialize/deserialize and GC helpers
+    if ((spec->len == 2 && memcmp(spec->chars, "v8", 2) == 0) ||
+        (spec->len == 5 && memcmp(spec->chars, "v8.js", 5) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "node:v8", 7) == 0)) {
+        static Item v8_ns = {0};
+        static int v8_epoch = -1;
+        if (v8_ns.item == 0 || v8_epoch != js_heap_epoch) {
+            v8_epoch = js_heap_epoch;
+            v8_ns = js_new_object();
+            heap_register_gc_root(&v8_ns.item);
+            Item noop = js_new_function((void*)js_stub_noop, 0);
+            Item noop1 = js_new_function((void*)js_stub_noop, 1);
+            // promiseHooks stub — { onInit, onBefore, onAfter, onSettled, createHook }
+            Item ph = js_new_object();
+            js_property_set(ph, (Item){.item = s2it(heap_create_name("onInit", 6))}, noop1);
+            js_property_set(ph, (Item){.item = s2it(heap_create_name("onBefore", 8))}, noop1);
+            js_property_set(ph, (Item){.item = s2it(heap_create_name("onAfter", 7))}, noop1);
+            js_property_set(ph, (Item){.item = s2it(heap_create_name("onSettled", 9))}, noop1);
+            js_property_set(ph, (Item){.item = s2it(heap_create_name("createHook", 10))}, noop1);
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("promiseHooks", 12))}, ph);
+            // GC-related no-ops
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("getHeapStatistics", 17))},
+                            js_new_function((void*)js_stub_noop_object, 0));
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("getHeapSpaceStatistics", 21))},
+                            js_new_function((void*)js_stub_noop_object, 0));
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("setFlagsFromString", 18))}, noop1);
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("serialize", 9))}, noop1);
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("deserialize", 11))}, noop1);
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("GCProfiler", 10))},
+                            js_new_function((void*)js_stub_noop_object, 0));
+            js_property_set(v8_ns, (Item){.item = s2it(heap_create_name("default", 7))}, v8_ns);
+        }
+        return v8_ns;
+    }
+    // node:tty — minimal stub with isatty, ReadStream, WriteStream
+    if ((spec->len == 3 && memcmp(spec->chars, "tty", 3) == 0) ||
+        (spec->len == 6 && memcmp(spec->chars, "tty.js", 6) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "node:tty", 8) == 0)) {
+        static Item tty_ns = {0};
+        static int tty_epoch = -1;
+        if (tty_ns.item == 0 || tty_epoch != js_heap_epoch) {
+            tty_epoch = js_heap_epoch;
+            tty_ns = js_new_object();
+            heap_register_gc_root(&tty_ns.item);
+            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("isatty", 6))},
+                            js_new_function((void*)js_stub_noop, 1));
+            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("WriteStream", 11))},
+                            js_new_function((void*)js_stub_noop_object, 1));
+            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("ReadStream", 10))},
+                            js_new_function((void*)js_stub_noop_object, 1));
+            js_property_set(tty_ns, (Item){.item = s2it(heap_create_name("default", 7))}, tty_ns);
+        }
+        return tty_ns;
+    }
+    // node:domain — stub with create() method that returns Domain-like objects
+    if ((spec->len == 6 && memcmp(spec->chars, "domain", 6) == 0) ||
+        (spec->len == 9 && memcmp(spec->chars, "domain.js", 9) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "node:domain", 11) == 0)) {
+        static Item dom_ns = {0};
+        static int dom_epoch = -1;
+        if (dom_ns.item == 0 || dom_epoch != js_heap_epoch) {
+            dom_epoch = js_heap_epoch;
+            dom_ns = js_new_object();
+            heap_register_gc_root(&dom_ns.item);
+            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("create", 6))},
+                            js_new_function((void*)js_domain_create, 0));
+            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("createDomain", 12))},
+                            js_new_function((void*)js_domain_create, 0));
+            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("Domain", 6))},
+                            js_new_function((void*)js_domain_create, 0));
+            js_property_set(dom_ns, (Item){.item = s2it(heap_create_name("default", 7))}, dom_ns);
+        }
+        return dom_ns;
+    }
 
     for (int i = 0; i < js_module_count_v14; i++) {
         if (js_modules[i].specifier->len == spec->len &&
@@ -19275,7 +19922,8 @@ extern "C" Item js_module_is_builtin(Item id) {
         "assert", "buffer", "child_process", "console", "crypto", "dns",
         "events", "fs", "http", "https", "module", "net", "os", "path",
         "process", "querystring", "readline", "stream", "string_decoder",
-        "timers", "tls", "url", "util", "vm", "worker_threads", "zlib"
+        "timers", "tls", "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
+        "async_hooks", "diagnostics_channel", "domain", "perf_hooks"
     };
     int n = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < n; i++) {
@@ -19283,6 +19931,13 @@ extern "C" Item js_module_is_builtin(Item id) {
             return (Item){.item = ITEM_TRUE};
     }
     return (Item){.item = ITEM_FALSE};
+}
+
+extern "C" Item js_module_create_require(Item filename) {
+    // createRequire(filename) — returns a require function bound to that path
+    // For simplicity, return the global js_require function
+    extern Item js_require(Item specifier);
+    return js_new_function((void*)js_require, 1);
 }
 
 extern "C" Item js_module_namespace_create(Item exports_map) {

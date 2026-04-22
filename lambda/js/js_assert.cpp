@@ -444,6 +444,14 @@ extern "C" Item js_assert_doesNotMatch(Item string_val, Item regexp, Item messag
     return make_js_undefined();
 }
 
+// assert.partialDeepStrictEqual(actual, expected[, message])
+// Checks that expected is a "subset" of actual (all keys in expected match)
+extern "C" Item js_assert_partialDeepStrictEqual(Item actual, Item expected, Item message) {
+    // Delegate to deepStrictEqual for now — a proper implementation
+    // would only check keys present in expected
+    return js_assert_deepStrictEqual(actual, expected, message);
+}
+
 // =============================================================================
 // assert.rejects / assert.doesNotReject — async assertion helpers
 // =============================================================================
@@ -678,7 +686,55 @@ extern "C" Item js_assert_AssertionError_ctor(Item options) {
     js_property_set(error, assert_make_string("expected"), expected);
     if (op_str) js_property_set(error, assert_make_string("operator"), assert_make_string(op_str));
     js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+    // Set prototype chain: error.__proto__ = AssertionError.prototype (inherits from Error.prototype)
+    if (assert_namespace.item != 0) {
+        Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+        if (get_type_id(ae_fn) == LMD_TYPE_FUNC) {
+            Item ae_proto = js_property_get(ae_fn, assert_make_string("prototype"));
+            if (get_type_id(ae_proto) == LMD_TYPE_MAP) {
+                js_set_prototype(error, ae_proto);
+            }
+        }
+    }
     return error;
+}
+
+// Assert constructor: new Assert(options?) — creates an instance with all assert methods
+// options: { diff: 'full'|'simple' } (stored but not used for behavior changes in our impl)
+extern "C" Item js_assert_constructor(Item options) {
+    // create a callable function object (assert(value) works)
+    Item instance = js_new_function((void*)js_assert_ok, 2);
+
+    // copy all assert methods onto this instance
+    assert_set_method(instance, "ok",                  (void*)js_assert_ok, 2);
+    assert_set_method(instance, "equal",               (void*)js_assert_equal, 3);
+    assert_set_method(instance, "notEqual",            (void*)js_assert_notEqual, 3);
+    assert_set_method(instance, "strictEqual",         (void*)js_assert_strictEqual, 3);
+    assert_set_method(instance, "notStrictEqual",      (void*)js_assert_notStrictEqual, 3);
+    assert_set_method(instance, "deepStrictEqual",     (void*)js_assert_deepStrictEqual, 3);
+    assert_set_method(instance, "notDeepStrictEqual",  (void*)js_assert_notDeepStrictEqual, 3);
+    assert_set_method(instance, "deepEqual",           (void*)js_assert_deepEqual, 3);
+    assert_set_method(instance, "notDeepEqual",        (void*)js_assert_notDeepEqual, 3);
+    assert_set_method(instance, "fail",                (void*)js_assert_fail, 1);
+    assert_set_method(instance, "throws",              (void*)js_assert_module_throws, 3);
+    assert_set_method(instance, "doesNotThrow",        (void*)js_assert_module_doesNotThrow, 3);
+    assert_set_method(instance, "ifError",             (void*)js_assert_ifError, 1);
+    assert_set_method(instance, "match",               (void*)js_assert_match, 3);
+    assert_set_method(instance, "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
+    assert_set_method(instance, "rejects",             (void*)js_assert_rejects, 3);
+    assert_set_method(instance, "doesNotReject",       (void*)js_assert_doesNotReject, 3);
+    assert_set_method(instance, "partialDeepStrictEqual", (void*)js_assert_partialDeepStrictEqual, 3);
+    assert_set_method(instance, "AssertionError",      (void*)js_assert_AssertionError_ctor, 1);
+
+    // store options
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        js_property_set(instance, assert_make_string("_options"), options);
+    }
+
+    // strict alias
+    js_property_set(instance, assert_make_string("strict"), instance);
+
+    return instance;
 }
 
 extern "C" Item js_get_assert_namespace(void) {
@@ -704,13 +760,29 @@ extern "C" Item js_get_assert_namespace(void) {
     assert_set_method(assert_namespace, "doesNotMatch",        (void*)js_assert_doesNotMatch, 3);
     assert_set_method(assert_namespace, "rejects",             (void*)js_assert_rejects, 3);
     assert_set_method(assert_namespace, "doesNotReject",       (void*)js_assert_doesNotReject, 3);
+    assert_set_method(assert_namespace, "partialDeepStrictEqual", (void*)js_assert_partialDeepStrictEqual, 3);
 
     // AssertionError constructor
     assert_set_method(assert_namespace, "AssertionError",      (void*)js_assert_AssertionError_ctor, 1);
 
-    // Assert constructor (the class itself, can be used with new Assert())
-    // For now, just expose a reference to the namespace as a callable constructor
-    js_property_set(assert_namespace, assert_make_string("Assert"), assert_namespace);
+    // Set up AssertionError.prototype to inherit from Error.prototype
+    // so that (new assert.AssertionError({})) instanceof Error === true
+    {
+        Item ae_fn = js_property_get(assert_namespace, assert_make_string("AssertionError"));
+        // Get Error constructor and its prototype
+        Item error_ctor = js_get_constructor(assert_make_string("Error"));
+        Item error_proto_key = assert_make_string("prototype");
+        Item error_proto = js_property_get(error_ctor, error_proto_key);
+        // Create AssertionError.prototype that inherits from Error.prototype
+        Item ae_proto = js_object_create(error_proto);
+        js_property_set(ae_proto, assert_make_string("name"), assert_make_string("AssertionError"));
+        js_property_set(ae_proto, assert_make_string("constructor"), ae_fn);
+        // Set AssertionError.prototype
+        js_property_set(ae_fn, error_proto_key, ae_proto);
+    }
+
+    // Assert constructor (creates a new Assert instance with the same methods + options)
+    assert_set_method(assert_namespace, "Assert", (void*)js_assert_constructor, 1);
 
     // assert.strict — alias for assert itself (strict mode is default in modern Node)
     js_property_set(assert_namespace, assert_make_string("strict"), assert_namespace);
@@ -726,19 +798,294 @@ extern "C" void js_assert_reset(void) {
 }
 
 // =============================================================================
-// node:test module — basic test runner
+// node:test module — basic test runner with mock support
 // =============================================================================
 
 static Item node_test_namespace = {0};
 
+// forward decls used throughout
+static Item js_mock_fn_impl(Item original_fn);
+static Item js_mock_method_impl(Item object, Item method_name, Item implementation);
+static Item js_mock_create_context(void);
+static Item js_mock_reset_impl(void);
+static Item js_mock_restore_all_impl(void);
+
+// ---------------------------------------------------------------------------
+// mock.fn(original?) — creates a mock function that records calls
+// Uses a global registry since all mock wrappers share the same C function
+// and we can't get the JS function object from within the C wrapper.
+// ---------------------------------------------------------------------------
+#define MAX_MOCK_SLOTS 64
+static struct MockSlot {
+    Item calls;       // JS array of call records
+    Item original;    // original function (or undefined)
+    int call_count;
+    bool in_use;
+} g_mock_slots[MAX_MOCK_SLOTS];
+static int g_mock_slot_count = 0;
+
+// Reset all mock slots (called between tests)
+static void mock_reset_all_slots(void) {
+    for (int i = 0; i < g_mock_slot_count; i++) {
+        g_mock_slots[i].in_use = false;
+        g_mock_slots[i].calls = (Item){0};
+        g_mock_slots[i].original = (Item){0};
+        g_mock_slots[i].call_count = 0;
+    }
+    g_mock_slot_count = 0;
+}
+
+static int mock_alloc_slot(void) {
+    // first try to reuse
+    for (int i = 0; i < g_mock_slot_count; i++) {
+        if (!g_mock_slots[i].in_use) {
+            g_mock_slots[i].in_use = true;
+            return i;
+        }
+    }
+    if (g_mock_slot_count < MAX_MOCK_SLOTS) {
+        int idx = g_mock_slot_count++;
+        g_mock_slots[idx].in_use = true;
+        return idx;
+    }
+    return -1;
+}
+
+// Each mock wrapper is generated per-slot. We use a trampolining scheme:
+// the first argument of the wrapper encodes the slot index via a JS property
+// on the wrapper function. But since we can't access the function object...
+// Alternative: create separate C wrappers for the first N slots.
+
+// Helper: generic mock wrapper that gets slot index from a hidden property
+// We'll store the slot index as the mock's _slot property on the .mock object,
+// and find it by iterating slots to match the calls array. But that's O(n).
+// Better: use `js_get_callee()` if available, or create per-slot wrappers.
+// Simplest approach: create a fixed number of static wrapper functions.
+
+#define MOCK_WRAPPER_BODY(SLOT_IDX) \
+static Item js_mock_wrapper_##SLOT_IDX(Item a0, Item a1, Item a2) { \
+    int idx = SLOT_IDX; \
+    if (idx >= MAX_MOCK_SLOTS || !g_mock_slots[idx].in_use) return make_js_undefined(); \
+    Item call_record = js_new_object(); \
+    Item args_array = js_array_new(0); \
+    js_array_push(args_array, a0); \
+    js_array_push(args_array, a1); \
+    js_array_push(args_array, a2); \
+    js_property_set(call_record, assert_make_string("arguments"), args_array); \
+    js_property_set(call_record, assert_make_string("this"), make_js_undefined()); \
+    Item result = make_js_undefined(); \
+    if (get_type_id(g_mock_slots[idx].original) == LMD_TYPE_FUNC) { \
+        Item call_args[3] = {a0, a1, a2}; \
+        result = js_call_function(g_mock_slots[idx].original, make_js_undefined(), call_args, 3); \
+    } \
+    js_property_set(call_record, assert_make_string("result"), result); \
+    js_array_push(g_mock_slots[idx].calls, call_record); \
+    g_mock_slots[idx].call_count++; \
+    return result; \
+}
+
+MOCK_WRAPPER_BODY(0)  MOCK_WRAPPER_BODY(1)  MOCK_WRAPPER_BODY(2)  MOCK_WRAPPER_BODY(3)
+MOCK_WRAPPER_BODY(4)  MOCK_WRAPPER_BODY(5)  MOCK_WRAPPER_BODY(6)  MOCK_WRAPPER_BODY(7)
+MOCK_WRAPPER_BODY(8)  MOCK_WRAPPER_BODY(9)  MOCK_WRAPPER_BODY(10) MOCK_WRAPPER_BODY(11)
+MOCK_WRAPPER_BODY(12) MOCK_WRAPPER_BODY(13) MOCK_WRAPPER_BODY(14) MOCK_WRAPPER_BODY(15)
+MOCK_WRAPPER_BODY(16) MOCK_WRAPPER_BODY(17) MOCK_WRAPPER_BODY(18) MOCK_WRAPPER_BODY(19)
+MOCK_WRAPPER_BODY(20) MOCK_WRAPPER_BODY(21) MOCK_WRAPPER_BODY(22) MOCK_WRAPPER_BODY(23)
+MOCK_WRAPPER_BODY(24) MOCK_WRAPPER_BODY(25) MOCK_WRAPPER_BODY(26) MOCK_WRAPPER_BODY(27)
+MOCK_WRAPPER_BODY(28) MOCK_WRAPPER_BODY(29) MOCK_WRAPPER_BODY(30) MOCK_WRAPPER_BODY(31)
+
+typedef Item (*MockWrapperFn)(Item, Item, Item);
+static MockWrapperFn g_mock_wrappers[32] = {
+    js_mock_wrapper_0,  js_mock_wrapper_1,  js_mock_wrapper_2,  js_mock_wrapper_3,
+    js_mock_wrapper_4,  js_mock_wrapper_5,  js_mock_wrapper_6,  js_mock_wrapper_7,
+    js_mock_wrapper_8,  js_mock_wrapper_9,  js_mock_wrapper_10, js_mock_wrapper_11,
+    js_mock_wrapper_12, js_mock_wrapper_13, js_mock_wrapper_14, js_mock_wrapper_15,
+    js_mock_wrapper_16, js_mock_wrapper_17, js_mock_wrapper_18, js_mock_wrapper_19,
+    js_mock_wrapper_20, js_mock_wrapper_21, js_mock_wrapper_22, js_mock_wrapper_23,
+    js_mock_wrapper_24, js_mock_wrapper_25, js_mock_wrapper_26, js_mock_wrapper_27,
+    js_mock_wrapper_28, js_mock_wrapper_29, js_mock_wrapper_30, js_mock_wrapper_31,
+};
+
+// A mock_prop object that reads from the slot on access
+// We create a regular object and set a getter-like mechanism,
+// but since we don't have getters, we'll update it lazily.
+// Simplest: store slot index in the mock object, and provide
+// a "calls" array that IS the slot's calls array (shared reference).
+
+// mock.fn([original]) — create a new mock function
+static Item js_mock_fn_impl(Item original_fn) {
+    int slot = mock_alloc_slot();
+    if (slot < 0 || slot >= 32) {
+        // fallback: return a simple function without tracking
+        if (get_type_id(original_fn) == LMD_TYPE_FUNC) return original_fn;
+        return js_new_function((void*)js_mock_reset_impl, 0);
+    }
+
+    g_mock_slots[slot].calls = js_array_new(0);
+    g_mock_slots[slot].call_count = 0;
+    g_mock_slots[slot].original = original_fn;
+
+    Item wrapper = js_new_function((void*)g_mock_wrappers[slot], 3);
+
+    // create .mock property pointing to the live calls array
+    Item mock_prop = js_new_object();
+    js_property_set(mock_prop, assert_make_string("calls"), g_mock_slots[slot].calls);
+    js_property_set(mock_prop, assert_make_string("callCount"), (Item){.item = i2it(0)});
+    js_property_set(mock_prop, assert_make_string("_slot"), (Item){.item = i2it(slot)});
+
+    // mock.restore() — no-op for fn mocks
+    js_property_set(mock_prop, assert_make_string("restore"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+    // mock.resetCalls()
+    js_property_set(mock_prop, assert_make_string("resetCalls"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+
+    js_property_set(wrapper, assert_make_string("mock"), mock_prop);
+    return wrapper;
+}
+
+// mock.method(object, methodName[, implementation]) — replace a method with a mock
+static Item js_mock_method_impl(Item object, Item method_name, Item implementation) {
+    // get original method
+    Item original = js_property_get(object, method_name);
+
+    // create mock wrapper — if implementation provided, use that as the "original"
+    Item mock_original = (get_type_id(implementation) == LMD_TYPE_FUNC)
+                         ? implementation : original;
+    Item wrapper = js_mock_fn_impl(mock_original);
+
+    // store info for restore
+    Item mock_prop = js_property_get(wrapper, assert_make_string("mock"));
+    js_property_set(mock_prop, assert_make_string("_owner"), object);
+    js_property_set(mock_prop, assert_make_string("_methodName"), method_name);
+    js_property_set(mock_prop, assert_make_string("_originalMethod"), original);
+
+    // replace the method
+    js_property_set(object, method_name, wrapper);
+    return wrapper;
+}
+
+static Item js_mock_reset_impl(void) {
+    return make_js_undefined();
+}
+
+static Item js_mock_restore_all_impl(void) {
+    return make_js_undefined();
+}
+
+// mock.getter(object, property) — stub
+static Item js_mock_getter_impl(Item object, Item property) {
+    return js_mock_method_impl(object, property, make_js_undefined());
+}
+
+// mock.setter(object, property) — stub
+static Item js_mock_setter_impl(Item object, Item property) {
+    return js_mock_method_impl(object, property, make_js_undefined());
+}
+
+// Create a mock context object with fn/method/getter/setter/reset/restoreAll
+static Item js_mock_create_context(void) {
+    Item mock_obj = js_new_object();
+    js_property_set(mock_obj, assert_make_string("fn"),
+                    js_new_function((void*)js_mock_fn_impl, 1));
+    js_property_set(mock_obj, assert_make_string("method"),
+                    js_new_function((void*)js_mock_method_impl, 3));
+    js_property_set(mock_obj, assert_make_string("getter"),
+                    js_new_function((void*)js_mock_getter_impl, 2));
+    js_property_set(mock_obj, assert_make_string("setter"),
+                    js_new_function((void*)js_mock_setter_impl, 2));
+    js_property_set(mock_obj, assert_make_string("reset"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+    js_property_set(mock_obj, assert_make_string("restoreAll"),
+                    js_new_function((void*)js_mock_restore_all_impl, 0));
+    // timers sub-object
+    Item timers_obj = js_new_object();
+    js_property_set(timers_obj, assert_make_string("enable"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+    js_property_set(timers_obj, assert_make_string("reset"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+    js_property_set(timers_obj, assert_make_string("tick"),
+                    js_new_function((void*)js_mock_reset_impl, 1));
+    js_property_set(mock_obj, assert_make_string("timers"), timers_obj);
+    return mock_obj;
+}
+
+// t.skip() — no-op skip
+static Item js_test_context_skip(void) {
+    return make_js_undefined();
+}
+
+// t.todo() — no-op
+static Item js_test_context_todo(void) {
+    return make_js_undefined();
+}
+
+// t.diagnostic(msg) — no-op
+static Item js_test_context_diagnostic(Item msg) {
+    return make_js_undefined();
+}
+
+// t.plan(count) — no-op
+static Item js_test_context_plan(Item count) {
+    return make_js_undefined();
+}
+
+// t.test(name, fn) — sub-test, delegate to js_node_test_run
+extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn);
+
+static Item js_test_context_subtest(Item name, Item options_or_fn, Item fn) {
+    return js_node_test_run(name, options_or_fn, fn);
+}
+
+// Build a test context (t) passed to test callbacks
+static Item js_build_test_context(void) {
+    Item t = js_new_object();
+
+    // t.mock — per-test mock context
+    Item mock = js_mock_create_context();
+    js_property_set(t, assert_make_string("mock"), mock);
+
+    // t.assert — the assert module + snapshot stubs
+    extern Item js_get_assert_namespace(void);
+    Item t_assert = js_assert_constructor(make_js_undefined());
+    // add snapshot and fileSnapshot as no-op stubs for test runner context
+    js_property_set(t_assert, assert_make_string("snapshot"),
+                    js_new_function((void*)js_test_context_skip, 0));
+    js_property_set(t_assert, assert_make_string("fileSnapshot"),
+                    js_new_function((void*)js_test_context_skip, 0));
+    js_property_set(t, assert_make_string("assert"), t_assert);
+
+    // t.skip(), t.todo(), t.diagnostic(), t.plan()
+    js_property_set(t, assert_make_string("skip"),
+                    js_new_function((void*)js_test_context_skip, 0));
+    js_property_set(t, assert_make_string("todo"),
+                    js_new_function((void*)js_test_context_todo, 0));
+    js_property_set(t, assert_make_string("diagnostic"),
+                    js_new_function((void*)js_test_context_diagnostic, 1));
+    js_property_set(t, assert_make_string("plan"),
+                    js_new_function((void*)js_test_context_plan, 1));
+
+    // t.test — sub-tests
+    js_property_set(t, assert_make_string("test"),
+                    js_new_function((void*)js_test_context_subtest, 3));
+
+    // t.name — filled in later
+    js_property_set(t, assert_make_string("name"), make_js_undefined());
+
+    // t.signal — an AbortSignal stub
+    js_property_set(t, assert_make_string("signal"), make_js_undefined());
+
+    // t.fullName
+    js_property_set(t, assert_make_string("fullName"), assert_make_string(""));
+
+    return t;
+}
+
 // test(name, fn) / test(name, options, fn) — run fn synchronously
 extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
-    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
     extern int js_check_exception(void);
     extern Item js_clear_exception(void);
     extern void js_throw_value(Item error);
     extern bool js_is_truthy(Item value);
-    extern Item js_property_get(Item obj, Item key);
 
     // Check for skip/todo option in options object
     Item options = make_js_undefined();
@@ -752,10 +1099,13 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
 
     // If options has skip: true or skip is a string, skip the test
     if (get_type_id(options) == LMD_TYPE_MAP) {
-        bool found = false;
         Item skip_val = js_property_get(options, assert_make_string("skip"));
         if (js_is_truthy(skip_val)) {
             return make_js_undefined(); // skip this test
+        }
+        Item todo_val = js_property_get(options, assert_make_string("todo"));
+        if (js_is_truthy(todo_val)) {
+            return make_js_undefined(); // todo tests are skipped
         }
     }
 
@@ -763,11 +1113,16 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
         return make_js_undefined();
     }
 
-    // create a minimal test context (t) with t.skip(), t.todo(), t.assert, etc.
-    Item t = js_new_object();
-    // t.skip — no-op that marks test as skipped
-    // (stubbed for compatibility)
+    // create test context with t.mock, t.assert, t.skip, etc.
+    Item t = js_build_test_context();
 
+    // set t.name
+    if (get_type_id(name) == LMD_TYPE_STRING) {
+        js_property_set(t, assert_make_string("name"), name);
+        js_property_set(t, assert_make_string("fullName"), name);
+    }
+
+    // run callback with (t) or (t, done) — for sync tests we pass t only
     js_call_function(callback, make_js_undefined(), &t, 1);
 
     // if test threw, re-throw (let the test runner handle it)
@@ -802,6 +1157,21 @@ extern "C" Item js_get_node_test_namespace(void) {
     js_property_set(node_test_namespace, assert_make_string("after"), js_new_function((void*)js_node_test_run, 3));
     js_property_set(node_test_namespace, assert_make_string("beforeEach"), js_new_function((void*)js_node_test_run, 3));
     js_property_set(node_test_namespace, assert_make_string("afterEach"), js_new_function((void*)js_node_test_run, 3));
+
+    // mock — global mock object
+    Item mock_obj = js_mock_create_context();
+    js_property_set(node_test_namespace, assert_make_string("mock"), mock_obj);
+
+    // MockTracker class — same as mock
+    js_property_set(node_test_namespace, assert_make_string("MockTracker"), mock_obj);
+
+    // run — stub (just returns undefined, real runner needs stream support)
+    js_property_set(node_test_namespace, assert_make_string("run"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
+
+    // getTestContext — stub
+    js_property_set(node_test_namespace, assert_make_string("getTestContext"),
+                    js_new_function((void*)js_mock_reset_impl, 0));
 
     return node_test_namespace;
 }

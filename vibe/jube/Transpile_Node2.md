@@ -4,14 +4,13 @@
 
 Lambda's Node.js compatibility layer (Transpile_Node) has established a solid foundation with 23 built-in modules implemented and an npm package management system. This proposal analyzes the results of running the official Node.js test suite (`ref/node/test/parallel/`) against Lambda's JS runtime and defines a phased plan to improve compliance.
 
-### Current State (after Phase 4 implementation)
+### Current State (after Phase 5 implementation)
 
 | Metric | Count |
 |--------|-------|
 | Total official parallel tests | 3,926 |
-| Tests in enabled modules (27 modules) | ~2,050 |
-| Tests in disabled modules (9 modules) | ~1,876 |
-| **Baseline passing** | **795** |
+| Tests in enabled modules (40+ prefixes) | ~2,619 |
+| **Baseline passing** | **1,053** |
 
 ### Phase 2 Implementation Results (cumulative)
 
@@ -58,6 +57,43 @@ Phase 4 (vm module + runtime API stubs) implemented three high-impact targets:
 3. **net.Socket method stubs**: Added `setTimeout`, `connect`, `setKeepAlive`, `setNoDelay`, `ref`, `unref`, `address` methods plus `readable`, `writable`, `_handle`, `allowHalfOpen` properties
 
 **Result: 795 passing tests** (+56 from Phase 3). Key gains: vm +17 (9→26), process/misc +25, net/socket +14.
+
+### Phase 5 Implementation Results
+
+Phase 5 (test infrastructure + module registration + runtime fixes) delivered the largest single gain:
+
+1. **Massive prefix expansion** — Added 40+ test filename prefixes to `g_feature_modules` in the test runner. Hundreds of tests were never being run because their filename prefix (e.g., `inspector-`, `eslint-`, `snapshot-`, `compile-`) wasn't registered. This was a zero-runtime-change gain of ~270 tests.
+2. **New module registrations** — Added `require('console')` with `Console` constructor, `require('module')` with `isBuiltin()`/`builtinModules`, `require('stream/promises')`, `require('timers/promises')`, `require('util/types')`
+3. **Runtime fixes**:
+   - `os.tmpdir()` — now respects `TMPDIR`/`TMP`/`TEMP` env vars with trailing slash stripping
+   - `process.env` assignment — now propagates to real environment via `setenv()`/`unsetenv()`
+   - `setTimeout`/`setInterval` extra args — transpiler + runtime support for `setTimeout(fn, ms, arg1, arg2, ...)`
+   - EventEmitter `_events` property exposure
+4. **Test timeout** increased from 30s to 60s
+5. **Inspector module** enabled in test runner (+69 tests)
+
+Per-module pass breakdown:
+
+| Module | Passes | Module | Passes |
+|--------|--------|--------|--------|
+| http | 273 | crypto | 14 |
+| fs | 142 | sqlite | 14 |
+| net | 81 | heap | 11 |
+| inspector | 69 | module | 9 |
+| tls | 54 | event | 8 |
+| https | 37 | pipe | 8 |
+| vm | 28 | require | 7 |
+| process | 26 | zlib | 7 |
+| snapshot | 26 | readline | 5 |
+| eslint | 25 | shadow | 5 |
+| stream | 25 | path | 4 |
+| child-process | 23 | promise | 4 |
+| buffer | 22 | next | 5 |
+| compile | 21 | inspect | 4 |
+| debugger | 15 | other | 19 |
+| timers | 16 | | |
+
+**Result: 1,053 passing tests** (+258 from Phase 4, 795→1,053). Key gains: prefix expansion +270, module registrations +8, runtime fixes +10, offset by some regressions from stricter validation.
 
 ### Phase 1 Implementation Results
 
@@ -169,19 +205,16 @@ Tests that depend on Node.js's event loop (`process.nextTick`, `setImmediate`, `
 
 ## 3. Disabled Modules — Expansion Opportunities
 
-Lambda already implements several modules that are **disabled in the test runner** (`test_node_official_gtest.cpp`). Enabling them would expand coverage:
+Most modules have been enabled in the test runner as of Phase 5. Remaining disabled/unimplemented modules:
 
-| Module | Implementation Status | Tests Available | Estimated Pass Rate | Action |
-|--------|----------------------|-----------------|--------------------|---------| 
-| `http` | ✅ Full (js_http.cpp) | 388 | ~5-10% | Enable, shim common |
-| `https` | ✅ Full (js_https.cpp) | 63 | ~5-10% | Enable after http |
-| `net` | ✅ Full (js_net.cpp) | 148 | ~10-15% | Enable, many event-loop dependent |
-| `tls` | ✅ Full (js_tls.cpp) | 214 | ~5% | Enable after net |
-| `readline` | ✅ Full (js_readline.cpp) | 21 | ~20% | Enable |
-| `timers` | ✅ Alias | 58 | ~15% | Enable |
-| `module` | ⚠️ Partial | 31 | ~5% | Low priority |
+| Module | Implementation Status | Tests Available | Action |
+|--------|----------------------|-----------------|--------|
+| `worker_threads` | ❌ Not implemented | ~50 | Requires threading model |
+| `cluster` | ❌ Not implemented | ~30 | Requires multi-process |
+| `http2` | ❌ Not implemented | ~80 | Low priority |
+| `dgram` (UDP) | ❌ Not implemented | ~20 | Niche usage |
 
-**Conservative estimate**: Enabling http, net, readline, timers could add ~50-80 passing tests.
+Previously disabled modules now enabled: http (273 passes), net (81), tls (54), https (37), timers (16), module (9), vm (28), readline (5), inspector (69).
 
 ## 4. Implementation Plan
 
@@ -384,23 +417,9 @@ zlib.gzip(input, (err, result) => { ... });
 
 Several stream and process tests depend on precise `process.nextTick` ordering relative to I/O callbacks. Verify Lambda's microtask queue correctly interleaves with I/O completion.
 
-### Phase 5: Enable Disabled Modules (Target: +80 tests)
+### Phase 5: Enable Disabled Modules ✅ DONE (+258 tests)
 
-#### 5a. Enable `net` Module in Test Runner
-
-Lambda implements `node:net` (js_net.cpp) but the test runner disables `net`-prefixed tests. Enable and assess.
-
-**Action**: Change `{"net", "net", false, ...}` to `true` in `test_node_official_gtest.cpp`.
-
-#### 5b. Enable `http` / `https` Modules
-
-Lambda has full `node:http` and `node:https` implementations. Enable in test runner.
-
-**Caveat**: Many HTTP tests depend on event loop, so pass rate will be low initially (~5-10%), but some request/response format tests should pass.
-
-#### 5c. Enable `readline`, `timers` Modules
-
-Both are implemented. Enable in test runner.
+Completed. All relevant modules enabled, 40+ test prefixes registered. See Phase 5 Implementation Results above.
 
 ### Phase 6: Long-tail Improvements (Target: +90 tests)
 
@@ -439,19 +458,25 @@ module.exports = {
 
 | Phase | Work Item | Estimated New Passes | Cumulative | Priority |
 |-------|-----------|---------------------|------------|----------|
-| 1a | Common module shim (mustCall, skip, platform) | +120 | 328 | **P0** |
-| 1b | Common sub-modules (tmpdir, fixtures) | +60 | 388 | **P0** |
-| 1c | Fix leaked globals (Node, innerWidth, innerHeight) | +20 | 408 | **P0** |
-| 2 | Fix all 37 crashers | +30 | 438 | **P0** |
-| 3a | `path.win32` fixes | +10 | 448 | **P1** |
-| 3b | `process` object completion | +15 | 463 | **P1** |
-| 3c-f | Buffer, assert, util, os.constants | +25 | 488 | **P1** |
-| 4a | Async callback model improvements | +80 | 568 | **P1** |
-| 4b | `process.nextTick` ordering | +20 | 588 | **P2** |
-| 5 | Enable disabled modules (net, http, readline, timers) | +50 | 638 | **P2** |
-| 6 | Long-tail (fs streams, crypto, internals stubs) | +60 | 698 | **P2** |
+| ~~1a~~ | ~~Common module shim~~ | ~~+120~~ | — | ✅ Done (Phase 1) |
+| ~~1b~~ | ~~Common sub-modules (tmpdir, fixtures)~~ | ~~+60~~ | — | ✅ Done (Phase 1) |
+| ~~1c~~ | ~~Fix leaked globals~~ | ~~+20~~ | — | ✅ Done (Phase 2) |
+| ~~2~~ | ~~Crash fixes (37 crashers)~~ | ~~+30~~ | — | ✅ Mostly done (Phases 2-4) |
+| ~~3a-b~~ | ~~process/vm/net API surface~~ | ~~+25~~ | — | ✅ Done (Phases 3-4) |
+| ~~5~~ | ~~Enable disabled modules + prefix expansion~~ | ~~+258~~ | — | ✅ Done (Phase 5) |
+| 3c | `Buffer` static methods (isAscii, isUtf8, copyBytesFrom) | +8 | 1,061 | **P1** |
+| 3d | `assert` enhancements (throws matching, rejects) | +8 | 1,069 | **P1** |
+| 3e | `util.inspect` robustness (circular, custom, proxy) | +8 | 1,077 | **P1** |
+| 3f | `os.constants` (signals, errno) | +5 | 1,082 | **P1** |
+| 3g | `path.win32` fixes (backslash, UNC, drive letters) | +10 | 1,092 | **P1** |
+| 4a | Async callback model improvements | +80 | 1,172 | **P1** |
+| 4b | `process.nextTick` ordering | +20 | 1,192 | **P2** |
+| 6a | `fs.createReadStream`/`createWriteStream` | +15 | 1,207 | **P2** |
+| 6b | `fs/promises` complete API | +20 | 1,227 | **P2** |
+| 6c | `crypto.subtle` Web Crypto expansion | +15 | 1,242 | **P2** |
+| 6d | Internal module stubs (`internalBinding`) | +20 | 1,262 | **P2** |
 
-**Target**: 600+ passing tests (58%+ of in-scope tests), up from 208 (20.3%).
+**Current: 1,053 passing tests** (40.2% of 2,619 in-scope tests). Target: 1,200+ (46%).
 
 ## 6. Test Infrastructure Improvements
 
@@ -491,7 +516,7 @@ Add automatic classification of new failures:
 The following are explicitly out of scope for this proposal:
 
 - **100% Node.js compliance** — Not a goal. Lambda is a polyglot runtime, not a Node.js clone.
-- **`node:cluster`**, **`node:vm`**, **`node:inspector`**, **`node:worker_threads`** — These require fundamentally different architecture (multi-process, sandboxing, debugger protocol, threading).
+- **`node:cluster`**, **`node:inspector`** (full), **`node:worker_threads`** — These require fundamentally different architecture (multi-process, debugger protocol, threading). Note: `node:vm` and basic `node:inspector` are now implemented.
 - **Native addon support** (`node-gyp`, N-API) — Would require V8 ABI compatibility.
 - **Full `fs.watch()` implementation** — Requires libuv event loop integration (tracked in Transpile_Js15).
 - **HTTP/2 (`node:http2`)** — Low ecosystem impact relative to implementation cost.
@@ -560,13 +585,14 @@ Tests available if modules are enabled in the test runner:
 
 | Module | Test Count | Implementation | Notes |
 |--------|-----------|---------------|-------|
-| `http` | 388 | ✅ js_http.cpp | Many event-loop dependent |
-| `tls` | 214 | ✅ js_tls.cpp | Certificate handling tests |
-| `net` | 148 | ✅ js_net.cpp | TCP socket tests |
-| `https` | 63 | ✅ js_https.cpp | Thin wrapper over http+tls |
-| `timers` | 58 | ✅ Alias | setTimeout/setInterval tests |
-| `module` | 31 | ⚠️ Partial | createRequire, module resolution |
-| `readline` | 21 | ✅ js_readline.cpp | Interactive input tests |
+| `http` | 388 | ✅ Enabled, 273 passing | Event-loop dependent tests remain |
+| `tls` | 214 | ✅ Enabled, 54 passing | Certificate handling tests |
+| `net` | 148 | ✅ Enabled, 81 passing | TCP socket tests |
+| `https` | 63 | ✅ Enabled, 37 passing | Thin wrapper over http+tls |
+| `timers` | 58 | ✅ Enabled, 16 passing | setTimeout/setInterval tests |
+| `module` | 31 | ✅ Enabled, 9 passing | createRequire, module resolution |
+| `readline` | 21 | ✅ Enabled, 5 passing | Interactive input tests |
+| `vm` | ~40 | ✅ Enabled, 28 passing | Sandboxed contexts (shared global) |
+| `inspector` | ~80 | ✅ Enabled, 69 passing | Basic inspector stubs |
 | `worker_threads` | ~50 | ❌ Not implemented | Threading |
 | `cluster` | ~30 | ❌ Not implemented | Multi-process |
-| `vm` | ~40 | ❌ Not implemented | Sandboxed contexts |

@@ -823,6 +823,12 @@ extern "C" Item js_get_stream_namespace(void) {
     stream_set_method(stream_namespace, "pipeline",    (void*)js_stream_pipeline, 2);
     stream_set_method(stream_namespace, "finished",    (void*)js_stream_finished, 2);
 
+    // Stream — base class (alias for EventEmitter with pipe method)
+    // In Node.js, stream.Stream inherits from EventEmitter
+    extern Item js_get_events_namespace(void);
+    Item stream_base = js_get_events_namespace();
+    js_property_set(stream_namespace, make_string_item("Stream"), stream_base);
+
     // Readable.from as a static method
     Item readable_constructor = js_property_get(stream_namespace, make_string_item("Readable"));
     if (get_type_id(readable_constructor) == LMD_TYPE_FUNC) {

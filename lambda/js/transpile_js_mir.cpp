@@ -21254,12 +21254,16 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
 
         // skip known built-in module names (prefer engine built-ins over npm polyfills)
         static const char* builtin_names[] = {
-            "fs", "child_process", "path", "path/posix", "path/win32",
-            "os", "url", "util",
+            "fs", "fs/promises", "child_process", "path", "path/posix", "path/win32",
+            "os", "url", "util", "util/types",
             "process", "querystring", "events", "buffer",
-            "crypto", "dns", "zlib", "readline", "stream", "net", "tls",
+            "crypto", "dns", "dns/promises", "zlib", "readline",
+            "stream", "stream/promises", "stream/web", "stream/consumers", "stream/iter",
+            "net", "tls", "http", "https",
             "string_decoder", "assert", "assert/strict",
-            "timers", "console", "worker_threads", "cluster", "vm", NULL
+            "timers", "timers/promises", "console", "module",
+            "worker_threads", "cluster", "vm", "v8", "tty", "perf_hooks",
+            "diagnostics_channel", "async_hooks", "domain", NULL
         };
         bool is_builtin = has_node_prefix;
         if (!is_builtin) {
@@ -21292,6 +21296,7 @@ static void jm_resolve_module_path(const char* base_file, const char* specifier,
 
         // fallback: use as-is (will be checked as builtin by js_module_get)
         snprintf(out, out_size, "%.*s", spec_len, specifier);
+        if (is_builtin) return;  // builtins don't need .js extension
     }
 
     // If doesn't end in a known JS extension, try adding .js
@@ -27165,7 +27170,8 @@ extern "C" Item js_require(Item specifier) {
         // Extract the default export (which is module.exports)
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(existing, def_key);
-        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        TypeId dt = get_type_id(def_val);
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
         return existing;
     }
 
@@ -27186,6 +27192,11 @@ extern "C" Item js_require(Item specifier) {
     }
     if (!source) {
         log_error("require: cannot read module '%s'", path_buf);
+        // For internal/* modules, return empty object to prevent destructure crashes
+        if (strncmp(path_buf, "internal/", 9) == 0 || 
+            (spec->len > 9 && memcmp(spec->chars, "internal/", 9) == 0)) {
+            return js_new_object();
+        }
         return ItemNull;
     }
 
@@ -27218,7 +27229,8 @@ extern "C" Item js_require(Item specifier) {
     if (js_is_cjs_file(path_buf)) {
         Item def_key = (Item){.item = s2it(heap_create_name("default"))};
         Item def_val = js_property_get(ns, def_key);
-        if (get_type_id(def_val) != LMD_TYPE_NULL) return def_val;
+        TypeId dt = get_type_id(def_val);
+        if (dt != LMD_TYPE_NULL && dt != LMD_TYPE_UNDEFINED) return def_val;
     }
 
     return ns;

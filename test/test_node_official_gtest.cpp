@@ -179,17 +179,132 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"misc",           "require",         true,  nullptr},  // test-require-*
     {"misc",           "inspect",         true,  nullptr},  // test-inspect-*
 
+    // --- Additional test prefixes (Phase 5b) ---
+    {"misc",           "runner",          true,  nullptr},  // test-runner-*
+    {"misc",           "webcrypto",       true,  nullptr},  // test-webcrypto-*
+    {"misc",           "cli",             true,  nullptr},  // test-cli-*
+    {"misc",           "file",            true,  nullptr},  // test-file-*
+    {"misc",           "filehandle",      true,  nullptr},  // test-filehandle-*
+    {"misc",           "fileurltopathbuffer", true, nullptr}, // test-fileurltopathbuffer*
+    {"misc",           "heapsnapshot",    true,  nullptr},  // test-heapsnapshot-*
+    {"misc",           "permission",      true,  nullptr},  // test-permission-*
+    {"misc",           "preload",         true,  nullptr},  // test-preload-*
+    {"misc",           "promises",        true,  nullptr},  // test-promises-*
+    {"misc",           "temporal",        true,  nullptr},  // test-temporal-*
+    {"misc",           "trace",           true,  nullptr},  // test-trace-*
+    {"misc",           "v8",              true,  nullptr},  // test-v8-*
+    {"misc",           "stream2",         true,  nullptr},  // test-stream2-*
+    {"misc",           "stream3",         true,  nullptr},  // test-stream3-*
+    {"misc",           "uncaught",        true,  nullptr},  // test-uncaught-*
+    {"misc",           "aborted",         true,  nullptr},  // test-aborted-*
+    {"misc",           "config",          true,  nullptr},  // test-config-*
+    {"misc",           "disable",         true,  nullptr},  // test-disable-*
+    {"misc",           "double",          true,  nullptr},  // test-double-*
+    {"misc",           "env",             true,  nullptr},  // test-env-*
+    {"misc",           "icu",             true,  nullptr},  // test-icu-*
+    {"misc",           "intl",            true,  nullptr},  // test-intl-*
+    {"misc",           "kill",            true,  nullptr},  // test-kill-*
+    {"misc",           "macos",           true,  nullptr},  // test-macos-*
+    {"misc",           "release",         true,  nullptr},  // test-release-*
+    {"misc",           "source",          true,  nullptr},  // test-source-*
+    {"misc",           "spawn",           true,  nullptr},  // test-spawn-*
+    {"misc",           "strace",          true,  nullptr},  // test-strace-*
+    {"misc",           "sync",            true,  nullptr},  // test-sync-*
+    {"misc",           "tick",            true,  nullptr},  // test-tick-*
+    {"misc",           "tz",              true,  nullptr},  // test-tz-*
+    {"misc",           "webstorage",      true,  nullptr},  // test-webstorage-*
+    {"misc",           "windows",         true,  nullptr},  // test-windows-*
+    {"misc",           "bad",             true,  nullptr},  // test-bad-*
+    {"misc",           "bash",            true,  nullptr},  // test-bash-*
+    {"misc",           "btoa",            true,  nullptr},  // test-btoa-*
+    {"misc",           "bootstrap",       true,  nullptr},  // test-bootstrap-*
+    {"misc",           "blocklist",       true,  nullptr},  // test-blocklist-*
+    {"misc",           "benchmark",       true,  nullptr},  // test-benchmark-*
+    {"misc",           "diagnostic",      true,  nullptr},  // test-diagnostic-*
+    {"misc",           "diagnostics",     true,  nullptr},  // test-diagnostics-*
+    {"misc",           "nodeeventtarget", true,  nullptr},  // test-nodeeventtarget-*
+    {"misc",           "webstreams",      true,  nullptr},  // test-webstreams-*
+    {"misc",           "webstream",       true,  nullptr},  // test-webstream-*
+
+    // --- Additional test prefixes (Phase 6) ---
+    {"misc",           "abortsignal",     true,  nullptr},  // test-abortsignal-*
+    {"misc",           "accessor",        true,  nullptr},  // test-accessor-*
+    {"misc",           "als",             true,  nullptr},  // test-als-*
+    {"misc",           "asyncresource",   true,  nullptr},  // test-asyncresource-*
+    {"misc",           "atomics",         true,  nullptr},  // test-atomics-*
+    {"misc",           "binding",         true,  nullptr},  // test-binding-*
+    {"misc",           "broadcastchannel",true,  nullptr},  // test-broadcastchannel-*
+    {"misc",           "code",            true,  nullptr},  // test-code-*
+    {"misc",           "compression",     true,  nullptr},  // test-compression-*
+    {"misc",           "corepack",        true,  nullptr},  // test-corepack-*
+    {"misc",           "coverage",        true,  nullptr},  // test-coverage-*
+    {"misc",           "cwd",             true,  nullptr},  // test-cwd-*
+    {"misc",           "dotenv",          true,  nullptr},  // test-dotenv-*
+    {"misc",           "duplex",          true,  nullptr},  // test-duplex-*
+    {"misc",           "emit",            true,  nullptr},  // test-emit-*
+    {"misc",           "err",             true,  nullptr},  // test-err-*
+    {"misc",           "eventemitter",    true,  nullptr},  // test-eventemitter-*
+    {"misc",           "exception",       true,  nullptr},  // test-exception-*
+    {"misc",           "fastutf8stream",  true,  nullptr},  // test-fastutf8stream-*
+    {"misc",           "fetch",           true,  nullptr},  // test-fetch-*
+    {"misc",           "force",           true,  nullptr},  // test-force-*
+    {"misc",           "gc",              true,  nullptr},  // test-gc-*
+    {"misc",           "handle",          true,  nullptr},  // test-handle-*
+    {"misc",           "listen",          true,  nullptr},  // test-listen-*
+    {"misc",           "memory",          true,  nullptr},  // test-memory-*
+    {"misc",           "messageport",     true,  nullptr},  // test-messageport-*
+    {"misc",           "messaging",       true,  nullptr},  // test-messaging-*
+    {"misc",           "mime",            true,  nullptr},  // test-mime-*
+    {"misc",           "no",              true,  nullptr},  // test-no-*
+    {"misc",           "node",            true,  nullptr},  // test-node-*
+    {"misc",           "npm",             true,  nullptr},  // test-npm-*
+    {"misc",           "openssl",         true,  nullptr},  // test-openssl-*
+    {"misc",           "options",         true,  nullptr},  // test-options-*
+    {"misc",           "outgoing",        true,  nullptr},  // test-outgoing-*
+    {"misc",           "parse",           true,  nullptr},  // test-parse-*
+    {"misc",           "pending",         true,  nullptr},  // test-pending-*
+    {"misc",           "perf",            true,  nullptr},  // test-perf-*
+    {"misc",           "performanceobserver", true, nullptr}, // test-performanceobserver-*
+    {"misc",           "primordials",     true,  nullptr},  // test-primordials-*
+    {"misc",           "primitive",       true,  nullptr},  // test-primitive-*
+    {"misc",           "priority",        true,  nullptr},  // test-priority-*
+    {"misc",           "queue",           true,  nullptr},  // test-queue-*
+    {"misc",           "ref",             true,  nullptr},  // test-ref-*
+    {"misc",           "resource",        true,  nullptr},  // test-resource-*
+    {"misc",           "safe",            true,  nullptr},  // test-safe-*
+    {"misc",           "sea",             true,  nullptr},  // test-sea-*
+    {"misc",           "security",        true,  nullptr},  // test-security-*
+    {"misc",           "set",             true,  nullptr},  // test-set-*
+    {"misc",           "signal",          true,  nullptr},  // test-signal-*
+    {"misc",           "stack",           true,  nullptr},  // test-stack-*
+    {"misc",           "startup",         true,  nullptr},  // test-startup-*
+    {"misc",           "streams",         true,  nullptr},  // test-streams-*
+    {"misc",           "string",          true,  nullptr},  // test-string-*
+    {"misc",           "tcp",             true,  nullptr},  // test-tcp-*
+    {"misc",           "tojson",          true,  nullptr},  // test-tojson-*
+    {"misc",           "tracing",         true,  nullptr},  // test-tracing-*
+    {"misc",           "ttywrap",         true,  nullptr},  // test-ttywrap-*
+    {"misc",           "unhandled",       true,  nullptr},  // test-unhandled-*
+    {"misc",           "unicode",         true,  nullptr},  // test-unicode-*
+    {"misc",           "urlpattern",      true,  nullptr},  // test-urlpattern-*
+    {"misc",           "uv",              true,  nullptr},  // test-uv-*
+    {"misc",           "web",             true,  nullptr},  // test-web-*
+    {"misc",           "webapi",          true,  nullptr},  // test-webapi-*
+    {"misc",           "websocket",       true,  nullptr},  // test-websocket-*
+    {"misc",           "wrap",            true,  nullptr},  // test-wrap-*
+    {"misc",           "x509",            true,  nullptr},  // test-x509-*
+
     // --- Unsupported modules (disabled by default) ---
-    {"cluster",        "cluster",         false, "clustering not implemented"},
+    {"cluster",        "cluster",         true, ""},
     {"dgram",          "dgram",           false, "UDP sockets not implemented"},
-    {"domain",         "domain",          false, "domain module not implemented"},
+    {"domain",         "domain",          true,  nullptr},  // enabled: some tests pass
     {"http2",          "http2",           false, "HTTP/2 not implemented"},
     {"inspector",      "inspector",       true,  nullptr},
-    {"perf_hooks",     "perf-hooks",      false, "performance hooks not implemented"},
-    {"repl",           "repl",            false, "REPL not implemented"},
-    {"tty",            "tty",             false, "TTY not implemented"},
+    {"perf_hooks",     "perf-hooks",      true,  nullptr},  // enabled: try coverage
+    {"repl",           "repl",            true,  nullptr},  // enabled: some tests pass
+    {"tty",            "tty",             true, ""},
     {"wasi",           "wasi",            false, "WASI not implemented"},
-    {"worker",         "worker",          false, "worker_threads not implemented"},
+    {"worker",         "worker",          true,  nullptr},  // enabled: some spawn tests pass
 };
 
 // Tests skipped by filename — known to be incompatible, non-deterministic, or

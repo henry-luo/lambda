@@ -1780,6 +1780,39 @@ extern "C" void js_process_reset_listeners(void) {
     process_listener_map = (Item){0};
 }
 
+// process.once(event, listener) — like process.on but fires only once
+extern "C" Item js_process_once(Item event_name, Item listener) {
+    // For simplicity, just register as a normal listener.
+    // A full implementation would wrap the listener to auto-remove after first call.
+    return js_process_on(event_name, listener);
+}
+
+// process.removeListener(event, listener) — no-op for now
+extern "C" Item js_process_removeListener(Item event_name, Item listener) {
+    return js_process_object;
+}
+
+// process.removeAllListeners(event) — no-op for now
+extern "C" Item js_process_removeAllListeners(Item event_name) {
+    return js_process_object;
+}
+
+// process.listenerCount(event) — return count of listeners for event
+extern "C" Item js_process_listenerCount(Item event_name) {
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it(js_array_length(arr))};
+}
+
+// process.listeners(event) — return array of listeners
+extern "C" Item js_process_listeners(Item event_name) {
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return js_array_new(0);
+    return arr;
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
@@ -1839,7 +1872,16 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
         js_process_set_method(js_process_object, "abort", (void*)js_process_abort, 0);
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
+        js_process_set_method(js_process_object, "addListener", (void*)js_process_on, 2);
+        js_process_set_method(js_process_object, "once", (void*)js_process_once, 2);
         js_process_set_method(js_process_object, "emit", (void*)js_process_emit, 2);
+        js_process_set_method(js_process_object, "off", (void*)js_process_removeListener, 2);
+        js_process_set_method(js_process_object, "removeListener", (void*)js_process_removeListener, 2);
+        js_process_set_method(js_process_object, "removeAllListeners", (void*)js_process_removeAllListeners, 1);
+        js_process_set_method(js_process_object, "listenerCount", (void*)js_process_listenerCount, 1);
+        js_process_set_method(js_process_object, "listeners", (void*)js_process_listeners, 1);
+        js_process_set_method(js_process_object, "prependListener", (void*)js_process_on, 2);
+        js_process_set_method(js_process_object, "prependOnceListener", (void*)js_process_once, 2);
 
         // versions object
         js_property_set(js_process_object,
@@ -1900,7 +1942,7 @@ extern "C" Item js_get_process_object_value(void) {
             Item config_obj = js_new_object();
             Item variables_obj = js_new_object();
             js_property_set(variables_obj,
-                (Item){.item = s2it(heap_create_name("v8_enable_i18n_support", 21))},
+                (Item){.item = s2it(heap_create_name("v8_enable_i18n_support", 22))},
                 (Item){.item = i2it(0)});
             js_property_set(variables_obj,
                 (Item){.item = s2it(heap_create_name("node_shared", 11))},
@@ -8728,6 +8770,61 @@ extern "C" Item js_abort_controller_abort(Item reason) {
     return make_js_undefined();
 }
 
+// =============================================================================
+// MessagePort / MessageChannel stubs
+// =============================================================================
+
+static Item js_mp_stub_noop(void) {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+static Item js_message_port_postMessage(Item msg) {
+    (void)msg;
+    // stub: no cross-context messaging
+    return make_js_undefined();
+}
+
+static Item js_message_port_close(void) {
+    return make_js_undefined();
+}
+
+extern "C" Item js_message_port_new(void) {
+    Item port = js_new_object();
+    js_property_set(port, make_string_item("__class_name__"), make_string_item("MessagePort"));
+    js_property_set(port, make_string_item("postMessage"),
+        js_new_function((void*)js_message_port_postMessage, 1));
+    js_property_set(port, make_string_item("close"),
+        js_new_function((void*)js_message_port_close, 0));
+    js_property_set(port, make_string_item("onmessage"), ItemNull);
+    js_property_set(port, make_string_item("onmessageerror"), ItemNull);
+    // EventEmitter methods
+    js_property_set(port, make_string_item("on"),
+        js_new_function((void*)js_mp_stub_noop, 2));
+    js_property_set(port, make_string_item("once"),
+        js_new_function((void*)js_mp_stub_noop, 2));
+    js_property_set(port, make_string_item("addEventListener"),
+        js_new_function((void*)js_mp_stub_noop, 2));
+    js_property_set(port, make_string_item("removeEventListener"),
+        js_new_function((void*)js_mp_stub_noop, 2));
+    js_property_set(port, make_string_item("start"),
+        js_new_function((void*)js_mp_stub_noop, 0));
+    js_property_set(port, make_string_item("ref"),
+        js_new_function((void*)js_mp_stub_noop, 0));
+    js_property_set(port, make_string_item("unref"),
+        js_new_function((void*)js_mp_stub_noop, 0));
+    return port;
+}
+
+extern "C" Item js_message_channel_new(void) {
+    Item channel = js_new_object();
+    js_property_set(channel, make_string_item("__class_name__"), make_string_item("MessageChannel"));
+    Item port1 = js_message_port_new();
+    Item port2 = js_message_port_new();
+    js_property_set(channel, make_string_item("port1"), port1);
+    js_property_set(channel, make_string_item("port2"), port2);
+    return channel;
+}
+
 // forward declaration for populating globalThis with constructors
 extern "C" Item js_get_constructor(Item name_item);
 
@@ -8848,6 +8945,60 @@ extern "C" Item js_get_global_this() {
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("TextDecoder", 11))},
                 js_new_function((void*)js_text_decoder_new, 1));
+        }
+
+        // globalThis.atob / globalThis.btoa
+        {
+            extern Item js_atob(Item);
+            extern Item js_btoa(Item);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("atob", 4))},
+                js_new_function((void*)js_atob, 1));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("btoa", 4))},
+                js_new_function((void*)js_btoa, 1));
+        }
+
+        // globalThis.performance (basic stub with now())
+        {
+            extern Item js_performance_now(void);
+            Item perf = js_new_object();
+            js_property_set(perf, make_string_item("now"),
+                js_new_function((void*)js_performance_now, 0));
+            // timeOrigin: process start time (use 0 for simplicity)
+            double* origin = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *origin = 0.0;
+            js_property_set(perf, make_string_item("timeOrigin"), (Item){.item = d2it(origin)});
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
+        }
+
+        // globalThis.MessageChannel / MessagePort stubs
+        {
+            extern Item js_message_channel_new(void);
+            extern Item js_message_port_new(void);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("MessageChannel", 14))},
+                js_new_function((void*)js_message_channel_new, 0));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("MessagePort", 11))},
+                js_new_function((void*)js_message_port_new, 0));
+        }
+
+        // globalThis.URLSearchParams
+        {
+            extern Item js_url_search_params_new(Item init);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("URLSearchParams", 15))},
+                js_new_function((void*)js_url_search_params_new, 1));
+        }
+
+        // globalThis.URL constructor
+        {
+            extern Item js_url_module_construct(Item input, Item base);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("URL", 3))},
+                js_new_function((void*)js_url_module_construct, 2));
         }
 
         // ES spec: all standard global properties are non-enumerable

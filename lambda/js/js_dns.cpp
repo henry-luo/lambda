@@ -203,6 +203,12 @@ extern "C" Item js_get_dns_namespace(void) {
     dns_set_method(dns_namespace, "lookupSync", (void*)js_dns_lookupSync, 1);
     dns_set_method(dns_namespace, "resolve",    (void*)js_dns_resolve, 3);
 
+    // dns.promises — promisified versions
+    Item promises = js_new_object();
+    dns_set_method(promises, "lookup",  (void*)js_dns_lookup, 2);
+    dns_set_method(promises, "resolve", (void*)js_dns_resolve, 3);
+    js_property_set(dns_namespace, make_string_item("promises"), promises);
+
     Item default_key = make_string_item("default");
     js_property_set(dns_namespace, default_key, dns_namespace);
 

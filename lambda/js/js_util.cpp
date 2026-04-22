@@ -436,6 +436,308 @@ extern "C" Item js_util_types_isError(Item obj) {
     return (Item){.item = b2it(false)};
 }
 
+// ─── additional util.types.* functions ───────────────────────────────────────
+
+extern "C" Item js_util_types_isTypedArray(Item obj) {
+    return (Item){.item = b2it(js_is_typed_array(obj))};
+}
+
+extern "C" Item js_util_types_isArrayBuffer(Item obj) {
+    return (Item){.item = b2it(js_is_arraybuffer(obj))};
+}
+
+extern "C" Item js_util_types_isSharedArrayBuffer(Item obj) {
+    return (Item){.item = b2it(js_is_sharedarraybuffer(obj))};
+}
+
+extern "C" Item js_util_types_isAnyArrayBuffer(Item obj) {
+    return (Item){.item = b2it(js_is_arraybuffer(obj) || js_is_sharedarraybuffer(obj))};
+}
+
+extern "C" Item js_util_types_isDataView(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 8 && memcmp(s->chars, "DataView", 8) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isWeakMap(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakMap", 7) == 0)};
+}
+
+extern "C" Item js_util_types_isWeakSet(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakSet", 7) == 0)};
+}
+
+extern "C" Item js_util_types_isWeakRef(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakRef", 7) == 0)};
+}
+
+static bool is_typed_array_type(Item obj, JsTypedArrayType target_type) {
+    if (!js_is_typed_array(obj)) return false;
+    Map* m = obj.map;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    return ta && ta->element_type == target_type;
+}
+
+extern "C" Item js_util_types_isUint16Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT16))};
+}
+
+extern "C" Item js_util_types_isUint32Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT32))};
+}
+
+extern "C" Item js_util_types_isInt8Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT8))};
+}
+
+extern "C" Item js_util_types_isInt16Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT16))};
+}
+
+extern "C" Item js_util_types_isInt32Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_INT32))};
+}
+
+extern "C" Item js_util_types_isFloat32Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_FLOAT32))};
+}
+
+extern "C" Item js_util_types_isFloat64Array(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_FLOAT64))};
+}
+
+extern "C" Item js_util_types_isUint8ClampedArray(Item obj) {
+    return (Item){.item = b2it(is_typed_array_type(obj, JS_TYPED_UINT8_CLAMPED))};
+}
+
+extern "C" Item js_util_types_isNumberObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "Number", 6) == 0)};
+}
+
+extern "C" Item js_util_types_isStringObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "String", 6) == 0)};
+}
+
+extern "C" Item js_util_types_isBooleanObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "Boolean", 7) == 0)};
+}
+
+extern "C" Item js_util_types_isSymbolObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "Symbol", 6) == 0)};
+}
+
+extern "C" Item js_util_types_isNativeError(Item obj) {
+    // same as isError — checks __class_name__ ending in "Error"
+    return js_util_types_isError(obj);
+}
+
+extern "C" Item js_util_types_isBoxedPrimitive(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(cn);
+    if (s->len == 6 && memcmp(s->chars, "Number", 6) == 0) return (Item){.item = b2it(true)};
+    if (s->len == 6 && memcmp(s->chars, "String", 6) == 0) return (Item){.item = b2it(true)};
+    if (s->len == 7 && memcmp(s->chars, "Boolean", 7) == 0) return (Item){.item = b2it(true)};
+    if (s->len == 6 && memcmp(s->chars, "Symbol", 6) == 0) return (Item){.item = b2it(true)};
+    if (s->len == 6 && memcmp(s->chars, "BigInt", 6) == 0) return (Item){.item = b2it(true)};
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isProxy(Item obj) {
+    // can't detect Proxy from the outside — always return false
+    (void)obj;
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isExternal(Item obj) {
+    // not supported — always return false
+    (void)obj;
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isGeneratorFunction(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 17 && memcmp(s->chars, "GeneratorFunction", 17) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isGeneratorObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 9 && memcmp(s->chars, "Generator", 9) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isAsyncFunction(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 13 && memcmp(s->chars, "AsyncFunction", 13) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isMapIterator(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 11 && memcmp(s->chars, "MapIterator", 11) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isSetIterator(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 11 && memcmp(s->chars, "SetIterator", 11) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item js_util_types_isArgumentsObject(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP && get_type_id(obj) != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0)
+            return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+// ─── util.styleText(format, text) — ANSI color formatting ──────────────────
+extern "C" Item js_util_styleText(Item format_item, Item text_item) {
+    Item str = js_to_string(text_item);
+    if (get_type_id(format_item) != LMD_TYPE_STRING) return str;
+    String* fmt = it2s(format_item);
+    if (!fmt || fmt->len == 0) return str;
+    String* txt = it2s(str);
+    if (!txt) return str;
+
+    // map format names to ANSI codes
+    const char* open = "";
+    const char* close = "\033[0m";
+    if (fmt->len == 4 && memcmp(fmt->chars, "bold", 4) == 0) { open = "\033[1m"; }
+    else if (fmt->len == 9 && memcmp(fmt->chars, "underline", 9) == 0) { open = "\033[4m"; }
+    else if (fmt->len == 6 && memcmp(fmt->chars, "italic", 6) == 0) { open = "\033[3m"; }
+    else if (fmt->len == 3 && memcmp(fmt->chars, "red", 3) == 0) { open = "\033[31m"; }
+    else if (fmt->len == 5 && memcmp(fmt->chars, "green", 5) == 0) { open = "\033[32m"; }
+    else if (fmt->len == 6 && memcmp(fmt->chars, "yellow", 6) == 0) { open = "\033[33m"; }
+    else if (fmt->len == 4 && memcmp(fmt->chars, "blue", 4) == 0) { open = "\033[34m"; }
+    else if (fmt->len == 7 && memcmp(fmt->chars, "magenta", 7) == 0) { open = "\033[35m"; }
+    else if (fmt->len == 4 && memcmp(fmt->chars, "cyan", 4) == 0) { open = "\033[36m"; }
+    else if (fmt->len == 5 && memcmp(fmt->chars, "white", 5) == 0) { open = "\033[37m"; }
+    else { return str; } // unknown format, return text as-is
+
+    int open_len = (int)strlen(open);
+    int close_len = (int)strlen(close);
+    int total = open_len + (int)txt->len + close_len;
+    char buf[4096];
+    if (total >= (int)sizeof(buf)) total = (int)sizeof(buf) - 1;
+    memcpy(buf, open, open_len);
+    int txt_len = total - open_len - close_len;
+    memcpy(buf + open_len, txt->chars, txt_len);
+    memcpy(buf + open_len + txt_len, close, close_len);
+    buf[total] = '\0';
+    return (Item){.item = s2it(heap_create_name(buf, total))};
+}
+
+// ─── util.getSystemErrorName(errno) — errno to name ─────────────────────────
+extern "C" Item js_util_getSystemErrorName(Item err_item) {
+    // convert to number first
+    Item num = js_to_number(err_item);
+    int err_code = 0;
+    TypeId t = get_type_id(num);
+    if (t == LMD_TYPE_INT) err_code = (int)it2i(num);
+    else if (t == LMD_TYPE_FLOAT) err_code = (int)it2d(num);
+    int err = -err_code; // Node.js passes negative errno values
+    if (err <= 0) err = (int)err_code; // handle positive values too
+    const char* name = NULL;
+    switch (err) {
+        case 1: name = "EPERM"; break;
+        case 2: name = "ENOENT"; break;
+        case 3: name = "ESRCH"; break;
+        case 4: name = "EINTR"; break;
+        case 5: name = "EIO"; break;
+        case 9: name = "EBADF"; break;
+        case 11: name = "EAGAIN"; break;
+        case 12: name = "ENOMEM"; break;
+        case 13: name = "EACCES"; break;
+        case 14: name = "EFAULT"; break;
+        case 17: name = "EEXIST"; break;
+        case 20: name = "ENOTDIR"; break;
+        case 21: name = "EISDIR"; break;
+        case 22: name = "EINVAL"; break;
+        case 24: name = "EMFILE"; break;
+        case 28: name = "ENOSPC"; break;
+        case 32: name = "EPIPE"; break;
+        case 36: name = "ENAMETOOLONG"; break;
+        case 38: name = "ENOSYS"; break;
+        case 39: name = "ENOTEMPTY"; break;
+        case 40: name = "ELOOP"; break;
+        case 61: name = "ENODATA"; break;
+        case 95: name = "ENOTSUP"; break;
+        case 98: name = "EADDRINUSE"; break;
+        case 99: name = "EADDRNOTAVAIL"; break;
+        case 104: name = "ECONNRESET"; break;
+        case 110: name = "ETIMEDOUT"; break;
+        case 111: name = "ECONNREFUSED"; break;
+        default: name = "UNKNOWN"; break;
+    }
+    return (Item){.item = s2it(heap_create_name(name, strlen(name)))};
+}
+
 // ─── util.debuglog(section) ─────────────────────────────────────────────────
 // Returns a logging function gated by NODE_DEBUG environment variable.
 // If NODE_DEBUG contains the section name (case-insensitive), the returned
@@ -529,6 +831,8 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "inherits",            (void*)js_util_inherits, 2);
     js_util_set_method(util_namespace, "isDeepStrictEqual",   (void*)js_util_isDeepStrictEqual, 2);
     js_util_set_method(util_namespace, "debuglog",            (void*)js_util_debuglog, 1);
+    js_util_set_method(util_namespace, "styleText",           (void*)js_util_styleText, 2);
+    js_util_set_method(util_namespace, "getSystemErrorName",  (void*)js_util_getSystemErrorName, 1);
 
     // util.types sub-namespace
     Item types = js_new_object();
@@ -550,6 +854,37 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(types, "isPrimitive",      (void*)js_util_types_isPrimitive, 1);
     js_util_set_method(types, "isBuffer",         (void*)js_util_types_isBuffer, 1);
     js_util_set_method(types, "isError",          (void*)js_util_types_isError, 1);
+    // additional types checks
+    js_util_set_method(types, "isTypedArray",     (void*)js_util_types_isTypedArray, 1);
+    js_util_set_method(types, "isArrayBuffer",    (void*)js_util_types_isArrayBuffer, 1);
+    js_util_set_method(types, "isSharedArrayBuffer", (void*)js_util_types_isSharedArrayBuffer, 1);
+    js_util_set_method(types, "isAnyArrayBuffer",    (void*)js_util_types_isAnyArrayBuffer, 1);
+    js_util_set_method(types, "isDataView",       (void*)js_util_types_isDataView, 1);
+    js_util_set_method(types, "isWeakMap",        (void*)js_util_types_isWeakMap, 1);
+    js_util_set_method(types, "isWeakSet",        (void*)js_util_types_isWeakSet, 1);
+    js_util_set_method(types, "isWeakRef",        (void*)js_util_types_isWeakRef, 1);
+    js_util_set_method(types, "isUint16Array",    (void*)js_util_types_isUint16Array, 1);
+    js_util_set_method(types, "isUint32Array",    (void*)js_util_types_isUint32Array, 1);
+    js_util_set_method(types, "isInt8Array",      (void*)js_util_types_isInt8Array, 1);
+    js_util_set_method(types, "isInt16Array",     (void*)js_util_types_isInt16Array, 1);
+    js_util_set_method(types, "isInt32Array",     (void*)js_util_types_isInt32Array, 1);
+    js_util_set_method(types, "isFloat32Array",   (void*)js_util_types_isFloat32Array, 1);
+    js_util_set_method(types, "isFloat64Array",   (void*)js_util_types_isFloat64Array, 1);
+    js_util_set_method(types, "isUint8ClampedArray", (void*)js_util_types_isUint8ClampedArray, 1);
+    js_util_set_method(types, "isNumberObject",   (void*)js_util_types_isNumberObject, 1);
+    js_util_set_method(types, "isStringObject",   (void*)js_util_types_isStringObject, 1);
+    js_util_set_method(types, "isBooleanObject",  (void*)js_util_types_isBooleanObject, 1);
+    js_util_set_method(types, "isSymbolObject",   (void*)js_util_types_isSymbolObject, 1);
+    js_util_set_method(types, "isNativeError",    (void*)js_util_types_isNativeError, 1);
+    js_util_set_method(types, "isBoxedPrimitive", (void*)js_util_types_isBoxedPrimitive, 1);
+    js_util_set_method(types, "isProxy",          (void*)js_util_types_isProxy, 1);
+    js_util_set_method(types, "isExternal",       (void*)js_util_types_isExternal, 1);
+    js_util_set_method(types, "isGeneratorFunction", (void*)js_util_types_isGeneratorFunction, 1);
+    js_util_set_method(types, "isGeneratorObject",   (void*)js_util_types_isGeneratorObject, 1);
+    js_util_set_method(types, "isAsyncFunction",     (void*)js_util_types_isAsyncFunction, 1);
+    js_util_set_method(types, "isMapIterator",       (void*)js_util_types_isMapIterator, 1);
+    js_util_set_method(types, "isSetIterator",       (void*)js_util_types_isSetIterator, 1);
+    js_util_set_method(types, "isArgumentsObject",   (void*)js_util_types_isArgumentsObject, 1);
     js_property_set(util_namespace, make_string_item("types"), types);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
