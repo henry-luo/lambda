@@ -6133,8 +6133,9 @@ extern "C" Item js_object_from_entries(Item iterable) {
     for (int64_t i = 0; i < len; i++) {
         Item pair = js_array_get(arr, (Item){.item = i2it(i)});
         TypeId ptid = get_type_id(pair);
+        // Spec: entry must be an object. Accept arrays, maps (including string/number wrappers).
+        // Primitive strings are NOT objects — they should throw TypeError.
         if (ptid != LMD_TYPE_ARRAY && ptid != LMD_TYPE_MAP) {
-            // Spec: If Type(entry) is not Object, throw a TypeError
             extern Item js_new_error_with_name(Item type_name, Item message);
             extern void js_throw_value(Item error);
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
@@ -6142,10 +6143,21 @@ extern "C" Item js_object_from_entries(Item iterable) {
             js_throw_value(js_new_error_with_name(tn, msg));
             return ItemNull;
         }
-        Item key = js_array_get(pair, (Item){.item = i2it(0)});
-        Item val = js_array_get(pair, (Item){.item = i2it(1)});
-        Item key_str = js_to_string(key);
-        js_property_set(result, key_str, val);
+        Item key, val;
+        if (ptid == LMD_TYPE_ARRAY) {
+            key = js_array_get(pair, (Item){.item = i2it(0)});
+            val = js_array_get(pair, (Item){.item = i2it(1)});
+        } else {
+            // MAP or String: access [0] and [1] via property_get with string keys
+            Item k0 = (Item){.item = s2it(heap_create_name("0", 1))};
+            Item k1 = (Item){.item = s2it(heap_create_name("1", 1))};
+            key = js_property_get(pair, k0);
+            val = js_property_get(pair, k1);
+        }
+        // Use ToPropertyKey: preserves Symbol keys, converts others to string
+        extern Item js_to_property_key(Item key);
+        Item prop_key = js_to_property_key(key);
+        js_property_set(result, prop_key, val);
     }
     return result;
 }

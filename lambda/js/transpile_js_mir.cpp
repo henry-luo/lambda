@@ -12714,10 +12714,13 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             if (pl == 6 && strncmp(pn, "length", 6) == 0) return jm_box_int_const(mt, 0);
             if (pl == 4 && strncmp(pn, "name", 4) == 0)
                 return jm_box_string_literal(mt, "Symbol", 6);
+            // Symbol.prototype → normal constructor prototype access (not a well-known symbol)
+            if (pl == 9 && strncmp(pn, "prototype", 9) == 0) goto symbol_not_wellknown;
             MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
             return jm_call_1(mt, "js_symbol_well_known", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
+        symbol_not_wellknown:
 
         // ClassName.staticField → js_get_module_var(index)
         JsClassEntry* sf_ce = jm_find_class(mt, obj->name->chars, (int)obj->name->len);

@@ -3196,6 +3196,7 @@ enum JsBuiltinId {
     JS_BUILTIN_NUM_TO_EXPONENTIAL,
     // Symbol.prototype methods
     JS_BUILTIN_SYM_TO_STRING,
+    JS_BUILTIN_SYM_DESCRIPTION_GETTER,
     // Symbol static methods
     JS_BUILTIN_SYMBOL_FOR,
     JS_BUILTIN_SYMBOL_KEY_FOR,
@@ -3300,6 +3301,10 @@ enum JsBuiltinId {
     JS_BUILTIN_PROMISE_ALL_SETTLED,
     JS_BUILTIN_PROMISE_ANY,
     JS_BUILTIN_PROMISE_RACE,
+    // Promise prototype methods
+    JS_BUILTIN_PROMISE_PROTO_THEN,
+    JS_BUILTIN_PROMISE_PROTO_CATCH,
+    JS_BUILTIN_PROMISE_PROTO_FINALLY,
     // Date static methods (v45)
     JS_BUILTIN_DATE_NOW,
     JS_BUILTIN_DATE_PARSE,
@@ -5672,7 +5677,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 14 && strncmp(nm, "ReferenceError", 14) == 0) ||
                             (nl == 8 && strncmp(nm, "URIError", 8) == 0) ||
                             (nl == 9 && strncmp(nm, "EvalError", 9) == 0) ||
-                            (nl == 14 && strncmp(nm, "AggregateError", 14) == 0);
+                            (nl == 14 && strncmp(nm, "AggregateError", 14) == 0) ||
+                            (nl == 6 && strncmp(nm, "Symbol", 6) == 0) ||
+                            (nl == 7 && strncmp(nm, "Promise", 7) == 0);
                         if (needs_class_name) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
                             Item cnv = (Item){.item = s2it(heap_create_name(nm, nl))};
@@ -5736,6 +5743,24 @@ extern "C" Item js_property_get(Item object, Item key) {
                                     }
                                 }
                             }
+                        }
+                        // v87: Symbol.prototype.description getter (ES2019)
+                        if (nl == 6 && strncmp(nm, "Symbol", 6) == 0) {
+                            Item desc_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_DESCRIPTION_GETTER, "get description", 0);
+                            Item gk = (Item){.item = s2it(heap_create_name("__get_description", 17))};
+                            js_property_set(fn->prototype, gk, desc_fn);
+                            Item dk = (Item){.item = s2it(heap_create_name("description", 11))};
+                            js_mark_non_enumerable(fn->prototype, dk);
+                            // Install toString on Symbol.prototype
+                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+                            Item ts_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
+                            js_property_set(fn->prototype, ts_key, ts_fn);
+                            js_mark_non_enumerable(fn->prototype, ts_key);
+                            // Symbol.toStringTag = "Symbol"
+                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_val = (Item){.item = s2it(heap_create_name("Symbol", 6))};
+                            js_property_set(fn->prototype, tag_key, tag_val);
+                            js_mark_non_enumerable(fn->prototype, tag_key);
                         }
                         // v41: Set Symbol.toStringTag on Map/Set/WeakMap/WeakSet prototypes
                         bool needs_tostring_tag =
@@ -5952,6 +5977,26 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 js_property_set(fn->prototype, mk, mf);
                                 js_mark_non_enumerable(fn->prototype, mk);
                             }
+                        }
+                        // v88: Populate Promise.prototype methods
+                        if (nl == 7 && strncmp(nm, "Promise", 7) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"then", 4, JS_BUILTIN_PROMISE_PROTO_THEN, 2},
+                                {"catch", 5, JS_BUILTIN_PROMISE_PROTO_CATCH, 1},
+                                {"finally", 7, JS_BUILTIN_PROMISE_PROTO_FINALLY, 1},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // Symbol.toStringTag = "Promise"
+                            Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                            Item tag_val = (Item){.item = s2it(heap_create_name("Promise", 7))};
+                            js_property_set(fn->prototype, tag_key, tag_val);
+                            js_mark_non_enumerable(fn->prototype, tag_key);
                         }
                         // v29: Populate Array.prototype methods for test262 compliance
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
@@ -8219,6 +8264,10 @@ extern "C" void js_set_function_source(Item fn_item, Item source_item) {
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
+// Forward declarations for promise runtime
+struct JsPromise;
+static JsPromise* js_get_promise(Item promise_obj);
+
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
 
@@ -9924,9 +9973,40 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_number_method(num_val, method_name, args, arg_count);
     }
 
-    // Symbol.prototype.toString
-    case JS_BUILTIN_SYM_TO_STRING:
-        return js_symbol_to_string(this_val);
+    // Symbol.prototype.toString — handles both primitives and wrapper objects
+    case JS_BUILTIN_SYM_TO_STRING: {
+        Item sym = this_val;
+        // If this is a Symbol wrapper object, unwrap __primitiveValue__
+        if (get_type_id(this_val) == LMD_TYPE_MAP) {
+            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+            Item cn = js_property_get(this_val, cn_key);
+            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
+                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+                sym = js_property_get(this_val, pv_key);
+            }
+        }
+        return js_symbol_to_string(sym);
+    }
+
+    // Symbol.prototype.description getter (ES2019)
+    case JS_BUILTIN_SYM_DESCRIPTION_GETTER: {
+        // thisSymbolValue: accept symbol primitive or Symbol wrapper object
+        extern Item js_symbol_get_description(Item sym);
+        if (get_type_id(this_val) == LMD_TYPE_INT && it2i(this_val) <= -(int64_t)JS_SYMBOL_BASE) {
+            return js_symbol_get_description(this_val);
+        }
+        if (get_type_id(this_val) == LMD_TYPE_MAP) {
+            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+            Item cn = js_property_get(this_val, cn_key);
+            if (get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "Symbol", 6) == 0) {
+                Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+                Item pv = js_property_get(this_val, pv_key);
+                return js_symbol_get_description(pv);
+            }
+        }
+        js_throw_type_error("Symbol.prototype.description requires that 'this' be a Symbol");
+        return ItemNull;
+    }
 
     // Symbol static methods
     case JS_BUILTIN_SYMBOL_FOR:
@@ -10159,6 +10239,35 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_promise_any(arg0);
     case JS_BUILTIN_PROMISE_RACE:
         return js_promise_race(arg0);
+
+    // Promise.prototype.then/catch/finally (this_val is the promise instance)
+    case JS_BUILTIN_PROMISE_PROTO_THEN: {
+        // ES spec: IsPromise(this) — throw TypeError if not a promise
+        if (get_type_id(this_val) != LMD_TYPE_MAP || !js_get_promise(this_val)) {
+            js_throw_type_error("Promise.prototype.then called on non-Promise object");
+            return ItemNull;
+        }
+        return js_promise_then(this_val, arg0, arg_count > 1 ? args[1] : make_js_undefined());
+    }
+    case JS_BUILTIN_PROMISE_PROTO_CATCH: {
+        // ES spec: Invoke(this, "then", [undefined, onRejected])
+        // Must call "then" method on this — non-objects/non-callables will throw
+        if (get_type_id(this_val) != LMD_TYPE_MAP) {
+            js_throw_type_error("Promise.prototype.catch called on non-object");
+            return ItemNull;
+        }
+        // Look up "then" on the object (may be overridden)
+        Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
+        Item then_fn = js_property_get(this_val, then_key);
+        if (get_type_id(then_fn) != LMD_TYPE_FUNC) {
+            js_throw_type_error("Promise.prototype.catch: this.then is not a function");
+            return ItemNull;
+        }
+        Item catch_args[2] = { make_js_undefined(), arg0 };
+        return js_call_function(then_fn, this_val, catch_args, 2);
+    }
+    case JS_BUILTIN_PROMISE_PROTO_FINALLY:
+        return js_promise_finally(this_val, arg0);
 
     // v45: Date static methods
     case JS_BUILTIN_DATE_NOW:
@@ -17187,6 +17296,17 @@ extern "C" Item js_to_object(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC) return value;
     if (type == LMD_TYPE_BOOL) return js_new_boolean_wrapper(value);
+    // Symbol wrapper must be checked before number (symbols are encoded as negative ints)
+    if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        Item obj = js_new_object();
+        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+        Item cn_val = (Item){.item = s2it(heap_create_name("Symbol", 6))};
+        js_property_set(obj, cn_key, cn_val);
+        Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
+        js_property_set(obj, pv_key, value);
+        js_wrapper_set_proto(obj, "Symbol", 6);
+        return obj;
+    }
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) return js_new_number_wrapper(value);
     if (type == LMD_TYPE_STRING) return js_new_string_wrapper(value);
     if (type == LMD_TYPE_DECIMAL && js_is_bigint(value)) {
@@ -18212,17 +18332,8 @@ static Item js_promise_to_item(JsPromise* p) {
     // Set __class_name__ for instanceof Promise support
     String* cn_key = heap_create_name("__class_name__", 14);
     js_property_set(obj, (Item){.item = s2it(cn_key)}, (Item){.item = s2it(heap_create_name("Promise", 7))});
-    // Add then, catch, finally as bound method properties
-    // bind prepends obj as first arg so wrapper receives (promise, ...userArgs)
-    Item then_fn = js_new_function((void*)js_promise_then_bound, 3);
-    Item then_bound = js_bind_function(then_fn, ItemNull, &obj, 1);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("then", 4))}, then_bound);
-    Item catch_fn = js_new_function((void*)js_promise_catch_bound, 2);
-    Item catch_bound = js_bind_function(catch_fn, ItemNull, &obj, 1);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("catch", 5))}, catch_bound);
-    Item finally_fn = js_new_function((void*)js_promise_finally_bound, 2);
-    Item finally_bound = js_bind_function(finally_fn, ItemNull, &obj, 1);
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("finally", 7))}, finally_bound);
+    // Set __proto__ to Promise.prototype so methods are inherited
+    js_wrapper_set_proto(obj, "Promise", 7);
     return obj;
 }
 
