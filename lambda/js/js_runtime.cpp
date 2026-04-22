@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cctype>
 #include <string>
+#include <unordered_map>
 #include <map>
 #include <re2/re2.h>
 #include <execinfo.h>
@@ -40,6 +41,9 @@ extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len)
 // Global Input context for JS runtime map_put operations.
 // Initialized in transpile_js_to_mir() before JIT execution.
 Input* js_input = NULL;
+
+// Forward declaration for regex compilation cache reset (defined near JsRegexData)
+void js_regex_cache_reset();
 
 // v24: Global strict mode flag. Set by transpiler when "use strict" directive is active.
 // Used by js_property_set to throw TypeError instead of silently rejecting writes.
@@ -457,6 +461,8 @@ extern "C" void js_batch_reset() {
     js_dom_batch_reset();
     // reset legacy RegExp static properties ($1-$9, input, etc.)
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
+    // reset regex compilation cache — AST pointers from previous test are stale
+    js_regex_cache_reset();
     // reset microtask queue and timers — callbacks referencing old heap
     extern void js_event_loop_init(void);
     js_event_loop_init();
@@ -580,6 +586,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_process_reset_listeners();
     // reset legacy RegExp static properties ($1-$9, input, etc.)
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
+    // reset regex compilation cache — AST pointers from previous test are stale
+    js_regex_cache_reset();
     // reset module namespace caches (epoch-cached objects may be stale after test mutations)
     js_child_process_reset();
     js_fs_reset();
@@ -11405,6 +11413,29 @@ struct JsRegexData {
     bool sticky;              // 'y' flag (v46)
 };
 
+// Regex compilation cache: avoids re-compiling the same regex literal in loops.
+// Keyed by (pattern_ptr, flags_ptr) — pointer identity from AST nodes.
+// Only benefits regex literals (constant AST pointers), not new RegExp() with runtime strings.
+struct JsRegexCacheEntry {
+    JsRegexData* rd;
+    const char* source;          // heap-allocated source string
+    int source_len;
+    const char* canonical_flags; // heap-allocated canonical flags
+    int canonical_flags_len;
+    bool dot_all;
+    bool has_unicode;
+};
+
+static std::unordered_map<uint64_t, JsRegexCacheEntry> g_regex_compile_cache;
+
+static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags) {
+    return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
+}
+
+void js_regex_cache_reset() {
+    g_regex_compile_cache.clear();
+}
+
 // Helper: get the correct number of capturing groups for output
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
@@ -11441,7 +11472,51 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                            anchor, matches, num_groups);
 }
 
+// Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
+static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
+    JsRegexData* rd = ce.rd;
+    Item regex_obj = js_new_object();
+    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
+    Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
+    js_property_set(regex_obj, rd_key, rd_val);
+    Item source_key = (Item){.item = s2it(heap_create_name("source"))};
+    Item source_val = (Item){.item = s2it(heap_strcpy((char*)ce.source, ce.source_len))};
+    js_property_set(regex_obj, source_key, source_val);
+    Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
+    Item flags_val = (Item){.item = s2it(heap_create_name(ce.canonical_flags))};
+    js_property_set(regex_obj, flags_key, flags_val);
+    Item global_key = (Item){.item = s2it(heap_create_name("global"))};
+    js_property_set(regex_obj, global_key, (Item){.item = b2it(rd->global ? BOOL_TRUE : BOOL_FALSE)});
+    Item ic_key = (Item){.item = s2it(heap_create_name("ignoreCase"))};
+    js_property_set(regex_obj, ic_key, (Item){.item = b2it(rd->ignore_case ? BOOL_TRUE : BOOL_FALSE)});
+    Item ml_key = (Item){.item = s2it(heap_create_name("multiline"))};
+    js_property_set(regex_obj, ml_key, (Item){.item = b2it(rd->multiline ? BOOL_TRUE : BOOL_FALSE)});
+    Item da_key = (Item){.item = s2it(heap_create_name("dotAll"))};
+    js_property_set(regex_obj, da_key, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
+    Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
+    js_property_set(regex_obj, uni_key, (Item){.item = b2it(ce.has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
+    js_property_set(regex_obj, sticky_key, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
+    js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
+    js_property_set(regex_obj, cn_key, cn_val);
+    return regex_obj;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Check regex compilation cache — avoids re-compiling the same literal in loops
+    uint64_t cache_key = js_regex_cache_key(pattern, flags);
+    auto cache_it = g_regex_compile_cache.find(cache_key);
+    if (cache_it != g_regex_compile_cache.end()) {
+        // Verify pointer identity (collision check)
+        auto& ce = cache_it->second;
+        if (ce.source_len == pattern_len && ce.source == pattern) {
+            return js_regex_build_object_from_cache(ce);
+        }
+    }
+
     // Check for 'v' flag (Unicode Sets mode) — needs preprocessing for set operations
     bool has_v_flag = false;
     for (int i = 0; i < flags_len; i++) {
@@ -11950,6 +12025,9 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
+    // Store in regex compilation cache for future reuse
+    g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
+                                         (int)strlen(flg_buf), dot_all, has_unicode};
     return regex_obj;
 }
 
