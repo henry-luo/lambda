@@ -7801,19 +7801,21 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
         if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
             String* cn_str = it2s(cn);
-            bool pv_own = false;
-            Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
-            if (pv_own) {
-                if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+            if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                bool pv_own = false;
+                Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
+                if (pv_own) {
                     value = pv;
                     vtype = get_type_id(value);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
-                    value = js_to_number(pv);
-                    vtype = get_type_id(value);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
-                    value = js_to_string(pv);
-                    vtype = get_type_id(value);
                 }
+            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                // ES spec: ToNumber(value) — calls valueOf on wrapper object
+                value = js_to_number(value);
+                vtype = get_type_id(value);
+            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                // ES spec: ToString(value) — calls toString on wrapper object
+                value = js_to_string(value);
+                vtype = get_type_id(value);
             }
         }
     }

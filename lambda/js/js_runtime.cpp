@@ -1097,10 +1097,17 @@ extern "C" Item js_to_number(Item value) {
         // v16: Objects/arrays — check for Symbol.toPrimitive before returning NaN
         if (type == LMD_TYPE_MAP) {
             // Fast path: boxed primitives with __primitiveValue__
+            // Skip fast path if custom valueOf/toString/@@toPrimitive exists on the object
             bool pv_found = false;
             Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &pv_found);
             if (pv_found && pv.item != ItemNull.item) {
-                return js_to_number(pv);
+                bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
+                js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
+                js_map_get_fast(value.map, "toString", 8, &has_own_ts);
+                js_map_get_fast(value.map, "__sym_2", 7, &has_own_tp);
+                if (!has_own_vo && !has_own_ts && !has_own_tp) {
+                    return js_to_number(pv);
+                }
             }
             // Check @@toPrimitive (Symbol.toPrimitive stored as __sym_2)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
@@ -1461,10 +1468,19 @@ extern "C" Item js_to_string(Item value) {
             }
         }
         // Wrapper objects with __primitiveValue__ (e.g. new Number(42), new String("hi"))
+        // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
         {
             bool own_pv = false;
             Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
-            if (own_pv) return js_to_string(pv);
+            if (own_pv) {
+                bool has_own_vo = false, has_own_ts = false, has_own_tp = false;
+                js_map_get_fast(value.map, "valueOf", 7, &has_own_vo);
+                js_map_get_fast(value.map, "toString", 8, &has_own_ts);
+                js_map_get_fast(value.map, "__sym_2", 7, &has_own_tp);
+                if (!has_own_vo && !has_own_ts && !has_own_tp) {
+                    return js_to_string(pv);
+                }
+            }
         }
         // Check for regex objects (have __rd hidden property)
         // JS: String(/pattern/flags) => "/pattern/flags"
@@ -11580,11 +11596,16 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     bool uses_last_index = rd->global || rd->sticky;
     if (uses_last_index) {
         Item li_val = js_property_get(regex, li_key);
+        // ES spec §21.2.5.2.2 step 4: let lastIndex = ? ToLength(? Get(R, "lastIndex"))
+        // ToLength calls ToNumber which triggers valueOf/toString on objects
+        li_val = js_to_number(li_val);
         TypeId li_tid = get_type_id(li_val);
         if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
             start_pos = (int)it2i(li_val);
         } else if (li_tid == LMD_TYPE_FLOAT) {
-            start_pos = (int)li_val.get_double();
+            double d = li_val.get_double();
+            if (d != d) start_pos = 0; // NaN → 0
+            else start_pos = (int)d;
         }
         if (start_pos < 0 || start_pos > len) {
             js_property_set(regex, li_key, (Item){.item = i2it(0)});
@@ -11791,31 +11812,26 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     int num_groups = js_regex_num_groups(rd);
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
-    int pos = 0;
+    int p = 0; // last split position
+    int q = 0; // search start position
     int part_count = 0;
 
-    while (pos <= len && part_count < max_parts) {
-        bool found = js_regex_match_internal(rd, chars, len, pos, re2::RE2::UNANCHORED, matches, num_groups);
+    while (q <= len && part_count < max_parts) {
+        bool found = js_regex_match_internal(rd, chars, len, q, re2::RE2::UNANCHORED, matches, num_groups);
         if (!found || (int)(matches[0].data() - chars) >= len) break;
 
         int match_start = (int)(matches[0].data() - chars);
         int match_end = match_start + (int)matches[0].size();
 
-        // avoid infinite loop on zero-length match at same position
-        if (match_end == pos && match_start == pos) {
-            // push one char and advance
-            if (pos < len) {
-                Item seg = (Item){.item = s2it(heap_strcpy((char*)(chars + pos), 1))};
-                js_array_push(result, seg);
-                part_count++;
-            }
-            pos++;
+        // ES spec @@split: if e == p, advance q and retry
+        if (match_end == p) {
+            q++;
             continue;
         }
 
-        // push segment before match
-        int seg_len = match_start - pos;
-        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + pos), seg_len))}
+        // push segment from p to match_start
+        int seg_len = match_start - p;
+        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), seg_len))}
                                  : (Item){.item = s2it(heap_create_name("", 0))};
         js_array_push(result, seg);
         part_count++;
@@ -11832,13 +11848,14 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             part_count++;
         }
 
-        pos = match_end;
+        p = match_end;
+        q = match_end;
     }
 
     // push trailing segment
     if (part_count < max_parts) {
-        int seg_len = len - pos;
-        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + pos), seg_len))}
+        int seg_len = len - p;
+        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), seg_len))}
                                  : (Item){.item = s2it(heap_create_name("", 0))};
         js_array_push(result, seg);
     }
@@ -13320,20 +13337,22 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
                         i = name_end; // skip past '>'
                     }
                 }
-            } else if (next >= '1' && next <= '9') {
-                // $N or $NN capture group reference
-                int group_idx = next - '0';
-                // Check for two-digit group number ($10-$99)
+            } else if (next >= '0' && next <= '9') {
+                // $N or $NN capture group reference (ES spec §21.1.3.14.1 GetSubstitution)
+                // Handles $1-$9, $01-$09, $10-$99
+                int first_digit = next - '0';
+                bool has_second_digit = (i + 2 < repl_len && repl[i + 2] >= '0' && repl[i + 2] <= '9');
+                int group_idx = first_digit;
                 bool used_two_digits = false;
-                if (i + 2 < repl_len && repl[i + 2] >= '0' && repl[i + 2] <= '9') {
-                    int two_digit = group_idx * 10 + (repl[i + 2] - '0');
+                if (has_second_digit) {
+                    int two_digit = first_digit * 10 + (repl[i + 2] - '0');
                     if (two_digit > 0 && two_digit < ngroups) {
                         group_idx = two_digit;
                         used_two_digits = true;
                     }
                 }
-                // ES spec: If n > m (ngroups-1), no replacement is done — output literal $N
-                if (group_idx >= ngroups || !groups) {
+                // $0 alone or $00 or $0N with no valid group → literal $
+                if (group_idx <= 0 || group_idx >= ngroups || !groups) {
                     strbuf_append_char(buf, '$');
                     // don't consume the digit — it'll be output normally next iteration
                 } else {
@@ -13379,9 +13398,36 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
 
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
-    if (!s || s->len == 0) return str;
+    if (!s) return str;
     bool replacement_is_func = (get_type_id(args[1]) == LMD_TYPE_FUNC);
     JsRegexData* rd = js_get_regex_data(args[0]);
+
+    if (s->len == 0 && !is_replace_all) return str;
+    if (s->len == 0 && is_replace_all && !rd) {
+        // "".replaceAll("", repl) — check if search is also empty
+        String* search = it2s(js_to_string(args[0]));
+        if (!search || search->len == 0) {
+            // single match at position 0, produce replacement
+            if (replacement_is_func) {
+                Item fn_args[3];
+                fn_args[0] = (Item){.item = s2it(heap_create_name("", 0))};
+                fn_args[1] = (Item){.item = i2it(0)};
+                fn_args[2] = str;
+                Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+                return js_to_string(result);
+            }
+            String* repl = it2s(js_to_string(args[1]));
+            if (!repl || repl->len == 0) return str;
+            StrBuf* buf = strbuf_new();
+            js_apply_replacement(buf, repl->chars, (int)repl->len,
+                "", 0, 0, 0, NULL, 0, ItemNull);
+            String* result_str = heap_strcpy(buf->str, buf->length);
+            strbuf_free(buf);
+            return (Item){.item = s2it(result_str)};
+        }
+        // "".replaceAll("x", repl) where x is non-empty → no match, return ""
+        return str;
+    }
 
     if (rd) {
         // regex-based replace
@@ -13601,6 +13647,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // v18n: coerce this to string if not already (for .call() with non-string this)
         if (get_type_id(str) != LMD_TYPE_STRING) {
             str = js_to_string(str);
+            if (js_exception_pending) return ItemNull;
             if (get_type_id(str) != LMD_TYPE_STRING) return ItemNull;
         }
         if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
@@ -13914,15 +13961,21 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 int total_groups = js_regex_num_groups(rd);
                 if (total_groups > 16) total_groups = 16;
                 re2::StringPiece match[16];
-                int pos = 0;
-                while (pos <= (int)s->len) {
-                    bool found = js_regex_match_internal(rd, s->chars, (int)s->len, pos,
+                int p = 0; // last split position
+                int q = 0; // search start position
+                while (q <= (int)s->len) {
+                    bool found = js_regex_match_internal(rd, s->chars, (int)s->len, q,
                         re2::RE2::UNANCHORED, match, total_groups);
-                    if (!found || match[0].size() == 0) break;
+                    if (!found) break;
                     int match_start = (int)(match[0].data() - s->chars);
                     int match_end = match_start + (int)match[0].size();
-                    // add substring before match
-                    String* part = heap_strcpy(s->chars + pos, match_start - pos);
+                    // ES spec @@split: if e == p, advance q and retry
+                    if (match_end == p) {
+                        q++;
+                        continue;
+                    }
+                    // add substring from p to match_start
+                    String* part = heap_strcpy(s->chars + p, match_start - p);
                     js_array_push(result, (Item){.item = s2it(part)});
                     if (result.array && (uint32_t)result.array->length >= lim) return result;
                     // add capturing groups
@@ -13935,10 +13988,11 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                         }
                         if (result.array && (uint32_t)result.array->length >= lim) return result;
                     }
-                    pos = match_end;
+                    p = match_end;
+                    q = match_end;
                 }
                 // add remainder
-                String* tail = heap_strcpy(s->chars + pos, (int)s->len - pos);
+                String* tail = heap_strcpy(s->chars + p, (int)s->len - p);
                 js_array_push(result, (Item){.item = s2it(tail)});
                 if (lim < 0xFFFFFFFF && result.array && result.array->length > (int)lim)
                     result.array->length = (int)lim;
@@ -13961,6 +14015,19 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         }
         // Step 8: If lim = 0, return empty array (after separator coercion)
         if (lim == 0) return js_array_new(0);
+        // JS edge case: empty string split
+        String* sstr = it2s(str);
+        if (!sstr || sstr->len == 0) {
+            String* sep_s = it2s(sep);
+            if (sep_s && sep_s->len == 0) {
+                // "".split("") → []
+                return js_array_new(0);
+            }
+            // "".split(sep) → [""] when sep doesn't match
+            Item result = js_array_new(0);
+            js_array_push(result, (Item){.item = s2it(heap_create_name("", 0))});
+            return result;
+        }
         Item result = fn_split(str, sep);
         // Clear is_content flag to prevent array flattening in JS context
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
@@ -18667,6 +18734,21 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
 // Promise Combinators (spec-compliant: all settlements go through microtask queue)
 // =============================================================================
 
+// Helper: invoke the user-visible .then method on a promise element.
+// Per ES spec, Promise.all/race/any/allSettled must call Invoke(nextPromise, "then", ...)
+// so that user-overridden .then methods are respected.
+static void js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
+    Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
+    Item then_fn = js_property_get(elem, then_key);
+    if (get_type_id(then_fn) == LMD_TYPE_FUNC) {
+        Item call_args[2] = {resolve_fn, reject_fn};
+        js_call_function(then_fn, elem, call_args, 2);
+    } else {
+        // fallback: use internal then for non-standard promise objects
+        js_promise_then(elem, resolve_fn, reject_fn);
+    }
+}
+
 extern "C" Item js_promise_all(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
 
@@ -18703,7 +18785,7 @@ extern "C" Item js_promise_all(Item iterable) {
         Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
         Item resolve_fn = js_bind_function(resolve_handler, ItemNull, bound_args, 3);
 
-        js_promise_then(elem, resolve_fn, reject_fn);
+        js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
 
     return result_item;
@@ -18732,7 +18814,7 @@ extern "C" Item js_promise_race(Item iterable) {
         Item elem = arr->items[i];
         JsPromise* p = js_get_promise(elem);
         if (!p) elem = js_promise_resolve(elem);
-        js_promise_then(elem, resolve_fn, reject_fn);
+        js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
 
     return result_item;
@@ -18775,7 +18857,7 @@ extern "C" Item js_promise_any(Item iterable) {
         Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
         Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
 
-        js_promise_then(elem, resolve_fn, reject_fn);
+        js_invoke_promise_then(elem, resolve_fn, reject_fn);
     }
 
     return result_item;
@@ -18814,7 +18896,7 @@ extern "C" Item js_promise_all_settled(Item iterable) {
         Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
         Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
 
-        js_promise_then(elem, fulfill_fn, reject_fn);
+        js_invoke_promise_then(elem, fulfill_fn, reject_fn);
     }
 
     return result_item;
