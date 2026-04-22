@@ -5924,7 +5924,8 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                                     if (lh->type == CSS_VALUE_TYPE_NUMBER) {
                                                         line_height = font_size * (float)lh->data.number.value;
                                                     } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                                                        float lh_px = (float)lh->data.length.value;
+                                                        // use resolve_length_value to handle rem/em/etc. units
+                                                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
                                                         if (lh_px > 0) line_height = lh_px;
                                                     } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
                                                         line_height = font_size * (float)(lh->data.percentage.value / 100.0);
