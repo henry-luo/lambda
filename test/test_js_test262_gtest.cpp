@@ -818,6 +818,11 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     std::string combined;
     combined.reserve(source.size() + 4096);
 
+    // "use strict" must come FIRST (before includes) to act as a valid directive prologue
+    if (p.is_strict) {
+        combined += "\"use strict\";\n";
+    }
+
     for (auto& inc : p.includes) {
         // Skip includes already compiled into the preamble
         if (g_preamble_includes.count(inc)) continue;
@@ -828,9 +833,6 @@ static std::string assemble_test_source(const Test262Prepared& p) {
         }
     }
 
-    if (p.is_strict) {
-        combined += "\"use strict\";\n";
-    }
     combined += source;
     return combined;
 }
@@ -857,6 +859,12 @@ static std::string assemble_combined_source(const Test262Prepared& p) {
 
     std::string combined;
     combined.reserve(g_harness_sta.size() + g_harness_assert.size() + source.size() + 4096);
+
+    // "use strict" must come FIRST to act as a valid directive prologue
+    if (p.is_strict) {
+        combined += "\"use strict\";\n";
+    }
+
     combined += g_harness_sta;
     combined += '\n';
     combined += g_harness_assert;
@@ -870,9 +878,6 @@ static std::string assemble_combined_source(const Test262Prepared& p) {
         }
     }
 
-    if (p.is_strict) {
-        combined += "\"use strict\";\n";
-    }
     combined += source;
     return combined;
 }
