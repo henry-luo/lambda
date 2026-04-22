@@ -234,6 +234,14 @@ static FontHandle* create_handle(FontContext* ctx,
         }
     }
 
+    // read actual font weight from OS/2 table for synthetic bold detection
+    {
+        Os2Table* os2t = font_tables_get_os2(handle->tables);
+        handle->actual_font_weight = (os2t && os2t->weight_class > 0)
+            ? (int)os2t->weight_class
+            : (int)weight;  // fall back to requested weight if OS/2 unavailable
+    }
+
     // compute bitmap_scale for fixed-size bitmap fonts via CBDT/CBLC
     if (handle->tables && physical_size > 0) {
         if (cbdt_has_table(handle->tables)) {

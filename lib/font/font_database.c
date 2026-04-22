@@ -59,9 +59,11 @@
 #define TTF_TAG_HEAD 0x68656164  // 'head'
 
 // Name ID constants
-#define NAME_ID_FAMILY_NAME      1
-#define NAME_ID_SUBFAMILY_NAME   2
-#define NAME_ID_POSTSCRIPT_NAME  6
+#define NAME_ID_FAMILY_NAME           1
+#define NAME_ID_SUBFAMILY_NAME        2
+#define NAME_ID_POSTSCRIPT_NAME       6
+#define NAME_ID_PREFERRED_FAMILY      16  // OTF: typographic/preferred family (no style suffix)
+#define NAME_ID_PREFERRED_SUBFAMILY   17  // OTF: typographic/preferred subfamily
 
 // OS/2 table constants
 #define OS2_WEIGHT_CLASS_OFFSET  4
@@ -284,9 +286,13 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
     bool found_family_english = false;
     bool found_subfamily_english = false;
     bool found_postscript_english = false;
+    // preferred (typographic) names — Name ID 16/17 override 1/2 when present
+    char preferred_family_buf[MAX_FONT_FAMILY_NAME]    = {0};
+    char preferred_subfamily_buf[MAX_FONT_FAMILY_NAME] = {0};
+    bool found_preferred_family = false;
+    bool found_preferred_subfamily = false;
 
-    for (int i = 0; i < count &&
-         !(found_family_english && found_subfamily_english && found_postscript_english); i++) {
+    for (int i = 0; i < count; i++) {
         uint16_t platform_id, encoding_id, language_id, name_id, length, offset;
         if (fread(&platform_id, 2, 1, file) != 1) break;
         if (fread(&encoding_id, 2, 1, file) != 1) break;
@@ -302,10 +308,12 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
         length      = be16toh_local(length);
         offset      = be16toh_local(offset);
 
-        // only process family, subfamily, and postscript names
+        // process family, subfamily, postscript, and preferred family/subfamily names
         if (name_id != NAME_ID_FAMILY_NAME &&
             name_id != NAME_ID_SUBFAMILY_NAME &&
-            name_id != NAME_ID_POSTSCRIPT_NAME) continue;
+            name_id != NAME_ID_POSTSCRIPT_NAME &&
+            name_id != NAME_ID_PREFERRED_FAMILY &&
+            name_id != NAME_ID_PREFERRED_SUBFAMILY) continue;
 
         // skip if already found English name for this name ID
         if (name_id == NAME_ID_FAMILY_NAME && found_family_english) continue;
@@ -369,7 +377,27 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
             entry->postscript_name = arena_strdup(arena, name_buf);
             found_postscript = true;
             if (is_english) found_postscript_english = true;
+        } else if (name_id == NAME_ID_PREFERRED_FAMILY && (!found_preferred_family || is_english)) {
+            // preferred (typographic) family — does NOT embed style suffix
+            strncpy(preferred_family_buf, name_buf, MAX_FONT_FAMILY_NAME - 1);
+            found_preferred_family = true;
+        } else if (name_id == NAME_ID_PREFERRED_SUBFAMILY && (!found_preferred_subfamily || is_english)) {
+            strncpy(preferred_subfamily_buf, name_buf, MAX_FONT_FAMILY_NAME - 1);
+            found_preferred_subfamily = true;
         }
+    }
+
+    // Name ID 16 (Preferred Family) overrides Name ID 1 when present.
+    // Many fonts embed the weight/style suffix in Name ID 1 (e.g. "Liberation Sans Bold")
+    // while Name ID 16 contains the clean family name ("Liberation Sans").
+    // Using ID 16 ensures all weights/styles of a family share the same family_name,
+    // so weight-based matching works correctly.
+    if (found_preferred_family && preferred_family_buf[0]) {
+        entry->family_name = arena_strdup(arena, preferred_family_buf);
+        found_family = true;
+    }
+    if (found_preferred_subfamily && preferred_subfamily_buf[0]) {
+        entry->subfamily_name = arena_strdup(arena, preferred_subfamily_buf);
     }
 
     return found_family;
@@ -665,6 +693,25 @@ static FontEntry* create_font_placeholder(const char* file_path, Pool* pool, Are
             strcasecmp(space, " Heavy") == 0 || strcasecmp(space, " Narrow") == 0 ||
             strcasecmp(space, " Condensed") == 0 || strcasecmp(space, " Oblique") == 0) {
             *space = '\0';
+        } else {
+            break;
+        }
+    }
+
+    // strip underscore-separated style suffixes (e.g. "Arial_Bold" → "Arial",
+    // "Arial_Bold_Italic" → "Arial"). Loop to handle compound suffixes.
+    for (int strip_pass = 0; strip_pass < 4; strip_pass++) {
+        char* us = strrchr(buf, '_');
+        if (!us) break;
+        if (strcasecmp(us, "_Regular") == 0 || strcasecmp(us, "_Bold") == 0 ||
+            strcasecmp(us, "_Italic") == 0 || strcasecmp(us, "_BoldItalic") == 0 ||
+            strcasecmp(us, "_Light") == 0 || strcasecmp(us, "_Medium") == 0 ||
+            strcasecmp(us, "_Semibold") == 0 || strcasecmp(us, "_Thin") == 0 ||
+            strcasecmp(us, "_Black") == 0 || strcasecmp(us, "_Heavy") == 0 ||
+            strcasecmp(us, "_Narrow") == 0 || strcasecmp(us, "_Condensed") == 0 ||
+            strcasecmp(us, "_Oblique") == 0 || strcasecmp(us, "_ExtraBold") == 0 ||
+            strcasecmp(us, "_ExtraLight") == 0) {
+            *us = '\0';
         } else {
             break;
         }

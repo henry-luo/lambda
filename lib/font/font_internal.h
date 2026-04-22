@@ -128,7 +128,8 @@ struct FontHandle {
     float       size_px;                // requested size in CSS pixels
     float       physical_size_px;       // size * pixel_ratio (actual FreeType size)
     float       bitmap_scale;           // scale factor for fixed-size bitmap fonts (target/actual ppem), 1.0 for scalable fonts
-    FontWeight  weight;
+    FontWeight  weight;                 // requested CSS weight (100-900)
+    int         actual_font_weight;     // weight of the loaded font file (from OS/2 usWeightClass); 0 = unknown
     FontSlant   slant;
     char*       family_name;            // arena-allocated
     bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
@@ -438,6 +439,7 @@ bool                font_rasterize_tvg_metrics(FontTables* tables, uint32_t code
 GlyphBitmap*        font_rasterize_tvg_render(void* tvg_ctx, FontTables* tables,
                                                uint32_t codepoint, float size_px,
                                                float bitmap_scale, float pixel_ratio,
+                                               float synth_bold_stroke,
                                                Arena* arena);
 #endif
 

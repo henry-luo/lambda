@@ -521,9 +521,21 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     // ThorVG rasterization path (preferred on Linux/WASM)
     if (handle->tvg_raster_ctx && handle->tables) {
         float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
+        // synthetic bold: apply stroke when requested weight is significantly heavier
+        // than the actual font file's weight (e.g. CSS bold=700 but only Regular=400 available)
+        float synth_bold_stroke = 0.0f;
+        int req_w = (int)handle->weight;
+        int act_w = (handle->actual_font_weight > 0) ? handle->actual_font_weight : req_w;
+        if (req_w >= 600 && act_w < 550) {
+            // stroke width ≈ size_px/14 ≈ same order as Chrome's synthetic bold
+            synth_bold_stroke = handle->size_px / 14.0f * pixel_ratio;
+            log_debug("font_glyph: synthetic bold stroke=%.2f (req=%d act=%d) for cp=%u",
+                      synth_bold_stroke, req_w, act_w, codepoint);
+        }
         GlyphBitmap* bmp = font_rasterize_tvg_render(handle->tvg_raster_ctx, handle->tables,
                                                       codepoint, handle->size_px,
                                                       handle->bitmap_scale, pixel_ratio,
+                                                      synth_bold_stroke,
                                                       ctx->glyph_arena);
         if (bmp && (bmp->buffer || bmp->width == 0)) {
             // insert into bitmap cache
@@ -693,7 +705,7 @@ static LoadedGlyph* try_load_from_handle_tvg(FontHandle* h, uint32_t codepoint) 
     // render bitmap at physical resolution
     GlyphBitmap* bmp = font_rasterize_tvg_render(h->tvg_raster_ctx, h->tables, codepoint,
                                                    h->size_px, h->bitmap_scale,
-                                                   pixel_ratio, h->ctx->glyph_arena);
+                                                   pixel_ratio, 0.0f, h->ctx->glyph_arena);
 
     memset(&s_loaded_glyph, 0, sizeof(s_loaded_glyph));
 
