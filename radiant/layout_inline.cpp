@@ -384,6 +384,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     DomNode* child = first_child;
     bool in_inline_sequence = false;
     bool had_block_child = false;
+    bool had_block_child_before = false;  // tracks if a block was laid out before the current one
+    DomElement* last_block_child_elem = nullptr;  // last block child for bottom margin collapse
 
     while (child) {
         DisplayValue child_display = child->is_element() ?
@@ -488,6 +490,65 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             lycon->block.max_width = saved_max_width; // Restore inline content width
             log_debug("%s block-in-inline: after block layout, restored max_width=%.1f", inline_elem->source_loc(), lycon->block.max_width);
 
+            // CSS 2.1 §9.2.1.1 + §8.3.1: Parent-child margin collapse for
+            // block-in-inline. When the inline wrapper's parent is a block
+            // container that doesn't create a BFC and has no border/padding,
+            // the block child's margins should collapse with the container.
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_block = child_elem->is_block() ? (ViewBlock*)child_elem : nullptr;
+                DomNode* container_node = inline_elem->parent;
+                if (child_block && child_block->bound && container_node &&
+                    container_node->is_element() && ((DomElement*)container_node)->is_block()) {
+                    ViewBlock* container = (ViewBlock*)container_node;
+                    // Only collapse when the container doesn't establish a BFC
+                    // (table cells, overflow:hidden etc. prevent margin collapse)
+                    if (!block_context_establishes_bfc(container)) {
+                        float cont_bt = container->bound && container->bound->border
+                            ? container->bound->border->width.top : 0;
+                        float cont_pt = container->bound ? container->bound->padding.top : 0;
+                        float cont_bb = container->bound && container->bound->border
+                            ? container->bound->border->width.bottom : 0;
+                        float cont_pb = container->bound ? container->bound->padding.bottom : 0;
+                        // Also check that the inline wrapper has no border/padding barrier
+                        float inline_bt = span->bound && span->bound->border
+                            ? span->bound->border->width.top : 0;
+                        float inline_pt = span->bound ? span->bound->padding.top : 0;
+                        float inline_bb = span->bound && span->bound->border
+                            ? span->bound->border->width.bottom : 0;
+                        float inline_pb = span->bound ? span->bound->padding.bottom : 0;
+
+                        // Top margin collapse: first block, no border/padding barrier
+                        if (!had_block_child_before && cont_bt == 0 && cont_pt == 0 &&
+                            inline_bt == 0 && inline_pt == 0 &&
+                            child_block->bound->margin.top != 0) {
+                            float child_mt = child_block->bound->margin.top;
+                            float cont_mt = container->bound ? container->bound->margin.top : 0;
+                            float collapsed = (child_mt >= 0 && cont_mt >= 0) ?
+                                (child_mt > cont_mt ? child_mt : cont_mt) :
+                                (child_mt < 0 && cont_mt < 0) ?
+                                (child_mt < cont_mt ? child_mt : cont_mt) :
+                                child_mt + cont_mt;
+                            float y_delta = collapsed - cont_mt;
+                            container->y += y_delta;
+                            if (!container->bound) {
+                                container->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                                memset(container->bound, 0, sizeof(BoundaryProp));
+                            }
+                            container->bound->margin.top = collapsed;
+                            child_block->y -= child_mt;
+                            child_block->bound->margin.top = 0;
+                            lycon->block.advance_y -= child_mt;
+                            log_debug("%s block-in-inline: top margin collapse: child_mt=%.1f, collapsed=%.1f, container y_delta=%.1f",
+                                      inline_elem->source_loc(), child_mt, collapsed, y_delta);
+                        }
+                        // Bottom margin collapse: check done after loop (need to know if it's the last block)
+                    }
+                }
+            }
+            had_block_child_before = true;
+            if (child->is_element()) last_block_child_elem = child->as_element();
+
         } else {
             // Inline or text content - accumulate in anonymous inline box
             if (!in_inline_sequence) {
@@ -515,6 +576,47 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         }
 
         child = child->next_sibling;
+    }
+
+    // CSS 2.1 §9.2.1.1 + §8.3.1: Bottom margin collapse for block-in-inline.
+    // After all children are processed, if the last block child has a bottom
+    // margin and the container has no bottom border/padding, collapse it.
+    if (last_block_child_elem && !in_inline_sequence) {
+        ViewBlock* last_blk = last_block_child_elem->is_block() ? (ViewBlock*)last_block_child_elem : nullptr;
+        DomNode* container_node = inline_elem->parent;
+        if (last_blk && last_blk->bound && container_node &&
+            container_node->is_element() && ((DomElement*)container_node)->is_block()) {
+            ViewBlock* container = (ViewBlock*)container_node;
+            if (!block_context_establishes_bfc(container)) {
+                float cont_bb = container->bound && container->bound->border
+                    ? container->bound->border->width.bottom : 0;
+                float cont_pb = container->bound ? container->bound->padding.bottom : 0;
+                float inline_bb = span->bound && span->bound->border
+                    ? span->bound->border->width.bottom : 0;
+                float inline_pb = span->bound ? span->bound->padding.bottom : 0;
+                // Check: container has auto height (no explicit height)
+                bool cont_auto_height = !container->blk || container->blk->given_height < 0;
+                if (cont_bb == 0 && cont_pb == 0 && inline_bb == 0 && inline_pb == 0 &&
+                    cont_auto_height && last_blk->bound->margin.bottom != 0) {
+                    float child_mb = last_blk->bound->margin.bottom;
+                    float cont_mb = container->bound ? container->bound->margin.bottom : 0;
+                    float collapsed = (child_mb >= 0 && cont_mb >= 0) ?
+                        (child_mb > cont_mb ? child_mb : cont_mb) :
+                        (child_mb < 0 && cont_mb < 0) ?
+                        (child_mb < cont_mb ? child_mb : cont_mb) :
+                        child_mb + cont_mb;
+                    if (!container->bound) {
+                        container->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                        memset(container->bound, 0, sizeof(BoundaryProp));
+                    }
+                    container->bound->margin.bottom = collapsed;
+                    lycon->block.advance_y -= child_mb;
+                    last_blk->bound->margin.bottom = 0;
+                    log_debug("%s block-in-inline: bottom margin collapse: child_mb=%.1f, collapsed=%.1f",
+                              inline_elem->source_loc(), child_mb, collapsed);
+                }
+            }
+        }
     }
 
     // CSS 2.1 §9.2.1.1: When an inline element with border/padding is split by
@@ -598,7 +700,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // The <br> element's bounding box height is the font content area (cell height),
         // not the CSS line-height. The line-height is used by line_break() to advance
         // the block cursor, but the element's own reported height matches the font metrics.
-        // Browsers report <br> with non-zero height matching the font cell height.
+        // Chrome's reported <br> height varies by context (0 in some cases, font-height
+        // in others). The exact rule is not fully understood, so we use font cell height
+        // consistently.
         struct FontHandle* br_fh = lycon->font.font_handle;
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
         br_view->height = br_font_height;

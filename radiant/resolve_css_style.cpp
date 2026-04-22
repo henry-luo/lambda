@@ -949,6 +949,19 @@ DisplayValue resolve_display_value(void* child) {
             return none_display;
         }
 
+        // HTML spec §4.11.1: Non-summary children of closed <details> are hidden.
+        // This must be checked here (not just in layout_flow_node) to cover all
+        // layout paths including flex and grid when CSS overrides display.
+        if (node->parent && node->parent->is_element()) {
+            DomElement* parent_elem = node->parent->as_element();
+            if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->has_attribute("open")) {
+                if (tag_id != HTM_TAG_SUMMARY) {
+                    DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+                    return none_display;
+                }
+            }
+        }
+
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
         // when display:none is set by UA defaults for hidden inputs, respect it
@@ -6660,6 +6673,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->top_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.top = 0;
+                    span->bound->border->width.top_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-top-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6677,6 +6695,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->right_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.right = 0;
+                    span->bound->border->width.right_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-right-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6694,6 +6717,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->bottom_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.bottom = 0;
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-bottom-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6711,6 +6739,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->left_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.left = 0;
+                    span->bound->border->width.left_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-left-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6906,6 +6939,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
                 border_width = 3.0f;  // medium
             }
+            // CSS Backgrounds 3 §4.4: When border-style is 'none' or 'hidden',
+            // the computed border-width is 0, regardless of any specified width.
+            if (border_style == CSS_VALUE_NONE || border_style == CSS_VALUE_HIDDEN) {
+                border_width = 0;
+            }
             // CSS spec: when no color specified, default to currentColor (text color)
             if (border_color.c == 0 && border_style >= 0 &&
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
@@ -6982,6 +7020,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->top_color = get_current_color(lycon);
                 span->bound->border->top_color_specificity = specificity;
             }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.top = 0;
+                span->bound->border->width.top_specificity = specificity;
+            }
             break;
         }
         case CSS_PROPERTY_BORDER_RIGHT: {
@@ -7022,6 +7066,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                        border.style->data.keyword != CSS_VALUE_HIDDEN) {
                 span->bound->border->right_color = get_current_color(lycon);
                 span->bound->border->right_color_specificity = specificity;
+            }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.right = 0;
+                span->bound->border->width.right_specificity = specificity;
             }
             break;
         }
@@ -7064,6 +7114,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->bottom_color = get_current_color(lycon);
                 span->bound->border->bottom_color_specificity = specificity;
             }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.bottom = 0;
+                span->bound->border->width.bottom_specificity = specificity;
+            }
             break;
         }
         case CSS_PROPERTY_BORDER_LEFT: {
@@ -7104,6 +7160,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                        border.style->data.keyword != CSS_VALUE_HIDDEN) {
                 span->bound->border->left_color = get_current_color(lycon);
                 span->bound->border->left_color_specificity = specificity;
+            }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.left = 0;
+                span->bound->border->width.left_specificity = specificity;
             }
             break;
         }

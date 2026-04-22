@@ -545,6 +545,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_AUDIO: {
         // HTML §4.8.9: <audio> without controls is not rendered
+        // <audio controls> is a replaced inline-block element with intrinsic size 300×54
+        // (Chrome default audio player dimensions)
+        if (elmt->has_attribute("controls")) {
+            block->display.inner = RDT_DISPLAY_REPLACED;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            lycon->block.given_width = 300;
+            block->blk->given_width = 300;
+            lycon->block.given_height = 54;
+            block->blk->given_height = 54;
+        }
         // audio-only playback: create RdtVideo (AVPlayer handles audio files natively)
         const char* src = elmt->get_attribute("src");
         if (src && *src && lycon->ui_context && lycon->ui_context->document && lycon->ui_context->document->url) {
@@ -929,9 +939,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
     case HTM_TAG_FIGCAPTION:
-        // text-align: center (common default)
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_CENTER;
+        // Chrome UA: figcaption is a plain block element, no special text-align
         break;
     case HTM_TAG_DL:
         // definition list: margin 1em 0
@@ -1701,6 +1709,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Datalist should be completely hidden (display:none)
         block->display.outer = CSS_VALUE_NONE;
         block->display.inner = CSS_VALUE_NONE;
+        break;
+    case HTM_TAG_DIALOG:
+        // HTML §4.12.4: <dialog> without the 'open' attribute is not rendered.
+        // Chrome UA: dialog:not([open]) { display: none; }
+        if (!elmt->has_attribute("open")) {
+            block->display.outer = CSS_VALUE_NONE;
+            block->display.inner = CSS_VALUE_NONE;
+        }
         break;
     // ========== Semantic/sectioning elements with no visual default ==========
     case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:
