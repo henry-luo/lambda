@@ -1194,7 +1194,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     bool had_children = (child != nullptr);
     float start_advance_y = lycon->block.advance_y;
     if (child) {
-        log_debug("%s layout inline children: advance_y %f, line_height %f", elmt->source_loc(), lycon->block.advance_y, lycon->block.line_height);
         do {
             layout_flow_node(lycon, child);
             child = child->next_sibling;
