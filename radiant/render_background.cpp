@@ -214,6 +214,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     bool has_blend = (bg->blend_mode != 0 && bg->blend_mode != CSS_VALUE_NORMAL);
     bool has_upper_layers = bg->image ||
         (bg->radial_layers && bg->radial_layer_count > 0) ||
+        (bg->linear_layers && bg->linear_layer_count > 0) ||
         (bg->gradient_type != GRADIENT_NONE &&
          (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient));
 
@@ -262,6 +263,16 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Render background image positioned within pos_rect, painted within paint_rect (via clip)
     if (bg->image) {
         render_background_image(rdcon, view, bg, pos_rect);
+    }
+
+    // Render all linear gradient layers (stacked bottom-to-top)
+    if (bg->linear_layers && bg->linear_layer_count > 0) {
+        for (int i = 0; i < bg->linear_layer_count; i++) {
+            if (bg->linear_layers[i]) {
+                log_debug("[GRADIENT] Rendering linear gradient layer %d/%d", i + 1, bg->linear_layer_count);
+                render_linear_gradient(rdcon, view, bg->linear_layers[i], paint_rect);
+            }
+        }
     }
 
     // Render all radial gradient layers (stacked bottom-to-top)

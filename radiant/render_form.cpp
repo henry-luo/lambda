@@ -358,9 +358,10 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     float w = block->width * s;
     float h = block->height * s;
 
-    // Check if button has CSS-specified background (from author stylesheet)
-    bool has_css_background = block->bound && block->bound->background &&
-                              block->bound->background->color.c != 0;
+    // Check if button has CSS-specified background (from author stylesheet).
+    // The background prop is only allocated when author CSS sets it, so its
+    // existence alone means the author specified a background (including transparent).
+    bool has_css_background = block->bound && block->bound->background;
 
     if (!has_css_background) {
         // No CSS background - render default button appearance
