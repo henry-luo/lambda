@@ -518,10 +518,19 @@ class LayoutDevTool {
     await fs.mkdir(path.join(renderRoot, 'output'), { recursive: true });
     await fs.mkdir(path.join(renderRoot, 'diff'), { recursive: true });
 
+    // Read per-test config (viewport overrides) if available
+    let viewportWidth = 100, viewportHeight = 100;
+    const configPath = path.join(renderRoot, renderDir, `${testName}.config.json`);
+    try {
+      const configData = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+      if (configData.viewportWidth) viewportWidth = configData.viewportWidth;
+      if (configData.viewportHeight) viewportHeight = configData.viewportHeight;
+    } catch {}
+
     // Render with lambda.exe
     const renderResult = await new Promise((resolve, reject) => {
       const args = ['render', htmlFile, '-o', outputPng,
-        '-vw', '100', '-vh', '100', '--pixel-ratio', '1'];
+        '-vw', String(viewportWidth), '-vh', String(viewportHeight), '--pixel-ratio', '1'];
       const proc = spawn(this.lambdaExe, args, { cwd: this.projectRoot });
       let stderr = '';
       proc.stdout.on('data', (data) => {

@@ -1317,6 +1317,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
+    {"js_error_captureStackTrace", FPTR(js_error_captureStackTrace)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
@@ -1553,7 +1554,13 @@ JitImport jit_runtime_imports[] = {
     {"js_promise_all_settled", FPTR(js_promise_all_settled)},
     // v14: Event loop & timers
     {"js_setTimeout", FPTR(js_setTimeout)},
+    {"js_setTimeout_args", FPTR(js_setTimeout_args)},
     {"js_setInterval", FPTR(js_setInterval)},
+    {"js_setInterval_args", FPTR(js_setInterval_args)},
+    {"js_pack_args_1", FPTR(js_pack_args_1)},
+    {"js_pack_args_2", FPTR(js_pack_args_2)},
+    {"js_pack_args_3", FPTR(js_pack_args_3)},
+    {"js_pack_args_4", FPTR(js_pack_args_4)},
     {"js_clearTimeout", FPTR(js_clearTimeout)},
     {"js_clearInterval", FPTR(js_clearInterval)},
     {"js_setImmediate", FPTR(js_setImmediate)},

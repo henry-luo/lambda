@@ -836,7 +836,7 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
     float y_base = rdcon->block.y + text_rect->y * s;
     float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * s;
     int gap_count = 0;
-    float pad = 1.0f;  // padding around glyph ink for the gap (1px each side)
+    float pad = fmaxf(2.0f, (deco_y_bot - deco_y_top));  // padding around glyph ink scales with thickness
 
     unsigned char* p = str + text_rect->start_index;
     unsigned char* end = p + text_rect->length;
@@ -868,10 +868,40 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
         // Require significant overlap (half the decoration height) to only catch
         // genuine descenders, not anti-aliasing fuzz at glyph edges.
         float overlap = fminf(glyph_bot, deco_y_bot) - fmaxf(glyph_top, deco_y_top);
-        float min_overlap = fmaxf((deco_y_bot - deco_y_top) * 0.5f, 2.0f);
+        float deco_height = deco_y_bot - deco_y_top;
+        float min_overlap = fmaxf(deco_height * 0.5f, 2.0f);
         if (overlap >= min_overlap && glyph->bitmap.width > 0) {
-            gaps[gap_count].x0 = glyph_left - pad;
-            gaps[gap_count].x1 = glyph_right + pad;
+            // Scan bitmap columns to find actual ink extent within the decoration
+            // y-range, rather than using full glyph width. This gives tighter gaps
+            // matching browser behavior (e.g. 'p' descender is narrower than glyph).
+            int bm_row_start = (int)fmaxf(deco_y_top - glyph_top, 0.0f);
+            int bm_row_end = (int)fminf(deco_y_bot - glyph_top, (float)glyph->bitmap.height);
+            int ink_col_min = glyph->bitmap.width;
+            int ink_col_max = -1;
+            uint8_t* buf = glyph->bitmap.buffer;
+            int pitch = glyph->bitmap.pitch;
+            // ink threshold: ignore faint anti-aliasing pixels (< 25% opacity)
+            const uint8_t ink_thresh = 64;
+            if (buf && glyph->bitmap.pixel_mode == GLYPH_PIXEL_GRAY) {
+                for (int row = bm_row_start; row < bm_row_end; row++) {
+                    uint8_t* rowp = buf + row * pitch;
+                    for (int col = 0; col < glyph->bitmap.width; col++) {
+                        if (rowp[col] >= ink_thresh) {
+                            if (col < ink_col_min) ink_col_min = col;
+                            if (col > ink_col_max) ink_col_max = col;
+                        }
+                    }
+                }
+            }
+            if (ink_col_max >= ink_col_min) {
+                // use actual ink extent within decoration band
+                gaps[gap_count].x0 = glyph_left + ink_col_min - pad;
+                gaps[gap_count].x1 = glyph_left + ink_col_max + 1.0f + pad;
+            } else {
+                // fallback to full glyph width if scan found nothing
+                gaps[gap_count].x0 = glyph_left - pad;
+                gaps[gap_count].x1 = glyph_right + pad;
+            }
             gap_count++;
         }
 
@@ -1421,6 +1451,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 x += h_glyph->advance_x;
             }
         }
+        // -webkit-line-clamp: render ellipsis (U+2026) after clamped line
+        if (text_rect->has_trailing_ellipsis) {
+            FontStyleDesc _sd_e = font_style_desc_from_prop(rdcon->font.style);
+            LoadedGlyph* e_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_e, 0x2026, true);
+            if (e_glyph) {
+                float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                draw_glyph(rdcon, &e_glyph->bitmap, x + e_glyph->bitmap.bearing_x, y + ascend - e_glyph->bitmap.bearing_y);
+            }
+        }
         // render text deco (positions in physical pixels)
         // skip _UNDEF (0) which means no decoration was explicitly set
         if (rdcon->font.style->text_deco != CSS_VALUE_NONE && rdcon->font.style->text_deco != CSS_VALUE__UNDEF) {
@@ -1429,6 +1468,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             float thickness = rdcon->font.style->text_deco_thickness > 0
                 ? rdcon->font.style->text_deco_thickness
                 : fmaxf(_deco_m ? _deco_m->underline_thickness : 1.0f, 1.0f);
+            // Round thickness to nearest pixel (minimum 1px) for crisp rendering
+            thickness = fmaxf(roundf(thickness), 1.0f);
             // Use text-decoration-color if set, otherwise currentColor
             Color deco_color = rdcon->font.style->text_deco_color.a > 0
                 ? rdcon->font.style->text_deco_color
@@ -1448,21 +1489,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 float offset = rdcon->font.style->text_underline_offset;
                 rect.x = rdcon->block.x + text_rect->x * s;
                 // baseline = text_rect_y + ascender; underline_pos is negative (below baseline)
-                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - underline_pos * s + offset;
+                rect.y = roundf(rdcon->block.y + text_rect->y * s + deco_ascend - underline_pos * s + offset);
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
                 rect.x = rdcon->block.x + text_rect->x * s;
                 // overline sits at the ascender line (baseline - ascender = top of text)
-                rect.y = rdcon->block.y + text_rect->y * s;
+                rect.y = floorf(rdcon->block.y + text_rect->y * s);
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
                 rect.x = rdcon->block.x + text_rect->x * s;
-                // Use OS/2 strikeout position (above baseline) for accurate placement
-                float strikeout_pos = (_deco_m && _deco_m->strikeout_position > 0)
-                    ? _deco_m->strikeout_position : (deco_ascend * 0.3f);
-                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - strikeout_pos * s;
+                // Line-through at the midpoint of lowercase text (x-height / 2 above baseline),
+                // matching browser behavior. Falls back to strikeout metric or 30% of ascender.
+                float strike_y;
+                if (_deco_m && _deco_m->x_height > 0) {
+                    strike_y = _deco_m->x_height * 0.5f;
+                } else if (_deco_m && _deco_m->strikeout_position > 0) {
+                    strike_y = _deco_m->strikeout_position;
+                } else {
+                    strike_y = deco_ascend * 0.3f / s;  // convert back from physical for consistency
+                }
+                rect.y = roundf(rdcon->block.y + text_rect->y * s + deco_ascend - strike_y * s);
                 if (_deco_m && _deco_m->strikeout_size > 0)
-                    thickness = _deco_m->strikeout_size;
+                    thickness = fmaxf(ceilf(_deco_m->strikeout_size), 1.0f);
             }
             else {
                 draw_deco = false;  // unknown decoration type, skip rendering
@@ -1493,32 +1541,34 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         dx += thickness * 2.0f;
                     }
                 } else if (deco_style == CSS_VALUE_DOUBLE) {
-                    // Double line: two lines with visible gap between them
-                    // Ensure minimum 3px total height so both lines + gap are visible
-                    float total_h = fmaxf(thickness, 3.0f);
-                    float line_t = fmaxf(1.0f, total_h / 3.0f);
+                    // Double line: two lines separated by a gap
+                    // Each line has the same thickness; gap = max(1, thickness - 1)
+                    float line_t = thickness;
+                    float gap = fmaxf(1.0f, thickness - 1.0f);
                     Rect top_line = {rect.x, rect.y, rect.width, line_t};
                     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &top_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-                    Rect bot_line = {rect.x, rect.y + total_h - line_t, rect.width, line_t};
+                    Rect bot_line = {rect.x, rect.y + line_t + gap, rect.width, line_t};
                     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                 } else if (deco_style == CSS_VALUE_WAVY) {
                     // Wavy line using RdtVector path
+                    // Wave centered below the underline position (browser behavior)
                     float wave_amp = thickness * 1.5f;
                     float wave_len = thickness * 4.0f;
+                    float wave_center = rect.y + wave_amp;  // shift down so top of wave is at underline pos
                     RdtPath* p = rdt_path_new();
                     float wx = rect.x;
-                    rdt_path_move_to(p, wx, rect.y);
+                    rdt_path_move_to(p, wx, wave_center);
                     while (wx < rect.x + rect.width) {
                         float half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-                        rdt_path_cubic_to(p, wx + half * 0.33f, rect.y - wave_amp,
-                                           wx + half * 0.67f, rect.y - wave_amp,
-                                           wx + half, rect.y);
+                        rdt_path_cubic_to(p, wx + half * 0.33f, wave_center - wave_amp,
+                                           wx + half * 0.67f, wave_center - wave_amp,
+                                           wx + half, wave_center);
                         wx += half;
                         if (wx >= rect.x + rect.width) break;
                         half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-                        rdt_path_cubic_to(p, wx + half * 0.33f, rect.y + wave_amp,
-                                           wx + half * 0.67f, rect.y + wave_amp,
-                                           wx + half, rect.y);
+                        rdt_path_cubic_to(p, wx + half * 0.33f, wave_center + wave_amp,
+                                           wx + half * 0.67f, wave_center + wave_amp,
+                                           wx + half, wave_center);
                         wx += half;
                     }
                     rc_stroke_path(rdcon, p, deco_color, fmaxf(1.0f, thickness * 0.5f),
@@ -1647,12 +1697,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             image_surface_ensure_decoded(img);
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             float img_w = (float)img->width;
             float img_h = (float)img->height;
-            // Position image: right-aligned within marker box, vertically centered on x-height
-            float ix = x + width - img_w - 4.0f;
-            float iy = y + baseline_offset - font_size * 0.35f - img_h / 2.0f;
+            // Position image: centered at ~1em from content edge, vertically centered in line
+            float ix = x + width - font_size - img_w / 2.0f;
+            float iy = y + marker->height / 2.0f - img_h / 2.0f;
             rc_draw_image(rdcon, (uint32_t*)img->pixels, img->width, img->height,
                           img->width, ix, iy, img_w, img_h, 255, nullptr);
             log_debug("[MARKER RENDER] Drew list-style-image at (%.1f, %.1f) size %.0fx%.0f",
@@ -1665,13 +1714,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
     switch (marker_type) {
         case CSS_VALUE_DISC: {
-            // Filled circle - center vertically in line, positioned at right side of marker box
+            // Filled circle - centered at ~1em from content edge, vertically centered in line
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
-            // Position bullet center: x at right side of marker box (with small gap), y at middle of x-height
-            float cx = x + width - bullet_size - 4.0f;  // 4px gap from right edge
-            float cy = y + baseline_offset - font_size * 0.35f;  // center on x-height
+            float cx = x + width - font_size;
+            float cy = y + marker->height / 2.0f;
             float radius = bullet_size / 2.0f;
 
             // Draw filled circle using RdtVector
@@ -1687,9 +1734,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             // Stroked circle (outline only)
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
-            float cx = x + width - bullet_size - 4.0f;
-            float cy = y + baseline_offset - font_size * 0.35f;
+            float cx = x + width - font_size;
+            float cy = y + marker->height / 2.0f;
             float radius = bullet_size / 2.0f;
             float stroke_width = 1.0f;
 
@@ -1702,12 +1748,13 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
 
         case CSS_VALUE_SQUARE: {
-            // Filled square
+            // Filled square - centered at ~1em from content edge, vertically centered in line
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
-            float sx = x + width - bullet_size - 4.0f;
-            float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
+            float cx = x + width - font_size;
+            float cy = y + marker->height / 2.0f;
+            float sx = cx - bullet_size / 2.0f;
+            float sy = cy - bullet_size / 2.0f;
 
             rc_fill_rect(rdcon, sx, sy, bullet_size, bullet_size, color);
             log_debug("[MARKER RENDER] Drew square at (%.1f, %.1f) size=%.1f", sx, sy, bullet_size);
@@ -1718,10 +1765,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             // Right-pointing triangle ▸ for <summary> elements
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - tri_size - 4.0f;
-            float cy = y + baseline_offset - font_size * 0.35f;
+            float cx = x + width - font_size;
+            float cy = y + marker->height / 2.0f;
 
             RdtPath* p = rdt_path_new();
             // right-pointing triangle: left edge at cx, top at cy - tri_size/2, bottom at cy + tri_size/2
@@ -1739,10 +1785,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
             // Down-pointing triangle ▾ for open <details> elements
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
-            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - tri_size - 4.0f;
-            float cy = y + baseline_offset - font_size * 0.35f;
+            float cx = x + width - font_size;
+            float cy = y + marker->height / 2.0f;
 
             RdtPath* p = rdt_path_new();
             // down-pointing triangle
@@ -1980,9 +2025,9 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     float column_width = mc->computed_column_width;
     float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
 
-    // Calculate block position
-    float block_x = rdcon->block.x + block->x;
-    float block_y = rdcon->block.y + block->y;
+    // Calculate block position (rdcon->block already includes block->x/y)
+    float block_x = rdcon->block.x;
+    float block_y = rdcon->block.y;
 
     // Adjust for padding
     if (block->bound) {

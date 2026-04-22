@@ -44,6 +44,9 @@ endif
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
 LINK_JOBS := 1
+# Debug+ASan test builds use ~2-3x more memory per compiler instance; cap parallelism
+# to avoid OOM kills on machines with limited RAM.
+TEST_JOBS := $(shell echo $$(( ($(NPROCS) + 1) / 2 )) )
 
 # Enable ccache for faster builds if available
 ifneq ($(shell which ccache 2>/dev/null),)
@@ -448,7 +451,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    verify-windows verify-linux \
-	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
+	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
@@ -501,7 +504,7 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form) + other checks"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form) + render visual + other checks"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
@@ -1087,9 +1090,14 @@ test-input-baseline: build-test ensure-yaml-submodule
 LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text pretext form
 
 test-radiant-baseline: build-test
+	@$(MAKE) --no-print-directory run-radiant-baseline
+
+# Run radiant tests without rebuilding (use when test executables are already built)
+run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
+	render_passed=0; render_failed=0; render_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
 	any_failed=0; \
 	layout_total_passed=0; layout_total_failed=0; layout_total_skipped=0; \
@@ -1178,8 +1186,25 @@ test-radiant-baseline: build-test
 		echo "   ⚠️  test/test_fuzzy_crash_gtest.exe not found"; \
 	fi; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed)); \
+	echo ""; \
+	echo "📦 Render Visual Tests:"; \
+	if [ -f "test/render/test_radiant_render.js" ]; then \
+		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j 1 2>&1) || true; \
+		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:" | tail -10; \
+		render_line=$$(echo "$$output" | grep "^Results:"); \
+		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
+		render_passed=$${render_passed:-0}; \
+		render_failed=$$(echo "$$render_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
+		render_errors=$$(echo "$$render_line" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" || echo "0"); \
+		render_failed=$${render_failed:-0}; render_errors=$${render_errors:-0}; \
+		render_failed=$$((render_failed + render_errors)); \
+		if [ "$$render_failed" = "0" ] || [ -z "$$render_failed" ]; then render_status="✅ PASS"; render_failed=0; else render_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/render/test_radiant_render.js not found"; \
+	fi; \
+	\
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + render_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + render_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1203,7 +1228,8 @@ test-radiant-baseline: build-test
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
-	echo "   └── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
+	echo "   └── Render Visual       $$render_status  ($$render_passed passed, $$render_failed failed) (test_radiant_render.js)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
@@ -2082,8 +2108,8 @@ build-lambda-input:
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
 	cd build/premake && premake5 gmake --file=../../$(PREMAKE_FILE)
-	@echo "Building lambda-input DLLs with $(JOBS) parallel jobs..."
-	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(JOBS)
+	@echo "Building lambda-input DLLs with $(TEST_JOBS) parallel jobs..."
+	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(TEST_JOBS)
 	@echo "✅ lambda-input DLLs built successfully!"
 
 build-test: build-lambda-input
@@ -2095,11 +2121,11 @@ build-test: build-lambda-input
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
-		$(MAKE) -C build/premake config=release_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"; \
+		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)"; \
 		cp -p lambda.exe .lambda_build_backup.exe; \
 	fi
-	@echo "Building all test executables (debug mode)..."
-	$(MAKE) -C build/premake config=debug_native -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
+	$(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)"
 	@# Restore release lambda.exe over the debug one
 	@if [ -f .lambda_build_backup.exe ]; then \
 		echo "Restoring release lambda.exe..."; \

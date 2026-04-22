@@ -421,7 +421,8 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TRANSITION_PROPERTY, "transition-property", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "all", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, "transition-timing-function", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "ease", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRAP_FLOW, "wrap-flow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_WRAP_THROUGH, "wrap-through", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "wrap", false, false, NULL, 0, validate_keyword, NULL}
+    {CSS_PROPERTY_WRAP_THROUGH, "wrap-through", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "wrap", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_WEBKIT_LINE_CLAMP, "-webkit-line-clamp", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_length, NULL}
 };
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))

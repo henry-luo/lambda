@@ -360,10 +360,40 @@ extern "C" Item js_assert_module_doesNotThrow(Item fn, Item error_cls, Item mess
 }
 
 // assert.ifError(value) — throw if value is truthy
+// Per Node.js spec: throws AssertionError with message "ifError got unwanted exception: <msg>"
 extern "C" Item js_assert_ifError(Item value) {
     if (assert_is_truthy(value)) {
         extern void js_throw_value(Item error);
-        js_throw_value(value);
+        extern Item js_property_get(Item obj, Item key);
+        extern Item js_property_set(Item obj, Item key, Item value);
+        extern Item js_to_string(Item val);
+        extern Item js_new_error_with_name(Item type_name, Item message);
+
+        // Build message: "ifError got unwanted exception: <original message>"
+        const char* orig_msg = "";
+        if (get_type_id(value) == LMD_TYPE_MAP) {
+            Item msg_key = assert_make_string("message");
+            Item msg_val = js_property_get(value, msg_key);
+            if (get_type_id(msg_val) == LMD_TYPE_STRING) {
+                orig_msg = it2s(msg_val)->chars;
+            }
+        } else if (get_type_id(value) == LMD_TYPE_STRING) {
+            orig_msg = it2s(value)->chars;
+        }
+        char buf[512];
+        snprintf(buf, sizeof(buf), "ifError got unwanted exception: %s", orig_msg);
+
+        // Create AssertionError with proper properties
+        Item type_name = assert_make_string("AssertionError");
+        Item msg_item = assert_make_string(buf);
+        Item error = js_new_error_with_name(type_name, msg_item);
+        js_property_set(error, assert_make_string("code"), assert_make_string("ERR_ASSERTION"));
+        js_property_set(error, assert_make_string("name"), assert_make_string("AssertionError"));
+        js_property_set(error, assert_make_string("actual"), value);
+        js_property_set(error, assert_make_string("expected"), ItemNull);
+        js_property_set(error, assert_make_string("operator"), assert_make_string("ifError"));
+        js_property_set(error, assert_make_string("generatedMessage"), (Item){.item = b2it(false)});
+        js_throw_value(error);
     }
     return make_js_undefined();
 }
@@ -678,6 +708,10 @@ extern "C" Item js_get_assert_namespace(void) {
     // AssertionError constructor
     assert_set_method(assert_namespace, "AssertionError",      (void*)js_assert_AssertionError_ctor, 1);
 
+    // Assert constructor (the class itself, can be used with new Assert())
+    // For now, just expose a reference to the namespace as a callable constructor
+    js_property_set(assert_namespace, assert_make_string("Assert"), assert_namespace);
+
     // assert.strict — alias for assert itself (strict mode is default in modern Node)
     js_property_set(assert_namespace, assert_make_string("strict"), assert_namespace);
 
@@ -703,12 +737,26 @@ extern "C" Item js_node_test_run(Item name, Item options_or_fn, Item fn) {
     extern int js_check_exception(void);
     extern Item js_clear_exception(void);
     extern void js_throw_value(Item error);
+    extern bool js_is_truthy(Item value);
+    extern Item js_property_get(Item obj, Item key);
 
+    // Check for skip/todo option in options object
+    Item options = make_js_undefined();
     Item callback = make_js_undefined();
     if (get_type_id(fn) == LMD_TYPE_FUNC) {
         callback = fn;
+        options = options_or_fn;
     } else if (get_type_id(options_or_fn) == LMD_TYPE_FUNC) {
         callback = options_or_fn;
+    }
+
+    // If options has skip: true or skip is a string, skip the test
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        bool found = false;
+        Item skip_val = js_property_get(options, assert_make_string("skip"));
+        if (js_is_truthy(skip_val)) {
+            return make_js_undefined(); // skip this test
+        }
     }
 
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
@@ -748,6 +796,7 @@ extern "C" Item js_get_node_test_namespace(void) {
 
     Item describe_fn = js_new_function((void*)js_node_test_describe, 3);
     js_property_set(node_test_namespace, assert_make_string("describe"), describe_fn);
+    js_property_set(node_test_namespace, assert_make_string("suite"), describe_fn);
     js_property_set(node_test_namespace, assert_make_string("it"), test_fn);
     js_property_set(node_test_namespace, assert_make_string("before"), js_new_function((void*)js_node_test_run, 3));
     js_property_set(node_test_namespace, assert_make_string("after"), js_new_function((void*)js_node_test_run, 3));

@@ -264,7 +264,141 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (block_count == 0) {
-        log_debug("[MULTICOL] No block children to distribute");
+        // No block children — content is inline-only (text lines).
+        // Redistribute TextRects across columns based on balanced height.
+        log_debug("[MULTICOL] No block children; redistributing inline text across columns");
+
+        // Collect all TextRects from all text children
+        struct LineRect {
+            TextRect* rect;
+            DomText* text_node;  // owning text node
+            float line_y;        // original y
+            float line_height;   // height of this rect
+        };
+        LineRect lines[512];
+        int line_count = 0;
+
+        child = block->first_child;
+        while (child) {
+            if (child->node_type == DOM_NODE_TEXT) {
+                DomText* tnode = (DomText*)child;
+                TextRect* tr = tnode->rect;
+                while (tr && line_count < 512) {
+                    lines[line_count].rect = tr;
+                    lines[line_count].text_node = tnode;
+                    lines[line_count].line_y = tr->y;
+                    lines[line_count].line_height = tr->height;
+                    line_count++;
+                    tr = tr->next;
+                }
+            }
+            child = child->next_sibling;
+        }
+
+        if (line_count == 0) {
+            log_debug("[MULTICOL] No text rects to distribute");
+            return;
+        }
+
+        // Calculate balanced height per column
+        float balanced_height = total_content_height / column_count;
+        balanced_height = ceilf(balanced_height);
+
+        log_debug("[MULTICOL] Inline redistribution: %d rects, total_h=%.1f, balanced_h=%.1f",
+                  line_count, total_content_height, balanced_height);
+
+        // Distribute rects across columns
+        int current_col = 0;
+        float col_y = 0;           // y offset within current column
+        float col_start_y = 0;     // the original y of the first line assigned to the current column
+        bool col_started = false;
+        float max_col_height = 0;
+
+        for (int li = 0; li < line_count; li++) {
+            LineRect& lr = lines[li];
+
+            // Relative y within original single-column layout
+            float rel_y = lr.line_y - lines[0].line_y;
+
+            // Check if this line should go to the next column.
+            // Break only when including this line would overshoot AND
+            // excluding it is closer to balanced than including it.
+            // This matches browser behavior of preferring more content
+            // in earlier columns when lines are indivisible.
+            if (col_started && current_col < column_count - 1) {
+                float col_h_with = rel_y - col_start_y + lr.line_height;
+                if (col_h_with > balanced_height) {
+                    float col_h_without = rel_y - col_start_y;
+                    float overshoot = col_h_with - balanced_height;
+                    float undershoot = balanced_height - col_h_without;
+                    if (undershoot <= overshoot) {
+                        // closer to balanced without this line — break here
+                        if (col_h_without > max_col_height) max_col_height = col_h_without;
+                        current_col++;
+                        col_start_y = rel_y;
+                        log_debug("[MULTICOL] Inline column break -> column %d at rel_y=%.1f", current_col, rel_y);
+                    }
+                }
+            }
+            col_started = true;
+
+            // Reposition: shift x by column offset, reset y within column
+            float col_x_offset = current_col * (column_width + gap);
+            lr.rect->x += col_x_offset;
+            lr.rect->y = lines[0].line_y + (rel_y - col_start_y);
+
+            col_y = (rel_y - col_start_y) + lr.line_height;
+        }
+        if (col_y > max_col_height) max_col_height = col_y;
+
+        // Update block height to the max column height (not total content height)
+        float final_height = max_col_height;
+
+        // Update text node bounds (x, y, width, height)
+        child = block->first_child;
+        while (child) {
+            if (child->node_type == DOM_NODE_TEXT) {
+                DomText* tnode = (DomText*)child;
+                // Recalculate text node bounding box from its rects
+                float min_x = 1e9f, min_y = 1e9f, max_x = 0, max_y_val = 0;
+                TextRect* tr = tnode->rect;
+                while (tr) {
+                    if (tr->x < min_x) min_x = tr->x;
+                    if (tr->y < min_y) min_y = tr->y;
+                    float rx = tr->x + tr->width;
+                    float ry = tr->y + tr->height;
+                    if (rx > max_x) max_x = rx;
+                    if (ry > max_y_val) max_y_val = ry;
+                    tr = tr->next;
+                }
+                // DomText doesn't have x/y/width/height directly, but
+                // the parent block uses content_height from advance_y
+            }
+            child = child->next_sibling;
+        }
+
+        // Set block height: use CSS given height if specified, otherwise balanced column height
+        float total_height = final_height;
+        if (block->blk && block->blk->given_height >= 0) {
+            total_height = block->blk->given_height;
+        } else if (block->bound) {
+            total_height += block->bound->padding.top + block->bound->padding.bottom;
+            if (block->bound->border) {
+                total_height += block->bound->border->width.top + block->bound->border->width.bottom;
+            }
+        }
+        block->height = total_height;
+        block->content_height = final_height + (block->bound ? block->bound->padding.bottom : 0);
+
+        float content_start_y = 0;
+        if (block->bound) {
+            if (block->bound->border) content_start_y += block->bound->border->width.top;
+            content_start_y += block->bound->padding.top;
+        }
+        lycon->block.advance_y = content_start_y + final_height;
+
+        log_debug("[MULTICOL] Inline redistribution complete: %d columns, max_col_h=%.1f, block_h=%.1f",
+                  column_count, max_col_height, block->height);
         return;
     }
 
@@ -388,12 +522,16 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         content_start_y += block->bound->padding.top;
     }
 
-    // Set block height directly (like flex layout does)
+    // Set block height: use CSS given height if specified, otherwise computed
     float total_height = max_column_height;
-    if (block->bound) {
-        total_height += block->bound->padding.top + block->bound->padding.bottom;
-        if (block->bound->border) {
-            total_height += block->bound->border->width.top + block->bound->border->width.bottom;
+    if (block->blk && block->blk->given_height >= 0) {
+        total_height = block->blk->given_height;
+    } else {
+        if (block->bound) {
+            total_height += block->bound->padding.top + block->bound->padding.bottom;
+            if (block->bound->border) {
+                total_height += block->bound->border->width.top + block->bound->border->width.bottom;
+            }
         }
     }
     block->height = total_height;

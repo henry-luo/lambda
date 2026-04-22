@@ -148,6 +148,16 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         text_content[len + 1] = '\0';
     }
 
+    // -webkit-line-clamp: append ellipsis character
+    if (text_rect->has_trailing_ellipsis) {
+        size_t len = strlen(text_content);
+        // U+2026 HORIZONTAL ELLIPSIS = 0xE2 0x80 0xA6 in UTF-8
+        text_content[len] = (char)0xE2;
+        text_content[len + 1] = (char)0x80;
+        text_content[len + 2] = (char)0xA6;
+        text_content[len + 3] = '\0';
+    }
+
     // Calculate natural text width for justify rendering (excluding trailing spaces)
     float natural_width = 0.0f;
     int space_count = 0;
@@ -1358,31 +1368,29 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     svg_color_to_string(color, color_str);
 
     float font_size = font->style && font->style->font_size > 0 ? font->style->font_size : 16;
-    float baseline_y = y + (font->style && font->style->ascender > 0 ? font->style->ascender : font_size * 0.8f);
-    float center_y = baseline_y - font_size * 0.35f;
+    float center_x = x + width - font_size;
+    float center_y = y + marker->height / 2.0f;
 
     switch (marker_type) {
         case CSS_VALUE_DISC: {
-            float cx = x + width - bullet_size - 4.0f;
             float radius = bullet_size / 2.0f;
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
                 "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"%s\" />\n",
-                cx, center_y, radius, color_str);
+                center_x, center_y, radius, color_str);
             break;
         }
         case CSS_VALUE_CIRCLE: {
-            float cx = x + width - bullet_size - 4.0f;
             float radius = bullet_size / 2.0f;
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
                 "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"%.2f\" fill=\"none\" stroke=\"%s\" stroke-width=\"1\" />\n",
-                cx, center_y, radius, color_str);
+                center_x, center_y, radius, color_str);
             break;
         }
         case CSS_VALUE_SQUARE: {
-            float sx = x + width - bullet_size - 4.0f;
-            float sy = center_y - bullet_size / 2;
+            float sx = center_x - bullet_size / 2.0f;
+            float sy = center_y - bullet_size / 2.0f;
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
                 "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" />\n",
@@ -1391,31 +1399,30 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
         }
         case CSS_VALUE_DISCLOSURE_CLOSED: {
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - tri_size - 4.0f;
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
                 "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"%s\" />\n",
-                cx, center_y - tri_size / 2.0f,
-                cx + tri_size, center_y,
-                cx, center_y + tri_size / 2.0f,
+                center_x, center_y - tri_size / 2.0f,
+                center_x + tri_size, center_y,
+                center_x, center_y + tri_size / 2.0f,
                 color_str);
             break;
         }
         case CSS_VALUE_DISCLOSURE_OPEN: {
             float tri_size = bullet_size * 1.6f;
-            float cx = x + width - tri_size - 4.0f;
             svg_indent(ctx);
             strbuf_append_format(ctx->svg_content,
                 "<polygon points=\"%.2f,%.2f %.2f,%.2f %.2f,%.2f\" fill=\"%s\" />\n",
-                cx - tri_size / 2.0f, center_y - tri_size / 2.0f,
-                cx + tri_size / 2.0f, center_y - tri_size / 2.0f,
-                cx, center_y + tri_size / 2.0f,
+                center_x - tri_size / 2.0f, center_y - tri_size / 2.0f,
+                center_x + tri_size / 2.0f, center_y - tri_size / 2.0f,
+                center_x, center_y + tri_size / 2.0f,
                 color_str);
             break;
         }
         default: {
             // text markers (decimal, roman, alpha, etc.)
             if (marker_prop->text_content && *marker_prop->text_content) {
+                float baseline_y = y + (font->style && font->style->ascender > 0 ? font->style->ascender : font_size * 0.8f);
                 // escape XML entities
                 const char* src = marker_prop->text_content;
                 StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);

@@ -932,11 +932,24 @@ void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
     tmp_surface.pitch = ew * 4;
     box_blur_region(sa, &tmp_surface, 0, 0, ew, eh, blur_radius);
 
-    // Copy inner rect from blurred temp back to surface
-    for (int row = 0; row < rh; row++) {
-        memcpy(pixels + (ry + row) * stride + rx,
-               buf + (iy0 + row) * ew + ix0,
-               rw * sizeof(uint32_t));
+    // Copy inner rect from blurred temp back to surface (clamped to surface bounds).
+    // When called from tiled rendering, (rx, ry) can be negative after tile-local
+    // translation, so we must only copy the intersection with the surface.
+    int cpy_x = (rx > 0) ? rx : 0;
+    int cpy_y = (ry > 0) ? ry : 0;
+    int cpy_x2 = ((rx + rw) < surface->width) ? (rx + rw) : surface->width;
+    int cpy_y2 = ((ry + rh) < surface->height) ? (ry + rh) : surface->height;
+    int cpy_w = cpy_x2 - cpy_x;
+    int cpy_h = cpy_y2 - cpy_y;
+
+    if (cpy_w > 0 && cpy_h > 0) {
+        int buf_x = cpy_x - ex;
+        int buf_y = cpy_y - ey;
+        for (int row = 0; row < cpy_h; row++) {
+            memcpy(pixels + (cpy_y + row) * stride + cpy_x,
+                   buf + (buf_y + row) * ew + buf_x,
+                   cpy_w * sizeof(uint32_t));
+        }
     }
 
     scratch_free(sa, buf);

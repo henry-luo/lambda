@@ -11500,22 +11500,64 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_symbol_create", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-            // v14: setTimeout(callback, delay)
+            // v14: setTimeout(callback, delay, ...extra_args)
             if (nl == 10 && strncmp(n, "setTimeout", 10) == 0) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
                     : jm_box_int_const(mt, 0);
+                // check for extra args (setTimeout(fn, delay, arg1, arg2, ...))
+                JsAstNode* extra = (call->arguments && call->arguments->next) ? call->arguments->next->next : NULL;
+                if (extra) {
+                    // count extra args (up to 4)
+                    int ec = 0;
+                    MIR_reg_t ea[4];
+                    JsAstNode* e = extra;
+                    while (e && ec < 4) {
+                        ea[ec++] = jm_transpile_box_item(mt, e);
+                        e = e->next;
+                    }
+                    // pack into array
+                    MIR_reg_t arr;
+                    if (ec == 1) arr = jm_call_1(mt, "js_pack_args_1", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]));
+                    else if (ec == 2) arr = jm_call_2(mt, "js_pack_args_2", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]));
+                    else if (ec == 3) arr = jm_call_3(mt, "js_pack_args_3", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]));
+                    else arr = jm_call_4(mt, "js_pack_args_4", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[3]));
+                    return jm_call_3(mt, "js_setTimeout_args", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, delay),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr));
+                }
                 return jm_call_2(mt, "js_setTimeout", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));
             }
-            // v14: setInterval(callback, delay)
+            // v14: setInterval(callback, delay, ...extra_args)
             if (nl == 11 && strncmp(n, "setInterval", 11) == 0) {
                 MIR_reg_t cb = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t delay = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
                     : jm_box_int_const(mt, 0);
+                // check for extra args
+                JsAstNode* extra = (call->arguments && call->arguments->next) ? call->arguments->next->next : NULL;
+                if (extra) {
+                    int ec = 0;
+                    MIR_reg_t ea[4];
+                    JsAstNode* e = extra;
+                    while (e && ec < 4) {
+                        ea[ec++] = jm_transpile_box_item(mt, e);
+                        e = e->next;
+                    }
+                    MIR_reg_t arr;
+                    if (ec == 1) arr = jm_call_1(mt, "js_pack_args_1", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]));
+                    else if (ec == 2) arr = jm_call_2(mt, "js_pack_args_2", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]));
+                    else if (ec == 3) arr = jm_call_3(mt, "js_pack_args_3", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]));
+                    else arr = jm_call_4(mt, "js_pack_args_4", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[0]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[1]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[2]), MIR_T_I64, MIR_new_reg_op(mt->ctx, ea[3]));
+                    return jm_call_3(mt, "js_setInterval_args", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, delay),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr));
+                }
                 return jm_call_2(mt, "js_setInterval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, delay));
@@ -24032,12 +24074,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->eval_completion_reg = result;
 
     // v20 TDZ: Initialize let/const module vars to TDZ sentinel
+    // Skip preamble-inherited entries from outer scope (e.g. eval)
+    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
     if (mt->module_consts) {
         size_t tdz_iter = 0; void* tdz_item;
         while (hashmap_iter(mt->module_consts, &tdz_iter, &tdz_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)tdz_item;
             if (mce->const_type == MCONST_MODVAR &&
-                (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST)) {
+                (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) &&
+                (int)mce->int_val >= preamble_var_limit) {
                 MIR_reg_t tdz_val = jm_new_reg(mt, "tdz_init", MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, tdz_val),
@@ -24051,8 +24097,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Initialize declared var module vars to undefined (not implicit globals,
     // and not preamble-inherited entries from outer scope e.g. eval)
-    int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
-        ? mt->preamble_var_count : 0;
     if (mt->module_consts) {
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
@@ -26503,6 +26547,13 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
                 snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd, filename);
             } else {
                 snprintf(abs_path, sizeof(abs_path), "%s", filename);
+            }
+        }
+        // Normalize: resolve . and .. components
+        {
+            char resolved[2048];
+            if (realpath(abs_path, resolved)) {
+                snprintf(abs_path, sizeof(abs_path), "%s", resolved);
             }
         }
         const char* last_slash = strrchr(abs_path, '/');
