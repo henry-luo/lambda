@@ -2948,6 +2948,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     CssUnit unit = alh->data.length.unit;
                     if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
                         needs_compute = (ancestor_fs > 0);
+                    } else if (unit == CSS_UNIT_REM) {
+                        // rem resolves against root font-size, not ancestor's
+                        needs_compute = true;
                     }
                 } else if (alh->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     needs_compute = (ancestor_fs > 0);
@@ -2965,6 +2968,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                             px = val * ancestor_fs;
                         } else if (unit == CSS_UNIT_EX) {
                             px = val * ancestor_fs * 0.5f; // approximate x-height
+                        } else if (unit == CSS_UNIT_REM) {
+                            // resolve rem against root font-size
+                            px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, alh);
                         } else { // CSS_UNIT_CH
                             px = val * ancestor_fs * 0.5f; // approximate ch width
                         }
@@ -2975,7 +2981,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               alh->type == CSS_VALUE_TYPE_PERCENTAGE ? alh->data.percentage.value :
                               alh->data.length.value,
                               alh->type == CSS_VALUE_TYPE_PERCENTAGE ? "%" :
-                              alh->data.length.unit == CSS_UNIT_EM ? "em" : "ex/ch",
+                              alh->data.length.unit == CSS_UNIT_EM ? "em" :
+                              alh->data.length.unit == CSS_UNIT_REM ? "rem" : "ex/ch",
                               px, ancestor_fs);
                     span->blk->line_height = computed;
                 } else {
