@@ -1549,7 +1549,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
-    
 
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)

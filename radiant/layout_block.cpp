@@ -1786,6 +1786,10 @@ static float apply_text_box_trim(ViewBlock* block) {
 // (before the parent shrank). This function corrects their widths and repositions
 // text content for text-align center/right.
 static void adjust_block_children_after_shrink(ViewBlock* parent, float new_parent_cw, CssEnum inherited_text_align) {
+    // CSS Flexbox §9: Flex item widths are determined by the flex algorithm,
+    // not by normal block flow rules. Skip adjustment for flex containers.
+    if (parent->display.inner == CSS_VALUE_FLEX) return;
+
     for (View* child = ((ViewElement*)parent)->first_placed_child(); child; child = child->next()) {
         // only adjust block-level elements in normal flow
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
@@ -6997,6 +7001,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (!is_float) {
                 assert(lycon->line.is_line_start);
             }
+
+            // CSS 2.1 §10.8.1: Propagate last line baseline from block children
+            // to parent. When an inline-block contains only block-level children
+            // (no direct inline content), its baseline must come from the last
+            // in-flow block child's last line box. Each child's
+            // content_last_line_ascender is measured from its border-box top;
+            // translate to parent coordinates by adding child->y.
+            // Only the last in-flow child with line boxes matters — subsequent
+            // children with content_last_line_ascender > 0 naturally overwrite.
+            if (!is_float && content_last_line_ascender > 0) {
+                lycon->block.last_line_ascender = block->y + content_last_line_ascender;
+            }
+
             log_debug("%s block end, pa max_width: %f, pa advance_y: %f, block hg: %f", elmt->source_loc(),
                 lycon->block.max_width, lycon->block.advance_y, block->height);
         }
