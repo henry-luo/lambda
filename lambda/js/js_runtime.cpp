@@ -578,6 +578,45 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset process event listeners — callbacks referencing old heap
     extern void js_process_reset_listeners(void);
     js_process_reset_listeners();
+    // reset legacy RegExp static properties ($1-$9, input, etc.)
+    memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
+    // reset module namespace caches (epoch-cached objects may be stale after test mutations)
+    js_child_process_reset();
+    js_fs_reset();
+    js_path_reset();
+    js_os_reset();
+    js_url_module_reset();
+    js_util_reset();
+    extern void js_reset_querystring_module(void);
+    js_reset_querystring_module();
+    extern void js_reset_events_module(void);
+    js_reset_events_module();
+    extern void js_reset_buffer_module(void);
+    js_reset_buffer_module();
+    extern void js_crypto_reset(void);
+    js_crypto_reset();
+    extern void js_dns_reset(void);
+    js_dns_reset();
+    extern void js_zlib_reset(void);
+    js_zlib_reset();
+    extern void js_readline_reset(void);
+    js_readline_reset();
+    extern void js_stream_reset(void);
+    js_stream_reset();
+    extern void js_net_reset(void);
+    js_net_reset();
+    extern void js_tls_reset(void);
+    js_tls_reset();
+    extern void js_http_reset(void);
+    js_http_reset();
+    extern void js_https_reset(void);
+    js_https_reset();
+    extern void js_string_decoder_reset(void);
+    js_string_decoder_reset();
+    extern void js_assert_reset(void);
+    js_assert_reset();
+    extern void js_node_test_reset(void);
+    js_node_test_reset();
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -1819,6 +1858,7 @@ static double js_get_number(Item value) {
                 Item args[1] = { hint };
                 Item result = js_call_function(to_prim, value, args, 1);
                 if (get_type_id(result) != LMD_TYPE_MAP) return js_get_number(result);
+                js_throw_type_error("Cannot convert object to primitive value");
                 return NAN;
             }
         }
@@ -1828,25 +1868,34 @@ static double js_get_number(Item value) {
         if (own_pv) return js_get_number(pv);
         // Check valueOf method
         bool own_vo = false;
+        bool vo_callable = false;
         Item vo_fn = js_map_get_fast(value.map, "valueOf", 7, &own_vo);
         if (!own_vo) {
             Item vo_key = (Item){.item = s2it(heap_create_name("valueOf", 7))};
             vo_fn = js_prototype_lookup(value, vo_key);
         }
         if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
+            vo_callable = true;
             Item result = js_call_function(vo_fn, value, NULL, 0);
             if (get_type_id(result) != LMD_TYPE_MAP) return js_get_number(result);
         }
         // ES spec: also try toString after valueOf
         bool own_ts = false;
+        bool ts_callable = false;
         Item ts_fn = js_map_get_fast(value.map, "toString", 8, &own_ts);
         if (!own_ts) {
             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
             ts_fn = js_prototype_lookup(value, ts_key);
         }
         if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+            ts_callable = true;
             Item result = js_call_function(ts_fn, value, NULL, 0);
             if (get_type_id(result) != LMD_TYPE_MAP) return js_get_number(result);
+        }
+        // ES spec §7.1.1: throw TypeError only when callable methods were found
+        // but both returned objects (not when methods weren't found at all)
+        if (vo_callable || ts_callable) {
+            js_throw_type_error("Cannot convert object to primitive value");
         }
         return NAN;
     }
@@ -8410,6 +8459,7 @@ static Item js_array_like_to_array(Item obj) {
     // propagate exception from length getter (e.g. Object.defineProperty getter that throws)
     if (js_check_exception()) return ItemNull;
     int len = (int)js_get_number(len_val);
+    if (js_check_exception()) return ItemNull;
     if (len < 0) len = 0;
     if (len > 100000) len = 100000; // safety cap
     Item result = js_array_new(len);
@@ -10505,6 +10555,21 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (js_is_proxy(func_item)) {
             return js_proxy_trap_apply(func_item, this_val, args, arg_count);
         }
+        // ES spec §20.2.3: Function.prototype is itself callable and returns undefined
+        if (get_type_id(func_item) == LMD_TYPE_MAP) {
+            bool is_proto = false;
+            js_map_get_fast_ext(func_item.map, "__is_proto__", 12, &is_proto);
+            if (is_proto) {
+                bool has_cn = false;
+                Item cn = js_map_get_fast_ext(func_item.map, "__class_name__", 14, &has_cn);
+                if (has_cn && get_type_id(cn) == LMD_TYPE_STRING) {
+                    String* cns = it2s(cn);
+                    if (cns && cns->len == 8 && strncmp(cns->chars, "Function", 8) == 0) {
+                        return make_js_undefined();
+                    }
+                }
+            }
+        }
         // Support objects with .call method (e.g. Sizzle's push polyfill)
         if (get_type_id(func_item) == LMD_TYPE_MAP) {
             bool found = false;
@@ -12271,6 +12336,21 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 int from = argc > 1 ? (int)it2i(args[1]) : 0;
                 if (from < 0) { from += len; if (from < 0) from = 0; }
                 for (int i = from; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = i2it(i)};
+                }
+                return (Item){.item = i2it(-1)};
+            }
+            if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
+                if (argc < 1) return (Item){.item = i2it(-1)};
+                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+                int len = ta->length;
+                if (len == 0) return (Item){.item = i2it(-1)};
+                int from = argc > 1 ? (int)js_get_number(args[1]) : len - 1;
+                if (from < 0) from += len;
+                if (from >= len) from = len - 1;
+                if (from < 0) return (Item){.item = i2it(-1)};
+                for (int i = from; i >= 0; i--) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = i2it(i)};
                 }

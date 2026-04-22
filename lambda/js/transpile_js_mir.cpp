@@ -9897,9 +9897,9 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 if (found && found->fc && found->fc->func_item) {
                     // Direct call to compiled static method — pass class object as 'this'
-                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_ref_op(mt->ctx, found->fc->func_item),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, found->param_count));
+                    // Use jm_create_func_or_closure so closures (e.g. generators with
+                    // env) get a proper js_new_closure instead of bare js_new_function.
+                    MIR_reg_t fn_item = jm_create_func_or_closure(mt, found->fc);
 
                     // Check for spread args
                     bool has_spread = false;

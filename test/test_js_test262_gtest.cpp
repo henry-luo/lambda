@@ -745,6 +745,15 @@ static std::string g_harness_assert;
 static std::mutex  g_harness_mutex;
 static std::unordered_map<std::string, std::string> g_harness_cache;
 
+// Harness files included in preamble (compiled once, not per-test).
+// These are expensive to MIR-compile due to large regex/code; adding them to the
+// preamble avoids recompilation for every test that uses them.
+static std::unordered_set<std::string> g_preamble_includes;
+static const char* PREAMBLE_INCLUDE_FILES[] = {
+    "nativeFunctionMatcher.js",
+    NULL
+};
+
 static const std::string& get_harness_file(const std::string& name) {
     std::lock_guard<std::mutex> lock(g_harness_mutex);
     auto it = g_harness_cache.find(name);
@@ -770,14 +779,23 @@ struct Test262Prepared {
 
 // Assemble combined source on-the-fly from metadata.
 // Reads test file from disk (OS-cached) and prepends harness files.
-// Assemble the harness source (sta.js + assert.js) — sent once per batch via harness: protocol
+// Assemble the harness source (sta.js + assert.js + preamble includes) — sent once per batch via harness: protocol
 static std::string assemble_harness_source() {
     std::string harness;
-    harness.reserve(g_harness_sta.size() + g_harness_assert.size() + 4);
+    harness.reserve(g_harness_sta.size() + g_harness_assert.size() + 65536);
     harness += g_harness_sta;
     harness += '\n';
     harness += g_harness_assert;
     harness += '\n';
+    // Append preamble includes (compiled once, reused across all tests in batch)
+    for (const char** f = PREAMBLE_INCLUDE_FILES; *f; f++) {
+        const std::string& src = get_harness_file(*f);
+        if (!src.empty()) {
+            harness += src;
+            harness += '\n';
+            g_preamble_includes.insert(*f);
+        }
+    }
     return harness;
 }
 
@@ -801,6 +819,8 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     combined.reserve(source.size() + 4096);
 
     for (auto& inc : p.includes) {
+        // Skip includes already compiled into the preamble
+        if (g_preamble_includes.count(inc)) continue;
         const std::string& harness_src = get_harness_file(inc);
         if (!harness_src.empty()) {
             combined += harness_src;
