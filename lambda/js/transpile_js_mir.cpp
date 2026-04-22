@@ -17917,6 +17917,35 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, forit_has_return),
             MIR_new_int_op(mt->ctx, 0)));
+        // In generators: register forit_return_val and forit_has_return as env-stored
+        // so they survive yield suspend/resume inside the for-of body
+        if (mt->in_generator && mt->gen_env_reg) {
+            int ret_slot = mt->gen_local_slot_count++;
+            int hret_slot = mt->gen_local_slot_count++;
+            {
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "_forit_ret_%d", mt->label_counter);
+                entry.var.reg = forit_return_val;
+                entry.var.from_env = true;
+                entry.var.env_slot = ret_slot;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+            {
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "_forit_hret_%d", mt->label_counter);
+                entry.var.reg = forit_has_return;
+                entry.var.from_env = true;
+                entry.var.env_slot = hret_slot;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+            mt->label_counter++;
+        }
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
         tc->catch_label = l_iter_exc;
         tc->finally_label = 0;
