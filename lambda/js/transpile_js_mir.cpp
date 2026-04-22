@@ -2357,7 +2357,23 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
 // Helper: emit js_set_function_name call if name is non-empty, and formal_length if needed
 static void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length = -1) {
     if (name && name[0]) {
-        MIR_reg_t name_reg = jm_box_string_literal(mt, name, strlen(name));
+        // Convert __private_X back to #X for ES spec compliance
+        char priv_buf[256];
+        const char* display_name = name;
+        if (strncmp(name, "__private_", 10) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", name + 10);
+            display_name = priv_buf;
+            (void)len;
+        } else if (strncmp(name, "get __private_", 14) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", name + 14);
+            display_name = priv_buf;
+            (void)len;
+        } else if (strncmp(name, "set __private_", 14) == 0) {
+            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", name + 14);
+            display_name = priv_buf;
+            (void)len;
+        }
+        MIR_reg_t name_reg = jm_box_string_literal(mt, display_name, strlen(display_name));
         jm_call_void_2(mt, "js_set_function_name",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
@@ -7456,7 +7472,6 @@ static void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_no
         chk = chk->next;
     }
     // Convert iterable to array (handles strings, generators, Maps, Sets, custom iterables)
-    // Only do this if pattern actually needs to extract elements
     if (has_real_elements) {
         src = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, src));

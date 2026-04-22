@@ -5877,8 +5877,17 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
     // Returns an array of all own Symbol keys of an object.
     // In our engine, symbols are stored as string keys "__sym_<N>" in the shape.
     // Walk shape entries, find __sym_* keys, convert back to symbol items.
-    if (get_type_id(object) != LMD_TYPE_MAP) return js_array_new(0);
-    Map* m = object.map;
+
+    Map* m = nullptr;
+    if (get_type_id(object) == LMD_TYPE_MAP) {
+        m = object.map;
+    } else if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        // array companion map holds symbol properties
+        Array* arr = object.array;
+        if (arr->extra != 0) {
+            m = (Map*)(uintptr_t)arr->extra;
+        }
+    }
     if (!m || !m->type) return js_array_new(0);
     TypeMap* tm = (TypeMap*)m->type;
 
@@ -7035,7 +7044,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v23: handle array objects — numeric indices and "length"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Item k = js_to_string(key);
+        Item k;
+        // Symbol keys → __sym_N format (must check before js_to_string which throws for symbols)
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        } else {
+            k = js_to_string(key);
+        }
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};

@@ -850,6 +850,8 @@ extern "C" void js_set_arguments_info(int64_t is_strict) {
     js_pending_args_is_strict = (int)is_strict;
 }
 
+extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+
 extern "C" Item js_build_arguments_object() {
     int argc = js_pending_call_argc;
     Item* args = js_pending_call_args;
@@ -866,6 +868,12 @@ extern "C" Item js_build_arguments_object() {
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
     js_property_set(companion, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
+
+    // ES6 §9.4.4.6 step 12: Set Symbol.iterator to Array.prototype.values
+    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item si_fn = js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+    js_property_set(companion, si_key, si_fn);
+    js_mark_non_enumerable(companion, si_key);
 
     // v29: Set callee property (non-strict only; strict mode throws TypeError on access)
     if (is_strict) {
@@ -8537,7 +8545,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // v27: Handle arrays — check __ne_ marker from companion map
         if (get_type_id(this_val) == LMD_TYPE_ARRAY) {
             if (!it2b(js_has_own_property(this_val, arg0))) return (Item){.item = ITEM_FALSE};
-            Item k = js_to_string(arg0);
+            Item k;
+            // Symbol keys → __sym_N format (must check before js_to_string)
+            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
+                int64_t id = -(it2i(arg0) + (int64_t)JS_SYMBOL_BASE);
+                char buf[32];
+                snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+                k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+            } else {
+                k = js_to_string(arg0);
+            }
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 // "length" is always non-enumerable for arrays
@@ -12044,8 +12061,8 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
                 pos += clen;
             }
         }
-    } else {
-        // Try iterator protocol for other iterables
+    } else if (tid != LMD_TYPE_NULL && iterable.item != ITEM_JS_UNDEFINED) {
+        // Try iterator protocol for other iterables (null/undefined → empty set per spec)
         Item arr = js_iterable_to_array(iterable);
         if (get_type_id(arr) == LMD_TYPE_ARRAY) {
             Array* a = arr.array;
@@ -12077,8 +12094,8 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
                 js_collection_method(map, 0, node->key, node->value);
             }
         }
-    } else {
-        // Try iterator protocol for other iterables
+    } else if (tid != LMD_TYPE_NULL && iterable.item != ITEM_JS_UNDEFINED) {
+        // Try iterator protocol for other iterables (null/undefined → empty map per spec)
         Item arr = js_iterable_to_array(iterable);
         if (get_type_id(arr) == LMD_TYPE_ARRAY) {
             Array* a = arr.array;
@@ -15825,7 +15842,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (start < 0) start = src->length + start;
         if (start < 0) start = 0;
         if (start > src->length) start = src->length;
-        int delete_count = argc > 1 ? (int)js_get_number(args[1]) : (src->length - start);
+        // ES2023 spec: if start not present → deleteCount=0; if start present but deleteCount not → len-start
+        int delete_count = argc > 1 ? (int)js_get_number(args[1]) : (argc == 0 ? 0 : (src->length - start));
         if (delete_count < 0) delete_count = 0;
         if (start + delete_count > src->length) delete_count = src->length - start;
         int insert_count = argc > 2 ? argc - 2 : 0;
@@ -17210,6 +17228,7 @@ struct JsGenerator {
     bool   is_async;          // true for async generators: .next()/.return()/.throw() return Promises
     Item   delegate;          // active yield* delegate iterator (ItemNull when none)
     int64_t delegate_resume;  // state to resume after delegate is exhausted
+    int    delegate_idx;      // current index for array/iterable delegation
 };
 
 #define JS_MAX_GENERATORS 4096
@@ -17270,6 +17289,7 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     gen->is_async = (is_async != 0);
     gen->delegate = ItemNull;
     gen->delegate_resume = -1;
+    gen->delegate_idx = 0;
 
     // Create a map object that references this generator via a hidden index
     Item obj = js_new_object();
@@ -17327,22 +17347,57 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     // If we have an active delegate (from yield*), drain it first
     if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
-        Item del_result = js_generator_next(gen->delegate, input);
-        // Check if delegate is done
-        if (get_type_id(del_result) == LMD_TYPE_MAP) {
-            String* done_key = heap_create_name("done", 4);
-            Item done_val = js_property_get(del_result, (Item){.item = s2it(done_key)});
-            if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
-                // Delegate exhausted — clear it and resume our state machine
+        // Handle delegation to generators vs plain iterables (arrays, strings, etc.)
+        if (js_is_generator(gen->delegate)) {
+            Item del_result = js_generator_next(gen->delegate, input);
+            // Check if delegate is done
+            if (get_type_id(del_result) == LMD_TYPE_MAP) {
+                String* done_key = heap_create_name("done", 4);
+                Item done_val = js_property_get(del_result, (Item){.item = s2it(done_key)});
+                if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
+                    // Delegate exhausted — clear it and resume our state machine
+                    String* val_key = heap_create_name("value", 5);
+                    Item return_val = js_property_get(del_result, (Item){.item = s2it(val_key)});
+                    gen->delegate = ItemNull;
+                    gen->state = gen->delegate_resume;
+                    gen->delegate_resume = -1;
+                    input = return_val;
+                    // Fall through to call state machine at resumed state
+                } else {
+                    // Delegate still producing — return its result
+                    gen->executing = false;
+                    return is_async ? js_promise_resolve(del_result) : del_result;
+                }
+            }
+        } else {
+            // Non-generator delegate (array, string, etc.) — convert to array and iterate
+            Item delegate_arr = gen->delegate;
+            if (get_type_id(delegate_arr) != LMD_TYPE_ARRAY) {
+                delegate_arr = js_iterable_to_array(delegate_arr);
+                gen->delegate = delegate_arr;
+            }
+            if (get_type_id(delegate_arr) == LMD_TYPE_ARRAY) {
+                Array* darr = delegate_arr.array;
+                int idx = gen->delegate_idx;
+                if (idx < darr->length) {
+                    Item value = darr->items[idx];
+                    gen->delegate_idx = idx + 1;
+                    gen->executing = false;
+                    Item iter_result = js_make_iter_result(value, false);
+                    return is_async ? js_promise_resolve(iter_result) : iter_result;
+                } else {
+                    // Array exhausted — resume state machine
+                    gen->delegate = ItemNull;
+                    gen->state = gen->delegate_resume;
+                    gen->delegate_resume = -1;
+                    gen->delegate_idx = 0;
+                    // Fall through to call state machine at resumed state
+                }
+            } else {
+                // Conversion failed — resume
                 gen->delegate = ItemNull;
                 gen->state = gen->delegate_resume;
                 gen->delegate_resume = -1;
-                // Fall through to call state machine at resumed state
-            } else {
-                // Delegate still producing — return its result
-                gen->executing = false;
-                // For async generators, delegate results are already wrapped if delegate is async
-                return is_async ? js_promise_resolve(del_result) : del_result;
             }
         }
     }
@@ -17368,6 +17423,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             // value is the iterable to delegate to, next_state is the resume state
             gen->delegate = value;
             gen->delegate_resume = next_state;
+            gen->delegate_idx = 0;
             // Immediately start draining the delegate
             gen->executing = false;
             return js_generator_next(generator, make_js_undefined());
@@ -17760,6 +17816,19 @@ extern "C" Item js_iterator_close(Item iterator) {
 // v15: Convert an iterable to an array. If it's a generator, drain it.
 // If it's already an array, return it as-is.
 extern "C" Item js_iterable_to_array(Item iterable) {
+    // If there's already a pending exception (e.g., ReferenceError from variable lookup),
+    // don't overwrite it with a new TypeError
+    if (js_exception_pending) return ItemNull;
+
+    // null and undefined are not iterable — throw TypeError (ES spec GetIterator step 1)
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error(tid == LMD_TYPE_NULL
+            ? "null is not iterable (cannot destructure)"
+            : "undefined is not iterable (cannot destructure)");
+        return ItemNull;
+    }
+
     if (get_type_id(iterable) == LMD_TYPE_ARRAY) return iterable;
 
     // Typed arrays (Uint8Array, Int32Array, etc.): convert to plain array of boxed numbers
@@ -17860,8 +17929,8 @@ extern "C" Item js_iterable_to_array(Item iterable) {
     if (get_type_id(iterable) == LMD_TYPE_MAP) {
         // Already handled above - this is for other objects with next()
     }
-    TypeId tid = get_type_id(iterable);
-    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+    TypeId tid2 = get_type_id(iterable);
+    if (tid2 == LMD_TYPE_MAP || tid2 == LMD_TYPE_ELEMENT) {
         // Check for [Symbol.iterator]() which returns an iterator (JS iterable protocol)
         // Symbol.iterator has well-known ID=1, stored as property key "__sym_1"
         Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
