@@ -1322,6 +1322,9 @@ extern "C" {
     // Mark arrow functions as non-constructable
     void js_mark_arrow_func(Item fn_item);
 
+    // Mark functions as strict mode
+    void js_mark_strict_func(Item fn_item);
+
     // Rounding functions (int versions return identity)
     int64_t fn_floor_i(int64_t x);
     int64_t fn_ceil_i(int64_t x);

@@ -169,6 +169,7 @@ struct JsFuncCollected {
     bool uses_arguments;            // v18q: true if function body references 'arguments'
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
     bool is_reassigned;              // function name is an assignment target somewhere in the module
+    bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -571,21 +572,27 @@ static int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname) {
 // v20: Check if a function body starts with "use strict" directive.
 static bool jm_has_use_strict_directive(JsFunctionNode* fn) {
     if (!fn->body) return false;
-    JsAstNode* first = NULL;
+    JsAstNode* stmt = NULL;
     if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
         JsBlockNode* blk = (JsBlockNode*)fn->body;
-        first = blk->statements;
+        stmt = blk->statements;
     } else {
         return false;
     }
-    if (!first || first->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) return false;
-    JsExpressionStatementNode* es = (JsExpressionStatementNode*)first;
-    if (!es->expression || es->expression->node_type != JS_AST_NODE_LITERAL) return false;
-    JsLiteralNode* lit = (JsLiteralNode*)es->expression;
-    if (lit->literal_type != JS_LITERAL_STRING) return false;
-    return lit->value.string_value &&
-           lit->value.string_value->len == 10 &&
-           strncmp(lit->value.string_value->chars, "use strict", 10) == 0;
+    // scan directive prologue: string literal expression statements at the top
+    while (stmt && stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+        if (!es->expression || es->expression->node_type != JS_AST_NODE_LITERAL) break;
+        JsLiteralNode* lit = (JsLiteralNode*)es->expression;
+        if (lit->literal_type != JS_LITERAL_STRING) break;
+        if (lit->value.string_value &&
+            lit->value.string_value->len == 10 &&
+            strncmp(lit->value.string_value->chars, "use strict", 10) == 0) {
+            return true;
+        }
+        stmt = stmt->next;
+    }
+    return false;
 }
 
 // v20: Emit writeback from param register to arguments[param_index]
@@ -5936,6 +5943,18 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo);
 static void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 static void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 static void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
+
+// v30: Helper to create a class method function (non-closure) and mark it strict
+static MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
+    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
+        MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
+    if (fc->is_strict) {
+        jm_call_void_1(mt, "js_mark_strict_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+    }
+    return fn_item;
+}
 
 static MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
     switch (lit->literal_type) {
@@ -11913,11 +11932,18 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     }
                 }
 
-                // Set this to undefined AFTER evaluating args (so `this` in args
+                // Set this AFTER evaluating args (so `this` in args
                 // still reads the caller's this binding, not undefined)
+                // OrdinaryCallBindThis: sloppy → globalThis, strict → undefined
                 MIR_reg_t undef_this = jm_emit_undefined(mt);
-                jm_call_void_1(mt, "js_set_this",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
+                if (!fc->is_strict) {
+                    MIR_reg_t global_this = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+                    jm_call_void_1(mt, "js_set_this",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, global_this));
+                } else {
+                    jm_call_void_1(mt, "js_set_this",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
+                }
                 jm_call_void_1(mt, "js_set_direct_new_target",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_this));
 
@@ -13889,6 +13915,11 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
         jm_call_void_1(mt, "js_mark_arrow_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
+    // v30: Mark strict mode functions
+    if (fc->is_strict) {
+        jm_call_void_1(mt, "js_mark_strict_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
     return fn_reg;
 }
 
@@ -14125,6 +14156,11 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     // Mark arrow functions as non-constructable
     if (fn->is_arrow) {
         jm_call_void_1(mt, "js_mark_arrow_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
+    // v30: Mark strict mode functions
+    if (fc->is_strict) {
+        jm_call_void_1(mt, "js_mark_strict_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     return fn_reg;
@@ -16503,11 +16539,17 @@ static MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollecte
                 MIR_new_reg_op(mt->ctx, undef_val)));
         }
     }
-    return jm_call_4(mt, "js_new_closure", MIR_T_I64,
+    MIR_reg_t closure_reg = jm_call_4(mt, "js_new_closure", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+    // v30: Mark strict mode for class methods (class bodies are implicitly strict)
+    if (fc->is_strict) {
+        jm_call_void_1(mt, "js_mark_strict_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, closure_reg));
+    }
+    return closure_reg;
 }
 
 // new expression: new TypedArray(len), new Array(len), new Object()
@@ -22351,6 +22393,44 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     jm_collect_functions(mt, root);
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
+    // Phase 1.0b: Determine strict mode for each collected function.
+    // A function is strict if: (a) it has "use strict" directive, (b) global/module is strict,
+    // (c) it's a class method, or (d) its parent is strict (strict propagates down).
+    {
+        // Step 1: mark functions with own "use strict" directive or global/module strict
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFuncCollected* e = &mt->func_entries[fi];
+            if (mt->is_global_strict || mt->is_module) {
+                e->is_strict = true;
+            } else if (e->node && jm_has_use_strict_directive(e->node)) {
+                e->is_strict = true;
+            } else if (e->is_constructor) {
+                e->is_strict = true; // class constructors are strict
+            }
+        }
+        // Step 2: mark class methods as strict (class bodies are implicitly strict)
+        for (int ci = 0; ci < mt->class_count; ci++) {
+            JsClassEntry* ce = &mt->class_entries[ci];
+            for (int mi = 0; mi < ce->method_count; mi++) {
+                JsClassMethodEntry* me = &ce->methods[mi];
+                if (me->fc) me->fc->is_strict = true;
+            }
+        }
+        // Step 3: propagate strict from parent to child (func_entries are post-order,
+        // so parent_index > child index; iterate in reverse to propagate top-down)
+        for (int fi = mt->func_count - 1; fi >= 0; fi--) {
+            JsFuncCollected* e = &mt->func_entries[fi];
+            if (e->is_strict) {
+                // mark all direct children
+                for (int ci = 0; ci < fi; ci++) {
+                    if (mt->func_entries[ci].parent_index == fi) {
+                        mt->func_entries[ci].is_strict = true;
+                    }
+                }
+            }
+        }
+    }
+
     // Phase 1.1: Pre-scan top-level const declarations with literal values
     // These become module-level constants accessible from any function scope
     mt->module_consts = hashmap_new(sizeof(JsModuleConstEntry), 16, 0, 0,
@@ -24179,6 +24259,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // v20: Mark generator functions
                     if (fn->is_generator) {
                         jm_call_void_1(mt, "js_mark_generator_func",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                    }
+                    // v30: Mark strict mode functions
+                    if (fc->is_strict) {
+                        jm_call_void_1(mt, "js_mark_strict_func",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                     }
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

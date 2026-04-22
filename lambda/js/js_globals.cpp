@@ -7836,6 +7836,24 @@ static void js_stringify_escape_string(StrBuf* sb, const char* s, int len) {
                     char esc[8];
                     snprintf(esc, sizeof(esc), "\\u%04x", c);
                     strbuf_append_str_n(sb, esc, 6);
+                } else if (c >= 0xED && c <= 0xEF && i + 2 < len) {
+                    // Possible UTF-8 surrogate sequence (U+D800-U+DFFF) or BMP chars
+                    unsigned char c2 = (unsigned char)s[i + 1];
+                    unsigned char c3 = (unsigned char)s[i + 2];
+                    if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
+                        unsigned int cp = ((c & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+                        if (cp >= 0xD800 && cp <= 0xDFFF) {
+                            // ES2019: lone surrogate → \uXXXX escape
+                            char esc[8];
+                            snprintf(esc, sizeof(esc), "\\u%04x", cp);
+                            strbuf_append_str_n(sb, esc, 6);
+                            i += 2;
+                        } else {
+                            strbuf_append_char(sb, (char)c);
+                        }
+                    } else {
+                        strbuf_append_char(sb, (char)c);
+                    }
                 } else {
                     strbuf_append_char(sb, (char)c);
                 }
@@ -7878,7 +7896,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         vtype = get_type_id(value);
     }
 
-    // Step 4: Unwrap Boolean/Number/String wrapper objects
+    // Step 4: Unwrap Boolean/Number/String/BigInt wrapper objects
     if (vtype == LMD_TYPE_MAP) {
         bool cn_own = false;
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
@@ -7899,6 +7917,10 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
                 // ES spec: ToString(value) — calls toString on wrapper object
                 value = js_to_string(value);
                 vtype = get_type_id(value);
+            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "BigInt", 6) == 0) {
+                // ES spec step 10: BigInt → TypeError
+                js_throw_type_error("Do not know how to serialize a BigInt");
+                return false;
             }
         }
     }
@@ -7907,6 +7929,15 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
         || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
         return false;
+    }
+
+    // BigInt → TypeError (ES spec §24.5.2.9 step 10)
+    if (vtype == LMD_TYPE_DECIMAL) {
+        Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+            js_throw_type_error("Do not know how to serialize a BigInt");
+            return false;
+        }
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
@@ -10110,6 +10141,8 @@ extern "C" Item js_symbol_well_known(Item name) {
             return js_make_symbol_item(JS_SYMBOL_ID_SPECIES);
         if (s->len == 5 && strncmp(s->chars, "match", 5) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_MATCH);
+        if (s->len == 8 && strncmp(s->chars, "matchAll", 8) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_MATCH_ALL);
         if (s->len == 7 && strncmp(s->chars, "replace", 7) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_REPLACE);
         if (s->len == 6 && strncmp(s->chars, "search", 6) == 0)
