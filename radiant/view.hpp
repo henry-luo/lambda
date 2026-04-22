@@ -661,6 +661,8 @@ typedef struct {
     // Multiple gradient layers (for stacked gradients)
     RadialGradient** radial_layers;  // array of additional radial gradients
     int radial_layer_count;
+    LinearGradient** linear_layers;  // array of additional linear gradients
+    int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
 
