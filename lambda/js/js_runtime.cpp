@@ -3379,6 +3379,16 @@ enum JsBuiltinId {
     JS_BUILTIN_TYPED_ARRAY_FROM,
     JS_BUILTIN_TYPED_ARRAY_OF,
     JS_BUILTIN_REGEXP_COMPILE,       // RegExp.prototype.compile (Annex B)
+    // RegExp prototype accessor getters (v89: flag accessors on prototype)
+    JS_BUILTIN_REGEXP_GET_SOURCE,
+    JS_BUILTIN_REGEXP_GET_FLAGS,
+    JS_BUILTIN_REGEXP_GET_GLOBAL,
+    JS_BUILTIN_REGEXP_GET_IGNORECASE,
+    JS_BUILTIN_REGEXP_GET_MULTILINE,
+    JS_BUILTIN_REGEXP_GET_DOTALL,
+    JS_BUILTIN_REGEXP_GET_UNICODE,
+    JS_BUILTIN_REGEXP_GET_STICKY,
+    JS_BUILTIN_REGEXP_GET_HASINDICES,
     JS_BUILTIN_ARRAYBUFFER_SLICE,    // ArrayBuffer.prototype.slice
     // Atomics methods
     JS_BUILTIN_ATOMICS_ADD,
@@ -5976,6 +5986,30 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 Item mf = js_get_or_create_builtin(sym_methods[mi].bid, sym_methods[mi].display, sym_methods[mi].pc);
                                 js_property_set(fn->prototype, mk, mf);
                                 js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // v89: Accessor getters for flag properties on RegExp.prototype
+                            struct { const char* prop; int prop_len; const char* getter_key; int gk_len; int bid; } accessors[] = {
+                                {"source",     6, "__get_source",     12, JS_BUILTIN_REGEXP_GET_SOURCE},
+                                {"flags",      5, "__get_flags",      11, JS_BUILTIN_REGEXP_GET_FLAGS},
+                                {"global",     6, "__get_global",     12, JS_BUILTIN_REGEXP_GET_GLOBAL},
+                                {"ignoreCase", 10, "__get_ignoreCase", 16, JS_BUILTIN_REGEXP_GET_IGNORECASE},
+                                {"multiline",  9, "__get_multiline",  15, JS_BUILTIN_REGEXP_GET_MULTILINE},
+                                {"dotAll",     6, "__get_dotAll",     12, JS_BUILTIN_REGEXP_GET_DOTALL},
+                                {"unicode",    7, "__get_unicode",    13, JS_BUILTIN_REGEXP_GET_UNICODE},
+                                {"sticky",     6, "__get_sticky",     12, JS_BUILTIN_REGEXP_GET_STICKY},
+                                {"hasIndices", 10, "__get_hasIndices", 16, JS_BUILTIN_REGEXP_GET_HASINDICES},
+                                {NULL, 0, NULL, 0, 0}
+                            };
+                            for (int ai = 0; accessors[ai].prop; ai++) {
+                                char display[32];
+                                snprintf(display, sizeof(display), "get %s", accessors[ai].prop);
+                                Item gf = js_get_or_create_builtin(accessors[ai].bid, display, 0);
+                                Item gk = (Item){.item = s2it(heap_create_name(accessors[ai].getter_key, accessors[ai].gk_len))};
+                                js_property_set(fn->prototype, gk, gf);
+                                js_mark_non_enumerable(fn->prototype, gk);
+                                // Mark the property itself as non-enumerable so getOwnPropertyDescriptor returns correct attributes
+                                Item pk = (Item){.item = s2it(heap_create_name(accessors[ai].prop, accessors[ai].prop_len))};
+                                js_mark_non_enumerable(fn->prototype, pk);
                             }
                         }
                         // v88: Populate Promise.prototype methods
@@ -10392,6 +10426,81 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return this_val;
     }
 
+    // v89: RegExp prototype accessor getters
+    case JS_BUILTIN_REGEXP_GET_SOURCE:
+    case JS_BUILTIN_REGEXP_GET_FLAGS:
+    case JS_BUILTIN_REGEXP_GET_GLOBAL:
+    case JS_BUILTIN_REGEXP_GET_IGNORECASE:
+    case JS_BUILTIN_REGEXP_GET_MULTILINE:
+    case JS_BUILTIN_REGEXP_GET_DOTALL:
+    case JS_BUILTIN_REGEXP_GET_UNICODE:
+    case JS_BUILTIN_REGEXP_GET_STICKY:
+    case JS_BUILTIN_REGEXP_GET_HASINDICES: {
+        // ES2023 §22.2.5.x: get RegExp.prototype.<flag>
+        if (get_type_id(this_val) != LMD_TYPE_MAP) {
+            return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
+        }
+        // The 'flags' getter works on ANY object per spec (§22.2.5.4)
+        if (builtin_id == JS_BUILTIN_REGEXP_GET_FLAGS) {
+            // Build flags string from individual properties in spec order: dgimsuy
+            char flags_buf[10];
+            int fi = 0;
+            struct { const char* prop; int len; char flag; } flag_map[] = {
+                {"hasIndices", 10, 'd'},
+                {"global",     6, 'g'},
+                {"ignoreCase", 10, 'i'},
+                {"multiline",  9, 'm'},
+                {"dotAll",     6, 's'},
+                {"unicode",    7, 'u'},
+                // unicodeSets 'v' — skip for now
+                {"sticky",     6, 'y'},
+                {NULL, 0, 0}
+            };
+            for (int k = 0; flag_map[k].prop; k++) {
+                Item val = js_property_get(this_val, (Item){.item = s2it(heap_create_name(flag_map[k].prop, flag_map[k].len))});
+                if (it2b(js_to_boolean(val))) flags_buf[fi++] = flag_map[k].flag;
+            }
+            flags_buf[fi] = '\0';
+            return (Item){.item = s2it(heap_create_name(flags_buf, fi))};
+        }
+        // For source and individual flag getters, check this is a regexp
+        bool has_rd = false;
+        js_map_get_fast(this_val.map, "__rd", 4, &has_rd);
+        if (!has_rd) {
+            // RegExp.prototype itself: return undefined for flag getters, "(?:)" for source
+            bool has_cn = false;
+            Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &has_cn);
+            if (has_cn && get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "RegExp", 6) == 0) {
+                if (builtin_id == JS_BUILTIN_REGEXP_GET_SOURCE) return (Item){.item = s2it(heap_create_name("(?:)", 4))};
+                return make_js_undefined();
+            }
+            return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
+        }
+        if (builtin_id == JS_BUILTIN_REGEXP_GET_SOURCE) {
+            bool own = false;
+            Item src = js_map_get_fast(this_val.map, "source", 6, &own);
+            return own ? src : (Item){.item = s2it(heap_create_name("(?:)", 4))};
+        }
+        // Boolean flag getters — read from own data properties
+        {
+            const char* prop = NULL;
+            int prop_len = 0;
+            switch (builtin_id) {
+                case JS_BUILTIN_REGEXP_GET_GLOBAL:     prop = "global";     prop_len = 6; break;
+                case JS_BUILTIN_REGEXP_GET_IGNORECASE: prop = "ignoreCase"; prop_len = 10; break;
+                case JS_BUILTIN_REGEXP_GET_MULTILINE:  prop = "multiline";  prop_len = 9; break;
+                case JS_BUILTIN_REGEXP_GET_DOTALL:     prop = "dotAll";     prop_len = 6; break;
+                case JS_BUILTIN_REGEXP_GET_UNICODE:    prop = "unicode";    prop_len = 7; break;
+                case JS_BUILTIN_REGEXP_GET_STICKY:     prop = "sticky";     prop_len = 6; break;
+                case JS_BUILTIN_REGEXP_GET_HASINDICES: prop = "hasIndices"; prop_len = 10; break;
+                default: return make_js_undefined();
+            }
+            bool own = false;
+            Item val = js_map_get_fast(this_val.map, prop, prop_len, &own);
+            return own ? val : (Item){.item = b2it(BOOL_FALSE)};
+        }
+    }
+
     // v55: Set/Map keys/values/entries — return proper iterator objects
     case JS_BUILTIN_SET_VALUES:   // Set.prototype.values() / Set.prototype[@@iterator]()
     case JS_BUILTIN_SET_KEYS:     // Set.prototype.keys() — same as values for Set
@@ -11581,8 +11690,18 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     memcpy(src_buf, pattern, pattern_len);
     src_buf[pattern_len] = '\0';
     char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
-    memcpy(flg_buf, flags, flags_len);
-    flg_buf[flags_len] = '\0';
+    // v89: store flags in canonical order dgimsuy (ES spec §22.2.5.4)
+    {
+        int fi = 0;
+        static const char flag_order[] = "dgimsuy";
+        for (int oi = 0; flag_order[oi]; oi++) {
+            for (int si = 0; si < flags_len; si++) {
+                if (flags[si] == flag_order[oi]) { flg_buf[fi++] = flag_order[oi]; break; }
+            }
+        }
+        flg_buf[fi] = '\0';
+        flags_len = fi;
+    }
     // set visible properties — use heap_strcpy with explicit length to handle NUL bytes
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
     Item source_val = (Item){.item = s2it(heap_strcpy(src_buf, pattern_len))};
