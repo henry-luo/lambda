@@ -2863,6 +2863,25 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_to_string(num);
     }
 
+    // Fallback: check Object.prototype for user-set methods
+    // (e.g. Object.prototype.exec = RegExp.prototype.exec; (1.0).exec("test"))
+    {
+        extern Item js_get_constructor(Item name);
+        extern Item js_property_get(Item obj, Item key);
+        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+        if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+            Item obj_proto = js_property_get(obj_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+            if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
+                bool found = false;
+                Item fn = js_map_get_fast_ext(obj_proto.map, method->chars, (int)method->len, &found);
+                if (found && get_type_id(fn) == LMD_TYPE_FUNC) {
+                    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+                    return js_call_function(fn, num, args, argc);
+                }
+            }
+        }
+    }
+
     log_debug("js_number_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
 }
@@ -3838,6 +3857,80 @@ extern "C" Item js_in(Item key, Item object) {
                 return (Item){.item = b2it(false)};
             }
             return (Item){.item = b2it(true)};
+        }
+        // Check Array.prototype and Object.prototype methods
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk) {
+                Item builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, sk->chars, (int)sk->len);
+                if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
+                if (sk->len == 11 && strncmp(sk->chars, "constructor", 11) == 0)
+                    return (Item){.item = b2it(true)};
+            }
+        }
+        return (Item){.item = b2it(false)};
+    }
+    if (type == LMD_TYPE_FUNC) {
+        // partial JsFunction layout for in-operator property checks
+        struct JsFuncInLayout {
+            TypeId type_id;
+            void* func_ptr;
+            int param_count;
+            Item* env;
+            int env_size;
+            Item prototype;
+            Item bound_this;
+            Item* bound_args;
+            int bound_argc;
+            String* name;
+            int builtin_id;
+            Item properties_map;
+            uint8_t flags;
+        };
+        #define JS_FUNC_FLAG_ARROW_IN 2
+        JsFuncInLayout* fn = (JsFuncInLayout*)object.function;
+        if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
+            const char* key_str = key.get_chars();
+            int key_len = (int)key.get_len();
+            // Check properties_map first (overridden/deleted properties)
+            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                bool pm_found = false;
+                Item pm_val = js_map_get_fast_ext(fn->properties_map.map, key_str, key_len, &pm_found);
+                if (pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL)
+                    return (Item){.item = b2it(true)};
+                // Check accessor descriptor
+                if (key_len < 128) {
+                    char getter_key[256];
+                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
+                    int gk_len = key_len + 6;
+                    bool gk_found = false;
+                    js_map_get_fast_ext(fn->properties_map.map, getter_key, gk_len, &gk_found);
+                    if (gk_found) return (Item){.item = b2it(true)};
+                }
+            }
+            // Virtual properties: name, length, prototype
+            if (key_len == 4 && strncmp(key_str, "name", 4) == 0)
+                return (Item){.item = b2it(true)};
+            if (key_len == 6 && strncmp(key_str, "length", 6) == 0)
+                return (Item){.item = b2it(true)};
+            if (key_len == 9 && strncmp(key_str, "prototype", 9) == 0) {
+                // Only return true if prototype is already explicitly set.
+                // Don't lazily create — class methods/arrows/builtins don't have .prototype
+                // and we can't distinguish concise methods from regular functions by flags alone.
+                if (fn->prototype.item != 0 && get_type_id(fn->prototype) == LMD_TYPE_MAP)
+                    return (Item){.item = b2it(true)};
+                // Check properties_map was already done above, so fall through to false
+            }
+            if (key_len == 6 && strncmp(key_str, "caller", 6) == 0)
+                return (Item){.item = b2it(true)};
+            if (key_len == 9 && strncmp(key_str, "arguments", 9) == 0)
+                return (Item){.item = b2it(true)};
+            // Function.prototype methods and Object.prototype methods
+            Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, key_str, key_len);
+            if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
+            // Also check Object.prototype methods (constructor, hasOwnProperty, etc.)
+            if (key_len == 11 && strncmp(key_str, "constructor", 11) == 0)
+                return (Item){.item = b2it(true)};
         }
         return (Item){.item = b2it(false)};
     }

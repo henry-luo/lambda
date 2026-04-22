@@ -2742,6 +2742,7 @@ extern "C" Item js_bigint_constructor(Item value) {
 
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     // BigInt.asIntN(bits, bigintValue) — clamp to signed N-bit range
+    // ES spec: mod = bigintValue mod 2^bits; if mod >= 2^(bits-1) return mod - 2^bits, else mod
     Item bits_num = js_to_number(bits_item);
     if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
@@ -2753,21 +2754,27 @@ extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item) {
     }
     Item bigint_val = js_bigint_constructor(bigint_item);
     if (js_check_exception()) return ItemNull;
-    int64_t val = bigint_to_int64(bigint_val);
     if (bits == 0) return bigint_from_int64(0);
-    if (bits >= 64) return bigint_from_int64(val);
-    // Truncate to N bits and sign-extend
-    uint64_t mask = ((uint64_t)1 << bits) - 1;
-    uint64_t truncated = (uint64_t)val & mask;
-    // Sign extend: if bit (bits-1) is set, extend sign
-    if (truncated & ((uint64_t)1 << (bits - 1))) {
-        truncated |= ~mask;
-    }
-    return bigint_from_int64((int64_t)truncated);
+    // 2^bits
+    Item two = bigint_from_int64(2);
+    Item exp = bigint_from_int64(bits);
+    Item modulus = bigint_pow(two, exp);  // 2^bits
+    Item mod = bigint_mod(bigint_val, modulus);
+    // mathematical mod: ensure non-negative
+    if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
+        mod = bigint_add(mod, modulus);
+    // half = 2^(bits-1)
+    Item exp_half = bigint_from_int64(bits - 1);
+    Item half = bigint_pow(two, exp_half);
+    // if mod >= half, result = mod - 2^bits
+    if (bigint_cmp(mod, half) >= 0)
+        return bigint_sub(mod, modulus);
+    return mod;
 }
 
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     // BigInt.asUintN(bits, bigintValue) — clamp to unsigned N-bit range
+    // ES spec: return bigintValue mod 2^bits
     Item bits_num = js_to_number(bits_item);
     if (js_check_exception()) return ItemNull;
     int64_t bits = 0;
@@ -2779,11 +2786,15 @@ extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item) {
     }
     Item bigint_val = js_bigint_constructor(bigint_item);
     if (js_check_exception()) return ItemNull;
-    int64_t val = bigint_to_int64(bigint_val);
     if (bits == 0) return bigint_from_int64(0);
-    if (bits >= 64) return bigint_from_int64(val);
-    uint64_t mask = ((uint64_t)1 << bits) - 1;
-    return bigint_from_int64((int64_t)((uint64_t)val & mask));
+    Item two = bigint_from_int64(2);
+    Item exp = bigint_from_int64(bits);
+    Item modulus = bigint_pow(two, exp);
+    Item mod = bigint_mod(bigint_val, modulus);
+    // mathematical mod: ensure non-negative
+    if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
+        mod = bigint_add(mod, modulus);
+    return mod;
 }
 
 extern "C" Item js_bigint_not_constructor(void) {
@@ -14540,6 +14551,23 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         String* result = heap_create_name(sb->str, sb->length);
         strbuf_free(sb);
         return (Item){.item = s2it(result)};
+    }
+
+    // Fallback: check Object.prototype for user-set methods
+    // (e.g. Object.prototype.exec = RegExp.prototype.exec; ".".exec("test"))
+    // Skip String.prototype (methods there would recurse back into js_string_method)
+    {
+        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+        if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+            Item obj_proto = js_property_get(obj_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
+            if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
+                bool found = false;
+                Item fn = js_map_get_fast_ext(obj_proto.map, method->chars, (int)method->len, &found);
+                if (found && get_type_id(fn) == LMD_TYPE_FUNC) {
+                    return js_call_function(fn, str, args, argc);
+                }
+            }
+        }
     }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
