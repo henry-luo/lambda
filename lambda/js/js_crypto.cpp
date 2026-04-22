@@ -1716,6 +1716,32 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(subtle, "decrypt", (void*)js_subtle_decrypt, 3);
     js_property_set(crypto_namespace, make_string_item_crypto("subtle"), subtle);
 
+    // crypto.constants — OpenSSL-compatible constants
+    Item constants = js_new_object();
+    // SSL/TLS
+    js_property_set(constants, make_string_item_crypto("SSL_OP_ALL"), (Item){.item = i2it(0)});
+    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_SSLv2"), (Item){.item = i2it(0x01000000)});
+    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_SSLv3"), (Item){.item = i2it(0x02000000)});
+    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_TLSv1"), (Item){.item = i2it(0x04000000)});
+    // DH/RSA padding
+    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PADDING"), (Item){.item = i2it(1)});
+    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_OAEP_PADDING"), (Item){.item = i2it(4)});
+    js_property_set(constants, make_string_item_crypto("RSA_NO_PADDING"), (Item){.item = i2it(3)});
+    // point conversion
+    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
+    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});
+    js_property_set(crypto_namespace, make_string_item_crypto("constants"), constants);
+
+    // class constructors as stubs (for typeof/instanceof checks)
+    js_property_set(crypto_namespace, make_string_item_crypto("Hash"),
+        js_new_function((void*)js_crypto_createHash, 1));
+    js_property_set(crypto_namespace, make_string_item_crypto("Hmac"),
+        js_new_function((void*)js_crypto_createHmac, 2));
+    js_property_set(crypto_namespace, make_string_item_crypto("Cipher"),
+        js_new_function((void*)js_crypto_createCipheriv, 3));
+    js_property_set(crypto_namespace, make_string_item_crypto("Decipher"),
+        js_new_function((void*)js_crypto_createDecipheriv, 3));
+
     Item default_key = make_string_item_crypto("default");
     js_property_set(crypto_namespace, default_key, crypto_namespace);
 

@@ -1028,6 +1028,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 // Measure text content of button
                 DomNode* btn_child = elem->first_child;
                 float max_text_width = 0;
+                // Set up button's own font for measurement (UA default 13.3333px Arial,
+                // not parent's inherited font which may differ)
+                FontBox saved_font = lycon->font;
+                if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
+                    setup_font(lycon->ui_context, &lycon->font, elem->font);
+                }
                 while (btn_child) {
                     if (btn_child->is_text()) {
                         const char* text = (const char*)btn_child->text_data();
@@ -1041,6 +1047,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     }
                     btn_child = btn_child->next_sibling;
                 }
+                lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
                     elem->form->intrinsic_width = max_text_width;
