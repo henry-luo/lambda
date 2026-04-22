@@ -1189,16 +1189,18 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 Render Visual Tests:"; \
 	if [ -f "test/render/test_radiant_render.js" ]; then \
-		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j 1 2>&1) || true; \
-		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:" | tail -10; \
+		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j 1 --baseline 2>&1) || true; \
+		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
 		render_line=$$(echo "$$output" | grep "^Results:"); \
 		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
 		render_passed=$${render_passed:-0}; \
-		render_failed=$$(echo "$$render_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
-		render_errors=$$(echo "$$render_line" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" || echo "0"); \
-		render_failed=$${render_failed:-0}; render_errors=$${render_errors:-0}; \
-		render_failed=$$((render_failed + render_errors)); \
-		if [ "$$render_failed" = "0" ] || [ -z "$$render_failed" ]; then render_status="✅ PASS"; render_failed=0; else render_status="❌ FAIL"; any_failed=1; fi; \
+		render_failed=0; \
+		if echo "$$output" | grep -q "Baseline Regressions"; then \
+			render_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1); render_failed=$${render_failed:-0}; \
+			render_status="❌ FAIL"; any_failed=1; \
+		else \
+			render_status="✅ PASS"; \
+		fi; \
 	else \
 		echo "   ⚠️  test/render/test_radiant_render.js not found"; \
 	fi; \
