@@ -1116,6 +1116,35 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                 tm.tm_hour, tm.tm_min, tm.tm_sec, h_off, m_off);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
+        if (method_id == 50) { // getYear — Annex B: returns year - 1900
+            struct tm tm; localtime_r(&secs, &tm);
+            return (Item){.item = i2it(tm.tm_year)}; // tm_year is already year - 1900
+        }
+        if (method_id == 51) { // setYear — Annex B
+            // ES spec: ToNumber(symbol) throws TypeError
+            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
+                extern Item js_throw_type_error(const char* msg);
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            }
+            Item num = js_to_number(arg0);
+            if (js_check_exception()) return ItemNull;
+            double y = to_double(num);
+            if (isnan(y)) return store_ms(NAN);
+            int iy = (int)y;
+            // ES Annex B §B.2.4.1: if 0 ≤ y ≤ 99, year = y + 1900
+            if (iy >= 0 && iy <= 99) iy += 1900;
+            // ES Annex B §B.2.4.2 step 2: if t is NaN, let t be +0
+            double base_ms = isnan(ms) ? 0.0 : ms;
+            time_t base_secs = (time_t)(base_ms / 1000.0);
+            int old_millis = (int)(base_ms - (double)base_secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm tm; localtime_r(&base_secs, &tm);
+            tm.tm_year = iy - 1900;
+            tm.tm_isdst = -1;
+            time_t new_secs = mktime(&tm);
+            double new_ms = (double)new_secs * 1000.0 + old_millis;
+            return store_ms(new_ms);
+        }
         return ItemNull;
     }
 

@@ -3291,6 +3291,8 @@ enum JsBuiltinId {
     JS_BUILTIN_DATE_SET_UTC_MINUTES,
     JS_BUILTIN_DATE_SET_UTC_SECONDS,
     JS_BUILTIN_DATE_SET_UTC_MILLISECONDS,
+    JS_BUILTIN_DATE_GET_YEAR,
+    JS_BUILTIN_DATE_SET_YEAR,
     // Promise static methods (v45: make Promise static methods visible as properties)
     JS_BUILTIN_PROMISE_RESOLVE,
     JS_BUILTIN_PROMISE_REJECT,
@@ -5345,6 +5347,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                             {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
                             {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
                             {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
+                            {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
+                            {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
                             {NULL, 0, 0, 0}
                         };
                         for (int i = 0; date_methods[i].name; i++) {
@@ -5886,6 +5890,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
                                 {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
                                 {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
+                                {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
+                                {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
                                 {NULL, 0, 0, 0}
                             };
                             for (int mi = 0; methods[mi].name; mi++) {
@@ -9108,6 +9114,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (js_is_typed_array(this_val) || js_is_dataview(this_val)) {
                 return js_map_method(this_val, method_name, args, arg_count);
             }
+            // concat needs the original MAP to check is_concat_spreadable
+            // but proxies need the old path for proper revocation checking
+            if (builtin_id == JS_BUILTIN_ARR_CONCAT && !js_is_proxy(this_val)) {
+                js_array_method_real_this = this_val;
+                Item result = js_array_method(this_val, method_name, args, arg_count);
+                js_array_method_real_this = (Item){0};
+                return result;
+            }
             // Plain Map: treat as array-like object (has length + numeric indices)
             js_array_method_real_this = this_val;
             Item temp_arr = js_array_like_to_array(this_val);
@@ -10115,6 +10129,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
     case JS_BUILTIN_DATE_SET_UTC_MILLISECONDS:
         return js_date_setter(this_val, 36, arg0, undef, undef, undef);
+    case JS_BUILTIN_DATE_GET_YEAR:
+        return js_date_setter(this_val, 50, undef, undef, undef, undef);
+    case JS_BUILTIN_DATE_SET_YEAR:
+        return js_date_setter(this_val, 51, arg0, undef, undef, undef);
 
     // v45: Promise static methods — spec requires Type(this) to be Object
     case JS_BUILTIN_PROMISE_RESOLVE: {
@@ -14086,7 +14104,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         int64_t length;
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
             double dlength = js_get_number(args[1]);
-            length = isnan(dlength) ? 0 : (int64_t)dlength;
+            length = isnan(dlength) ? 0 : (isinf(dlength) && dlength > 0) ? slen : (int64_t)dlength;
             if (length < 0) length = 0;
         } else {
             length = slen - start;
@@ -15218,18 +15236,13 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // concat - returns new array that is the concatenation
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        Array* src = arr.array;
-
         // helper lambda to check if an item should be spread in concat
         // Arrays: spreadable by default unless Symbol.isConcatSpreadable === false
         // Others: not spreadable unless Symbol.isConcatSpreadable === true
         auto is_concat_spreadable = [](Item item) -> bool {
             TypeId t = get_type_id(item);
             bool is_array = (t == LMD_TYPE_ARRAY);
-            // Check Symbol.isConcatSpreadable (stored as __sym_10 or similar)
-            // Symbol.isConcatSpreadable has well-known ID in JS_SYMBOL_BASE+10 area
-            // Look for it in companion map or as a property
+            // Check Symbol.isConcatSpreadable (stored as __sym_12)
             if (t == LMD_TYPE_ARRAY && item.array->extra != 0) {
                 Map* props = (Map*)(uintptr_t)item.array->extra;
                 bool found = false;
@@ -15238,14 +15251,41 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             } else if (t == LMD_TYPE_MAP) {
                 bool found = false;
                 Item val = js_map_get_fast_ext(item.map, "__sym_12", 8, &found);
+                if (!found) {
+                    // check prototype chain
+                    Item sym_key = (Item){.item = s2it(heap_create_name("__sym_12", 8))};
+                    val = js_prototype_lookup(item, sym_key);
+                    if (val.item != ITEM_NULL && get_type_id(val) != LMD_TYPE_UNDEFINED)
+                        found = true;
+                }
                 if (found) return js_is_truthy(val);
             }
             return is_array;
         };
 
+        // helper lambda to spread an item into result
+        auto spread_item = [&](Item item) -> void {
+            // (uses pos, result_is_plain_array, dst via capture)
+        };
+
+        // ES spec: check spreadability of 'this' first
+        bool this_spreadable = is_concat_spreadable(arr);
+
         // calculate total length (use double to detect overflow per ES spec §22.1.3.1)
-        double total_d = (double)src->length;
+        double total_d = 0.0;
         const double MAX_SAFE_LEN = 9007199254740991.0; // 2^53 - 1
+        // count 'this' contribution
+        if (this_spreadable) {
+            if (arr_type == LMD_TYPE_ARRAY)
+                total_d += arr.array->length;
+            else if (arr_type == LMD_TYPE_MAP) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(arr, len_key);
+                total_d += js_get_number(len_val);
+            }
+        } else {
+            total_d = 1.0;
+        }
         for (int i = 0; i < argc; i++) {
             if (is_concat_spreadable(args[i])) {
                 if (get_type_id(args[i]) == LMD_TYPE_ARRAY)
@@ -15283,8 +15323,30 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             } \
             pos++; \
         } while(0)
-        for (int i = 0; i < src->length; i++) {
-            CONCAT_WRITE(src->items[i]);
+        // spread 'this' into result
+        if (this_spreadable) {
+            if (arr_type == LMD_TYPE_ARRAY) {
+                Array* src = arr.array;
+                for (int i = 0; i < src->length; i++) {
+                    CONCAT_WRITE(src->items[i]);
+                }
+            } else if (arr_type == LMD_TYPE_MAP) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(arr, len_key);
+                if (js_exception_pending) { goto concat_done; }
+                double len = js_get_number(len_val);
+                for (double j = 0; j < len; j++) {
+                    char buf[24];
+                    snprintf(buf, sizeof(buf), "%.0f", j);
+                    Item idx_key = (Item){.item = s2it(heap_create_name(buf))};
+                    Item elem = js_property_get(arr, idx_key);
+                    if (js_exception_pending) { goto concat_done; }
+                    CONCAT_WRITE(elem);
+                }
+            }
+        } else {
+            // non-spreadable 'this' — add as single element
+            CONCAT_WRITE(arr);
         }
         for (int i = 0; i < argc; i++) {
             if (is_concat_spreadable(args[i])) {
@@ -15314,6 +15376,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
         }
         #undef CONCAT_WRITE
+        concat_done:
         if (result_is_plain_array) dst->length = pos;
         else if (result_is_array) {
             result.array->length = pos;
