@@ -2,7 +2,7 @@
 
 ## Overview
 
-LambdaJS is Lambda's embedded JavaScript engine (~22K LOC across 13 source files). It compiles JavaScript to native machine code through a four-stage pipeline reusing Lambda's type system, memory management, and JIT infrastructure. JavaScript programs execute within the same `Item`-based runtime as Lambda scripts, enabling direct interop with Lambda's input parsers, output formatters, and the Radiant HTML/CSS layout engine.
+LambdaJS is Lambda's embedded JavaScript engine (~95K LOC across 35+ source files). It compiles JavaScript to native machine code through a four-stage pipeline reusing Lambda's type system, memory management, and JIT infrastructure. JavaScript programs execute within the same `Item`-based runtime as Lambda scripts, enabling direct interop with Lambda's input parsers, output formatters, and the Radiant HTML/CSS layout engine.
 
 ### Design Goals
 
@@ -317,36 +317,15 @@ MIR:   // native version (_n suffix):
 
 ### 4.4 Closure Implementation
 
-Closures use a **shared scope environment** model:
+Closures use a **shared scope environment** model: all child closures of the same parent share a single `uint64_t[]` array allocated via `js_alloc_env()`, enabling mutable capture semantics. Child functions receive the env pointer as a hidden first parameter. Phases 1.5–1.7 handle capture analysis, transitive propagation, and scope env layout.
 
-1. **Capture analysis** identifies free variables in each function
-2. **Transitive propagation** ensures grandchild captures are available in parent scope envs
-3. Parent allocates a single `uint64_t[]` scope env via `js_alloc_env()`
-4. All child closures of the same parent share this array → **mutable capture semantics**
-5. Closures created via `js_new_closure(func_ptr, param_count, env, env_size)`
-6. Child functions receive env pointer as first hidden parameter
-7. **Scope env writeback:** Mutations to captured variables write back to the shared slot immediately
-
-```
-function counter() {
-    let count = 0;                  // → scope_env[0]
-    return {
-        inc: () => ++count,         // reads/writes scope_env[0]
-        get: () => count            // reads scope_env[0]
-    };
-}
-// inc() and get() share the same scope_env array → both see mutations
-```
+> See [JS_Runtime_Detailed.md §2](JS_Runtime_Detailed.md#2-closure-implementation) for env allocation, writeback rules, multi-level nesting, and generator interaction.
 
 ### 4.5 Class System
 
-Classes compile to prototype-based objects using the `JsClassEntry` / `JsClassMethodEntry` system:
+Classes compile to prototype-based constructor functions. The transpiler collects class declarations into `JsClassEntry` structs, compiles constructors with special prologue (object allocation + `__proto__` setup) and epilogue (implicit return), and attaches methods to the prototype. Inheritance uses `Object.create(Parent.prototype)` + `super()` dispatch.
 
-- **Constructor:** Allocates a new object, sets `__proto__` to constructor's prototype, executes constructor body. With **shape pre-allocation (A5)**: constructor body is pre-scanned for `this.prop = expr` patterns, and all property slots are created at object allocation time.
-- **Methods:** Created as closures, attached to the prototype object.
-- **Inheritance:** `class B extends A` sets `B.prototype.__proto__ = A.prototype`. `super()` calls parent constructor.
-- **Static members:** Stored as module variables (static fields) or registered on the constructor function object (static methods).
-- **Compile-time method resolution (P7):** When a variable is known to hold an instance of a specific class, method calls can be resolved at compile time and dispatched to native function versions.
+> See [JS_Runtime_Detailed.md §3](JS_Runtime_Detailed.md#3-class-system) for shape pre-allocation (A5), method compilation, private members, and compile-time resolution (P7).
 
 ### 4.6 Exception Handling
 
@@ -416,20 +395,27 @@ JavaScript scoping semantics are implemented through `JsScope` (parser phase) an
 ### 4.10 File Layout
 
 | File | Lines | Purpose |
-|------|-------|---------|
-| `transpile_js_mir.cpp` | ~11K | Core MIR transpiler: AST → MIR IR, type inference, native optimization, closures, classes |
-| `js_runtime.cpp` | ~3K | Runtime library: operators, type coercion, property access, prototype chain, collection methods |
-| `js_dom.cpp` | ~2.5K | DOM bridge: wraps Radiant DomElement as JS Maps via sentinel markers |
-| `build_js_ast.cpp` | ~1.9K | AST builder: Tree-sitter CST → typed JS AST nodes |
-| `js_globals.cpp` | ~1.1K | Built-in objects: JSON, Date, Symbol, Object.*, parseInt/parseFloat, URI encoding |
-| `js_ast.hpp` | ~540 | AST node types: ~45 node types, ~50 operators, struct definitions |
-| `js_runtime.h` | ~350 | Runtime C API: function declarations callable from JIT code |
-| `js_dom.h` | ~260 | DOM API declarations |
-| `js_scope.cpp` | ~250 | Scope management: var/let/const semantics, Tree-sitter parser init |
-| `js_transpiler.hpp` | ~210 | Transpiler context struct, scope types, forward declarations |
-| `js_typed_array.cpp` | ~200 | TypedArray support: Int8 through Float64 arrays |
-| `js_print.cpp` | ~160 | Debug AST printer |
-| `js_typed_array.h` | ~50 | TypedArray declarations |
+|------|------:|---------|
+| `transpile_js_mir.cpp` | ~28K | Core MIR transpiler: AST → MIR IR, type inference, native optimization, closures, classes, generators, async |
+| `js_runtime.cpp` | ~21K | Runtime library: operators, type coercion, property access, prototype chain, iterators, generators, collections |
+| `js_globals.cpp` | ~11K | Built-in objects: JSON, Date, Symbol, Object.*, Math, Reflect, constructors, URI encoding |
+| `build_js_ast.cpp` | ~4K | AST builder: Tree-sitter CST → typed JS AST nodes |
+| `js_dom.cpp` | ~3.8K | DOM bridge: wraps Radiant DomElement as JS Maps via sentinel markers |
+| `js_buffer.cpp` | ~2.5K | Node.js Buffer implementation |
+| `js_fs.cpp` | ~1.8K | Node.js fs module (readFileSync, writeFileSync, stat, etc.) |
+| `js_crypto.cpp` | ~1.8K | Node.js crypto module (hash, randomBytes, randomUUID) |
+| `js_typed_array.cpp` | ~1.1K | TypedArray support: Int8 through Float64 arrays, ArrayBuffer, DataView |
+| `js_early_errors.cpp` | ~1.1K | Early error detection, strict mode validation |
+| `js_event_loop.cpp` | ~800 | Event loop, microtask queue, timers |
+| `js_regex_wrapper.cpp` | ~780 | JS regex → RE2 transpilation with post-filters |
+| `js_runtime.h` | ~740 | Runtime C API: function declarations callable from JIT code |
+| `js_ast.hpp` | ~620 | AST node types: ~45 node types, ~50 operators, struct definitions |
+| `js_scope.cpp` | ~440 | Scope management: var/let/const semantics, Tree-sitter parser init |
+| `js_transpiler.hpp` | ~256 | Transpiler context struct, scope types, forward declarations |
+| `js_print.cpp` | ~178 | Debug AST printer |
+| + 18 more | ~17K | Node.js compat (http, net, path, os, stream, etc.), DOM events, CSSOM, Canvas, Fetch, XHR |
+
+> See [JS_Runtime_Detailed.md](JS_Runtime_Detailed.md) for the complete file listing and detailed subsystem documentation.
 
 ---
 
