@@ -6227,6 +6227,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     if (id->name->len == 4 && strncmp(id->name->chars, "$262", 4) == 0) {
         return jm_call_0(mt, "js_get_262_object_value", MIR_T_I64);
     }
+    if (id->name->len == 3 && strncmp(id->name->chars, "CSS", 3) == 0) {
+        return jm_call_0(mt, "js_get_css_object_value", MIR_T_I64);
+    }
 
     // v48: Global builtin functions as values (parseInt, parseFloat, isNaN, etc.)
     {
@@ -15699,6 +15702,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             }
 
             // Emit static field initializers for class expressions
+            jm_call_void_0(mt, "js_private_field_init_begin");
             for (int fi = 0; ce && fi < ce->static_field_count; fi++) {
                 JsStaticFieldEntry* sf = &ce->static_fields[fi];
                 if (sf->computed && sf->key_expr) {
@@ -15737,6 +15741,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_transpile_statement(mt, ce->static_blocks[si]);
                 }
             }
+            jm_call_void_0(mt, "js_private_field_init_end");
         log_debug("js-mir: class expression evaluated with __class_name__");
         return cls_obj;
     }
@@ -17546,6 +17551,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
             // Emit base-first, then own class
+            // v37: Set private field init flag to bypass brand check during initialization
+            jm_call_void_0(mt, "js_private_field_init_begin");
             for (int ci = field_chain_len - 1; ci >= 0; ci--) {
                 JsClassEntry* fc_ce = field_chain[ci];
                 for (int fi = 0; fi < fc_ce->instance_field_count; fi++) {
@@ -17602,6 +17609,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+            // v37: Clear private field init flag after all fields are initialized
+            jm_call_void_0(mt, "js_private_field_init_end");
             // Restore 'this' after field initialization
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this_fi));
@@ -19077,6 +19086,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_call_void_1(mt, "js_mark_all_non_enumerable",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     // Emit static field initializers
+                    jm_call_void_0(mt, "js_private_field_init_begin");
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
                         if (sf->computed && sf->key_expr) {
@@ -19115,6 +19125,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
+                    jm_call_void_0(mt, "js_private_field_init_end");
                 }
             }
         }
@@ -19991,13 +20002,32 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     if (fn->is_generator) {
         // Count yield points to determine number of states
-        int yield_count = jm_count_yields(fn->body);
+        // +1 for implicit "param binding" yield that separates param destructuring
+        // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
+        int yield_count = jm_count_yields(fn->body) + 1;
         if (yield_count > 63) yield_count = 63;  // safety cap matching gen_state_labels size
 
         // Collect local variable names for env slot assignment
         struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         if (fn->body) jm_collect_body_locals(fn->body, gen_locals);  // generators need all locals for state machine
+
+        // Also collect destructured param variable names so they get env slots.
+        // These variables are created during param destructuring in state 0 and
+        // must survive across the implicit param-binding yield.
+        {
+            JsAstNode* dp = fn->params;
+            while (dp) {
+                JsAstNode* pat = dp;
+                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                    pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                    jm_collect_pattern_names(pat, gen_locals);
+                }
+                dp = dp->next;
+            }
+        }
 
         // Count distinct locals
         int local_count = 0;
@@ -20102,6 +20132,53 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // State 0 label (initial entry)
         jm_emit_label(mt, mt->gen_state_labels[0]);
 
+        // Pre-register ONLY destructured param variable names with env slots.
+        // This must happen before param destructuring so that the variables created
+        // by jm_emit_object_destructure/jm_emit_array_destructure get env-backed
+        // entries that survive across the implicit param-binding yield.
+        // Body locals are hoisted LATER (after the implicit yield) to avoid
+        // prematurely shadowing outer-scope variables during param default evaluation.
+        int gen_dstr_param_count = 0;
+        {
+            struct hashmap* dstr_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            JsAstNode* dp = fn->params;
+            while (dp) {
+                JsAstNode* pat = dp;
+                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                    pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                    jm_collect_pattern_names(pat, dstr_names);
+                }
+                dp = dp->next;
+            }
+            int li = 0;
+            size_t diter = 0; void* ditem;
+            while (hashmap_iter(dstr_names, &diter, &ditem)) {
+                JsNameSetEntry* ns = (JsNameSetEntry*)ditem;
+                if (!jm_find_var(mt, ns->name)) {
+                    MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, vr),
+                        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                    JsVarScopeEntry entry;
+                    memset(&entry, 0, sizeof(entry));
+                    snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
+                    entry.var.reg = vr;
+                    entry.var.from_env = true;
+                    entry.var.env_slot = local_offset + li;
+                    entry.var.env_reg = mt->gen_env_reg;
+                    entry.var.typed_array_type = -1;
+                    entry.var.from_hoist = true;
+                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    li++;
+                }
+            }
+            gen_dstr_param_count = li;
+            hashmap_free(dstr_names);
+        }
+
         // Load parameters from env (stored there during generator creation)
         JsAstNode* sm_param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
@@ -20164,6 +20241,61 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
             sm_param_node = sm_param_node ? sm_param_node->next : NULL;
+        }
+
+        // === Implicit "param binding" yield ===
+        // ES spec: FunctionDeclarationInstantiation (parameter binding including
+        // destructuring) must happen synchronously at call time, not lazily on
+        // first .next(). We emit an implicit yield here that separates param
+        // binding from body execution. js_generator_create eagerly runs state 0
+        // to execute param destructuring, and the generator starts at state 1.
+        {
+            // Check for pending exception from param destructuring
+            MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, mt->gen_done_label),
+                MIR_new_reg_op(mt->ctx, param_exc)));
+
+            // Save all env-backed variables (params + destructured locals) to env
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter2 = 0; void* item2;
+                while (hashmap_iter(mt->var_scopes[sd], &iter2, &item2)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item2;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, e->var.reg)));
+                    }
+                }
+            }
+
+            // Return [undefined, 1] — implicit yield to separate param binding from body
+            MIR_reg_t pundef = jm_emit_undefined(mt);
+            MIR_reg_t pb_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, pundef),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)1));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, pb_result)));
+
+            // State 1 label: body execution starts here (on first .next() call)
+            mt->gen_yield_index = 1;
+            jm_emit_label(mt, mt->gen_state_labels[1]);
+
+            // Reload all env-backed variables after resume
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter2 = 0; void* item2;
+                while (hashmap_iter(mt->var_scopes[sd], &iter2, &item2)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item2;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    }
+                }
+            }
         }
 
         // Build self-capture name for detecting self-references
@@ -20234,9 +20366,11 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_set_var(mt, "_js_arguments", args_reg);
         }
 
-        // Hoist var declarations with env slots
+        // Hoist body-local var declarations with env slots.
+        // Destructured param names were already pre-registered before state 0;
+        // skip those and continue env slot assignment from gen_dstr_param_count.
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            int li = 0;
+            int li = gen_dstr_param_count;
             size_t liter = 0; void* litem;
             while (hashmap_iter(gen_locals, &liter, &litem)) {
                 JsNameSetEntry* ns = (JsNameSetEntry*)litem;
@@ -20253,7 +20387,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_slot = local_offset + li;
                     entry.var.env_reg = mt->gen_env_reg;
                     entry.var.typed_array_type = -1;
-                    entry.var.from_hoist = true;  // v50: mark as hoisted
+                    entry.var.from_hoist = true;
                     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
                     li++;
                 }
@@ -25815,6 +25949,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                     // Emit static field initializers at the class's source position.
                     // Static fields may reference functions/variables declared before.
+                    jm_call_void_0(mt, "js_private_field_init_begin");
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
                         if (sf->computed && sf->key_expr) {
@@ -25853,13 +25988,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 sf->module_var_index);
                         }
                     }
-
                     // Emit static block bodies
                     for (int si = 0; si < ce->static_block_count; si++) {
                         if (ce->static_blocks[si]) {
                             jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
+                    jm_call_void_0(mt, "js_private_field_init_end");
                 }
             }
             stmt = stmt->next;
@@ -27028,11 +27163,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
-    // Try expression form first: body = "return (code)\n"
-    // js_new_function_from_string wraps as (function() { return (code)\n })
-    // Skip if code starts with a declaration keyword — wrapping in parens would
-    // turn a declaration into an expression (e.g. function f(){} → function expression),
-    // giving a wrong completion value (should be undefined, not the function).
+    // v37: Phase A — try expression form for single-expression eval code.
+    // Wraps as "return (code)\n" inside a function IIFE. This handles simple
+    // cases like eval("1+2"), eval("new.target"), etc. and preserves function
+    // context (new.target, arguments, super) that a top-level script wouldn't have.
+    // Skip if code starts with a declaration keyword or contains semicolons
+    // (multi-statement code should go to Phase C for correct scoping).
     {
         bool skip_expr_form = false;
         const char* s = code_str->chars;
@@ -27050,6 +27186,72 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             else if (slen - i >= 5 && memcmp(s + i, "async", 5) == 0 &&
                 (i + 5 >= slen || s[i+5] == ' '))
                 skip_expr_form = true;
+            // v37: '{' at start is a block statement, not an object literal
+            else if (s[i] == '{')
+                skip_expr_form = true;
+            // v37: statement keywords that can't be expressions
+            else if (slen - i >= 3 && memcmp(s + i, "var", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "let", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "const", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 2 && memcmp(s + i, "if", 2) == 0 &&
+                (i + 2 >= slen || s[i+2] == ' ' || s[i+2] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "for", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' ' || s[i+3] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "while", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "switch", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "try", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' ' || s[i+3] == '{'))
+                skip_expr_form = true;
+            else if (slen - i >= 2 && memcmp(s + i, "do", 2) == 0 &&
+                (i + 2 >= slen || s[i+2] == ' ' || s[i+2] == '{'))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "throw", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "return", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "break", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 8 && memcmp(s + i, "continue", 8) == 0 &&
+                (i + 8 >= slen || s[i+8] == ' ' || s[i+8] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "import", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "export", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' '))
+                skip_expr_form = true;
+        }
+        // v37: Also skip expression form if code contains semicolons (multi-statement)
+        // or declarations that need to be compiled as a program for correct scoping.
+        if (!skip_expr_form) {
+            for (size_t j = i; j < slen; j++) {
+                char c = s[j];
+                if (c == ';') { skip_expr_form = true; break; }
+                // Skip string literals to avoid false semicolon detection
+                if (c == '\'' || c == '"' || c == '`') {
+                    char q = c;
+                    j++;
+                    while (j < slen && s[j] != q) {
+                        if (s[j] == '\\') j++; // skip escape
+                        j++;
+                    }
+                }
+            }
         }
         if (!skip_expr_form) {
             const char* prefix = "return (";
@@ -27072,35 +27274,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
         Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-        // NOTE: we intentionally do NOT call jm_finish_last_deferred_mir() here.
-        // The deferred MIR context keeps the name_pool alive — its backing ast_pool
-        // contains string literals (via jm_box_string_literal) that may be referenced
-        // by the returned Item.  Freeing it would leave dangling pointers.
-        // Cleanup happens at program exit via jm_free_all_deferred_mir_contexts().
         return result;
     }
 
-    // Try statement form with "return" inserted before last expression statement
-    {
-        char* modified = eval_try_insert_return(code_str->chars, code_str->len);
-        if (modified) {
-            log_debug("js-eval: trying completion-value form: %.80s", modified);
-            Item body_item = (Item){.item = s2it(heap_create_name(modified, strlen(modified)))};
-            mem_free(modified);
-            fn_item = js_new_function_from_string(&body_item, 1);
-            if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-                Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-                // Do not call jm_finish_last_deferred_mir() — see note above
-                // about name_pool lifetime.
-                return result;
-            }
-        }
-    }
-
-    // Fallback: compile code directly as a top-level script (not wrapped in a function).
-    // This allows js_main to execute the code and return the completion value via
-    // eval_completion_reg, which tracks the last evaluated expression statement
-    // even inside control flow (for/while/if/switch/try).
+    // v37: Phase C — compile code directly as a top-level script (not wrapped in a function).
+    // Skip Phase B (return insertion) which still wrapped in function body (wrong scoping).
+    // Phase C handles completion values via eval_completion_reg and var export
+    // via is_eval_direct, making it spec-compliant for multi-statement code.
     {
         const char* source = code_str->chars;
         size_t source_len = code_str->len;
@@ -27216,7 +27396,17 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
         }
 
         // Execute js_main directly — returns the completion value
+        // v37: Save/restore new.target, set to undefined for eval code.
+        // Per ES spec, eval in class field initializers runs "outside a constructor",
+        // so new.target should be undefined, not the enclosing constructor.
+        extern Item js_get_new_target();
+        extern void js_set_direct_new_target(Item);
+        Item prev_nt = js_get_new_target();
+        js_set_direct_new_target((Item){.item = ITEM_JS_UNDEFINED});
+
         Item result = js_main_fn((Context*)context);
+
+        js_set_direct_new_target(prev_nt);
 
         // Cleanup
         hashmap_free(mt->import_cache);

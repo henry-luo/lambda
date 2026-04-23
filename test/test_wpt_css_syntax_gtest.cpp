@@ -42,7 +42,11 @@
     #include <dirent.h>
 #endif
 
-static const char* WPT_DIR = "ref/wpt/css/css-syntax";
+static const char* WPT_DIRS[] = {
+    "ref/wpt/css/css-syntax",
+    "ref/wpt/css/css-syntax/charset",
+};
+static const int WPT_DIR_COUNT = sizeof(WPT_DIRS) / sizeof(WPT_DIRS[0]);
 static const char* SHIM_PATH = "test/wpt_testharness_shim.js";
 static const char* TEMP_DIR = "temp";
 
@@ -151,65 +155,84 @@ struct WptCssSyntaxParam {
 };
 
 /**
- * Discover WPT CSS-Syntax test HTML files.
+ * Discover WPT CSS-Syntax test HTML files from all WPT_DIRS.
  * Skips reference files (*-ref.html), support directory, and non-JS tests.
  */
 static std::vector<WptCssSyntaxParam> discover_wpt_css_syntax_tests() {
     std::vector<WptCssSyntaxParam> params;
 
-#ifdef _WIN32
-    char pattern[512];
-    snprintf(pattern, sizeof(pattern), "%s\\*.html", WPT_DIR);
-    struct _finddata_t fd;
-    intptr_t handle = _findfirst(pattern, &fd);
-    if (handle == -1) return params;
-    do {
-        if (fd.attrib & _A_SUBDIR) continue;
-        const char* name = fd.name;
-#else
-    DIR* dir = opendir(WPT_DIR);
-    if (!dir) return params;
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) continue;
-        const char* name = entry->d_name;
-#endif
+    for (int di = 0; di < WPT_DIR_COUNT; di++) {
+        const char* wpt_dir = WPT_DIRS[di];
 
-        size_t len = strlen(name);
-        if (len < 6 || strcmp(name + len - 5, ".html") != 0) {
-#ifdef _WIN32
-            continue;
-#else
-            continue;
-#endif
+        // derive a prefix for test names from subdirs beyond the base
+        // e.g. "ref/wpt/css/css-syntax/charset" → "charset_"
+        std::string prefix;
+        std::string base_dir = WPT_DIRS[0];
+        std::string cur_dir = wpt_dir;
+        if (cur_dir.size() > base_dir.size() + 1) {
+            prefix = cur_dir.substr(base_dir.size() + 1);
+            for (auto& c : prefix) {
+                if (!isalnum((unsigned char)c)) c = '_';
+            }
+            prefix += "_";
         }
 
-        // skip reference files
-        std::string base(name, len - 5);
-        if (base.size() > 4 && base.substr(base.size() - 4) == "-ref") {
 #ifdef _WIN32
-            continue;
+        char pattern[512];
+        snprintf(pattern, sizeof(pattern), "%s\\*.html", wpt_dir);
+        struct _finddata_t fd;
+        intptr_t handle = _findfirst(pattern, &fd);
+        if (handle == -1) continue;
+        do {
+            if (fd.attrib & _A_SUBDIR) continue;
+            const char* name = fd.name;
 #else
-            continue;
+        DIR* dir = opendir(wpt_dir);
+        if (!dir) continue;
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type == DT_DIR) continue;
+            const char* name = entry->d_name;
 #endif
-        }
 
-        WptCssSyntaxParam p;
-        p.html_path = std::string(WPT_DIR) + "/" + name;
-        p.test_name = base;
-        for (auto& c : p.test_name) {
-            if (!isalnum((unsigned char)c)) c = '_';
-        }
+            size_t len = strlen(name);
+            if (len < 6 || strcmp(name + len - 5, ".html") != 0) {
+#ifdef _WIN32
+                continue;
+#else
+                continue;
+#endif
+            }
 
-        params.push_back(p);
+            // skip reference files
+            std::string base(name, len - 5);
+            if (base.size() > 4 && base.substr(base.size() - 4) == "-ref") {
+#ifdef _WIN32
+                continue;
+#else
+                continue;
+#endif
+            }
+
+            // skip xhtml files picked up in charset/ (they have .xhtml extension, but check anyway)
+
+            WptCssSyntaxParam p;
+            p.html_path = std::string(wpt_dir) + "/" + name;
+            p.test_name = prefix + base;
+            for (auto& c : p.test_name) {
+                if (!isalnum((unsigned char)c)) c = '_';
+            }
+
+            params.push_back(p);
 
 #ifdef _WIN32
-    } while (_findnext(handle, &fd) == 0);
-    _findclose(handle);
+        } while (_findnext(handle, &fd) == 0);
+        _findclose(handle);
 #else
-    }
-    closedir(dir);
+        }
+        closedir(dir);
 #endif
+    } // end for each dir
 
     std::sort(params.begin(), params.end(),
               [](const WptCssSyntaxParam& a, const WptCssSyntaxParam& b) {
@@ -241,8 +264,8 @@ TEST_P(WptCssSyntaxTest, Run) {
     std::string shim = read_file_contents(SHIM_PATH);
     ASSERT_FALSE(shim.empty()) << "Could not read testharness shim: " << SHIM_PATH;
 
-    // Compose combined JS: shim + scripts + summary call
-    std::string combined = shim + "\n" + scripts + "\n_wpt_print_summary();\n";
+    // Compose combined JS: shim + scripts + onload simulation + summary call
+    std::string combined = shim + "\n" + scripts + "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
     // Write to temp file
     std::string temp_js = std::string(TEMP_DIR) + "/wpt_" + p.test_name + ".js";

@@ -2,6 +2,7 @@
 #include "layout_positioned.hpp"
 #include "available_space.hpp"
 #include "intrinsic_sizing.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
@@ -583,9 +584,12 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // CSS 2.1 §10.3.8 / §10.6.5: Absolutely positioned REPLACED elements
     // use intrinsic dimensions for auto width/height, not the constraint equation.
-    bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+    // Form controls (input, select, textarea) are also replaced elements per CSS spec.
+    bool is_replaced = (block->display.inner == RDT_DISPLAY_REPLACED) ||
+                       (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                         block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-                        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")));
+                        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data"))) ||
+                       (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form);
 
     // Gather horizontal border+padding for constraint calculations
     float h_border_padding = 0;
@@ -663,6 +667,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
         log_debug("[ABS POS] width from aspect-ratio + max-height: max_h=%.1f, content_h=%.1f, ratio=%.3f, content_width=%.1f",
                   max_h, content_h, block->fi->aspect_ratio, content_width);
+    } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+               block->form->intrinsic_width > 0) {
+        // CSS 2.1 §10.3.8: replaced form control with auto width → use intrinsic width
+        content_width = block->form->intrinsic_width;
+        log_debug("[ABS POS] form control intrinsic width: %.1f", content_width);
     } else {
         // CSS 2.1 §10.3.7: width is auto, at most one of left/right specified (non-replaced)
         // Use shrink-to-fit width = min(max(preferred_minimum_width, available_width), preferred_width)
@@ -819,6 +828,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         if (has_auto_margin_bottom && block->bound) block->bound->margin.bottom = 0;
         log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, border_box=%.1f, content_height=%.1f (stored in given_height)",
                   top_edge, bottom_edge, border_box_height, content_height);
+    } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+               block->form->intrinsic_height > 0) {
+        // CSS 2.1 §10.6.5: replaced form control with auto height → use intrinsic height
+        content_height = block->form->intrinsic_height;
+        log_debug("[ABS POS] form control intrinsic height: %.1f", content_height);
     } else {
         // shrink-to-fit: height will be determined by content after layout
         content_height = 0;
@@ -1524,13 +1538,17 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0)
         ) > 0));
     bool has_grid_calculated_width = is_grid_container && block->width > 0;
+    // Form controls (checkbox, radio, etc.) have intrinsic sizes set by layout_form_control.
+    // Don't overwrite with flow-based auto-sizing (void elements have 0 flow content).
+    bool has_form_intrinsic_width = block->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                                    block->form && block->width > 0;
 
     // Width is auto-sized when no explicit width AND neither left+right constraints
     if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
-        // Don't override flex/grid calculated width with flow-based auto-sizing
-        if (has_flex_calculated_width || has_grid_calculated_width) {
-            log_debug("auto-sizing width: SKIPPED - %s container already has calculated width %.1f",
-                      is_flex_container ? "flex" : "grid", block->width);
+        // Don't override flex/grid/form calculated width with flow-based auto-sizing
+        if (has_flex_calculated_width || has_grid_calculated_width || has_form_intrinsic_width) {
+            log_debug("auto-sizing width: SKIPPED - %s already has calculated width %.1f",
+                      has_form_intrinsic_width ? "form control" : (is_flex_container ? "flex" : "grid"), block->width);
         } else {
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
@@ -1698,7 +1716,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // CSS 2.1 §10.6.5: Replaced elements (img, iframe) use intrinsic height
     // for auto height. The image-loading code above already set block->height
     // from intrinsic dimensions; don't overwrite it with flow-based auto-sizing.
-    bool has_replaced_intrinsic_height = (block->display.inner == RDT_DISPLAY_REPLACED) && block->height > 0;
+    bool has_replaced_intrinsic_height = ((block->display.inner == RDT_DISPLAY_REPLACED) ||
+        (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form)) && block->height > 0;
 
     // CRITICAL: Use block->blk->given_height (canonical CSS value) instead of lycon->block.given_height
     // here, because lycon->block.given_height can be corrupted by child CSS style resolution

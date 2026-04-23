@@ -1540,8 +1540,8 @@ static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_
 
 static Item js_fs_fchmod_async(Item fd_item, Item mode_item, Item callback) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    int fd = (int)it2i(fd_item);
-    int mode = (int)it2i(mode_item);
+    int fd = (int)it2i(js_to_number(fd_item));
+    int mode = (int)it2i(js_to_number(mode_item));
     uv_fs_t req;
     int r = uv_fs_fchmod(NULL, &req, fd, mode, NULL);
     uv_fs_req_cleanup(&req);
@@ -1552,9 +1552,9 @@ static Item js_fs_fchmod_async(Item fd_item, Item mode_item, Item callback) {
 
 static Item js_fs_fchown_async(Item fd_item, Item uid_item, Item gid_item, Item callback) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    int fd = (int)it2i(fd_item);
-    int uid = (int)it2i(uid_item);
-    int gid = (int)it2i(gid_item);
+    int fd = (int)it2i(js_to_number(fd_item));
+    int uid = (int)it2i(js_to_number(uid_item));
+    int gid = (int)it2i(js_to_number(gid_item));
     uv_fs_t req;
     int r = uv_fs_fchown(NULL, &req, fd, uid, gid, NULL);
     uv_fs_req_cleanup(&req);
@@ -1573,8 +1573,8 @@ static Item js_fs_lchown_async(Item path_item, Item uid_item, Item gid_item, Ite
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
     }
-    int uid = (int)it2i(uid_item);
-    int gid = (int)it2i(gid_item);
+    int uid = (int)it2i(js_to_number(uid_item));
+    int gid = (int)it2i(js_to_number(gid_item));
     uv_fs_t req;
     int r = uv_fs_lchown(NULL, &req, path, uid, gid, NULL);
     uv_fs_req_cleanup(&req);
@@ -1593,8 +1593,8 @@ static Item js_fs_chown_async(Item path_item, Item uid_item, Item gid_item, Item
         js_call_function(callback, ItemNull, args, 1);
         return make_js_undefined();
     }
-    int uid = (int)it2i(uid_item);
-    int gid = (int)it2i(gid_item);
+    int uid = (int)it2i(js_to_number(uid_item));
+    int gid = (int)it2i(js_to_number(gid_item));
     uv_fs_t req;
     int r = uv_fs_chown(NULL, &req, path, uid, gid, NULL);
     uv_fs_req_cleanup(&req);

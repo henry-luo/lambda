@@ -191,6 +191,7 @@ Item js_get_console_object_value(void);
 Item js_get_reflect_object_value(void);
 Item js_get_atomics_object_value(void);
 Item js_get_262_object_value(void);
+Item js_get_css_object_value(void);
 
 // =============================================================================
 // v5: Process I/O

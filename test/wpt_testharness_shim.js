@@ -89,6 +89,12 @@ function assert_throws_js(constructor, func, desc) {
     }
 }
 
+function assert_unreached(desc) {
+    var msg = "assert_unreached: reached unreachable code";
+    if (desc) msg = msg + " - " + desc;
+    throw new Error(msg);
+}
+
 // setup() and done() are no-ops in our synchronous model
 function setup(func_or_props, maybe_props) {
     if (typeof func_or_props === "function") {
@@ -96,6 +102,76 @@ function setup(func_or_props, maybe_props) {
     }
 }
 function done() {}
+
+// async_test() shim — Lambda JS runs synchronously, so we capture
+// the step function and execute it when onload fires (simulated at end of script).
+var _wpt_async_tests = [];
+function async_test(name_or_props) {
+    var name = "";
+    if (typeof name_or_props === "string") name = name_or_props;
+    else if (name_or_props && name_or_props.name) name = name_or_props.name;
+
+    var t = {
+        _name: name,
+        _done: false,
+        _steps: [],
+        step_func: function(fn) {
+            var self = this;
+            return function() {
+                _wpt_total++;
+                try {
+                    fn.apply(self, arguments);
+                    _wpt_pass++;
+                } catch (e) {
+                    _wpt_fail++;
+                    console.log("FAIL: " + self._name + " - " + e.message);
+                }
+            };
+        },
+        step: function(fn) {
+            try {
+                fn.apply(this, Array.prototype.slice.call(arguments, 1));
+            } catch (e) {
+                _wpt_total++;
+                _wpt_fail++;
+                console.log("FAIL: " + this._name + " - " + e.message);
+            }
+        },
+        step_func_done: function(fn) {
+            var self = this;
+            return function() {
+                _wpt_total++;
+                try {
+                    if (fn) fn.apply(self, arguments);
+                    _wpt_pass++;
+                    self._done = true;
+                } catch (e) {
+                    _wpt_fail++;
+                    console.log("FAIL: " + self._name + " - " + e.message);
+                }
+            };
+        },
+        done: function() { this._done = true; },
+        unreached_func: function(desc) {
+            return function() {
+                _wpt_total++;
+                _wpt_fail++;
+                console.log("FAIL: " + desc + " - reached unreachable code");
+            };
+        }
+    };
+    _wpt_async_tests.push(t);
+    return t;
+}
+
+// Simulate window.onload — called at end of combined script by the GTest runner.
+// Fires the onload handler if one was set, which triggers async_test step_funcs.
+var onload = null;
+function _wpt_fire_onload() {
+    if (onload !== null && onload !== undefined) {
+        onload();
+    }
+}
 
 // Print summary at end (called by GTest runner via appended code)
 function _wpt_print_summary() {
