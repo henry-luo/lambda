@@ -1000,14 +1000,18 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         shadow = shadow->next;
     }
 
-    // Get border radius if present
+    // Scale factor: rect is in physical pixels but shadow props and border radii
+    // are in CSS pixels.  Multiply by rdcon->scale to convert to physical pixels.
+    float sc = rdcon->scale;
+
+    // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
     if (view->bound && view->bound->border) {
         BorderProp* border = view->bound->border;
-        r_tl = border->radius.top_left;
-        r_tr = border->radius.top_right;
-        r_br = border->radius.bottom_right;
-        r_bl = border->radius.bottom_left;
+        r_tl = border->radius.top_left * sc;
+        r_tr = border->radius.top_right * sc;
+        r_br = border->radius.bottom_right * sc;
+        r_bl = border->radius.bottom_left * sc;
     }
 
     const RdtMatrix* xform = get_transform(rdcon);
@@ -1017,21 +1021,27 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         BoxShadow* s = shadows[i];
         if (s->inset) continue;  // Skip inset shadows for now
 
+        // Scale shadow properties from CSS pixels to physical pixels
+        float s_offset_x = s->offset_x * sc;
+        float s_offset_y = s->offset_y * sc;
+        float s_blur     = s->blur_radius * sc;
+        float s_spread   = s->spread_radius * sc;
+
         // Calculate shadow rectangle
-        float shadow_x = rect.x + s->offset_x - s->spread_radius;
-        float shadow_y = rect.y + s->offset_y - s->spread_radius;
-        float shadow_w = rect.width + 2 * s->spread_radius;
-        float shadow_h = rect.height + 2 * s->spread_radius;
+        float shadow_x = rect.x + s_offset_x - s_spread;
+        float shadow_y = rect.y + s_offset_y - s_spread;
+        float shadow_w = rect.width + 2 * s_spread;
+        float shadow_h = rect.height + 2 * s_spread;
 
         // Adjust border radius for spread
-        float spread_factor = (s->spread_radius >= 0) ? 1.0f : 1.0f;
-        float sr_tl = max(0.0f, r_tl + s->spread_radius * spread_factor);
-        float sr_tr = max(0.0f, r_tr + s->spread_radius * spread_factor);
-        float sr_br = max(0.0f, r_br + s->spread_radius * spread_factor);
-        float sr_bl = max(0.0f, r_bl + s->spread_radius * spread_factor);
+        float spread_factor = (s_spread >= 0) ? 1.0f : 1.0f;
+        float sr_tl = max(0.0f, r_tl + s_spread * spread_factor);
+        float sr_tr = max(0.0f, r_tr + s_spread * spread_factor);
+        float sr_br = max(0.0f, r_br + s_spread * spread_factor);
+        float sr_bl = max(0.0f, r_bl + s_spread * spread_factor);
 
-        log_debug("[BOX-SHADOW] Rendering shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f color=#%02x%02x%02x%02x",
-                  s->offset_x, s->offset_y, s->blur_radius, s->spread_radius,
+        log_debug("[BOX-SHADOW] Rendering shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f scale=%.1f color=#%02x%02x%02x%02x",
+                  s_offset_x, s_offset_y, s_blur, s_spread, sc,
                   s->color.r, s->color.g, s->color.b, s->color.a);
 
         // Build shadow path
@@ -1078,6 +1088,30 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rdt_path_add_rect(shadow_path, shadow_x, shadow_y, shadow_w, shadow_h, 0, 0);
         }
 
+        // For rounded elements, save pixels in the element border-box area BEFORE
+        // the shadow fill. After fill+blur, the saved pixels are restored inside
+        // the border-box so the shadow doesn't contaminate the element area at
+        // anti-aliased rounded corners. Per CSS spec, outer box-shadow is clipped
+        // to outside the border-box.
+        bool need_shadow_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0);
+        int save_rx = 0, save_ry = 0, save_rw = 0, save_rh = 0;
+        int exclude_type = 0;
+        float exclude_params[8] = {};
+        if (need_shadow_clip) {
+            save_rx = (int)floorf(rect.x);
+            save_ry = (int)floorf(rect.y);
+            save_rw = (int)ceilf(rect.x + rect.width) - save_rx;
+            save_rh = (int)ceilf(rect.y + rect.height) - save_ry;
+            exclude_type = CLIP_SHAPE_ROUNDED_RECT;
+            exclude_params[0] = rect.x;  exclude_params[1] = rect.y;
+            exclude_params[2] = rect.width; exclude_params[3] = rect.height;
+            exclude_params[4] = r_tl; exclude_params[5] = r_tr;
+            exclude_params[6] = r_br; exclude_params[7] = r_bl;
+            if (rdcon->dl) {
+                dl_shadow_clip_save(rdcon->dl, save_rx, save_ry, save_rw, save_rh);
+            }
+        }
+
         // Clip to block clip region and fill
         RdtPath* clip_path = create_bg_clip_path(rdcon);
         rc_push_clip(rdcon, clip_path, xform);
@@ -1087,8 +1121,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         rdt_path_free(clip_path);
 
         // Apply software box blur if blur radius > 0
-        if (s->blur_radius > 0) {
-            float blur_px = s->blur_radius;
+        if (s_blur > 0) {
+            float blur_px = s_blur;
             // Blur region must cover the shadow plus the blur extent
             int br_x = (int)floorf(shadow_x - blur_px);
             int br_y = (int)floorf(shadow_y - blur_px);
@@ -1109,19 +1143,17 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                    clip_type, clip_params);
             } else if (rdcon->ui_context->surface) {
                 box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
-                // Restore pixels outside CSS clip-path after blur
-                if (clip_type) {
-                    ImageSurface* surface = rdcon->ui_context->surface;
-                    // Note: for direct path, the pre-blur save/restore is not needed
-                    // because we can re-clip against the live clip shapes.
-                    // But we don't have saved pixels here. Instead, the clip shapes
-                    // are checked by the pixel ops (fill_surface_rect), so outer shadow
-                    // via direct path already uses clip_shapes correctly for fill.
-                    // The blur smearing is the issue — handled by DL path above.
-                }
             }
             log_debug("[BOX-SHADOW] Applied 3-pass box blur radius=%.1f on region (%d,%d,%d,%d)",
                       blur_px, br_x, br_y, br_w, br_h);
+        }
+
+        // Restore pixels inside element border-box from the pre-fill save
+        if (need_shadow_clip) {
+            if (rdcon->dl) {
+                dl_shadow_clip_restore(rdcon->dl, exclude_type, exclude_params,
+                                       save_rx, save_ry, save_rw, save_rh, 1);
+            }
         }
     }
 
@@ -1163,13 +1195,17 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         shadow = shadow->next;
     }
 
-    // Get border radius if present
+    // Scale factor: rect is in physical pixels but shadow props and border radii
+    // are in CSS pixels.  Multiply by rdcon->scale to convert to physical pixels.
+    float sc = rdcon->scale;
+
+    // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
     if (view->bound->border) {
-        r_tl = view->bound->border->radius.top_left;
-        r_tr = view->bound->border->radius.top_right;
-        r_br = view->bound->border->radius.bottom_right;
-        r_bl = view->bound->border->radius.bottom_left;
+        r_tl = view->bound->border->radius.top_left * sc;
+        r_tr = view->bound->border->radius.top_right * sc;
+        r_br = view->bound->border->radius.bottom_right * sc;
+        r_bl = view->bound->border->radius.bottom_left * sc;
     }
 
     const RdtMatrix* xform = get_transform(rdcon);
@@ -1178,13 +1214,19 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     for (int i = shadow_count - 1; i >= 0; i--) {
         BoxShadow* s = shadows[i];
 
-        // Band width: blur_radius/2 gives the blur enough material for a smooth
-        // gradient while avoiding over-darkening.  With the bg-color padding in
-        // box_blur_region_inset, the blur kernel at the element edge sees the
-        // correct base color, producing ~50% intensity at the boundary.
-        float band = s->blur_radius * 0.5f + s->spread_radius;
-        float inner_x = rect.x + s->offset_x + band;
-        float inner_y = rect.y + s->offset_y + band;
+        // Scale shadow properties from CSS pixels to physical pixels
+        float s_offset_x = s->offset_x * sc;
+        float s_offset_y = s->offset_y * sc;
+        float s_blur     = s->blur_radius * sc;
+        float s_spread   = s->spread_radius * sc;
+
+        // Band = blur/2 + spread.  This provides enough fill material for the
+        // Gaussian to produce a smooth gradient while avoiding over-darkening.
+        // box_blur_region_inset pads outside the element with bg_color so the
+        // blur kernel sees the correct base color.
+        float band = s_blur * 0.5f + s_spread;
+        float inner_x = rect.x + s_offset_x + band;
+        float inner_y = rect.y + s_offset_y + band;
         float inner_w = rect.width  - 2 * band;
         float inner_h = rect.height - 2 * band;
 
@@ -1214,8 +1256,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         float ir_br = max(0.0f, r_br - band);
         float ir_bl = max(0.0f, r_bl - band);
 
-        log_debug("[BOX-SHADOW INSET] Rendering inset shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f band=%.1f alpha=%d color=#%02x%02x%02x%02x",
-                  s->offset_x, s->offset_y, s->blur_radius, s->spread_radius, band, fill_color.a,
+        log_debug("[BOX-SHADOW INSET] Rendering inset shadow: offset=(%.1f,%.1f) blur=%.1f spread=%.1f band=%.1f scale=%.1f alpha=%d color=#%02x%02x%02x%02x",
+                  s_offset_x, s_offset_y, s_blur, s_spread, band, sc, fill_color.a,
                   fill_color.r, fill_color.g, fill_color.b, fill_color.a);
 
         // Even-odd fill: outer (CW) = element border-box, inner (CCW) = inset cutout
@@ -1261,11 +1303,10 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
                 #define KAPPA_INNER 0.5522847498f
                 rdt_path_move_to(shadow_path, ix + ir_tl, iy);
-                rdt_path_line_to(shadow_path, ix, iy + ir_tl);
                 if (ir_tl > 0) rdt_path_cubic_to(shadow_path,
-                    ix, iy + ir_tl - ir_tl * KAPPA_INNER,
                     ix + ir_tl - ir_tl * KAPPA_INNER, iy,
-                    ix + ir_tl, iy);
+                    ix, iy + ir_tl - ir_tl * KAPPA_INNER,
+                    ix, iy + ir_tl);
                 rdt_path_line_to(shadow_path, ix, iy + ih - ir_bl);
                 if (ir_bl > 0) rdt_path_cubic_to(shadow_path,
                     ix, iy + ih - ir_bl + ir_bl * KAPPA_INNER,
@@ -1292,6 +1333,28 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             }
         }
 
+        // For rounded elements, the inset blur operates on a rectangular region
+        // that extends into the rounded corners. Save corner pixels before fill+blur
+        // and restore them after, so the blur doesn't leak outside the rounded border.
+        bool inset_need_clip = (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) && s_blur > 0;
+        int inset_save_rx = 0, inset_save_ry = 0, inset_save_rw = 0, inset_save_rh = 0;
+        int inset_clip_type = 0;
+        float inset_clip_params[8] = {};
+        if (inset_need_clip) {
+            inset_save_rx = (int)floorf(rect.x);
+            inset_save_ry = (int)floorf(rect.y);
+            inset_save_rw = (int)ceilf(rect.x + rect.width) - inset_save_rx;
+            inset_save_rh = (int)ceilf(rect.y + rect.height) - inset_save_ry;
+            inset_clip_type = CLIP_SHAPE_ROUNDED_RECT;
+            inset_clip_params[0] = rect.x;  inset_clip_params[1] = rect.y;
+            inset_clip_params[2] = rect.width; inset_clip_params[3] = rect.height;
+            inset_clip_params[4] = r_tl; inset_clip_params[5] = r_tr;
+            inset_clip_params[6] = r_br; inset_clip_params[7] = r_bl;
+            if (rdcon->dl) {
+                dl_shadow_clip_save(rdcon->dl, inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh);
+            }
+        }
+
         // Clip to element boundary and fill
         RdtPath* clip_path = rdt_path_new();
         rdt_path_add_rect(clip_path, rect.x, rect.y, rect.width, rect.height, 0, 0);
@@ -1302,8 +1365,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         rdt_path_free(clip_path);
 
         // Apply box blur within element rect
-        if (s->blur_radius > 0) {
-            float blur_px = s->blur_radius;
+        if (s_blur > 0) {
+            float blur_px = s_blur;
             int br_x = (int)floorf(rect.x);
             int br_y = (int)floorf(rect.y);
             int br_w = (int)ceilf(rect.width);
@@ -1330,6 +1393,14 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             }
             log_debug("[BOX-SHADOW INSET] Applied inset blur radius=%.1f pad=%d bg=#%08x on region (%d,%d,%d,%d)",
                       blur_px, pad, bg_pixel, br_x, br_y, br_w, br_h);
+        }
+
+        // Restore corner pixels outside rounded border-box after inset blur
+        if (inset_need_clip) {
+            if (rdcon->dl) {
+                dl_shadow_clip_restore(rdcon->dl, inset_clip_type, inset_clip_params,
+                                       inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh, 0);
+            }
         }
     }
 

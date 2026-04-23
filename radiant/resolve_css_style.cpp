@@ -11009,6 +11009,36 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
 
+            // Resolve var() before routing through background shorthand logic
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name && strcmp(value->data.function->name, "var") == 0) {
+                const CssValue* resolved = resolve_var_function(lycon, value);
+                if (resolved && resolved != value) {
+                    CssDeclaration resolved_decl = *decl;
+                    resolved_decl.value = const_cast<CssValue*>(resolved);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &resolved_decl, lycon);
+                    return;
+                }
+                // var() didn't resolve — fall through (will be logged as unimplemented)
+            }
+
+            // Handle 'background: none' → transparent background (CSS spec: background-image: none)
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
+                if (!span->bound) {
+                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                }
+                if (!span->bound->background) {
+                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                }
+                span->bound->background->color.r = 0;
+                span->bound->background->color.g = 0;
+                span->bound->background->color.b = 0;
+                span->bound->background->color.a = 0;  // fully transparent
+                log_debug("[Lambda CSS Shorthand] background: none/transparent -> transparent");
+                return;
+            }
+
             // Handle multiple background layers (comma-separated list)
             // CSS stacks backgrounds bottom-to-top, so last item is base layer
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1) {

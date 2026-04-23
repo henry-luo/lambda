@@ -1307,6 +1307,12 @@
                     "link": "dynamic"
                 },
                 {
+                    "name": "CoreText",
+                    "include": null,
+                    "lib": "-framework CoreText",
+                    "link": "dynamic"
+                },
+                {
                     "name": "AppKit",
                     "include": null,
                     "lib": "-framework AppKit",
@@ -1475,7 +1481,10 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc"
+                            "rpmalloc",
+                            "CoreFoundation",
+                            "CoreGraphics",
+                            "CoreText"
                         ],
                         "additional_sources": [
                             "lib/font/font_config.c",

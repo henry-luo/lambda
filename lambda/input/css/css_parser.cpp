@@ -2070,42 +2070,171 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         }
     } else {
         // Multiple values - create list
-        CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-        if (!list_value) return NULL;
-
-        list_value->type = CSS_VALUE_TYPE_LIST;
-        list_value->data.list.count = value_count;
-
-        // Allocate array of pointers to CssValue
-        list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
-        if (!list_value->data.list.values) return NULL;
-
-        int list_idx = 0;
-        int i = value_start;
-        while (i < *pos && list_idx < value_count) {
-            if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMA) {
-                i++;
-                continue;
-            }
-
-            CssValue* value = NULL;
-
-            // Handle function tokens specially
-            if (tokens[i].type == CSS_TOKEN_FUNCTION) {
-                int func_pos = i;
-                value = css_parse_function_from_tokens(tokens, &func_pos, *pos, pool);
-                i = func_pos;  // advance past the function
-            } else {
-                value = css_parse_token_to_value(&tokens[i], pool);
-                i++;
-            }
-
-            if (value) {
-                list_value->data.list.values[list_idx++] = value;
+        // Check for top-level commas (outside functions/parentheses) indicating
+        // comma-separated value groups (e.g. box-shadow, background, transition).
+        // Top-level commas split values into sub-lists; commas inside functions
+        // like rgba() are NOT group separators.
+        bool has_top_level_comma = false;
+        {
+            int pd = 0;
+            for (int i = value_start; i < *pos; i++) {
+                CssTokenType t = tokens[i].type;
+                if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
+                else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
+                else if (t == CSS_TOKEN_COMMA && pd == 0) { has_top_level_comma = true; break; }
             }
         }
 
-        decl->value = list_value;
+        if (has_top_level_comma) {
+            // Count comma-separated groups (tracking paren depth to skip function args)
+            int group_count = 1;
+            {
+                int pd = 0;
+                for (int i = value_start; i < *pos; i++) {
+                    CssTokenType t = tokens[i].type;
+                    if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
+                    else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
+                    else if (t == CSS_TOKEN_COMMA && pd == 0) group_count++;
+                }
+            }
+
+            CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+            if (!list_value) return NULL;
+            list_value->type = CSS_VALUE_TYPE_LIST;
+            list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * group_count);
+            if (!list_value->data.list.values) return NULL;
+
+            // Parse each comma-separated group into a sub-list (or single value)
+            int group_idx = 0;
+            int i = value_start;
+            while (i < *pos && group_idx < group_count) {
+                // Find group boundaries (up to next top-level comma or end)
+                int group_start = i;
+                int pd = 0;
+                while (i < *pos) {
+                    CssTokenType t = tokens[i].type;
+                    if (t == CSS_TOKEN_FUNCTION || t == CSS_TOKEN_LEFT_PAREN) pd++;
+                    else if (t == CSS_TOKEN_RIGHT_PAREN) { if (pd > 0) pd--; }
+                    else if (t == CSS_TOKEN_COMMA && pd == 0) break;
+                    i++;
+                }
+                int group_end = i;
+                if (i < *pos && tokens[i].type == CSS_TOKEN_COMMA) i++; // skip comma
+
+                // Parse values within this group
+                // First count values (functions count as 1)
+                int gval_count = 0;
+                {
+                    int j = group_start, gpd = 0;
+                    while (j < group_end) {
+                        CssTokenType t = tokens[j].type;
+                        if (t == CSS_TOKEN_WHITESPACE) { j++; continue; }
+                        if (t == CSS_TOKEN_FUNCTION) {
+                            gval_count++;
+                            gpd = 1;
+                            j++;
+                            while (j < group_end && gpd > 0) {
+                                if (tokens[j].type == CSS_TOKEN_FUNCTION || tokens[j].type == CSS_TOKEN_LEFT_PAREN) gpd++;
+                                else if (tokens[j].type == CSS_TOKEN_RIGHT_PAREN) gpd--;
+                                j++;
+                            }
+                        } else {
+                            gval_count++;
+                            j++;
+                        }
+                    }
+                }
+
+                if (gval_count == 0) {
+                    group_idx++;
+                    continue;
+                } else if (gval_count == 1) {
+                    // Single value in group - store directly
+                    int j = group_start;
+                    while (j < group_end && tokens[j].type == CSS_TOKEN_WHITESPACE) j++;
+                    CssValue* value = NULL;
+                    if (tokens[j].type == CSS_TOKEN_FUNCTION) {
+                        int func_pos = j;
+                        value = css_parse_function_from_tokens(tokens, &func_pos, group_end, pool);
+                    } else {
+                        value = css_parse_token_to_value(&tokens[j], pool);
+                    }
+                    list_value->data.list.values[group_idx] = value;
+                } else {
+                    // Multiple values in group - create sub-list
+                    CssValue* sub_list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+                    if (!sub_list) { group_idx++; continue; }
+                    sub_list->type = CSS_VALUE_TYPE_LIST;
+                    sub_list->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * gval_count);
+                    if (!sub_list->data.list.values) { group_idx++; continue; }
+
+                    int sub_idx = 0;
+                    int j = group_start;
+                    while (j < group_end && sub_idx < gval_count) {
+                        if (tokens[j].type == CSS_TOKEN_WHITESPACE) { j++; continue; }
+                        CssValue* value = NULL;
+                        if (tokens[j].type == CSS_TOKEN_FUNCTION) {
+                            int func_pos = j;
+                            value = css_parse_function_from_tokens(tokens, &func_pos, group_end, pool);
+                            j = func_pos;
+                        } else {
+                            value = css_parse_token_to_value(&tokens[j], pool);
+                            j++;
+                        }
+                        if (value) sub_list->data.list.values[sub_idx++] = value;
+                    }
+                    sub_list->data.list.count = sub_idx;
+                    list_value->data.list.values[group_idx] = sub_list;
+                }
+                group_idx++;
+            }
+            list_value->data.list.count = group_idx;
+
+            // If only one group, unwrap the outer list
+            if (group_idx == 1 && list_value->data.list.values[0]) {
+                decl->value = list_value->data.list.values[0];
+            } else {
+                decl->value = list_value;
+            }
+        } else {
+            // No top-level commas — space-separated flat list (existing behavior)
+            CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+            if (!list_value) return NULL;
+
+            list_value->type = CSS_VALUE_TYPE_LIST;
+            list_value->data.list.count = value_count;
+
+            // Allocate array of pointers to CssValue
+            list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
+            if (!list_value->data.list.values) return NULL;
+
+            int list_idx = 0;
+            int i = value_start;
+            while (i < *pos && list_idx < value_count) {
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+                    i++;
+                    continue;
+                }
+
+                CssValue* value = NULL;
+
+                // Handle function tokens specially
+                if (tokens[i].type == CSS_TOKEN_FUNCTION) {
+                    int func_pos = i;
+                    value = css_parse_function_from_tokens(tokens, &func_pos, *pos, pool);
+                    i = func_pos;  // advance past the function
+                } else {
+                    value = css_parse_token_to_value(&tokens[i], pool);
+                    i++;
+                }
+
+                if (value) {
+                    list_value->data.list.values[list_idx++] = value;
+                }
+            }
+
+            decl->value = list_value;
+        }
     }
 
     // reject declaration if no valid value was parsed (e.g. unknown unit like "300x")

@@ -2307,7 +2307,7 @@ layout: test-layout
 # ─── Render Visual Regression Tests ─────────────────────────────────────────
 
 # capture-render: Capture browser reference PNGs for render tests
-# Usage: make capture-render [test=<test-name>] [force=1] [platform=<platform>]
+# Usage: make capture-render [test=<test-name>] [force=1] [platform=<platform>] [suite=<suite>]
 capture-render:
 	@echo "🖼️  Capturing browser render references..."
 	@if [ -d "test/render" ]; then \
@@ -2320,6 +2320,7 @@ capture-render:
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		FORCE_VAR="$(or $(force),$(FORCE))"; \
 		PLATFORM_VAR="$(or $(platform),$(PLATFORM))"; \
+		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			ARGS="$$ARGS --test $$TEST_VAR"; \
 		fi; \
@@ -2329,6 +2330,9 @@ capture-render:
 		if [ -n "$$PLATFORM_VAR" ]; then \
 			ARGS="$$ARGS --platform $$PLATFORM_VAR"; \
 		fi; \
+		if [ -n "$$SUITE_VAR" ]; then \
+			ARGS="$$ARGS --suite $$SUITE_VAR"; \
+		fi; \
 		LAMBDA_ROOT=$(CURDIR) node capture_render_references.js $$ARGS; \
 	else \
 		echo "❌ Error: Render test directory not found at test/render"; \
@@ -2336,7 +2340,7 @@ capture-render:
 	fi
 
 # test-render: Run render visual regression tests
-# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>]
+# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>] [suite=<suite>]
 test-render:
 	@echo "🎨 Running Radiant Render Tests"
 	@echo "================================"
@@ -2350,6 +2354,7 @@ test-render:
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
 		THRESHOLD_VAR="$(or $(threshold),$(THRESHOLD))"; \
+		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			ARGS="$$ARGS --test $$TEST_VAR"; \
 		fi; \
@@ -2359,6 +2364,9 @@ test-render:
 		if [ -n "$$THRESHOLD_VAR" ]; then \
 			ARGS="$$ARGS --threshold $$THRESHOLD_VAR"; \
 		fi; \
+		if [ -n "$$SUITE_VAR" ]; then \
+			ARGS="$$ARGS --suite $$SUITE_VAR"; \
+		fi; \
 		LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js $$ARGS; \
 	else \
 		echo "❌ Error: Render test directory not found at test/render"; \
@@ -2367,6 +2375,9 @@ test-render:
 
 # render-test: Alias for test-render
 render-test: test-render
+
+# render: Alias for test-render
+render: test-render
 
 # compare-layout: Run Radiant layout and compare with browser reference
 # Usage: make compare-layout test=<test-name> [category=<category>] [options]
