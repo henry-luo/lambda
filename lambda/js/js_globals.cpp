@@ -1515,13 +1515,145 @@ static Item build_process_stdin(void) {
 }
 
 // process.nextTick(callback, ...args) — queue callback before microtasks
-extern "C" Item js_process_nextTick(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    // schedule as microtask (matches Node.js semantics closely enough)
+extern "C" Item js_process_nextTick(Item rest_args) {
+    int argc = js_array_length(rest_args);
+    if (argc == 0) return make_js_undefined();
+    Item callback = js_array_get_int(rest_args, 0);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("The \"callback\" argument must be of type function");
+    }
     extern void js_microtask_enqueue(Item func);
-    js_microtask_enqueue(callback);
+    if (argc == 1) {
+        // no extra args — enqueue callback directly
+        js_microtask_enqueue(callback);
+    } else {
+        // bind extra args: callback.bind(undefined, arg1, arg2, ...)
+        extern Item js_bind_function(Item func, Item this_val, Item* args, int arg_count);
+        int extra = argc - 1;
+        Item* bound_args = (Item*)alloca(extra * sizeof(Item));
+        for (int i = 0; i < extra; i++) {
+            bound_args[i] = js_array_get_int(rest_args, i + 1);
+        }
+        Item bound = js_bind_function(callback, make_js_undefined(), bound_args, extra);
+        js_microtask_enqueue(bound);
+    }
     return make_js_undefined();
 }
+
+// process.binding(name) — deprecated, returns empty objects or specific bindings
+extern "C" Item js_process_binding(Item name) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return js_new_object();
+    String* s = it2s(name);
+    // process.binding('natives') — return empty object (tests check it exists)
+    // process.binding('config') — return config object
+    if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
+        Item cfg = js_new_object();
+        js_property_set(cfg, (Item){.item = s2it(heap_create_name("hasOpenSSL", 10))}, (Item){.item = ITEM_TRUE});
+        js_property_set(cfg, (Item){.item = s2it(heap_create_name("hasCrypto", 9))}, (Item){.item = ITEM_TRUE});
+        js_property_set(cfg, (Item){.item = s2it(heap_create_name("fipsMode", 8))}, (Item){.item = ITEM_FALSE});
+        return cfg;
+    }
+    return js_new_object();
+}
+
+// process.dlopen(module, filename) — stub for native addon loading
+extern "C" Item js_process_dlopen(Item module, Item filename) {
+    return js_throw_type_error_code("ERR_DLOPEN_FAILED",
+        "process.dlopen is not supported in Lambda");
+}
+
+// Set.has() stub — always returns false (for allowedNodeEnvironmentFlags)
+extern "C" Item js_set_has_stub(Item self, Item key) {
+    (void)self;
+    (void)key;
+    return (Item){.item = ITEM_FALSE};
+}
+
+// process.report.getReport() — return minimal diagnostic report
+extern "C" Item js_process_report_getReport(void) {
+    Item report = js_new_object();
+    Item header = js_new_object();
+    js_property_set(header,
+        (Item){.item = s2it(heap_create_name("nodeVersion", 11))},
+        (Item){.item = s2it(heap_create_name("v20.0.0", 7))});
+    js_property_set(header,
+        (Item){.item = s2it(heap_create_name("platform", 8))},
+#ifdef __APPLE__
+        (Item){.item = s2it(heap_create_name("darwin", 6))});
+#elif defined(__linux__)
+        (Item){.item = s2it(heap_create_name("linux", 5))});
+#else
+        (Item){.item = s2it(heap_create_name("win32", 5))});
+#endif
+    js_property_set(report,
+        (Item){.item = s2it(heap_create_name("header", 6))},
+        header);
+    return report;
+}
+
+#ifndef _WIN32
+#include <unistd.h>
+#include <grp.h>
+// process.setuid(uid)
+extern "C" Item js_process_setuid(Item uid_item) {
+    if (get_type_id(uid_item) == LMD_TYPE_INT) {
+        int r = setuid((uid_t)it2i(uid_item));
+        if (r != 0) {
+            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
+                "setuid failed");
+        }
+    }
+    return make_js_undefined();
+}
+
+// process.setgid(gid)
+extern "C" Item js_process_setgid(Item gid_item) {
+    if (get_type_id(gid_item) == LMD_TYPE_INT) {
+        int r = setgid((gid_t)it2i(gid_item));
+        if (r != 0) {
+            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
+                "setgid failed");
+        }
+    }
+    return make_js_undefined();
+}
+
+// process.seteuid(uid)
+extern "C" Item js_process_seteuid(Item uid_item) {
+    if (get_type_id(uid_item) == LMD_TYPE_INT) {
+        int r = seteuid((uid_t)it2i(uid_item));
+        if (r != 0) {
+            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
+                "seteuid failed");
+        }
+    }
+    return make_js_undefined();
+}
+
+// process.setegid(gid)
+extern "C" Item js_process_setegid(Item gid_item) {
+    if (get_type_id(gid_item) == LMD_TYPE_INT) {
+        int r = setegid((gid_t)it2i(gid_item));
+        if (r != 0) {
+            return js_throw_error_with_code("ERR_UNKNOWN_CREDENTIAL",
+                "setegid failed");
+        }
+    }
+    return make_js_undefined();
+}
+
+// process.initgroups(user, group)
+extern "C" Item js_process_initgroups(Item user, Item group) {
+    (void)user; (void)group;
+    return make_js_undefined();
+}
+
+// process.setgroups(groups)
+extern "C" Item js_process_setgroups(Item groups) {
+    (void)groups;
+    return make_js_undefined();
+}
+#endif
 
 // process.emitWarning(warning, type, code) — emit a warning
 // Node.js: emits 'warning' event on process; for us, log and call listeners
@@ -1991,7 +2123,7 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "chdir", (void*)js_process_chdir, 1);
         js_process_set_method(js_process_object, "exit", (void*)js_process_exit, 1);
         js_process_set_method(js_process_object, "uptime", (void*)js_process_uptime, 0);
-        js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, 1);
+        js_process_set_method(js_process_object, "nextTick", (void*)js_process_nextTick, -1);
         js_process_set_method(js_process_object, "memoryUsage", (void*)js_process_memoryUsage, 0);
         js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
@@ -2186,6 +2318,91 @@ extern "C" Item js_get_process_object_value(void) {
                 (Item){.item = s2it(heap_create_name("release", 7))},
                 release_obj);
         }
+
+        // process.binding(name) — deprecated, but tests check it exists
+        {
+            extern Item js_process_binding(Item name);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("binding", 7))},
+                js_new_function((void*)js_process_binding, 1));
+            extern Item js_process_dlopen(Item module, Item filename);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("dlopen", 6))},
+                js_new_function((void*)js_process_dlopen, 2));
+        }
+
+        // process.allowedNodeEnvironmentFlags — Set of known flags
+        {
+            // Create an empty Set-like object with .has() method
+            Item flags = js_new_object();
+            extern Item js_set_has_stub(Item self, Item key);
+            js_property_set(flags,
+                (Item){.item = s2it(heap_create_name("has", 3))},
+                js_new_function((void*)js_set_has_stub, 1));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("allowedNodeEnvironmentFlags", 27))},
+                flags);
+        }
+
+        // process.report — diagnostic report stub
+        {
+            Item report = js_new_object();
+            extern Item js_process_report_getReport(void);
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("getReport", 9))},
+                js_new_function((void*)js_process_report_getReport, 0));
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("directory", 9))},
+                (Item){.item = s2it(heap_create_name("", 0))});
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("filename", 8))},
+                (Item){.item = s2it(heap_create_name("", 0))});
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("compact", 7))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("reportOnFatalError", 18))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("reportOnSignal", 14))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(report,
+                (Item){.item = s2it(heap_create_name("reportOnUncaughtException", 25))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("report", 6))},
+                report);
+        }
+
+#ifndef _WIN32
+        // process.setuid / process.setgid
+        {
+            extern Item js_process_setuid(Item uid);
+            extern Item js_process_setgid(Item gid);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("setuid", 6))},
+                js_new_function((void*)js_process_setuid, 1));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("setgid", 6))},
+                js_new_function((void*)js_process_setgid, 1));
+            extern Item js_process_seteuid(Item uid);
+            extern Item js_process_setegid(Item gid);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("seteuid", 7))},
+                js_new_function((void*)js_process_seteuid, 1));
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("setegid", 7))},
+                js_new_function((void*)js_process_setegid, 1));
+            extern Item js_process_initgroups(Item user, Item group);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("initgroups", 10))},
+                js_new_function((void*)js_process_initgroups, 2));
+            extern Item js_process_setgroups(Item groups);
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("setgroups", 9))},
+                js_new_function((void*)js_process_setgroups, 1));
+        }
+#endif
     }
     return js_process_object;
 }

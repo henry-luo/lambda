@@ -10,6 +10,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_error_codes.h"
 #include "../lambda-data.hpp"
 
 extern "C" Item js_get_current_this(void);
@@ -359,8 +360,7 @@ static Item make_string_item_crypto(const char* str) {
 extern "C" Item js_crypto_randomBytes(Item size_item) {
     int size = (int)it2i(size_item);
     if (size <= 0 || size > 65536) {
-        log_error("crypto: randomBytes: invalid size %d", size);
-        return ItemNull;
+        return js_throw_out_of_range("size", ">= 0 && <= 65536", size_item);
     }
     Item result = js_typed_array_new(JS_TYPED_UINT8, size);
     JsTypedArray* ta = (JsTypedArray*)result.map->data;
@@ -612,7 +612,7 @@ extern "C" Item js_hmac_digest(Item encoding_item) {
 }
 
 extern "C" Item js_crypto_createHmac(Item alg_item, Item key_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
     String* alg = it2s(alg_item);
 
     HmacCtx* ctx = (HmacCtx*)mem_calloc(1, sizeof(HmacCtx), MEM_CAT_JS_RUNTIME);
@@ -737,7 +737,7 @@ extern "C" Item js_hash_digest(Item encoding_item) {
 }
 
 extern "C" Item js_crypto_createHash(Item alg_item) {
-    if (get_type_id(alg_item) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(alg_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("algorithm", "string", alg_item);
     String* alg = it2s(alg_item);
 
     HashCtx* ctx = (HashCtx*)mem_calloc(1, sizeof(HashCtx), MEM_CAT_JS_RUNTIME);

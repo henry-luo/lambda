@@ -362,7 +362,9 @@ extern "C" Item js_assert_module_doesNotThrow(Item fn, Item error_cls, Item mess
 // assert.ifError(value) — throw if value is truthy
 // Per Node.js spec: throws AssertionError with message "ifError got unwanted exception: <msg>"
 extern "C" Item js_assert_ifError(Item value) {
-    if (assert_is_truthy(value)) {
+    // ifError throws for any value that is NOT null or undefined
+    TypeId tid = get_type_id(value);
+    if (value.item != 0 && tid != LMD_TYPE_NULL && tid != LMD_TYPE_UNDEFINED) {
         extern void js_throw_value(Item error);
         extern Item js_property_get(Item obj, Item key);
         extern Item js_property_set(Item obj, Item key, Item value);

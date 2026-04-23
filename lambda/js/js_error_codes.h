@@ -1,0 +1,57 @@
+/**
+ * js_error_codes.h — Centralized Node.js error code registry for LambdaJS
+ *
+ * Node.js tests validate error.code properties on thrown errors.
+ * All ERR_* codes used across modules are defined here for consistency.
+ */
+#pragma once
+
+// Argument validation
+#define JS_ERR_INVALID_ARG_TYPE         "ERR_INVALID_ARG_TYPE"
+#define JS_ERR_INVALID_ARG_VALUE        "ERR_INVALID_ARG_VALUE"
+#define JS_ERR_OUT_OF_RANGE             "ERR_OUT_OF_RANGE"
+#define JS_ERR_MISSING_ARGS             "ERR_MISSING_ARGS"
+
+// Buffer
+#define JS_ERR_BUFFER_TOO_LARGE         "ERR_BUFFER_TOO_LARGE"
+#define JS_ERR_BUFFER_OUT_OF_BOUNDS     "ERR_BUFFER_OUT_OF_BOUNDS"
+
+// Encoding
+#define JS_ERR_UNKNOWN_ENCODING         "ERR_UNKNOWN_ENCODING"
+
+// Stream
+#define JS_ERR_STREAM_DESTROYED         "ERR_STREAM_DESTROYED"
+#define JS_ERR_STREAM_PUSH_AFTER_EOF    "ERR_STREAM_PUSH_AFTER_EOF"
+#define JS_ERR_STREAM_NULL_VALUES       "ERR_STREAM_NULL_VALUES"
+#define JS_ERR_STREAM_WRITE_AFTER_END   "ERR_STREAM_WRITE_AFTER_END"
+#define JS_ERR_STREAM_ALREADY_FINISHED  "ERR_STREAM_ALREADY_FINISHED"
+#define JS_ERR_METHOD_NOT_IMPLEMENTED   "ERR_METHOD_NOT_IMPLEMENTED"
+
+// Return values
+#define JS_ERR_INVALID_RETURN_VALUE     "ERR_INVALID_RETURN_VALUE"
+
+// Context
+#define JS_ERR_INVALID_THIS             "ERR_INVALID_THIS"
+
+// Assertion
+#define JS_ERR_ASSERTION                "ERR_ASSERTION"
+
+// File system
+#define JS_ERR_FS_FILE_TOO_LARGE       "ERR_FS_FILE_TOO_LARGE"
+#define JS_ERR_FS_INVALID_SYMLINK_TYPE "ERR_FS_INVALID_SYMLINK_TYPE"
+
+// Crypto
+#define JS_ERR_CRYPTO_INVALID_STATE     "ERR_CRYPTO_INVALID_STATE"
+#define JS_ERR_CRYPTO_SIGN_KEY_REQUIRED "ERR_CRYPTO_SIGN_KEY_REQUIRED"
+
+// Child process
+#define JS_ERR_CHILD_PROCESS_STDIO_MAXBUFFER "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+
+// Module
+#define JS_ERR_MODULE_NOT_FOUND         "MODULE_NOT_FOUND"
+
+// Misc
+#define JS_ERR_INVALID_URL              "ERR_INVALID_URL"
+#define JS_ERR_INVALID_CALLBACK         "ERR_INVALID_CALLBACK"
+#define JS_ERR_SOCKET_BAD_PORT          "ERR_SOCKET_BAD_PORT"
+#define JS_ERR_UNHANDLED_ERROR          "ERR_UNHANDLED_ERROR"

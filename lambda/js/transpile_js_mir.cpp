@@ -9946,6 +9946,25 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         }
                     }
                 }
+                // v21: Handle member-expression superclass for super() calls
+                // e.g. class Foo extends obj.Bar { constructor() { super(); } }
+                if (mt->current_class && mt->current_class->node &&
+                    mt->current_class->node->superclass &&
+                    mt->current_class->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                    MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                    MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+                    jm_call_void_1(mt, "js_set_new_target",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
+                    jm_call_4(mt, "js_call_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    log_debug("js-mir: super() resolved dynamically for member-expression parent");
+                    return this_val;
+                }
                 log_debug("js-mir: super() called but no parent class context");
                 return jm_emit_null(mt);
             }
@@ -15416,6 +15435,23 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             }
                         }
                     }
+                    // v21: Handle member-expression / general-expression superclass
+                    // e.g. class Foo extends obj.Bar, class Foo extends require('events').EventEmitter
+                    if (!ce->superclass && ce->node && ce->node->superclass &&
+                        ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                        MIR_reg_t super_val = jm_transpile_box_item(mt, ce->node->superclass);
+                        MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
+                        MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+                        jm_call_void_2(mt, "js_set_prototype",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
+                        // Also set constructor chain: Child.__proto__ = Parent
+                        jm_call_void_2(mt, "js_set_prototype",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
+                    }
                 }
                 // Add inherited instance methods (base-first)
                 {
@@ -17667,6 +17703,37 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 return result;
             }
+        }
+        // v21: Handle member-expression superclass with no explicit constructor
+        // e.g. class Foo extends obj.Bar {} → implicit super(...args)
+        if (!active_ctor && !ce->superclass && ce->node && ce->node->superclass &&
+            ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+            MIR_reg_t super_ctor = jm_transpile_box_item(mt, ce->node->superclass);
+            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
+            jm_call_void_1(mt, "js_set_new_target",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
+            MIR_reg_t result = jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor),
+                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            MIR_reg_t cls_val2 = jm_transpile_box_item(mt, call->callee);
+            MIR_reg_t proto_key2 = jm_box_string_literal(mt, "prototype", 9);
+            MIR_reg_t class_proto2 = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_val2),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_key2));
+            jm_call_void_2(mt, "js_set_prototype",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, class_proto2));
+            if (ce->name) {
+                MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
+                MIR_reg_t cn_val = jm_box_string_literal(mt, ce->name->chars, (int)ce->name->len);
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
+            }
+            return result;
         }
 
         return obj;
@@ -25665,6 +25732,21 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                                     }
                                 }
+                            }
+                            // v21: Handle member-expression superclass in class expressions
+                            if (!ce->superclass && ce->node && ce->node->superclass &&
+                                ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
+                                MIR_reg_t super_val = jm_transpile_box_item(mt, ce->node->superclass);
+                                MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);
+                                MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val));
                             }
                         }
                         // Add inherited instance methods (base-first)

@@ -384,6 +384,18 @@ void js_throw_reference_error(Item message);
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
 Item js_throw_type_error_code(const char* code, const char* message);
 Item js_throw_range_error_code(const char* code, const char* message);
+Item js_throw_error_with_code(const char* code, const char* message);
+
+/**
+ * Node.js-style error helpers for common validation patterns.
+ * Format: 'The "name" argument must be of type expected. Received type actual'
+ */
+Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual);
+Item js_throw_invalid_arg_value(const char* name, const char* reason, Item actual);
+Item js_throw_out_of_range(const char* name, const char* range, Item actual);
+
+/** Throw a system error (like ENOENT, EACCES) with code, errno, syscall, path. */
+Item js_throw_system_error(int uv_errno, const char* syscall, const char* path);
 
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
 void js_require_object_coercible(Item value);
