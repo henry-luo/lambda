@@ -356,7 +356,8 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
 }
 
 void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
-                        int clip_type, const float* clip_params) {
+                        int clip_type, const float* clip_params,
+                        int exclude_type, const float* exclude_params) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_BOX_BLUR_REGION;
     item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
@@ -371,6 +372,12 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
         memcpy(item->box_blur_region.clip_params, clip_params, 8 * sizeof(float));
     } else {
         memset(item->box_blur_region.clip_params, 0, 8 * sizeof(float));
+    }
+    item->box_blur_region.exclude_type = exclude_type;
+    if (exclude_type && exclude_params) {
+        memcpy(item->box_blur_region.exclude_params, exclude_params, 8 * sizeof(float));
+    } else {
+        memset(item->box_blur_region.exclude_params, 0, 8 * sizeof(float));
     }
 }
 
@@ -387,6 +394,37 @@ void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad,
     item->box_blur_inset.pad = pad;
     item->box_blur_inset.blur_radius = blur_radius;
     item->box_blur_inset.bg_color = bg_color;
+}
+
+void dl_shadow_clip_save(DisplayList* dl, int rx, int ry, int rw, int rh) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_SHADOW_CLIP_SAVE;
+    item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
+    item->bounds[2] = (float)rw; item->bounds[3] = (float)rh;
+    item->shadow_clip_save.rx = rx;
+    item->shadow_clip_save.ry = ry;
+    item->shadow_clip_save.rw = rw;
+    item->shadow_clip_save.rh = rh;
+}
+
+void dl_shadow_clip_restore(DisplayList* dl, int exclude_type, const float* exclude_params,
+                            int save_rx, int save_ry, int save_rw, int save_rh,
+                            int restore_inside) {
+    DisplayItem* item = dl_alloc_item(dl);
+    item->op = DL_SHADOW_CLIP_RESTORE;
+    item->bounds[0] = (float)save_rx; item->bounds[1] = (float)save_ry;
+    item->bounds[2] = (float)save_rw; item->bounds[3] = (float)save_rh;
+    item->shadow_clip_restore.exclude_type = exclude_type;
+    if (exclude_type && exclude_params) {
+        memcpy(item->shadow_clip_restore.exclude_params, exclude_params, 8 * sizeof(float));
+    } else {
+        memset(item->shadow_clip_restore.exclude_params, 0, 8 * sizeof(float));
+    }
+    item->shadow_clip_restore.save_rx = save_rx;
+    item->shadow_clip_restore.save_ry = save_ry;
+    item->shadow_clip_restore.save_rw = save_rw;
+    item->shadow_clip_restore.save_rh = save_rh;
+    item->shadow_clip_restore.restore_inside = restore_inside;
 }
 
 void dl_video_placeholder(DisplayList* dl, void* video,
@@ -594,6 +632,10 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
     uint32_t* backdrop_stack[DL_MAX_BACKDROP_DEPTH];
     int backdrop_region[DL_MAX_BACKDROP_DEPTH][4];  // x0, y0, w, h
     int backdrop_sp = 0;
+
+    // shadow clip save buffer for DL_SHADOW_CLIP_SAVE / DL_SHADOW_CLIP_RESTORE pairs
+    uint32_t* shadow_clip_saved = nullptr;
+    int shadow_clip_region[4] = {};  // x0, y0, w, h (clamped to surface)
 
     for (int i = 0; i < dl->count; i++) {
         DisplayItem* item = &dl->items[i];
@@ -890,6 +932,51 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             DlBoxBlurInset* r = &item->box_blur_inset;
             box_blur_region_inset(scratch, surface, r->rx, r->ry, r->rw, r->rh,
                                   r->pad, r->blur_radius, r->bg_color);
+            break;
+        }
+
+        case DL_SHADOW_CLIP_SAVE: {
+            DlShadowClipSave* r = &item->shadow_clip_save;
+            shadow_clip_saved = nullptr;
+            if (surface && surface->pixels) {
+                int sw = surface->width, sh = surface->height;
+                int x0 = std::max(0, r->rx), y0 = std::max(0, r->ry);
+                int x1 = std::min(sw, r->rx + r->rw), y1 = std::min(sh, r->ry + r->rh);
+                int w = x1 - x0, h = y1 - y0;
+                if (w > 0 && h > 0) {
+                    shadow_clip_saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < h; row++)
+                        memcpy(shadow_clip_saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
+                    shadow_clip_region[0] = x0;
+                    shadow_clip_region[1] = y0;
+                    shadow_clip_region[2] = w;
+                    shadow_clip_region[3] = h;
+                }
+            }
+            break;
+        }
+
+        case DL_SHADOW_CLIP_RESTORE: {
+            DlShadowClipRestore* r = &item->shadow_clip_restore;
+            if (shadow_clip_saved && surface && surface->pixels && r->exclude_type) {
+                int x0 = shadow_clip_region[0], y0 = shadow_clip_region[1];
+                int w = shadow_clip_region[2], h = shadow_clip_region[3];
+                ClipShape ex = clip_shape_from_params(r->exclude_type, r->exclude_params);
+                uint32_t* px = (uint32_t*)surface->pixels;
+                int pitch = surface->pitch / 4;
+                for (int row = 0; row < h; row++) {
+                    for (int col = 0; col < w; col++) {
+                        float fx = (float)(x0 + col) + 0.5f;
+                        float fy = (float)(y0 + row) + 0.5f;
+                        bool inside = clip_point_in_shape(&ex, fx, fy);
+                        if (r->restore_inside ? inside : !inside)
+                            px[(y0 + row) * pitch + (x0 + col)] = shadow_clip_saved[row * w + col];
+                    }
+                }
+            }
+            shadow_clip_saved = nullptr;
             break;
         }
 

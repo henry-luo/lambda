@@ -284,7 +284,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // DON'T copy bound - pseudo-element should have its own BoundaryProp
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
     pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
-    pseudo_elem->in_line = parent->in_line;
+    // DON'T copy in_line - pseudo-element should have its own InlineProp
+    // pseudo_elem->in_line = parent->in_line;  // BUG: causes shared opacity
+    pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
 
     // Get display value from pseudo-element's styles (before_styles or after_styles)
     // Default to inline for pseudo-elements per CSS spec
@@ -503,9 +505,14 @@ static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem)
 
     log_debug("%s [PSEUDO] Laying out %s content", pseudo_elem->source_loc(), pseudo_elem->tag_name);
 
-    // Resolve CSS styles for the pseudo-element BEFORE layout
-    // This ensures font-family and other properties from CSS are applied
+    // Resolve CSS styles for the pseudo-element BEFORE layout.
+    // IMPORTANT: Set lycon->view to the pseudo-element so that CSS property
+    // callbacks (which use (ViewSpan*)lycon->view) apply properties to the
+    // pseudo-element itself, not the parent element.
+    View* saved_view = lycon->view;
+    lycon->view = (View*)pseudo_elem;
     dom_node_resolve_style(pseudo_elem, lycon);
+    lycon->view = saved_view;
 
     // Layout the pseudo-element as inline (it will lay out its text child)
     layout_inline(lycon, pseudo_elem, pseudo_elem->display);
@@ -2594,7 +2601,9 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
     // allocate a new FontProp via alloc_font_prop(), which properly copies from
     // lycon->font.style (the parent's computed font values).
     pseudo_elem->font = nullptr;
-    pseudo_elem->in_line = parent_elem->in_line;
+    // DON'T copy in_line - pseudo-element should have its own InlineProp
+    // pseudo_elem->in_line = parent_elem->in_line;  // BUG: causes shared opacity
+    pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
 
     // Log font inheritance for debugging
     log_debug("[Pseudo-Element] font=nullptr for %s (will be allocated during style resolution)",

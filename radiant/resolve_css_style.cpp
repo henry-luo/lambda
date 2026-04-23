@@ -3403,7 +3403,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle list of values (common case for shorthand)
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
-                size_t count = value->data.list.count;
+                // The CSS parser may produce comma-separated groups for font shorthand
+                // (e.g. "bold 10px Arial, Helvetica, sans-serif" → 3 groups).
+                // Detect this: if the first child is itself a list, we have nested
+                // comma groups.  Flatten the first group (which has style/weight/size/
+                // first-family) and collect remaining groups as extra font-family names.
+                const CssValue* effective_value = value;
+                if (value->data.list.count >= 2 &&
+                    value->data.list.values[0] &&
+                    value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+                    // First group is the main shorthand; use it as the value to parse
+                    effective_value = value->data.list.values[0];
+                    log_debug("[CSS] Font shorthand: detected comma-separated groups, using first group (%zu values)",
+                              effective_value->data.list.count);
+                }
+                size_t count = effective_value->data.list.count;
                 log_debug("[CSS] Font shorthand: %zu values", count);
 
                 // CSS 2.1 §15.8: If 'inherit' appears mixed with other values
@@ -3413,7 +3427,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 {
                     bool has_inherit = false;
                     for (size_t i = 0; i < count; i++) {
-                        const CssValue* v = value->data.list.values[i];
+                        const CssValue* v = effective_value->data.list.values[i];
                         if (v && v->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* ki = css_enum_info(v->data.keyword);
                             if (ki && ki->group == CSS_VALUE_GROUP_GLOBAL) {
@@ -3436,7 +3450,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 size_t family_start_index = count; // Index where font-family starts
 
                 for (size_t i = 0; i < count; i++) {
-                    const CssValue* v = value->data.list.values[i];
+                    const CssValue* v = effective_value->data.list.values[i];
                     if (!v) continue;
 
                     log_debug("[CSS] Font shorthand value[%zu]: type=%d", i, v->type);
@@ -3452,7 +3466,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                             // Skip "/" delimiter if present
                             if (next_idx < count) {
-                                const CssValue* next = value->data.list.values[next_idx];
+                                const CssValue* next = effective_value->data.list.values[next_idx];
                                 // Check if next is "/" (could be CUSTOM type with name "/")
                                 if (next && next->type == CSS_VALUE_TYPE_CUSTOM &&
                                     next->data.custom_property.name &&
@@ -3463,7 +3477,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     // Next should be line-height
                                     // CSS 2.1 §15.7: line-height accepts: normal | <number> | <length> | <percentage> | inherit
                                     if (next_idx < count) {
-                                        const CssValue* lh = value->data.list.values[next_idx];
+                                        const CssValue* lh = effective_value->data.list.values[next_idx];
                                         if (lh && (lh->type == CSS_VALUE_TYPE_LENGTH ||
                                                    lh->type == CSS_VALUE_TYPE_PERCENTAGE ||
                                                    lh->type == CSS_VALUE_TYPE_NUMBER ||
@@ -3481,7 +3495,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             // Everything from next_idx onwards is font-family
                             family_start_index = next_idx;
                             if (family_start_index < count) {
-                                family_value = value->data.list.values[family_start_index];
+                                family_value = effective_value->data.list.values[family_start_index];
                             }
                             break;  // Found size, done scanning for size
                         }
@@ -3503,16 +3517,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 size_value = v;
                                 // Check if next value is "/line-height"
                                 if (i + 2 < count) {
-                                    CssValue* maybe_slash = value->data.list.values[i + 1];
+                                    CssValue* maybe_slash = effective_value->data.list.values[i + 1];
                                     if (maybe_slash && maybe_slash->type == CSS_VALUE_TYPE_CUSTOM &&
                                         maybe_slash->data.custom_property.name &&
                                         strcmp(maybe_slash->data.custom_property.name, "/") == 0 &&
                                         i + 2 < count) {
-                                        line_height_value = value->data.list.values[i + 2];
+                                        line_height_value = effective_value->data.list.values[i + 2];
                                         int next_idx = i + 3;
                                         family_start_index = next_idx;
                                         if (family_start_index < count) {
-                                            family_value = value->data.list.values[family_start_index];
+                                            family_value = effective_value->data.list.values[family_start_index];
                                         }
                                         break;
                                     }
@@ -3520,7 +3534,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // Everything after size is font-family
                                 family_start_index = i + 1;
                                 if (family_start_index < count) {
-                                    family_value = value->data.list.values[family_start_index];
+                                    family_value = effective_value->data.list.values[family_start_index];
                                 }
                                 break;
                             } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
@@ -11008,6 +11022,36 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
+
+            // Resolve var() before routing through background shorthand logic
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name && strcmp(value->data.function->name, "var") == 0) {
+                const CssValue* resolved = resolve_var_function(lycon, value);
+                if (resolved && resolved != value) {
+                    CssDeclaration resolved_decl = *decl;
+                    resolved_decl.value = const_cast<CssValue*>(resolved);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &resolved_decl, lycon);
+                    return;
+                }
+                // var() didn't resolve — fall through (will be logged as unimplemented)
+            }
+
+            // Handle 'background: none' → transparent background (CSS spec: background-image: none)
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
+                if (!span->bound) {
+                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                }
+                if (!span->bound->background) {
+                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                }
+                span->bound->background->color.r = 0;
+                span->bound->background->color.g = 0;
+                span->bound->background->color.b = 0;
+                span->bound->background->color.a = 0;  // fully transparent
+                log_debug("[Lambda CSS Shorthand] background: none/transparent -> transparent");
+                return;
+            }
 
             // Handle multiple background layers (comma-separated list)
             // CSS stacks backgrounds bottom-to-top, so last item is base layer

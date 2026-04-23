@@ -12,10 +12,41 @@
 #include "../../lib/mem.h"
 
 #include <cstring>
+#include <cstdio>
 
 // Helper: make JS undefined value
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+// Helper: get JS type name for error messages
+static const char* js_type_name_for_error(Item value) {
+    TypeId tid = get_type_id(value);
+    switch (tid) {
+        case LMD_TYPE_NULL:       return "null";
+        case LMD_TYPE_UNDEFINED:  return "undefined";
+        case LMD_TYPE_BOOL:       return "boolean";
+        case LMD_TYPE_INT:
+        case LMD_TYPE_INT64:
+        case LMD_TYPE_FLOAT:      return "number";
+        case LMD_TYPE_STRING:     return "string";
+        case LMD_TYPE_ARRAY:      return "object"; // arrays are objects in JS
+        case LMD_TYPE_MAP:
+        case LMD_TYPE_FUNC:       return "object";
+        default:                  return "object";
+    }
+}
+
+// Helper: validate path argument is a string, throw ERR_INVALID_ARG_TYPE if not
+// Returns true if valid (is a string), false if error was thrown
+static bool validate_path_string(Item value, const char* arg_name) {
+    if (get_type_id(value) == LMD_TYPE_STRING) return true;
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+        "The \"%s\" argument must be of type string. Received type %s",
+        arg_name, js_type_name_for_error(value));
+    js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+    return false;
 }
 
 // Helper: extract a null-terminated C string from an Item string
@@ -103,6 +134,9 @@ static int normalize_path_buf(const char* path, char* result, int result_size) {
 // path.basename(path[, ext])
 // Returns the last portion of a path, optionally removing a suffix
 extern "C" Item js_path_basename(Item path_item, Item ext_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
+    if (get_type_id(ext_item) != LMD_TYPE_UNDEFINED
+        && !validate_path_string(ext_item, "ext")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
@@ -135,7 +169,13 @@ extern "C" Item js_path_basename(Item path_item, Item ext_item) {
         const char* ext = item_to_cstr(ext_item, ext_buf, sizeof(ext_buf));
         if (ext) {
             int ext_len = (int)strlen(ext);
-            if (ext_len > 0 && ext_len <= base_len &&
+            // Node.js: if entire path equals suffix, return ''
+            // but if suffix matches full basename (with dir prefix), don't strip
+            if (ext_len > 0 && ext_len == path_len &&
+                memcmp(path, ext, ext_len) == 0) {
+                return make_string_item("");
+            }
+            if (ext_len > 0 && ext_len < base_len &&
                 memcmp(base + base_len - ext_len, ext, ext_len) == 0) {
                 return make_string_item(base, base_len - ext_len);
             }
@@ -146,23 +186,56 @@ extern "C" Item js_path_basename(Item path_item, Item ext_item) {
 }
 
 // path.dirname(path)
-// Returns the directory name of a path
+// Returns the directory name of a path (POSIX compliant, handles // prefix)
 extern "C" Item js_path_dirname(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return make_string_item(".");
+    if (!path || !*path) return make_string_item(".");
 
-    char* dir = file_path_dirname(path);
-    if (!dir) return make_string_item(".");
+    int len = (int)strlen(path);
+    bool has_root = (path[0] == '/');
 
-    Item result = make_string_item(dir);
-    mem_free(dir);
-    return result;
+    // determine root length: '//' prefix is special (stays as '//')
+    int root_end = 0;
+    if (has_root) {
+        root_end = 1;
+        if (len > 1 && path[1] == '/' && (len == 2 || path[2] != '/')) {
+            root_end = 2; // '//' prefix
+        }
+    }
+
+    // strip trailing slashes
+    int end = len - 1;
+    while (end > root_end - 1 && path[end] == '/') end--;
+    if (end < root_end) {
+        // only root or empty
+        return make_string_item(path, root_end > 0 ? root_end : 1);
+    }
+
+    // find last slash before basename
+    int i = end;
+    while (i >= root_end && path[i] != '/') i--;
+
+    if (i < root_end) {
+        // no directory component
+        if (has_root) return make_string_item(path, root_end);
+        return make_string_item(".");
+    }
+
+    // strip trailing slashes from directory
+    while (i > root_end - 1 && path[i] == '/') i--;
+    if (i < root_end) {
+        return make_string_item(path, root_end);
+    }
+
+    return make_string_item(path, i + 1);
 }
 
 // path.extname(path)
 // Returns the extension of the path
 extern "C" Item js_path_extname(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
@@ -181,29 +254,40 @@ extern "C" Item js_path_extname(Item path_item) {
     int base_len = end - start + 1;
     const char* base = path + start;
 
-    // Node.js extname rules:
-    // - Find the LAST dot in the basename
-    // - If no dot, or dot is the first char with nothing after, return ""
-    // - If basename is all dots (e.g. "..", "..."), return ""
+    // Node.js extname: find last dot in basename for extension
+    // Special cases: "." -> "", ".." -> "", "..." -> ".", ".hidden" -> "",
+    // "..file" -> ".file", "file.txt" -> ".txt", "file." -> "."
+    
+    // Check if entire basename is dots
+    bool all_dots = true;
+    for (int i = 0; i < base_len; i++) {
+        if (base[i] != '.') { all_dots = false; break; }
+    }
+    if (all_dots) {
+        // "." -> "", ".." -> "", "..." -> ".", "...." -> "."
+        if (base_len <= 2) return make_string_item("");
+        return make_string_item(".", 1);
+    }
+    
+    // Find the LAST dot
     int last_dot = -1;
     for (int i = base_len - 1; i >= 0; i--) {
         if (base[i] == '.') { last_dot = i; break; }
     }
-    if (last_dot <= 0) return make_string_item("");
-
-    // Check that not all chars before last_dot are dots
-    bool all_dots_before = true;
-    for (int i = 0; i < last_dot; i++) {
-        if (base[i] != '.') { all_dots_before = false; break; }
-    }
-    if (all_dots_before) return make_string_item("");
-
+    if (last_dot == -1) return make_string_item("");  // no dot at all
+    if (last_dot == base_len - 1 && last_dot == 0) return make_string_item("");  // just "."
+    
+    // Hidden file check: dot at position 0 with no other dots
+    // ".hidden" -> "" but ".foo.bar" -> ".bar", "..ext" -> ".ext"
+    if (last_dot == 0) return make_string_item("");  // single leading dot, no other dots
+    
     return make_string_item(base + last_dot, base_len - last_dot);
 }
 
 // path.isAbsolute(path)
 // Returns true if path is absolute
 extern "C" Item js_path_isAbsolute(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
@@ -214,6 +298,7 @@ extern "C" Item js_path_isAbsolute(Item path_item) {
 // path.win32.isAbsolute(path)
 // Returns true if path is a Windows absolute path
 static Item js_path_win32_isAbsolute(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || path[0] == '\0') return (Item){.item = ITEM_FALSE};
@@ -240,6 +325,12 @@ extern "C" Item js_path_join(Item args_item) {
 
     int argc = (int)js_array_length(args_item);
     if (argc == 0) return make_string_item(".");
+
+    // validate all arguments are strings
+    for (int i = 0; i < argc; i++) {
+        Item seg_item = js_array_get_int(args_item, i);
+        if (!validate_path_string(seg_item, "path")) return ItemNull;
+    }
 
     char result[4096] = {0};
     int result_len = 0;
@@ -270,9 +361,19 @@ extern "C" Item js_path_join(Item args_item) {
 
     if (result_len == 0) return make_string_item(".");
 
+    // check if result has trailing separator before normalizing
+    bool had_trailing_sep = (result_len > 0 && result[result_len - 1] == '/');
+
     // normalize the result (resolve . and .. segments)
     char normalized[4096];
     int nlen = normalize_path_buf(result, normalized, sizeof(normalized));
+
+    // Node.js: preserve trailing slash if original joined path had one
+    if (had_trailing_sep && nlen > 0 && normalized[nlen - 1] != '/') {
+        normalized[nlen] = '/';
+        nlen++;
+        normalized[nlen] = '\0';
+    }
     return make_string_item(normalized, nlen);
 }
 
@@ -287,6 +388,12 @@ extern "C" Item js_path_resolve(Item args_item) {
     }
 
     int argc = (int)js_array_length(args_item);
+
+    // validate all arguments are strings
+    for (int i = 0; i < argc; i++) {
+        Item seg_item = js_array_get_int(args_item, i);
+        if (!validate_path_string(seg_item, "path")) return ItemNull;
+    }
 
     // start with cwd
     char resolved[4096] = {0};
@@ -347,6 +454,7 @@ extern "C" Item js_path_resolve(Item args_item) {
 // path.normalize(path)
 // Normalizes a path, resolving '..' and '.' segments
 extern "C" Item js_path_normalize(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[4096];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) return make_string_item(".");
@@ -368,6 +476,8 @@ extern "C" Item js_path_normalize(Item path_item) {
 // path.relative(from, to)
 // Returns the relative path from 'from' to 'to'
 extern "C" Item js_path_relative(Item from_item, Item to_item) {
+    if (!validate_path_string(from_item, "from")) return ItemNull;
+    if (!validate_path_string(to_item, "to")) return ItemNull;
     char from_buf[2048], to_buf[2048];
     const char* from_path = item_to_cstr(from_item, from_buf, sizeof(from_buf));
     const char* to_path = item_to_cstr(to_item, to_buf, sizeof(to_buf));
@@ -442,6 +552,7 @@ extern "C" Item js_path_relative(Item from_item, Item to_item) {
 // path.parse(path)
 // Returns an object with root, dir, base, ext, name
 extern "C" Item js_path_parse(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
 
@@ -634,6 +745,7 @@ static inline bool is_drive_letter(char c) {
 
 // win32.normalize(path)
 static Item js_path_win32_normalize(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[4096];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || path[0] == '\0') return make_string_item(".");
@@ -710,17 +822,34 @@ static Item js_path_win32_normalize(Item path_item) {
 
 // win32.basename(path, ext)
 static Item js_path_win32_basename(Item path_item, Item ext_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
+    if (get_type_id(ext_item) != LMD_TYPE_UNDEFINED
+        && !validate_path_string(ext_item, "ext")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");
 
     int path_len = (int)strlen(path);
+
+    // determine root end (drive letter prefix)
+    int root_end = 0;
+    if (path_len >= 2 && is_drive_letter(path[0]) && path[1] == ':') {
+        root_end = 2;
+        if (path_len > 2 && is_win32_sep(path[2])) root_end = 3;
+    } else if (path_len >= 1 && is_win32_sep(path[0])) {
+        root_end = 1;
+        // UNC: \\server\share
+        if (path_len >= 2 && is_win32_sep(path[1])) root_end = 2;
+    }
+
     int end = path_len - 1;
-    while (end >= 0 && is_win32_sep(path[end])) end--;
-    if (end < 0) return make_string_item("\\");
+    while (end >= root_end && is_win32_sep(path[end])) end--;
+    if (end < root_end) return make_string_item("");
 
     int start = end;
-    while (start > 0 && !is_win32_sep(path[start - 1]) && path[start - 1] != ':') start--;
+    while (start > root_end && !is_win32_sep(path[start - 1])) start--;
+    // ensure start is not before root_end
+    if (start < root_end) start = root_end;
 
     int base_len = end - start + 1;
     const char* base = path + start;
@@ -730,7 +859,13 @@ static Item js_path_win32_basename(Item path_item, Item ext_item) {
         const char* ext = item_to_cstr(ext_item, ext_buf, sizeof(ext_buf));
         if (ext) {
             int ext_len = (int)strlen(ext);
-            if (ext_len > 0 && ext_len <= base_len &&
+            // Node.js: if entire path equals suffix, return ''
+            // but if suffix matches full basename (with dir prefix), don't strip
+            if (ext_len > 0 && ext_len == path_len &&
+                memcmp(path, ext, ext_len) == 0) {
+                return make_string_item("");
+            }
+            if (ext_len > 0 && ext_len < base_len &&
                 memcmp(base + base_len - ext_len, ext, ext_len) == 0) {
                 return make_string_item(base, base_len - ext_len);
             }
@@ -741,6 +876,7 @@ static Item js_path_win32_basename(Item path_item, Item ext_item) {
 
 // win32.dirname(path)
 static Item js_path_win32_dirname(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item(".");
@@ -782,6 +918,7 @@ static Item js_path_win32_dirname(Item path_item) {
 
 // win32.extname — same as POSIX but handles backslash separators
 static Item js_path_win32_extname(Item path_item) {
+    if (!validate_path_string(path_item, "path")) return ItemNull;
     char path_buf[2048];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path || !*path) return make_string_item("");

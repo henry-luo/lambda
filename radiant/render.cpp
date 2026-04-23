@@ -3271,12 +3271,18 @@ void render_children(RenderContext* rdcon, View* view) {
                       block->embed ? block->embed->img : NULL, block->width, block->height);
             if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
                 // Form control rendering (input, select, textarea, button)
-                // First render the block (background, borders, children) then form-specific decoration
-                log_debug("[RENDER DISPATCH] calling render_block_view for form control");
-                render_block_view(rdcon, block);
-                // Now render form-specific decorations (checkboxes, radio buttons, etc.)
-                log_debug("[RENDER DISPATCH] calling render_form_control");
-                render_form_control(rdcon, block);
+                // For <button> elements with children, render default button background BEFORE
+                // children so the gray fill doesn't cover the text content.
+                if (block->form->control_type == FORM_CONTROL_BUTTON && block->first_child) {
+                    render_form_control(rdcon, block);  // draw button chrome first
+                    render_block_view(rdcon, block);    // then children (text) on top
+                } else {
+                    // Other form controls: render block first, then form decorations on top
+                    log_debug("[RENDER DISPATCH] calling render_block_view for form control");
+                    render_block_view(rdcon, block);
+                    log_debug("[RENDER DISPATCH] calling render_form_control");
+                    render_form_control(rdcon, block);
+                }
             }
             else if (block->tag_id == HTM_TAG_SVG) {
                 // Inline SVG element - render via ThorVG

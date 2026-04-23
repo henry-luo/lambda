@@ -590,26 +590,24 @@ extern "C" Item js_process_stdin_read(void) {
 }
 
 extern "C" Item js_process_hrtime_bigint(void) {
-    // Return nanosecond-precision monotonic time as a double
-    // double has ~53 bits of mantissa, good for ~104 days of nanosecond precision
+    // Return nanosecond-precision monotonic time as BigInt (per Node.js spec)
+    extern Item bigint_from_string(const char* str, int len);
+    uint64_t ns;
 #ifdef __APPLE__
     static mach_timebase_info_data_t timebase = {0, 0};
     if (timebase.denom == 0) {
         mach_timebase_info(&timebase);
     }
     uint64_t ticks = mach_absolute_time();
-    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = ns;
-    return (Item){.item = d2it(fp)};
+    ns = ticks * timebase.numer / timebase.denom;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    double ns = (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = ns;
-    return (Item){.item = d2it(fp)};
+    ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 #endif
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)ns);
+    return bigint_from_string(buf, (int)strlen(buf));
 }
 
 // process.hrtime([prev]) — returns [seconds, nanoseconds]
@@ -1534,11 +1532,26 @@ static Item js_process_emitWarning(Item warning, Item type_item, Item code_item)
     if (get_type_id(warning) == LMD_TYPE_STRING) {
         warning_obj = js_new_object();
         js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("message", 7))}, warning);
-        js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
-            get_type_id(type_item) == LMD_TYPE_STRING ? type_item :
-                (Item){.item = s2it(heap_create_name("Warning", 7))});
-        if (get_type_id(code_item) == LMD_TYPE_STRING) {
-            js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, code_item);
+
+        // Check if type_item is an options object { type, code, detail }
+        if (get_type_id(type_item) == LMD_TYPE_MAP) {
+            Item opt_type = js_property_get(type_item, (Item){.item = s2it(heap_create_name("type", 4))});
+            Item opt_code = js_property_get(type_item, (Item){.item = s2it(heap_create_name("code", 4))});
+            Item opt_detail = js_property_get(type_item, (Item){.item = s2it(heap_create_name("detail", 6))});
+            js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
+                get_type_id(opt_type) == LMD_TYPE_STRING ? opt_type :
+                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+            if (get_type_id(opt_code) == LMD_TYPE_STRING)
+                js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, opt_code);
+            if (get_type_id(opt_detail) == LMD_TYPE_STRING)
+                js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("detail", 6))}, opt_detail);
+        } else {
+            js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("name", 4))},
+                get_type_id(type_item) == LMD_TYPE_STRING ? type_item :
+                    (Item){.item = s2it(heap_create_name("Warning", 7))});
+            if (get_type_id(code_item) == LMD_TYPE_STRING) {
+                js_property_set(warning_obj, (Item){.item = s2it(heap_create_name("code", 4))}, code_item);
+            }
         }
     } else {
         warning_obj = warning;
@@ -1664,16 +1677,60 @@ extern "C" Item js_process_umask(Item mask_item) {
 #ifndef _WIN32
     TypeId tid = get_type_id(mask_item);
     if (tid == LMD_TYPE_INT) {
-        mode_t old = umask((mode_t)it2i(mask_item));
+        int64_t val = it2i(mask_item);
+        mode_t old = umask((mode_t)val);
         return (Item){.item = i2it((int64_t)old)};
     }
-    // get current and restore
+    if (tid == LMD_TYPE_STRING) {
+        String* s = it2s(mask_item);
+        if (s && s->len > 0) {
+            // parse as octal string
+            char buf[16];
+            int len = (int)s->len < 15 ? (int)s->len : 15;
+            memcpy(buf, s->chars, (size_t)len);
+            buf[len] = '\0';
+            char* end = NULL;
+            long val = strtol(buf, &end, 8);
+            if (end == buf || *end != '\0' || val < 0 || val > 0777) {
+                // invalid octal string
+                return js_throw_range_error_code("ERR_INVALID_ARG_VALUE", "The argument 'mask' is invalid");
+            }
+            mode_t old = umask((mode_t)val);
+            return (Item){.item = i2it((int64_t)old)};
+        }
+    }
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_BOOL) {
+        // invalid type
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", "The \"mask\" argument must be of type number or string");
+    }
+    // no arg: get current and restore
     mode_t current = umask(0);
     umask(current);
     return (Item){.item = i2it((int64_t)current)};
 #else
     return (Item){.item = i2it(0)};
 #endif
+}
+
+// process.constrainedMemory() — returns 0 (no cgroup constraints on most systems)
+extern "C" Item js_process_constrainedMemory(void) {
+    return (Item){.item = i2it(0)};
+}
+
+// process.availableMemory() — returns an estimate of available memory in bytes
+extern "C" Item js_process_availableMemory(void) {
+#ifdef __APPLE__
+    // rough estimate: free + inactive pages
+    vm_statistics64_data_t vm_stat;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                          (host_info64_t)&vm_stat, &count) == KERN_SUCCESS) {
+        int64_t avail = ((int64_t)vm_stat.free_count + (int64_t)vm_stat.inactive_count) * 4096;
+        return (Item){.item = i2it(avail)};
+    }
+#endif
+    // fallback: return 0
+    return (Item){.item = i2it(0)};
 }
 
 // process.abort() — abort the process
@@ -1736,17 +1793,22 @@ static Item get_process_listener_map() {
     return process_listener_map;
 }
 
+extern "C" int64_t js_key_is_symbol_c(Item key);
 extern "C" Item js_process_on(Item event_name, Item listener) {
-    if (get_type_id(event_name) != LMD_TYPE_STRING) return js_process_object;
+    TypeId etype = get_type_id(event_name);
+    bool is_sym = js_key_is_symbol_c(event_name);
+    if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
     if (get_type_id(listener) != LMD_TYPE_FUNC) return js_process_object;
-    String* ev = it2s(event_name);
-    if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
-        if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
-            process_exit_listeners[process_exit_listener_count++] = listener;
-        }
-    } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
-        if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
-            process_uncaught_listeners[process_uncaught_listener_count++] = listener;
+    if (etype == LMD_TYPE_STRING) {
+        String* ev = it2s(event_name);
+        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+            if (process_exit_listener_count < MAX_PROCESS_LISTENERS) {
+                process_exit_listeners[process_exit_listener_count++] = listener;
+            }
+        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+            if (process_uncaught_listener_count < MAX_PROCESS_LISTENERS) {
+                process_uncaught_listeners[process_uncaught_listener_count++] = listener;
+            }
         }
     }
 
@@ -1771,7 +1833,8 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
 
 // process.emit(event, ...args) — emit an event on process
 extern "C" Item js_process_emit(Item event_name, Item arg1) {
-    if (get_type_id(event_name) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    TypeId etype = get_type_id(event_name);
+    if (etype != LMD_TYPE_STRING && !js_key_is_symbol_c(event_name)) return (Item){.item = b2it(false)};
 
     extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
 
@@ -1842,6 +1905,39 @@ extern "C" Item js_process_listeners(Item event_name) {
     return arr;
 }
 
+// process.hasUncaughtExceptionCaptureCallback()
+static Item js_uncaught_exception_cb = {.item = 0};
+extern "C" Item js_process_hasUncaughtExceptionCaptureCallback(void) {
+    return (Item){.item = b2it(js_uncaught_exception_cb.item != 0 &&
+        get_type_id(js_uncaught_exception_cb) == LMD_TYPE_FUNC)};
+}
+
+// process.setUncaughtExceptionCaptureCallback(fn)
+extern "C" Item js_process_setUncaughtExceptionCaptureCallback(Item fn) {
+    TypeId tid = get_type_id(fn);
+    if (tid == LMD_TYPE_FUNC) {
+        js_uncaught_exception_cb = fn;
+    } else if (tid == LMD_TYPE_NULL) {
+        js_uncaught_exception_cb = (Item){.item = 0};
+    } else {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"fn\" argument must be of type function or null.");
+    }
+    return make_js_undefined();
+}
+
+// process.getActiveResourcesInfo() — stub returns empty array
+extern "C" Item js_process_getActiveResourcesInfo(void) {
+    return js_array_new(0);
+}
+
+// process.setSourceMapsEnabled(val) — stub no-op
+extern "C" Item js_process_setSourceMapsEnabled(Item val) {
+    (void)val;
+    return make_js_undefined();
+}
+
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_object.item == ITEM_NULL) {
         js_process_object = js_object_create(ItemNull);
@@ -1900,6 +1996,12 @@ extern "C" Item js_get_process_object_value(void) {
         js_process_set_method(js_process_object, "cpuUsage", (void*)js_process_cpuUsage, 0);
         js_process_set_method(js_process_object, "umask", (void*)js_process_umask, 1);
         js_process_set_method(js_process_object, "abort", (void*)js_process_abort, 0);
+        js_process_set_method(js_process_object, "constrainedMemory", (void*)js_process_constrainedMemory, 0);
+        js_process_set_method(js_process_object, "availableMemory", (void*)js_process_availableMemory, 0);
+        js_process_set_method(js_process_object, "hasUncaughtExceptionCaptureCallback", (void*)js_process_hasUncaughtExceptionCaptureCallback, 0);
+        js_process_set_method(js_process_object, "setUncaughtExceptionCaptureCallback", (void*)js_process_setUncaughtExceptionCaptureCallback, 1);
+        js_process_set_method(js_process_object, "getActiveResourcesInfo", (void*)js_process_getActiveResourcesInfo, 0);
+        js_process_set_method(js_process_object, "setSourceMapsEnabled", (void*)js_process_setSourceMapsEnabled, 1);
         js_process_set_method(js_process_object, "on", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "addListener", (void*)js_process_on, 2);
         js_process_set_method(js_process_object, "once", (void*)js_process_once, 2);
@@ -2011,6 +2113,24 @@ extern "C" Item js_get_process_object_value(void) {
             js_property_set(features_obj,
                 (Item){.item = s2it(heap_create_name("tls", 3))},
                 (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("ipv6", 4))},
+                (Item){.item = ITEM_TRUE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("openssl_is_boringssl", 20))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("quic", 4))},
+                (Item){.item = ITEM_FALSE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("cached_builtins", 15))},
+                (Item){.item = ITEM_TRUE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("require_module", 14))},
+                (Item){.item = ITEM_TRUE});
+            js_property_set(features_obj,
+                (Item){.item = s2it(heap_create_name("typescript", 10))},
+                (Item){.item = ITEM_FALSE});
             js_property_set(js_process_object,
                 (Item){.item = s2it(heap_create_name("features", 8))},
                 features_obj);
@@ -2055,6 +2175,17 @@ extern "C" Item js_get_process_object_value(void) {
         js_property_set(js_process_object,
             (Item){.item = s2it(heap_create_name("emitWarning", 11))},
             js_new_function((void*)js_process_emitWarning, 3));
+
+        // process.release — Node.js compat
+        {
+            Item release_obj = js_new_object();
+            js_property_set(release_obj,
+                (Item){.item = s2it(heap_create_name("name", 4))},
+                (Item){.item = s2it(heap_create_name("node", 4))});
+            js_property_set(js_process_object,
+                (Item){.item = s2it(heap_create_name("release", 7))},
+                release_obj);
+        }
     }
     return js_process_object;
 }
@@ -2065,10 +2196,24 @@ extern "C" Item js_get_process_object_value(void) {
 
 // setImmediate(callback) — schedule callback as a microtask (next tick)
 extern "C" Item js_setImmediate(Item callback) {
-    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
-    // use setTimeout with 0 delay for setImmediate semantics
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"callback\" argument must be of type function.");
+    }
     extern Item js_setTimeout(Item cb, Item delay);
     return js_setTimeout(callback, (Item){.item = i2it(0)});
+}
+
+// setImmediate with extra args passed as a JS array (used by transpiler)
+extern "C" Item js_setImmediate_with_args(Item callback, Item args_array) {
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        extern Item js_throw_type_error_code(const char*, const char*);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"callback\" argument must be of type function.");
+    }
+    extern Item js_setTimeout_args(Item cb, Item delay, Item args_array);
+    return js_setTimeout_args(callback, (Item){.item = i2it(0)}, args_array);
 }
 
 // clearImmediate(id) — cancel a setImmediate
@@ -2962,25 +3107,6 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_to_string(num);
     }
 
-    // Fallback: check Object.prototype for user-set methods
-    // (e.g. Object.prototype.exec = RegExp.prototype.exec; (1.0).exec("test"))
-    {
-        extern Item js_get_constructor(Item name);
-        extern Item js_property_get(Item obj, Item key);
-        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
-        if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
-            Item obj_proto = js_property_get(obj_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
-            if (get_type_id(obj_proto) == LMD_TYPE_MAP) {
-                bool found = false;
-                Item fn = js_map_get_fast_ext(obj_proto.map, method->chars, (int)method->len, &found);
-                if (found && get_type_id(fn) == LMD_TYPE_FUNC) {
-                    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
-                    return js_call_function(fn, num, args, argc);
-                }
-            }
-        }
-    }
-
     log_debug("js_number_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
 }
@@ -3289,6 +3415,22 @@ extern "C" Item js_string_raw(Item* args, int argc) {
 }
 
 // =============================================================================
+// Console output helpers
+// =============================================================================
+extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
+extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+
+extern "C" void js_console_write_to_stdout(const char* data, int len) {
+    fwrite(data, 1, len, stdout);
+    fflush(stdout);
+}
+
+extern "C" void js_console_write_to_stderr(const char* data, int len) {
+    fwrite(data, 1, len, stderr);
+    fflush(stderr);
+}
+
+// =============================================================================
 // Console multi-argument log
 // =============================================================================
 
@@ -3312,6 +3454,8 @@ static bool has_format_specifiers(String* s) {
 extern "C" void js_console_log_multi(Item* args, int argc) {
     // if first arg is a string with format specifiers and there are more args,
     // use util.format-style substitution (matches Node.js console.log behavior)
+    char buf[4096];
+    int pos = 0;
     if (argc >= 2 && get_type_id(args[0]) == LMD_TYPE_STRING &&
         has_format_specifiers(it2s(args[0]))) {
         Item arr = js_array_new(0);
@@ -3321,18 +3465,26 @@ extern "C" void js_console_log_multi(Item* args, int argc) {
         Item formatted = js_util_format(arr);
         if (get_type_id(formatted) == LMD_TYPE_STRING) {
             String* s = it2s(formatted);
-            if (s) fwrite(s->chars, 1, s->len, stdout);
+            if (s && s->len > 0) {
+                int copy = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
+                memcpy(buf, s->chars, copy);
+                pos = copy;
+            }
         }
     } else {
         for (int i = 0; i < argc; i++) {
-            if (i > 0) fputc(' ', stdout);
+            if (i > 0 && pos < (int)sizeof(buf) - 1) buf[pos++] = ' ';
             Item str = js_to_string(args[i]);
             String* s = it2s(str);
-            if (s) fwrite(s->chars, 1, s->len, stdout);
+            if (s && s->len > 0) {
+                int copy = (int)s->len < (int)sizeof(buf) - 1 - pos ? (int)s->len : (int)sizeof(buf) - 1 - pos;
+                memcpy(buf + pos, s->chars, copy);
+                pos += copy;
+            }
         }
     }
-    fputc('\n', stdout);
-    fflush(stdout);
+    if (pos < (int)sizeof(buf) - 1) buf[pos++] = '\n';
+    js_console_write_to_stdout(buf, pos);
 }
 
 // =============================================================================
@@ -3363,23 +3515,48 @@ extern "C" Item js_console_count_fn(Item label_item) {
     const char* label = "default";
     int label_len = 7;
     char buf[256];
-    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+    char label_buf[128];
+    TypeId lt = get_type_id(label_item);
+    if (lt == LMD_TYPE_STRING) {
         String* s = it2s(label_item);
         if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    } else if (lt != LMD_TYPE_UNDEFINED) {
+        // convert non-string, non-undefined to string
+        Item str = js_to_string(label_item);
+        String* s = it2s(str);
+        if (s && s->len > 0) {
+            int copy = (int)s->len < (int)sizeof(label_buf) - 1 ? (int)s->len : (int)sizeof(label_buf) - 1;
+            memcpy(label_buf, s->chars, copy);
+            label_buf[copy] = '\0';
+            label = label_buf;
+            label_len = copy;
+        }
     }
     int* slot = js_console_count_slot(label, label_len);
     (*slot)++;
-    snprintf(buf, sizeof(buf), "%.*s: %d", label_len, label, *slot);
-    printf("%s\n", buf);
+    int n = snprintf(buf, sizeof(buf), "%.*s: %d\n", label_len, label, *slot);
+    js_console_write_to_stdout(buf, n);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 extern "C" Item js_console_countReset_fn(Item label_item) {
     const char* label = "default";
     int label_len = 7;
-    if (get_type_id(label_item) == LMD_TYPE_STRING) {
+    char label_buf[128];
+    TypeId lt = get_type_id(label_item);
+    if (lt == LMD_TYPE_STRING) {
         String* s = it2s(label_item);
         if (s && s->len > 0) { label = s->chars; label_len = (int)s->len; }
+    } else if (lt != LMD_TYPE_UNDEFINED) {
+        Item str = js_to_string(label_item);
+        String* s = it2s(str);
+        if (s && s->len > 0) {
+            int copy = (int)s->len < (int)sizeof(label_buf) - 1 ? (int)s->len : (int)sizeof(label_buf) - 1;
+            memcpy(label_buf, s->chars, copy);
+            label_buf[copy] = '\0';
+            label = label_buf;
+            label_len = copy;
+        }
     }
     int* slot = js_console_count_slot(label, label_len);
     *slot = 0;
@@ -3435,7 +3612,9 @@ extern "C" Item js_console_timeEnd_fn(Item label_item) {
         clock_gettime(CLOCK_MONOTONIC, &ts);
         double now = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
         double elapsed = now - js_console_timers[idx];
-        printf("%.*s: %.3fms\n", label_len, label, elapsed);
+        char buf[256];
+        int n = snprintf(buf, sizeof(buf), "%.*s: %.3fms\n", label_len, label, elapsed);
+        js_console_write_to_stdout(buf, n);
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -3444,8 +3623,22 @@ extern "C" Item js_console_timeLog_fn(Item label_item) {
     return js_console_timeEnd_fn(label_item); // same output, but doesn't clear timer
 }
 
-// console.clear — no-op in non-TTY
+// console.clear — sends escape sequence when TTY, through process.stdout.write
 extern "C" Item js_console_clear_fn(void) {
+    // check process.stdout.isTTY
+    extern Item js_get_process_object_value(void);
+    Item process = js_get_process_object_value();
+    if (process.item != ITEM_NULL) {
+        Item stdout_obj = js_property_get_str(process, "stdout", 6);
+        if (stdout_obj.item != ITEM_NULL && get_type_id(stdout_obj) != LMD_TYPE_UNDEFINED) {
+            Item isTTY = js_property_get_str(stdout_obj, "isTTY", 5);
+            extern bool js_is_truthy(Item val);
+            if (js_is_truthy(isTTY)) {
+                // ESC[1;1H ESC[0J — move cursor to 1,1 and clear screen down
+                js_console_write_to_stdout("\x1b[1;1H\x1b[0J", 10);
+            }
+        }
+    }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -3454,7 +3647,11 @@ static int js_console_group_depth = 0;
 extern "C" Item js_console_group_fn(Item label_item) {
     if (get_type_id(label_item) == LMD_TYPE_STRING) {
         String* s = it2s(label_item);
-        if (s && s->len > 0) printf("%.*s\n", (int)s->len, s->chars);
+        if (s && s->len > 0) {
+            char buf[4096];
+            int n = snprintf(buf, sizeof(buf), "%.*s\n", (int)s->len, s->chars);
+            js_console_write_to_stdout(buf, n);
+        }
     }
     js_console_group_depth++;
     return (Item){.item = ITEM_JS_UNDEFINED};
@@ -3467,12 +3664,15 @@ extern "C" Item js_console_groupEnd_fn(void) {
 
 // console.trace — print stack trace stub
 extern "C" Item js_console_trace_fn(Item label_item) {
-    printf("Trace");
+    char buf[256];
+    int n = 0;
+    n += snprintf(buf + n, sizeof(buf) - n, "Trace");
     if (get_type_id(label_item) == LMD_TYPE_STRING) {
         String* s = it2s(label_item);
-        if (s && s->len > 0) printf(": %.*s", (int)s->len, s->chars);
+        if (s && s->len > 0) n += snprintf(buf + n, sizeof(buf) - n, ": %.*s", (int)s->len, s->chars);
     }
-    printf("\n");
+    n += snprintf(buf + n, sizeof(buf) - n, "\n");
+    js_console_write_to_stdout(buf, n);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -3494,12 +3694,14 @@ extern "C" Item js_console_table_fn(Item data) {
 extern "C" bool js_is_truthy(Item val);
 extern "C" Item js_console_assert_fn(Item cond, Item msg) {
     if (!js_is_truthy(cond)) {
-        fprintf(stderr, "Assertion failed");
+        char buf[4096];
+        int n = snprintf(buf, sizeof(buf), "Assertion failed");
         if (get_type_id(msg) == LMD_TYPE_STRING) {
             String* s = it2s(msg);
-            if (s && s->len > 0) fprintf(stderr, ": %.*s", (int)s->len, s->chars);
+            if (s && s->len > 0) n += snprintf(buf + n, sizeof(buf) - n, ": %.*s", (int)s->len, s->chars);
         }
-        fprintf(stderr, "\n");
+        n += snprintf(buf + n, sizeof(buf) - n, "\n");
+        js_console_write_to_stderr(buf, n);
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
@@ -4051,80 +4253,6 @@ extern "C" Item js_in(Item key, Item object) {
                 depth++;
             }
             return (Item){.item = b2it(false)};
-        }
-        // Check Array.prototype and Object.prototype methods
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* sk = it2s(key);
-            if (sk) {
-                Item builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, sk->chars, (int)sk->len);
-                if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
-                if (sk->len == 11 && strncmp(sk->chars, "constructor", 11) == 0)
-                    return (Item){.item = b2it(true)};
-            }
-        }
-        return (Item){.item = b2it(false)};
-    }
-    if (type == LMD_TYPE_FUNC) {
-        // partial JsFunction layout for in-operator property checks
-        struct JsFuncInLayout {
-            TypeId type_id;
-            void* func_ptr;
-            int param_count;
-            Item* env;
-            int env_size;
-            Item prototype;
-            Item bound_this;
-            Item* bound_args;
-            int bound_argc;
-            String* name;
-            int builtin_id;
-            Item properties_map;
-            uint8_t flags;
-        };
-        #define JS_FUNC_FLAG_ARROW_IN 2
-        JsFuncInLayout* fn = (JsFuncInLayout*)object.function;
-        if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
-            const char* key_str = key.get_chars();
-            int key_len = (int)key.get_len();
-            // Check properties_map first (overridden/deleted properties)
-            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                bool pm_found = false;
-                Item pm_val = js_map_get_fast_ext(fn->properties_map.map, key_str, key_len, &pm_found);
-                if (pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL)
-                    return (Item){.item = b2it(true)};
-                // Check accessor descriptor
-                if (key_len < 128) {
-                    char getter_key[256];
-                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
-                    int gk_len = key_len + 6;
-                    bool gk_found = false;
-                    js_map_get_fast_ext(fn->properties_map.map, getter_key, gk_len, &gk_found);
-                    if (gk_found) return (Item){.item = b2it(true)};
-                }
-            }
-            // Virtual properties: name, length, prototype
-            if (key_len == 4 && strncmp(key_str, "name", 4) == 0)
-                return (Item){.item = b2it(true)};
-            if (key_len == 6 && strncmp(key_str, "length", 6) == 0)
-                return (Item){.item = b2it(true)};
-            if (key_len == 9 && strncmp(key_str, "prototype", 9) == 0) {
-                // Only return true if prototype is already explicitly set.
-                // Don't lazily create — class methods/arrows/builtins don't have .prototype
-                // and we can't distinguish concise methods from regular functions by flags alone.
-                if (fn->prototype.item != 0 && get_type_id(fn->prototype) == LMD_TYPE_MAP)
-                    return (Item){.item = b2it(true)};
-                // Check properties_map was already done above, so fall through to false
-            }
-            if (key_len == 6 && strncmp(key_str, "caller", 6) == 0)
-                return (Item){.item = b2it(true)};
-            if (key_len == 9 && strncmp(key_str, "arguments", 9) == 0)
-                return (Item){.item = b2it(true)};
-            // Function.prototype methods and Object.prototype methods
-            Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, key_str, key_len);
-            if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
-            // Also check Object.prototype methods (constructor, hasOwnProperty, etc.)
-            if (key_len == 11 && strncmp(key_str, "constructor", 11) == 0)
-                return (Item){.item = b2it(true)};
         }
         return (Item){.item = b2it(false)};
     }
@@ -6242,17 +6370,8 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
     // Returns an array of all own Symbol keys of an object.
     // In our engine, symbols are stored as string keys "__sym_<N>" in the shape.
     // Walk shape entries, find __sym_* keys, convert back to symbol items.
-
-    Map* m = nullptr;
-    if (get_type_id(object) == LMD_TYPE_MAP) {
-        m = object.map;
-    } else if (get_type_id(object) == LMD_TYPE_ARRAY) {
-        // array companion map holds symbol properties
-        Array* arr = object.array;
-        if (arr->extra != 0) {
-            m = (Map*)(uintptr_t)arr->extra;
-        }
-    }
+    if (get_type_id(object) != LMD_TYPE_MAP) return js_array_new(0);
+    Map* m = object.map;
     if (!m || !m->type) return js_array_new(0);
     TypeMap* tm = (TypeMap*)m->type;
 
@@ -7530,16 +7649,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v23: handle array objects — numeric indices and "length"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Item k;
-        // Symbol keys → __sym_N format (must check before js_to_string which throws for symbols)
-        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
-            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
-            char buf[32];
-            snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-            k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-        } else {
-            k = js_to_string(key);
-        }
+        Item k = js_to_string(key);
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
@@ -8305,25 +8415,23 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
         if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
             String* cn_str = it2s(cn);
-            if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
-                bool pv_own = false;
-                Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
-                if (pv_own) {
+            bool pv_own = false;
+            Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
+            if (pv_own) {
+                if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
                     value = pv;
                     vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                    value = js_to_number(pv);
+                    vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                    value = js_to_string(pv);
+                    vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "BigInt", 6) == 0) {
+                    // ES spec step 10: BigInt → TypeError
+                    js_throw_type_error("Do not know how to serialize a BigInt");
+                    return false;
                 }
-            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
-                // ES spec: ToNumber(value) — calls valueOf on wrapper object
-                value = js_to_number(value);
-                vtype = get_type_id(value);
-            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
-                // ES spec: ToString(value) — calls toString on wrapper object
-                value = js_to_string(value);
-                vtype = get_type_id(value);
-            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "BigInt", 6) == 0) {
-                // ES spec step 10: BigInt → TypeError
-                js_throw_type_error("Do not know how to serialize a BigInt");
-                return false;
             }
         }
     }
@@ -8848,6 +8956,17 @@ static const unsigned char b64_decode_table[256] = {
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
 };
 
+// helper: throw DOMException with InvalidCharacterError
+extern "C" Item js_domexception_new(Item message, Item name_arg);
+static Item js_throw_domexception_invalid_char(const char* msg) {
+    extern void js_throw_value(Item val);
+    Item msg_item = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+    Item name_item = (Item){.item = s2it(heap_create_name("InvalidCharacterError", 21))};
+    Item ex = js_domexception_new(msg_item, name_item);
+    js_throw_value(ex);
+    return ItemNull;
+}
+
 extern "C" Item js_atob(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -8856,19 +8975,43 @@ extern "C" Item js_atob(Item str_item) {
     const char* src = s->chars;
     int src_len = s->len;
 
-    // skip whitespace and compute output size
-    char* buf = (char*)mem_alloc(src_len, MEM_CAT_JS_RUNTIME); // output is always <= input
-    if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
-
-    int out = 0;
-    int bits = 0;
-    int val = 0;
+    // Step 1: remove ASCII whitespace from data
+    char* cleaned = (char*)mem_alloc(src_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!cleaned) return (Item){.item = s2it(heap_create_name("", 0))};
+    int clen = 0;
     for (int i = 0; i < src_len; i++) {
         unsigned char c = (unsigned char)src[i];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') continue;
-        if (c == '=') break;
-        unsigned char d = b64_decode_table[c];
-        if (d == 255) continue; // skip invalid
+        cleaned[clen++] = (char)c;
+    }
+
+    // Step 2: if length % 4 == 0, remove 1-2 trailing '='
+    if (clen > 0 && cleaned[clen - 1] == '=') clen--;
+    if (clen > 0 && cleaned[clen - 1] == '=') clen--;
+
+    // Step 3: if length % 4 == 1, throw InvalidCharacterError
+    if (clen % 4 == 1) {
+        mem_free(cleaned);
+        return js_throw_domexception_invalid_char("Invalid character");
+    }
+
+    // Step 4: validate all remaining characters are in base64 alphabet
+    for (int i = 0; i < clen; i++) {
+        unsigned char c = (unsigned char)cleaned[i];
+        if (b64_decode_table[c] == 255) {
+            mem_free(cleaned);
+            return js_throw_domexception_invalid_char("Invalid character");
+        }
+    }
+
+    // Decode
+    char* buf = (char*)mem_alloc(clen, MEM_CAT_JS_RUNTIME);
+    if (!buf) { mem_free(cleaned); return (Item){.item = s2it(heap_create_name("", 0))}; }
+    int out = 0;
+    int bits = 0;
+    int val = 0;
+    for (int i = 0; i < clen; i++) {
+        unsigned char d = b64_decode_table[(unsigned char)cleaned[i]];
         val = (val << 6) | d;
         bits += 6;
         if (bits >= 8) {
@@ -8879,6 +9022,7 @@ extern "C" Item js_atob(Item str_item) {
 
     String* result = heap_create_name(buf, out);
     mem_free(buf);
+    mem_free(cleaned);
     return (Item){.item = s2it(result)};
 }
 
@@ -8889,8 +9033,17 @@ extern "C" Item js_btoa(Item str_item) {
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
 
+    // Check for characters outside Latin1 range (> 0xFF)
+    // In UTF-8, any byte >= 0xC4 followed by >= 0x80 means code point > 0xFF
     const unsigned char* src = (const unsigned char*)s->chars;
     int src_len = s->len;
+    for (int i = 0; i < src_len; i++) {
+        unsigned char c = src[i];
+        if (c >= 0xC4 && i + 1 < src_len && src[i + 1] >= 0x80) {
+            return js_throw_domexception_invalid_char(
+                "The string to be encoded contains characters outside of the Latin1 range.");
+        }
+    }
     int out_len = ((src_len + 2) / 3) * 4;
     char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
@@ -9276,6 +9429,130 @@ extern "C" Item js_abort_signal_throwIfAborted(void) {
     return make_js_undefined();
 }
 
+// AbortSignal.abort(reason) — creates an already-aborted signal
+extern "C" Item js_abort_signal_abort(Item reason) {
+    Item signal = js_make_abort_signal();
+    // set methods on the signal
+    js_property_set(signal, make_string_item("addEventListener"),
+        js_new_function((void*)js_abort_signal_addEventListener, 2));
+    js_property_set(signal, make_string_item("removeEventListener"),
+        js_new_function((void*)js_abort_signal_removeEventListener, 2));
+    js_property_set(signal, make_string_item("throwIfAborted"),
+        js_new_function((void*)js_abort_signal_throwIfAborted, 0));
+    js_property_set(signal, make_string_item("onabort"), ItemNull);
+    // mark as already aborted
+    js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(true)});
+    // default reason: DOMException "AbortError"
+    if (get_type_id(reason) == LMD_TYPE_UNDEFINED || get_type_id(reason) == LMD_TYPE_NULL) {
+        Item err = js_new_object();
+        js_property_set(err, make_string_item("__class_name__"), make_string_item("DOMException"));
+        js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
+        js_property_set(err, make_string_item("message"), make_string_item("This operation was aborted"));
+        js_property_set(err, make_string_item("code"), (Item){.item = i2it(20)});
+        reason = err;
+    }
+    js_property_set(signal, make_string_item("reason"), reason);
+    return signal;
+}
+
+// AbortSignal.timeout(ms) — creates a signal that auto-aborts after ms
+extern "C" Item js_abort_signal_timeout(Item ms_item) {
+    // create signal (not yet aborted)
+    Item signal = js_make_abort_signal();
+    js_property_set(signal, make_string_item("addEventListener"),
+        js_new_function((void*)js_abort_signal_addEventListener, 2));
+    js_property_set(signal, make_string_item("removeEventListener"),
+        js_new_function((void*)js_abort_signal_removeEventListener, 2));
+    js_property_set(signal, make_string_item("throwIfAborted"),
+        js_new_function((void*)js_abort_signal_throwIfAborted, 0));
+    js_property_set(signal, make_string_item("onabort"), ItemNull);
+    // TODO: actually schedule a timeout to abort after ms
+    // for now just return the un-aborted signal
+    return signal;
+}
+
+// generic stub constructor — returns a new empty object
+extern "C" Item js_stub_constructor(Item arg) {
+    (void)arg;
+    return js_new_object();
+}
+
+// DOMException(message, nameOrOptions) constructor
+extern "C" Item js_domexception_new(Item message, Item name_arg) {
+    Item obj = js_new_object();
+    js_property_set(obj, make_string_item("__class_name__"), make_string_item("DOMException"));
+
+    // message (default: "")
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        js_property_set(obj, make_string_item("message"), message);
+    } else {
+        js_property_set(obj, make_string_item("message"), make_string_item(""));
+    }
+
+    // name can be a string or an options object { name, cause }
+    Item actual_name = make_string_item("Error");
+    bool has_cause = false;
+    Item cause_val = make_js_undefined();
+
+    TypeId name_type = get_type_id(name_arg);
+    if (name_type == LMD_TYPE_STRING) {
+        actual_name = name_arg;
+    } else if (name_type == LMD_TYPE_MAP || name_type == LMD_TYPE_OBJECT) {
+        // options object: { name: "...", cause: ... }
+        Item name_prop = js_property_get(name_arg, make_string_item("name"));
+        if (get_type_id(name_prop) == LMD_TYPE_STRING) {
+            actual_name = name_prop;
+        }
+        // check if 'cause' is an own property
+        extern Item js_has_own_property(Item obj, Item key);
+        Item has_cause_item = js_has_own_property(name_arg, make_string_item("cause"));
+        if (get_type_id(has_cause_item) == LMD_TYPE_BOOL && it2b(has_cause_item)) {
+            has_cause = true;
+            cause_val = js_property_get(name_arg, make_string_item("cause"));
+        }
+    }
+
+    js_property_set(obj, make_string_item("name"), actual_name);
+
+    // set cause if present
+    if (has_cause) {
+        js_property_set(obj, make_string_item("cause"), cause_val);
+    }
+
+    // DOMException legacy code mappings
+    int code = 0;
+    if (get_type_id(actual_name) == LMD_TYPE_STRING) {
+        String* ns = it2s(actual_name);
+        if (ns) {
+            struct { const char* name; int code; } codes[] = {
+                {"IndexSizeError", 1}, {"HierarchyRequestError", 3},
+                {"WrongDocumentError", 4}, {"InvalidCharacterError", 5},
+                {"NoModificationAllowedError", 7}, {"NotFoundError", 8},
+                {"NotSupportedError", 9}, {"InvalidStateError", 11},
+                {"SyntaxError", 12}, {"InvalidModificationError", 13},
+                {"NamespaceError", 14}, {"InvalidAccessError", 15},
+                {"TypeMismatchError", 17}, {"SecurityError", 18},
+                {"NetworkError", 19}, {"AbortError", 20},
+                {"URLMismatchError", 21}, {"QuotaExceededError", 22},
+                {"TimeoutError", 23}, {"InvalidNodeTypeError", 24},
+                {"DataCloneError", 25}, {NULL, 0}
+            };
+            for (int i = 0; codes[i].name; i++) {
+                if (ns->len == strlen(codes[i].name) && strncmp(ns->chars, codes[i].name, ns->len) == 0) {
+                    code = codes[i].code;
+                    break;
+                }
+            }
+        }
+    }
+    js_property_set(obj, make_string_item("code"), (Item){.item = i2it(code)});
+
+    // stack property (empty for DOMException)
+    js_property_set(obj, make_string_item("stack"), make_string_item(""));
+
+    return obj;
+}
+
 // forward declaration
 extern "C" Item js_abort_controller_abort(Item reason);
 
@@ -9308,6 +9585,11 @@ extern "C" Item js_abort_controller_abort(Item reason) {
     Item signal = js_property_get(self, make_string_item("signal"));
     if (get_type_id(signal) != LMD_TYPE_MAP) return make_js_undefined();
 
+    // no-op if already aborted
+    Item already = js_property_get(signal, make_string_item("aborted"));
+    if (get_type_id(already) == LMD_TYPE_BOOL && it2b(already))
+        return make_js_undefined();
+
     // mark as aborted
     js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(true)});
 
@@ -9321,13 +9603,16 @@ extern "C" Item js_abort_controller_abort(Item reason) {
     }
     js_property_set(signal, make_string_item("reason"), reason);
 
+    // create abort event once, shared by onabort and addEventListener handlers
+    extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+    Item event = js_new_object();
+    js_property_set(event, make_string_item("type"), make_string_item("abort"));
+    js_property_set(event, make_string_item("target"), signal);
+    js_property_set(event, make_string_item("isTrusted"), (Item){.item = b2it(true)});
+
     // fire onabort handler
     Item onabort = js_property_get(signal, make_string_item("onabort"));
     if (get_type_id(onabort) == LMD_TYPE_FUNC) {
-        extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
-        Item event = js_new_object();
-        js_property_set(event, make_string_item("type"), make_string_item("abort"));
-        js_property_set(event, make_string_item("target"), signal);
         Item argv[1] = { event };
         js_call_function(onabort, signal, argv, 1);
     }
@@ -9336,6 +9621,7 @@ extern "C" Item js_abort_controller_abort(Item reason) {
     Item listeners = js_property_get(signal, make_string_item("__listeners__"));
     if (get_type_id(listeners) == LMD_TYPE_ARRAY) {
         extern Item js_call_function(Item func, Item this_val, Item* args, int nargs);
+        extern void js_clearTimeout(Item timer_id);
         int64_t len = js_array_length(listeners);
         for (int i = 0; i < (int)len; i++) {
             Item entry = js_array_get_int(listeners, i);
@@ -9343,11 +9629,34 @@ extern "C" Item js_abort_controller_abort(Item reason) {
             if (get_type_id(type) == LMD_TYPE_STRING) {
                 String* ts = it2s(type);
                 if (ts->len == 5 && memcmp(ts->chars, "abort", 5) == 0) {
+                    // check for timer promise reject entry
+                    Item timer_reject = js_property_get(entry, make_string_item("__timer_reject__"));
+                    if (get_type_id(timer_reject) == LMD_TYPE_FUNC) {
+                        // reject promise with AbortError and clear the timer
+                        Item timer_signal = js_property_get(entry, make_string_item("__timer_signal__"));
+                        Item abort_err = js_new_object();
+                        js_property_set(abort_err, make_string_item("__class_name__"), make_string_item("AbortError"));
+                        js_property_set(abort_err, make_string_item("name"), make_string_item("AbortError"));
+                        js_property_set(abort_err, make_string_item("code"), make_string_item("ABORT_ERR"));
+                        js_property_set(abort_err, make_string_item("message"), make_string_item("The operation was aborted"));
+                        // propagate cause from signal reason
+                        if (get_type_id(timer_signal) == LMD_TYPE_MAP) {
+                            Item sig_reason = js_property_get(timer_signal, make_string_item("reason"));
+                            if (get_type_id(sig_reason) != LMD_TYPE_UNDEFINED && get_type_id(sig_reason) != LMD_TYPE_NULL) {
+                                js_property_set(abort_err, make_string_item("cause"), sig_reason);
+                            }
+                        }
+                        Item argv[1] = { abort_err };
+                        js_call_function(timer_reject, ItemNull, argv, 1);
+                        // clear the associated timer
+                        Item timer_id = js_property_get(entry, make_string_item("__timer_id__"));
+                        if (get_type_id(timer_id) == LMD_TYPE_INT) {
+                            js_clearTimeout(timer_id);
+                        }
+                        continue;
+                    }
                     Item handler = js_property_get(entry, make_string_item("handler"));
                     if (get_type_id(handler) == LMD_TYPE_FUNC) {
-                        Item event = js_new_object();
-                        js_property_set(event, make_string_item("type"), make_string_item("abort"));
-                        js_property_set(event, make_string_item("target"), signal);
                         Item argv[1] = { event };
                         js_call_function(handler, signal, argv, 1);
                     }
@@ -9523,6 +9832,20 @@ extern "C" Item js_get_global_this() {
                 ac_ctor);
         }
 
+        // AbortSignal — global with static methods abort() and timeout()
+        {
+            extern Item js_abort_signal_abort(Item reason);
+            extern Item js_abort_signal_timeout(Item ms);
+            Item as_ctor = js_new_function((void*)js_make_abort_signal, 0);
+            js_property_set(as_ctor, make_string_item("abort"),
+                js_new_function((void*)js_abort_signal_abort, 1));
+            js_property_set(as_ctor, make_string_item("timeout"),
+                js_new_function((void*)js_abort_signal_timeout, 1));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("AbortSignal", 11))},
+                as_ctor);
+        }
+
         // TextEncoder / TextDecoder constructors as globals
         {
             extern Item js_text_encoder_new(void);
@@ -9587,6 +9910,17 @@ extern "C" Item js_get_global_this() {
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("URL", 3))},
                 js_new_function((void*)js_url_module_construct, 2));
+        }
+
+        // globalThis.DOMException constructor
+        {
+            extern Item js_domexception_new(Item message, Item name);
+            Item ctor = js_new_function((void*)js_domexception_new, 2);
+            Item proto = js_new_object();
+            js_property_set(proto, make_string_item("constructor"), ctor);
+            js_property_set(ctor, make_string_item("prototype"), proto);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("DOMException", 12))}, ctor);
         }
 
         // ES spec: all standard global properties are non-enumerable
@@ -10654,6 +10988,8 @@ extern "C" Item js_symbol_well_known(Item name) {
 // URL Constructor — wraps lib/url.c
 // =============================================================================
 
+extern "C" Item js_url_search_params_new(Item init);
+
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
@@ -10701,6 +11037,23 @@ static Item js_url_to_object(Url* url) {
     URL_SET_PROP("hash", url_get_hash);
 
     #undef URL_SET_PROP
+
+    // searchParams — full URLSearchParams object
+    {
+        const char* search = url_get_search(url);
+        Item search_str;
+        if (search && search[0]) {
+            search_str = (Item){.item = s2it(heap_create_name(search, strlen(search)))};
+        } else {
+            search_str = (Item){.item = s2it(heap_create_name("", 0))};
+        }
+        js_property_set(obj, (Item){.item = s2it(heap_create_name("searchParams"))},
+                        js_url_search_params_new(search_str));
+    }
+
+    // mark as URL for instanceof checks
+    js_property_set(obj, (Item){.item = s2it(heap_create_name("__class_name__"))},
+                    (Item){.item = s2it(heap_create_name("URL"))});
 
     url_destroy(url);
     return obj;

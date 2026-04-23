@@ -416,6 +416,10 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     int backdrop_region[DL_MAX_BACKDROP_DEPTH][4];  // x0, y0, w, h (tile-local)
     int backdrop_sp = 0;
 
+    // Shadow clip save buffer for DL_SHADOW_CLIP_SAVE / DL_SHADOW_CLIP_RESTORE pairs
+    uint32_t* shadow_clip_saved = nullptr;
+    int shadow_clip_region[4] = {};  // x0, y0, w, h (tile-local, clamped)
+
     // Per-tile clip depth save stack (avoids writing to shared display list)
     #define DL_MAX_CLIP_SAVE_DEPTH 32
     int clip_saved_depths[DL_MAX_CLIP_SAVE_DEPTH];
@@ -469,6 +473,17 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     if (backdrop_sp > 0) backdrop_sp--;
                     break;
                 }
+                case DL_COMPOSITE_OPACITY: {
+                    // pop backdrop to keep stack balanced (same as DL_APPLY_BLEND_MODE)
+                    if (backdrop_sp > 0) backdrop_sp--;
+                    break;
+                }
+                case DL_SHADOW_CLIP_SAVE:
+                    shadow_clip_saved = nullptr;
+                    break;
+                case DL_SHADOW_CLIP_RESTORE:
+                    shadow_clip_saved = nullptr;
+                    break;
                 default:
                     break;
             }
@@ -787,7 +802,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     // reconstruct clip shape with tile-relative coordinates
                     float adj_params[8];
                     memcpy(adj_params, r->clip_params, 8 * sizeof(float));
-                    // offset shape x/y by tile origin
                     switch ((ClipShapeType)r->clip_type) {
                         case CLIP_SHAPE_CIRCLE:
                         case CLIP_SHAPE_ELLIPSE:
@@ -823,6 +837,67 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             int ry = r->ry - (int)tile_y;
             box_blur_region_inset(scratch, tile_surface, rx, ry, r->rw, r->rh,
                                   r->pad, r->blur_radius, r->bg_color);
+            break;
+        }
+
+        case DL_SHADOW_CLIP_SAVE: {
+            DlShadowClipSave* r = &item->shadow_clip_save;
+            shadow_clip_saved = nullptr;
+            if (tile_surface && tile_surface->pixels) {
+                int rx = r->rx - (int)tile_x;
+                int ry = r->ry - (int)tile_y;
+                int sw = tile_surface->width, sh = tile_surface->height;
+                int x0 = std::max(0, rx), y0 = std::max(0, ry);
+                int x1 = std::min(sw, rx + r->rw), y1 = std::min(sh, ry + r->rh);
+                int w = x1 - x0, h = y1 - y0;
+                if (w > 0 && h > 0) {
+                    shadow_clip_saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+                    uint32_t* px = (uint32_t*)tile_surface->pixels;
+                    int pitch = tile_surface->pitch / 4;
+                    for (int row = 0; row < h; row++)
+                        memcpy(shadow_clip_saved + row * w, px + (y0 + row) * pitch + x0, w * sizeof(uint32_t));
+                    shadow_clip_region[0] = x0;
+                    shadow_clip_region[1] = y0;
+                    shadow_clip_region[2] = w;
+                    shadow_clip_region[3] = h;
+                }
+            }
+            break;
+        }
+
+        case DL_SHADOW_CLIP_RESTORE: {
+            DlShadowClipRestore* r = &item->shadow_clip_restore;
+            if (shadow_clip_saved && tile_surface && tile_surface->pixels && r->exclude_type) {
+                int x0 = shadow_clip_region[0], y0 = shadow_clip_region[1];
+                int w = shadow_clip_region[2], h = shadow_clip_region[3];
+                // reconstruct exclude shape with tile-relative coordinates
+                float adj_params[8];
+                memcpy(adj_params, r->exclude_params, 8 * sizeof(float));
+                switch ((ClipShapeType)r->exclude_type) {
+                    case CLIP_SHAPE_CIRCLE:
+                    case CLIP_SHAPE_ELLIPSE:
+                        adj_params[0] -= tile_x; adj_params[1] -= tile_y;
+                        break;
+                    case CLIP_SHAPE_INSET:
+                    case CLIP_SHAPE_ROUNDED_RECT:
+                        adj_params[0] -= tile_x; adj_params[1] -= tile_y;
+                        break;
+                    default: break;
+                }
+                ClipShape ex = clip_shape_from_params(r->exclude_type, adj_params);
+                uint32_t* px = (uint32_t*)tile_surface->pixels;
+                int pitch = tile_surface->pitch / 4;
+                for (int row = 0; row < h; row++) {
+                    for (int col = 0; col < w; col++) {
+                        float fx = (float)(x0 + col) + 0.5f;
+                        float fy = (float)(y0 + row) + 0.5f;
+                        bool inside = clip_point_in_shape(&ex, fx, fy);
+                        if (r->restore_inside ? inside : !inside)
+                            px[(y0 + row) * pitch + (x0 + col)] = shadow_clip_saved[row * w + col];
+                    }
+                }
+            }
+            shadow_clip_saved = nullptr;
             break;
         }
 

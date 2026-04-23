@@ -61,12 +61,12 @@ extern "C" Item js_string_decoder_new(Item encoding_item) {
                     (Item){.item = i2it(0)});
 
     // Set write and end methods on the instance
-    extern Item js_string_decoder_write(Item decoder, Item buffer);
-    extern Item js_string_decoder_end(Item decoder, Item buffer);
+    extern Item js_string_decoder_write(Item buffer);
+    extern Item js_string_decoder_end(Item buffer);
     js_property_set(decoder, make_string_item("write"),
-                    js_new_function((void*)js_string_decoder_write, 2));
+                    js_new_function((void*)js_string_decoder_write, 1));
     js_property_set(decoder, make_string_item("end"),
-                    js_new_function((void*)js_string_decoder_end, 2));
+                    js_new_function((void*)js_string_decoder_end, 1));
 
     return decoder;
 }
@@ -81,7 +81,11 @@ static int utf8_char_len(uint8_t byte) {
 }
 
 // decoder.write(buffer) — decode buffer, return complete string
-extern "C" Item js_string_decoder_write(Item decoder, Item buffer) {
+extern "C" Item js_string_decoder_write(Item buffer) {
+    // "this" is the decoder object (set by method call dispatch)
+    extern Item js_get_current_this(void);
+    Item decoder = js_get_current_this();
+    (void)decoder; // decoder can be used for pending byte state in future
     int blen = 0;
     uint8_t* data = buffer_data(buffer, &blen);
     if (!data || blen == 0) return make_string_item("", 0);
@@ -109,10 +113,10 @@ extern "C" Item js_string_decoder_write(Item decoder, Item buffer) {
 }
 
 // decoder.end([buffer]) — flush any remaining bytes
-extern "C" Item js_string_decoder_end(Item decoder, Item buffer) {
+extern "C" Item js_string_decoder_end(Item buffer) {
     if (get_type_id(buffer) != LMD_TYPE_UNDEFINED &&
         buffer.item != ITEM_NULL) {
-        return js_string_decoder_write(decoder, buffer);
+        return js_string_decoder_write(buffer);
     }
     // return empty string (no pending data in this simplified version)
     return make_string_item("", 0);
@@ -136,8 +140,8 @@ extern "C" Item js_get_string_decoder_namespace(void) {
     sd_namespace = js_new_object();
 
     sd_set_method(sd_namespace, "StringDecoder", (void*)js_string_decoder_new, 1);
-    sd_set_method(sd_namespace, "write",         (void*)js_string_decoder_write, 2);
-    sd_set_method(sd_namespace, "end",           (void*)js_string_decoder_end, 2);
+    sd_set_method(sd_namespace, "write",         (void*)js_string_decoder_write, 1);
+    sd_set_method(sd_namespace, "end",           (void*)js_string_decoder_end, 1);
 
     // default export is the constructor
     js_property_set(sd_namespace, make_string_item("default"), sd_namespace);

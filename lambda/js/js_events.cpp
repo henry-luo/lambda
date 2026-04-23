@@ -150,20 +150,48 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
         if (get_type_id(event_name) == LMD_TYPE_STRING) {
             String* en = it2s(event_name);
             if (en->len == 5 && memcmp(en->chars, "error", 5) == 0) {
-                // throw the error argument, or a generic error
+                // Node.js: throw error arg if it's an Error, else wrap in ERR_UNHANDLED_ERROR
                 extern void js_throw_value(Item error);
                 extern Item js_new_error_with_name(Item type_name, Item message);
+                extern Item js_to_string(Item value);
+                extern Item js_util_inspect(Item obj_item, Item options_item);
                 Item err_arg = ItemNull;
                 if (args_rest.item != 0 && get_type_id(args_rest) != LMD_TYPE_UNDEFINED) {
                     int64_t argc = js_array_length(args_rest);
                     if (argc > 0) err_arg = js_array_get_int(args_rest, 0);
                 }
-                if (err_arg.item == 0 || get_type_id(err_arg) == LMD_TYPE_UNDEFINED) {
-                    Item type_n = make_string_item("Error");
-                    Item msg = make_string_item("Unhandled 'error' event");
-                    err_arg = js_new_error_with_name(type_n, msg);
+                // check if err_arg is an Error instance
+                bool is_error = false;
+                if (get_type_id(err_arg) == LMD_TYPE_MAP) {
+                    Item cn = js_property_get(err_arg, make_string_item("__class_name__"));
+                    if (get_type_id(cn) == LMD_TYPE_STRING) {
+                        String* cns = it2s(cn);
+                        if (cns->len >= 5 && memcmp(cns->chars + cns->len - 5, "Error", 5) == 0)
+                            is_error = true;
+                    }
                 }
-                js_throw_value(err_arg);
+                if (is_error) {
+                    // Error instance: throw directly
+                    js_throw_value(err_arg);
+                } else {
+                    // wrap in ERR_UNHANDLED_ERROR
+                    char buf[512];
+                    int len;
+                    if (err_arg.item == 0 || get_type_id(err_arg) == LMD_TYPE_UNDEFINED) {
+                        len = snprintf(buf, sizeof(buf), "Unhandled error.");
+                    } else {
+                        Item inspected = js_util_inspect(err_arg, make_js_undefined());
+                        String* is_str = it2s(inspected);
+                        len = snprintf(buf, sizeof(buf), "Unhandled error. (%.*s)", is_str->len, is_str->chars);
+                    }
+                    Item wrapped = js_new_error_with_name(make_string_item("Error"),
+                        (Item){.item = s2it(heap_create_name(buf, len))});
+                    js_property_set(wrapped, make_string_item("code"), make_string_item("ERR_UNHANDLED_ERROR"));
+                    if (err_arg.item != 0 && get_type_id(err_arg) != LMD_TYPE_UNDEFINED) {
+                        js_property_set(wrapped, make_string_item("context"), err_arg);
+                    }
+                    js_throw_value(wrapped);
+                }
                 return (Item){.item = b2it(false)};
             }
         }

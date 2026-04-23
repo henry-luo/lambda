@@ -848,6 +848,22 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         float bwt = border->width.top, bwr = border->width.right;
         float bwb = border->width.bottom, bwl = border->width.left;
 
+        // When border-radius is present, clip border polygons to the outer
+        // rounded rect — matching the raster path's radius_clip approach.
+        bool has_radius = svg_has_border_radius(border);
+        if (has_radius) {
+            char clip_id[64];
+            str_fmt(clip_id, sizeof(clip_id), "border-clip-%lx", (unsigned long)(uintptr_t)view);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content, "<defs><clipPath id=\"%s\"><path d=\"", clip_id);
+            svg_append_rounded_rect_path(ctx->svg_content, x, y, width, height,
+                border->radius.top_left, border->radius.top_right,
+                border->radius.bottom_right, border->radius.bottom_left);
+            strbuf_append_str(ctx->svg_content, "\"/></clipPath></defs>\n");
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content, "<g clip-path=\"url(#%s)\">\n", clip_id);
+        }
+
         // Top
         svg_emit_border_side(ctx, border->top_style, border->top_color,
             x, y, width, height, bwt, bwr, bwb, bwl, 0);
@@ -860,6 +876,11 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         // Left
         svg_emit_border_side(ctx, border->left_style, border->left_color,
             x, y, width, height, bwt, bwr, bwb, bwl, 3);
+
+        if (has_radius) {
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</g>\n");
+        }
     }
 
     // Render outline (outside border-box)

@@ -16,6 +16,9 @@
 #include <cmath>
 #include <cstdio>
 
+// forward declarations
+extern "C" Item js_util_inspect(Item obj_item, Item options_item);
+
 // Helper: make JS undefined
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
@@ -54,13 +57,27 @@ extern "C" Item js_util_format(Item args_item) {
 
     // first arg is the format string (or the only value)
     Item first = js_array_get_int(args_item, 0);
-    if (get_type_id(first) != LMD_TYPE_STRING || argc == 1) {
-        // no format string — stringify and join with space
+    if (get_type_id(first) != LMD_TYPE_STRING) {
+        // first arg is not a string — inspect all args and join with space
         char buf[8192];
         int pos = 0;
         for (int i = 0; i < argc; i++) {
             if (i > 0 && pos < (int)sizeof(buf) - 1) buf[pos++] = ' ';
-            Item str = js_to_string(js_array_get_int(args_item, i));
+            Item val = js_array_get_int(args_item, i);
+            TypeId vt = get_type_id(val);
+            // special case: Symbol (inspect would fail — use Symbol.toString)
+            if (vt == LMD_TYPE_INT && it2i(val) <= -(int64_t)JS_SYMBOL_BASE) {
+                Item sym_str = js_symbol_to_string(val);
+                if (get_type_id(sym_str) == LMD_TYPE_STRING) {
+                    String* s = it2s(sym_str);
+                    int clen = (int)s->len;
+                    if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
+                    memcpy(buf + pos, s->chars, clen);
+                    pos += clen;
+                }
+                continue;
+            }
+            Item str = js_util_inspect(val, make_js_undefined());
             if (get_type_id(str) == LMD_TYPE_STRING) {
                 String* s = it2s(str);
                 int clen = (int)s->len;
@@ -79,32 +96,68 @@ extern "C" Item js_util_format(Item args_item) {
     int arg_idx = 1;
 
     for (int i = 0; i < (int)fmt->len && pos < (int)sizeof(buf) - 1; i++) {
-        if (fmt->chars[i] == '%' && i + 1 < (int)fmt->len && arg_idx < argc) {
+        if (fmt->chars[i] == '%' && i + 1 < (int)fmt->len) {
             char spec = fmt->chars[i + 1];
+
+            // %% is always handled regardless of remaining args
+            if (spec == '%') {
+                buf[pos++] = '%';
+                i++; // skip second %
+                continue;
+            }
+
+            // other specifiers require a remaining arg
+            if (arg_idx >= argc) {
+                buf[pos++] = fmt->chars[i];
+                continue;
+            }
+
             Item arg = js_array_get_int(args_item, arg_idx);
             i++; // skip past specifier
 
             switch (spec) {
                 case 's': {
-                    Item str = js_to_string(arg);
-                    if (get_type_id(str) == LMD_TYPE_STRING) {
-                        String* s = it2s(str);
-                        int clen = (int)s->len;
-                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
-                        memcpy(buf + pos, s->chars, clen);
-                        pos += clen;
+                    // Symbol needs special handling (js_to_string throws for Symbol)
+                    TypeId at = get_type_id(arg);
+                    if (at == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+                        Item sym_str = js_symbol_to_string(arg);
+                        if (get_type_id(sym_str) == LMD_TYPE_STRING) {
+                            String* s = it2s(sym_str);
+                            int clen = (int)s->len;
+                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
+                            memcpy(buf + pos, s->chars, clen);
+                            pos += clen;
+                        }
+                    } else {
+                        Item str = js_to_string(arg);
+                        if (get_type_id(str) == LMD_TYPE_STRING) {
+                            String* s = it2s(str);
+                            int clen = (int)s->len;
+                            if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
+                            memcpy(buf + pos, s->chars, clen);
+                            pos += clen;
+                        }
                     }
                     arg_idx++;
                     break;
                 }
                 case 'd':
                 case 'i': {
+                    // Symbol cannot convert to number
+                    TypeId at = get_type_id(arg);
+                    if (at == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "NaN");
+                        arg_idx++;
+                        break;
+                    }
                     Item num = js_to_number(arg);
                     TypeId t = get_type_id(num);
                     double val = 0;
                     bool is_nan = false;
+                    bool is_int = false;
                     if (t == LMD_TYPE_INT) {
                         val = (double)it2i(num);
+                        is_int = true;
                     } else if (t == LMD_TYPE_FLOAT) {
                         val = it2d(num);
                         if (val != val) is_nan = true; // NaN check
@@ -113,8 +166,29 @@ extern "C" Item js_util_format(Item args_item) {
                     }
 
                     // %i truncates to integer (like parseInt)
-                    if (spec == 'i' && !is_nan && val == val) {
-                        val = (val >= 0) ? floor(val) : ceil(val);
+                    if (spec == 'i') {
+                        // parseInt semantics: NaN, Infinity, -Infinity → NaN
+                        if (is_nan || val == 1.0/0.0 || val == -1.0/0.0) {
+                            is_nan = true;
+                        } else if (val == val) {
+                            val = (val >= 0) ? floor(val) : ceil(val);
+                            is_int = true;
+                        }
+                        // %i with string arg: parseInt('') = NaN, parseInt('  ') = NaN
+                        if (!is_nan && get_type_id(arg) == LMD_TYPE_STRING) {
+                            String* as = it2s(arg);
+                            if (as) {
+                                // Check if string is empty or whitespace-only
+                                bool blank = true;
+                                for (int k = 0; k < (int)as->len; k++) {
+                                    if (as->chars[k] != ' ' && as->chars[k] != '\t' &&
+                                        as->chars[k] != '\n' && as->chars[k] != '\r') {
+                                        blank = false; break;
+                                    }
+                                }
+                                if (blank) is_nan = true;
+                            }
+                        }
                     }
 
                     if (is_nan) {
@@ -130,14 +204,33 @@ extern "C" Item js_util_format(Item args_item) {
                         } else {
                             pos += snprintf(buf + pos, sizeof(buf) - pos, "-0");
                         }
-                    } else {
-                        // after truncation for %i, val is always integer
+                    } else if (is_int || val == floor(val)) {
                         pos += snprintf(buf + pos, sizeof(buf) - pos, "%lld", (long long)val);
+                    } else {
+                        // float with fractional part: use %g-style formatting
+                        char tmp[64];
+                        snprintf(tmp, sizeof(tmp), "%.17g", val);
+                        // trim trailing zeros after decimal point but keep at least one digit
+                        char* dot = strchr(tmp, '.');
+                        if (dot) {
+                            char* end = tmp + strlen(tmp) - 1;
+                            while (end > dot + 1 && *end == '0') end--;
+                            *(end + 1) = '\0';
+                        }
+                        int n = (int)strlen(tmp);
+                        if (pos + n < (int)sizeof(buf)) { memcpy(buf + pos, tmp, n); pos += n; }
                     }
                     arg_idx++;
                     break;
                 }
                 case 'f': {
+                    // Symbol cannot convert to number
+                    TypeId fat = get_type_id(arg);
+                    if (fat == LMD_TYPE_INT && it2i(arg) <= -(int64_t)JS_SYMBOL_BASE) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "NaN");
+                        arg_idx++;
+                        break;
+                    }
                     Item num = js_to_number(arg);
                     TypeId t = get_type_id(num);
                     double val = 0;
@@ -147,7 +240,23 @@ extern "C" Item js_util_format(Item args_item) {
                     arg_idx++;
                     break;
                 }
-                case 'j':
+                case 'j': {
+                    Item str = js_json_stringify(arg);
+                    if (get_type_id(str) == LMD_TYPE_STRING) {
+                        String* s = it2s(str);
+                        int clen = (int)s->len;
+                        if (pos + clen >= (int)sizeof(buf)) clen = (int)sizeof(buf) - 1 - pos;
+                        memcpy(buf + pos, s->chars, clen);
+                        pos += clen;
+                    } else {
+                        // JSON.stringify returns undefined for Symbol, functions, etc.
+                        const char* undef = "undefined";
+                        int ulen = 9;
+                        if (pos + ulen < (int)sizeof(buf)) { memcpy(buf + pos, undef, ulen); pos += ulen; }
+                    }
+                    arg_idx++;
+                    break;
+                }
                 case 'o':
                 case 'O': {
                     Item str = js_json_stringify(arg);
@@ -159,10 +268,6 @@ extern "C" Item js_util_format(Item args_item) {
                         pos += clen;
                     }
                     arg_idx++;
-                    break;
-                }
-                case '%': {
-                    buf[pos++] = '%';
                     break;
                 }
                 default: {
@@ -177,10 +282,19 @@ extern "C" Item js_util_format(Item args_item) {
         }
     }
 
-    // append remaining args
+    // append remaining args (Node.js: strings raw, others inspected)
     while (arg_idx < argc && pos < (int)sizeof(buf) - 2) {
         buf[pos++] = ' ';
-        Item str = js_to_string(js_array_get_int(args_item, arg_idx++));
+        Item extra = js_array_get_int(args_item, arg_idx++);
+        TypeId et = get_type_id(extra);
+        Item str;
+        if (et == LMD_TYPE_INT && it2i(extra) <= -(int64_t)JS_SYMBOL_BASE) {
+            str = js_symbol_to_string(extra);
+        } else if (et == LMD_TYPE_STRING) {
+            str = extra; // strings appended raw, not inspected
+        } else {
+            str = js_util_inspect(extra, make_js_undefined());
+        }
         if (get_type_id(str) == LMD_TYPE_STRING) {
             String* s = it2s(str);
             int clen = (int)s->len;
@@ -211,6 +325,111 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
     }
     if (tid == LMD_TYPE_UNDEFINED) return make_string_item("undefined");
     if (tid == LMD_TYPE_NULL) return make_string_item("null");
+
+    // Strings: wrap in single quotes (Node.js style)
+    if (tid == LMD_TYPE_STRING) {
+        String* s = it2s(obj_item);
+        if (!s) return make_string_item("''");
+        // build 'value' with single quotes
+        int len = (int)s->len;
+        char* buf = (char*)malloc(len + 3);
+        buf[0] = '\'';
+        memcpy(buf + 1, s->chars, len);
+        buf[len + 1] = '\'';
+        buf[len + 2] = '\0';
+        Item result = make_string_item(buf, len + 2);
+        free(buf);
+        return result;
+    }
+
+    // Objects: Node.js-style inspect { key: value, ... }
+    if (tid == LMD_TYPE_MAP) {
+        // Check for custom inspect function: Symbol.for('nodejs.util.inspect.custom')
+        extern Item js_symbol_for(Item desc);
+        extern int js_check_exception(void);
+        extern Item js_clear_exception(void);
+        Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
+        Item custom_fn = js_property_get(obj_item, custom_sym);
+        if (get_type_id(custom_fn) == LMD_TYPE_FUNC) {
+            Item result = js_call_function(custom_fn, obj_item, nullptr, 0);
+            if (js_check_exception()) {
+                js_clear_exception();
+                return make_string_item("[object Object]");
+            }
+            if (get_type_id(result) == LMD_TYPE_STRING) return result;
+            return js_to_string(result);
+        }
+
+        extern Item js_object_keys(Item obj);
+        Item keys = js_object_keys(obj_item);
+        int64_t klen = js_array_length(keys);
+        if (klen == 0) return make_string_item("{}");
+        // build "{ key1: val1, key2: val2 }"
+        // estimate buffer size
+        int cap = 256;
+        char* buf = (char*)malloc(cap);
+        int pos = 0;
+        buf[pos++] = '{';
+        buf[pos++] = ' ';
+        for (int64_t i = 0; i < klen; i++) {
+            if (i > 0) {
+                buf[pos++] = ',';
+                buf[pos++] = ' ';
+            }
+            Item key = js_array_get_int(keys, i);
+            String* ks = it2s(key);
+            Item val = js_property_get(obj_item, key);
+            Item val_str = js_util_inspect(val, make_js_undefined());
+            String* vs = it2s(val_str);
+            int need = pos + (ks ? (int)ks->len : 0) + 2 + (vs ? (int)vs->len : 0) + 4;
+            if (need >= cap) {
+                cap = need * 2;
+                buf = (char*)realloc(buf, cap);
+            }
+            if (ks) { memcpy(buf + pos, ks->chars, ks->len); pos += (int)ks->len; }
+            buf[pos++] = ':';
+            buf[pos++] = ' ';
+            if (vs) { memcpy(buf + pos, vs->chars, vs->len); pos += (int)vs->len; }
+        }
+        buf[pos++] = ' ';
+        buf[pos++] = '}';
+        buf[pos] = '\0';
+        Item r = make_string_item(buf, pos);
+        free(buf);
+        return r;
+    }
+
+    // Arrays: Node.js-style inspect [ val1, val2, ... ]
+    if (tid == LMD_TYPE_ARRAY) {
+        int64_t alen = js_array_length(obj_item);
+        if (alen == 0) return make_string_item("[]");
+        int cap = 256;
+        char* buf = (char*)malloc(cap);
+        int pos = 0;
+        buf[pos++] = '[';
+        buf[pos++] = ' ';
+        for (int64_t i = 0; i < alen; i++) {
+            if (i > 0) {
+                buf[pos++] = ',';
+                buf[pos++] = ' ';
+            }
+            Item val = js_array_get_int(obj_item, i);
+            Item val_str = js_util_inspect(val, make_js_undefined());
+            String* vs = it2s(val_str);
+            int need = pos + (vs ? (int)vs->len : 0) + 6;
+            if (need >= cap) {
+                cap = need * 2;
+                buf = (char*)realloc(buf, cap);
+            }
+            if (vs) { memcpy(buf + pos, vs->chars, vs->len); pos += (int)vs->len; }
+        }
+        buf[pos++] = ' ';
+        buf[pos++] = ']';
+        buf[pos] = '\0';
+        Item r = make_string_item(buf, pos);
+        free(buf);
+        return r;
+    }
 
     // use JSON.stringify as a basic inspect
     Item result = js_json_stringify(obj_item);
@@ -286,15 +505,42 @@ extern "C" Item js_util_deprecate(Item fn_item, Item msg_item) {
 // =============================================================================
 
 extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
-    // set ctor.prototype = Object.create(super.prototype)
-    Item super_proto = js_property_get(super_item, make_string_item("prototype"));
-    if (get_type_id(super_proto) == LMD_TYPE_MAP || get_type_id(super_proto) == LMD_TYPE_ARRAY) {
-        Item new_proto = js_object_create(super_proto);
-        js_property_set(new_proto, make_string_item("constructor"), ctor_item);
-        js_property_set(ctor_item, make_string_item("prototype"), new_proto);
+    // validate ctor — must be typeof "function" (regular function or ES6 class)
+    Item ctor_type = js_typeof(ctor_item);
+    String* ctor_type_str = it2s(ctor_type);
+    bool ctor_is_func = ctor_type_str && ctor_type_str->len == 8 &&
+                        memcmp(ctor_type_str->chars, "function", 8) == 0;
+    if (!ctor_is_func) {
+        const char* received = (ctor_item.item == ITEM_NULL) ? "null" :
+                               (ctor_item.item == ITEM_JS_UNDEFINED) ? "undefined" :
+                               ctor_type_str ? ctor_type_str->chars : "unknown";
+        char msg[256];
+        snprintf(msg, sizeof(msg), "The \"ctor\" argument must be of type function. Received %s", received);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
     }
-    // set ctor.super_ = superConstructor
-    js_property_set(ctor_item, make_string_item("super_"), super_item);
+    // validate superCtor — reject null, undefined, and non-object primitives
+    if (super_item.item == ITEM_NULL || super_item.item == ITEM_JS_UNDEFINED) {
+        const char* received = (super_item.item == ITEM_NULL) ? "null" : "undefined";
+        char msg[256];
+        snprintf(msg, sizeof(msg), "The \"superCtor\" argument must be of type function. Received %s", received);
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
+    }
+    // validate superCtor.prototype
+    Item super_proto = js_property_get(super_item, make_string_item("prototype"));
+    TypeId proto_tid = get_type_id(super_proto);
+    if (proto_tid != LMD_TYPE_MAP && proto_tid != LMD_TYPE_ARRAY) {
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"superCtor.prototype\" property must be of type object. Received undefined");
+    }
+    // Set ctor.prototype.__proto__ = superCtor.prototype
+    // This preserves existing properties on ctor.prototype (like D.prototype.d set before inherits)
+    Item ctor_proto = js_property_get(ctor_item, make_string_item("prototype"));
+    js_property_set(ctor_proto, make_string_item("__proto__"), super_proto);
+    js_property_set(ctor_proto, make_string_item("constructor"), ctor_item);
+    // set ctor.super_ = superConstructor (non-enumerable, per Node.js spec)
+    Item super_key = make_string_item("super_");
+    js_property_set(ctor_item, super_key, super_item);
+    js_mark_non_enumerable(ctor_item, super_key);
     return make_js_undefined();
 }
 
@@ -325,6 +571,61 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     }
 
     if (ta == LMD_TYPE_MAP) {
+        // Check if both are Set or Map collections
+        extern bool js_is_set_instance(Item obj);
+        extern bool js_is_map_instance(Item obj);
+        extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+        extern Item js_iterable_to_array(Item iterable);
+        bool a_set = js_is_set_instance(a), b_set = js_is_set_instance(b);
+        bool a_map = js_is_map_instance(a), b_map = js_is_map_instance(b);
+        if (a_set && b_set) {
+            // Set: compare by size, then check each element
+            Item size_a = js_collection_method(a, 9, ItemNull, ItemNull); // 9=size
+            Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
+            if (it2i(size_a) != it2i(size_b)) return (Item){.item = b2it(false)};
+            // Convert both to arrays and compare elements
+            Item arr_a = js_iterable_to_array(a);
+            Item arr_b = js_iterable_to_array(b);
+            int64_t la = js_array_length(arr_a);
+            for (int64_t i = 0; i < la; i++) {
+                Item elem = js_array_get_int(arr_a, i);
+                // Check if elem exists in b
+                Item has = js_collection_method(b, 2, elem, ItemNull); // 2=has
+                if (!js_is_truthy(has)) {
+                    // Try deep equality for each element in b
+                    bool found = false;
+                    int64_t lb = js_array_length(arr_b);
+                    for (int64_t j = 0; j < lb; j++) {
+                        Item eb = js_array_get_int(arr_b, j);
+                        Item r = js_util_isDeepStrictEqual(elem, eb);
+                        if (js_is_truthy(r)) { found = true; break; }
+                    }
+                    if (!found) return (Item){.item = b2it(false)};
+                }
+            }
+            return (Item){.item = b2it(true)};
+        }
+        if (a_map && b_map) {
+            // Map: compare by size, then compare key-value pairs
+            Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
+            Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
+            if (it2i(size_a) != it2i(size_b)) return (Item){.item = b2it(false)};
+            // Convert to array of [key, value] entries
+            Item entries_a = js_iterable_to_array(a);
+            int64_t la = js_array_length(entries_a);
+            for (int64_t i = 0; i < la; i++) {
+                Item pair = js_array_get_int(entries_a, i);
+                Item ka = js_array_get_int(pair, 0);
+                Item va = js_array_get_int(pair, 1);
+                Item vb = js_collection_method(b, 1, ka, ItemNull); // 1=get
+                Item r = js_util_isDeepStrictEqual(va, vb);
+                if (!js_is_truthy(r)) return (Item){.item = b2it(false)};
+            }
+            return (Item){.item = b2it(true)};
+        }
+        if ((a_set && !b_set) || (!a_set && b_set) || (a_map && !b_map) || (!a_map && b_map)) {
+            return (Item){.item = b2it(false)};
+        }
         Item keys_a = js_object_keys(a);
         Item keys_b = js_object_keys(b);
         int64_t la = js_array_length(keys_a);
@@ -825,6 +1126,13 @@ extern "C" Item js_get_util_namespace(void) {
 
     js_util_set_method(util_namespace, "format",              (void*)js_util_format, -1);
     js_util_set_method(util_namespace, "inspect",             (void*)js_util_inspect, 2);
+    // Set util.inspect.custom = Symbol.for('nodejs.util.inspect.custom')
+    {
+        extern Item js_symbol_for(Item desc);
+        Item inspect_fn = js_property_get(util_namespace, make_string_item("inspect"));
+        Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
+        js_property_set(inspect_fn, make_string_item("custom"), custom_sym);
+    }
     js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
     js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
     js_util_set_method(util_namespace, "deprecate",           (void*)js_util_deprecate, 2);
