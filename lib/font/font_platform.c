@@ -702,7 +702,7 @@ void* font_platform_create_ct_font(const char* postscript_name,
     if (is_system_ui) {
         // Create at the correct weight so advances match Chrome for bold/semibold too.
         // Map CSS weight to CoreText weight trait (-1..1 normalized scale).
-        // kCTFontWeight* constants: Semibold≈0.23, Bold≈0.40, Heavy≈0.56, Black≈0.62
+        // kCTFontWeight* constants: Semibold≈0.30, Bold≈0.40, Heavy≈0.56, Black≈0.62
         ct_font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,
                                                 (CGFloat)size_px, NULL);
         if (ct_font && css_weight > 500) {
@@ -712,7 +712,7 @@ void* font_platform_create_ct_font(const char* postscript_name,
             if      (css_weight >= 900) ct_weight = 0.62f;
             else if (css_weight >= 800) ct_weight = 0.56f;
             else if (css_weight >= 700) ct_weight = 0.40f;
-            else                        ct_weight = 0.23f;  // 600 SemiBold
+            else                        ct_weight = 0.30f;  // 600 SemiBold (kCTFontWeightSemibold)
             CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
             CFStringRef wt_key = kCTFontWeightTrait;
             CFDictionaryRef traits = CFDictionaryCreate(NULL,

@@ -1896,6 +1896,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Also check if it's a ROW flex container (children laid out horizontally -> SUM widths)
     bool is_flex_container = false;
     bool is_row_flex = false;
+    bool is_flex_wrap = false;
     float flex_gap = 0;
     int flex_child_count = 0;  // Count of flex children for gap calculation
     ViewBlock* view_block = (ViewBlock*)element;
@@ -2113,8 +2114,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_row_flex = !is_row_flex;
             log_debug("measure_element_intrinsic_widths: vertical writing mode, flipped is_row_flex");
         }
-        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d",
-                  element->node_name(), is_flex_container, is_row_flex, flex_gap, is_vertical_wm);
+        // Check flex-wrap to determine min-content sizing strategy.
+        // CSS Flexbox §9.9.1: for wrapping flex containers, min-content main size is the
+        // largest flex item's min-content contribution (not the sum).
+        if (is_row_flex) {
+            if (view_block->embed && view_block->embed->flex) {
+                int wrap = view_block->embed->flex->wrap;
+                is_flex_wrap = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
+            } else if (element->specified_style) {
+                CssDeclaration* wrap_decl = style_tree_get_declaration(
+                    element->specified_style, CSS_PROPERTY_FLEX_WRAP);
+                if (wrap_decl && wrap_decl->value && wrap_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum wrap = wrap_decl->value->data.keyword;
+                    is_flex_wrap = (wrap == CSS_VALUE_WRAP || wrap == CSS_VALUE_WRAP_REVERSE);
+                }
+            }
+        }
+        log_debug("measure_element_intrinsic_widths: %s is_flex=%d, is_row_flex=%d, gap=%.1f, vertical_wm=%d, wrap=%d",
+                  element->node_name(), is_flex_container, is_row_flex, flex_gap, is_vertical_wm, is_flex_wrap);
     }
 
     // Set up parent context for children to inherit definite height
@@ -2559,12 +2576,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
 
             if (is_row_flex) {
-                // Row flex: sum widths horizontally
-                sizes.min_content += child_sizes.min_content;
+                // Row flex: for wrapping containers, min-content is the largest item
+                // (CSS Flexbox §9.9.1). For nowrap, sum all items.
+                if (is_flex_wrap) {
+                    sizes.min_content = max(sizes.min_content, child_sizes.min_content);
+                } else {
+                    sizes.min_content += child_sizes.min_content;
+                }
                 sizes.max_content += child_sizes.max_content;
                 flex_child_count++;
-                log_debug("  row flex item: min=%.1f, max=%.1f, count=%d",
-                          child_sizes.min_content, child_sizes.max_content, flex_child_count);
+                log_debug("  row flex item: min=%.1f, max=%.1f, count=%d, wrap=%d",
+                          child_sizes.min_content, child_sizes.max_content, flex_child_count, is_flex_wrap);
             } else {
                 // Column flex: take max of widths
                 sizes.min_content = max(sizes.min_content, child_sizes.min_content);
@@ -2839,10 +2861,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Add gaps for row flex containers
     if (is_row_flex && flex_child_count > 1 && flex_gap > 0) {
         float total_gap = flex_gap * (flex_child_count - 1);
-        sizes.min_content += total_gap;
+        // For wrapping flex, gaps don't apply to min-content (each item on its own line)
+        if (!is_flex_wrap) {
+            sizes.min_content += total_gap;
+        }
         sizes.max_content += total_gap;
-        log_debug("  row flex gap: %d items, %.1fpx gap = %.0fpx total",
-                  flex_child_count, flex_gap, total_gap);
+        log_debug("  row flex gap: %d items, %.1fpx gap = %.0fpx total, wrap=%d",
+                  flex_child_count, flex_gap, total_gap, is_flex_wrap);
     }
 
     // CSS 2.1 §12.5.1: For display:list-item with list-style-position:inside,

@@ -6281,6 +6281,80 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             log_debug("%s inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d", elmt->source_loc(),
                 block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
+
+            // CSS Flexbox §4.1: Re-resolve abs-pos children of inline-level flex/grid
+            // containers whose static position was set container-relative during the
+            // container's layout (before the container's inline position was known).
+            // Now that block->x/y is finalized, convert container-relative to CB-relative.
+            if (dom_elem && (display.inner == CSS_VALUE_FLEX || display.inner == CSS_VALUE_GRID)) {
+                // Skip if this container IS the containing block for abs-pos children
+                bool is_containing_block = block->position &&
+                    (block->position->position == CSS_VALUE_RELATIVE ||
+                     block->position->position == CSS_VALUE_ABSOLUTE ||
+                     block->position->position == CSS_VALUE_FIXED ||
+                     block->position->position == CSS_VALUE_STICKY);
+                if (!is_containing_block) {
+                // Walk DOM children looking for abs-pos elements
+                DomNode* fc = dom_elem->first_child;
+                bool has_abs_children = false;
+                while (fc && !has_abs_children) {
+                    if (fc->is_element()) {
+                        ViewBlock* cb = (ViewBlock*)(fc->as_element());
+                        if (cb->position &&
+                            (cb->position->position == CSS_VALUE_ABSOLUTE ||
+                             cb->position->position == CSS_VALUE_FIXED)) {
+                            has_abs_children = true;
+                        }
+                    }
+                    fc = fc->next_sibling;
+                }
+                if (has_abs_children) {
+                    // Compute container's absolute position relative to the abs CB
+                    // by walking from the container (block) up to the CB
+                    float container_to_cb_x = 0, container_to_cb_y = 0;
+                    ViewBlock* p = block;
+                    while (p) {
+                        container_to_cb_x += p->x;
+                        container_to_cb_y += p->y;
+                        // Stop if we reached a positioned ancestor (that's the CB)
+                        ViewElement* gp = p->parent_view();
+                        while (gp && !gp->is_block()) gp = gp->parent_view();
+                        if (!gp || !gp->is_block()) break;
+                        p = (ViewBlock*)gp;
+                        if (p->position &&
+                            (p->position->position == CSS_VALUE_RELATIVE ||
+                             p->position->position == CSS_VALUE_ABSOLUTE ||
+                             p->position->position == CSS_VALUE_FIXED ||
+                             p->position->position == CSS_VALUE_STICKY)) {
+                            break;  // reached the containing block
+                        }
+                    }
+                    log_debug("[INLINE-FLEX ABS] container-to-CB offset: (%.1f, %.1f)", container_to_cb_x, container_to_cb_y);
+
+                    // Adjust each abs-pos child's static position
+                    fc = dom_elem->first_child;
+                    while (fc) {
+                        if (fc->is_element()) {
+                            ViewBlock* cb = (ViewBlock*)(fc->as_element());
+                            if (cb->position &&
+                                (cb->position->position == CSS_VALUE_ABSOLUTE ||
+                                 cb->position->position == CSS_VALUE_FIXED)) {
+                                if (!cb->position->has_left && !cb->position->has_right) {
+                                    cb->x += container_to_cb_x;
+                                }
+                                if (!cb->position->has_top && !cb->position->has_bottom) {
+                                    cb->y += container_to_cb_y;
+                                }
+                                log_debug("[INLINE-FLEX ABS] adjusted child %s to (%.1f, %.1f)",
+                                    fc->node_name(), cb->x, cb->y);
+                            }
+                        }
+                        fc = fc->next_sibling;
+                    }
+                }
+                } // !is_containing_block
+            }
+
             lycon->line.has_replaced_content = true;  // inline-block contributes to line box
             // update baseline
             // CSS 2.1 §10.8.1: vertical-align defaults to 'baseline' (CSS_VALUE__UNDEF=0 also means baseline).
