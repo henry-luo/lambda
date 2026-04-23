@@ -19927,13 +19927,32 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     if (fn->is_generator) {
         // Count yield points to determine number of states
-        int yield_count = jm_count_yields(fn->body);
+        // +1 for implicit "param binding" yield that separates param destructuring
+        // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
+        int yield_count = jm_count_yields(fn->body) + 1;
         if (yield_count > 63) yield_count = 63;  // safety cap matching gen_state_labels size
 
         // Collect local variable names for env slot assignment
         struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
         if (fn->body) jm_collect_body_locals(fn->body, gen_locals);  // generators need all locals for state machine
+
+        // Also collect destructured param variable names so they get env slots.
+        // These variables are created during param destructuring in state 0 and
+        // must survive across the implicit param-binding yield.
+        {
+            JsAstNode* dp = fn->params;
+            while (dp) {
+                JsAstNode* pat = dp;
+                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                    pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                    jm_collect_pattern_names(pat, gen_locals);
+                }
+                dp = dp->next;
+            }
+        }
 
         // Count distinct locals
         int local_count = 0;
@@ -20038,6 +20057,53 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // State 0 label (initial entry)
         jm_emit_label(mt, mt->gen_state_labels[0]);
 
+        // Pre-register ONLY destructured param variable names with env slots.
+        // This must happen before param destructuring so that the variables created
+        // by jm_emit_object_destructure/jm_emit_array_destructure get env-backed
+        // entries that survive across the implicit param-binding yield.
+        // Body locals are hoisted LATER (after the implicit yield) to avoid
+        // prematurely shadowing outer-scope variables during param default evaluation.
+        int gen_dstr_param_count = 0;
+        {
+            struct hashmap* dstr_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            JsAstNode* dp = fn->params;
+            while (dp) {
+                JsAstNode* pat = dp;
+                if (pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                    pat = ((JsAssignmentPatternNode*)pat)->left;
+                if (pat->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                    pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                    jm_collect_pattern_names(pat, dstr_names);
+                }
+                dp = dp->next;
+            }
+            int li = 0;
+            size_t diter = 0; void* ditem;
+            while (hashmap_iter(dstr_names, &diter, &ditem)) {
+                JsNameSetEntry* ns = (JsNameSetEntry*)ditem;
+                if (!jm_find_var(mt, ns->name)) {
+                    MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, vr),
+                        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                    JsVarScopeEntry entry;
+                    memset(&entry, 0, sizeof(entry));
+                    snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
+                    entry.var.reg = vr;
+                    entry.var.from_env = true;
+                    entry.var.env_slot = local_offset + li;
+                    entry.var.env_reg = mt->gen_env_reg;
+                    entry.var.typed_array_type = -1;
+                    entry.var.from_hoist = true;
+                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    li++;
+                }
+            }
+            gen_dstr_param_count = li;
+            hashmap_free(dstr_names);
+        }
+
         // Load parameters from env (stored there during generator creation)
         JsAstNode* sm_param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
@@ -20100,6 +20166,61 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
             sm_param_node = sm_param_node ? sm_param_node->next : NULL;
+        }
+
+        // === Implicit "param binding" yield ===
+        // ES spec: FunctionDeclarationInstantiation (parameter binding including
+        // destructuring) must happen synchronously at call time, not lazily on
+        // first .next(). We emit an implicit yield here that separates param
+        // binding from body execution. js_generator_create eagerly runs state 0
+        // to execute param destructuring, and the generator starts at state 1.
+        {
+            // Check for pending exception from param destructuring
+            MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, mt->gen_done_label),
+                MIR_new_reg_op(mt->ctx, param_exc)));
+
+            // Save all env-backed variables (params + destructured locals) to env
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter2 = 0; void* item2;
+                while (hashmap_iter(mt->var_scopes[sd], &iter2, &item2)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item2;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, e->var.reg)));
+                    }
+                }
+            }
+
+            // Return [undefined, 1] — implicit yield to separate param binding from body
+            MIR_reg_t pundef = jm_emit_undefined(mt);
+            MIR_reg_t pb_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, pundef),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)1));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, pb_result)));
+
+            // State 1 label: body execution starts here (on first .next() call)
+            mt->gen_yield_index = 1;
+            jm_emit_label(mt, mt->gen_state_labels[1]);
+
+            // Reload all env-backed variables after resume
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter2 = 0; void* item2;
+                while (hashmap_iter(mt->var_scopes[sd], &iter2, &item2)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item2;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    }
+                }
+            }
         }
 
         // Build self-capture name for detecting self-references
@@ -20170,9 +20291,11 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_set_var(mt, "_js_arguments", args_reg);
         }
 
-        // Hoist var declarations with env slots
+        // Hoist body-local var declarations with env slots.
+        // Destructured param names were already pre-registered before state 0;
+        // skip those and continue env slot assignment from gen_dstr_param_count.
         if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-            int li = 0;
+            int li = gen_dstr_param_count;
             size_t liter = 0; void* litem;
             while (hashmap_iter(gen_locals, &liter, &litem)) {
                 JsNameSetEntry* ns = (JsNameSetEntry*)litem;
@@ -20189,7 +20312,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_slot = local_offset + li;
                     entry.var.env_reg = mt->gen_env_reg;
                     entry.var.typed_array_type = -1;
-                    entry.var.from_hoist = true;  // v50: mark as hoisted
+                    entry.var.from_hoist = true;
                     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
                     li++;
                 }
