@@ -15663,6 +15663,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             }
 
             // Emit static field initializers for class expressions
+            jm_call_void_0(mt, "js_private_field_init_begin");
             for (int fi = 0; ce && fi < ce->static_field_count; fi++) {
                 JsStaticFieldEntry* sf = &ce->static_fields[fi];
                 if (sf->computed && sf->key_expr) {
@@ -15701,6 +15702,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_transpile_statement(mt, ce->static_blocks[si]);
                 }
             }
+            jm_call_void_0(mt, "js_private_field_init_end");
         log_debug("js-mir: class expression evaluated with __class_name__");
         return cls_obj;
     }
@@ -17510,6 +17512,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
             // Emit base-first, then own class
+            // v37: Set private field init flag to bypass brand check during initialization
+            jm_call_void_0(mt, "js_private_field_init_begin");
             for (int ci = field_chain_len - 1; ci >= 0; ci--) {
                 JsClassEntry* fc_ce = field_chain[ci];
                 for (int fi = 0; fi < fc_ce->instance_field_count; fi++) {
@@ -17566,6 +17570,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+            // v37: Clear private field init flag after all fields are initialized
+            jm_call_void_0(mt, "js_private_field_init_end");
             // Restore 'this' after field initialization
             jm_call_void_1(mt, "js_set_this",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_this_fi));
@@ -19010,6 +19016,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_call_void_1(mt, "js_mark_all_non_enumerable",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     // Emit static field initializers
+                    jm_call_void_0(mt, "js_private_field_init_begin");
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
                         if (sf->computed && sf->key_expr) {
@@ -19048,6 +19055,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
+                    jm_call_void_0(mt, "js_private_field_init_end");
                 }
             }
         }
@@ -25856,6 +25864,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                     // Emit static field initializers at the class's source position.
                     // Static fields may reference functions/variables declared before.
+                    jm_call_void_0(mt, "js_private_field_init_begin");
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
                         if (sf->computed && sf->key_expr) {
@@ -25894,13 +25903,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 sf->module_var_index);
                         }
                     }
-
                     // Emit static block bodies
                     for (int si = 0; si < ce->static_block_count; si++) {
                         if (ce->static_blocks[si]) {
                             jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
+                    jm_call_void_0(mt, "js_private_field_init_end");
                 }
             }
             stmt = stmt->next;
@@ -27069,11 +27078,12 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
-    // Try expression form first: body = "return (code)\n"
-    // js_new_function_from_string wraps as (function() { return (code)\n })
-    // Skip if code starts with a declaration keyword — wrapping in parens would
-    // turn a declaration into an expression (e.g. function f(){} → function expression),
-    // giving a wrong completion value (should be undefined, not the function).
+    // v37: Phase A — try expression form for single-expression eval code.
+    // Wraps as "return (code)\n" inside a function IIFE. This handles simple
+    // cases like eval("1+2"), eval("new.target"), etc. and preserves function
+    // context (new.target, arguments, super) that a top-level script wouldn't have.
+    // Skip if code starts with a declaration keyword or contains semicolons
+    // (multi-statement code should go to Phase C for correct scoping).
     {
         bool skip_expr_form = false;
         const char* s = code_str->chars;
@@ -27091,6 +27101,72 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
             else if (slen - i >= 5 && memcmp(s + i, "async", 5) == 0 &&
                 (i + 5 >= slen || s[i+5] == ' '))
                 skip_expr_form = true;
+            // v37: '{' at start is a block statement, not an object literal
+            else if (s[i] == '{')
+                skip_expr_form = true;
+            // v37: statement keywords that can't be expressions
+            else if (slen - i >= 3 && memcmp(s + i, "var", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "let", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "const", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 2 && memcmp(s + i, "if", 2) == 0 &&
+                (i + 2 >= slen || s[i+2] == ' ' || s[i+2] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "for", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' ' || s[i+3] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "while", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "switch", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == '('))
+                skip_expr_form = true;
+            else if (slen - i >= 3 && memcmp(s + i, "try", 3) == 0 &&
+                (i + 3 >= slen || s[i+3] == ' ' || s[i+3] == '{'))
+                skip_expr_form = true;
+            else if (slen - i >= 2 && memcmp(s + i, "do", 2) == 0 &&
+                (i + 2 >= slen || s[i+2] == ' ' || s[i+2] == '{'))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "throw", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "return", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' ' || s[i+6] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 5 && memcmp(s + i, "break", 5) == 0 &&
+                (i + 5 >= slen || s[i+5] == ' ' || s[i+5] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 8 && memcmp(s + i, "continue", 8) == 0 &&
+                (i + 8 >= slen || s[i+8] == ' ' || s[i+8] == ';'))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "import", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' '))
+                skip_expr_form = true;
+            else if (slen - i >= 6 && memcmp(s + i, "export", 6) == 0 &&
+                (i + 6 >= slen || s[i+6] == ' '))
+                skip_expr_form = true;
+        }
+        // v37: Also skip expression form if code contains semicolons (multi-statement)
+        // or declarations that need to be compiled as a program for correct scoping.
+        if (!skip_expr_form) {
+            for (size_t j = i; j < slen; j++) {
+                char c = s[j];
+                if (c == ';') { skip_expr_form = true; break; }
+                // Skip string literals to avoid false semicolon detection
+                if (c == '\'' || c == '"' || c == '`') {
+                    char q = c;
+                    j++;
+                    while (j < slen && s[j] != q) {
+                        if (s[j] == '\\') j++; // skip escape
+                        j++;
+                    }
+                }
+            }
         }
         if (!skip_expr_form) {
             const char* prefix = "return (";
@@ -27113,35 +27189,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
     // If expression form succeeded, call and return
     if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
         Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-        // NOTE: we intentionally do NOT call jm_finish_last_deferred_mir() here.
-        // The deferred MIR context keeps the name_pool alive — its backing ast_pool
-        // contains string literals (via jm_box_string_literal) that may be referenced
-        // by the returned Item.  Freeing it would leave dangling pointers.
-        // Cleanup happens at program exit via jm_free_all_deferred_mir_contexts().
         return result;
     }
 
-    // Try statement form with "return" inserted before last expression statement
-    {
-        char* modified = eval_try_insert_return(code_str->chars, code_str->len);
-        if (modified) {
-            log_debug("js-eval: trying completion-value form: %.80s", modified);
-            Item body_item = (Item){.item = s2it(heap_create_name(modified, strlen(modified)))};
-            mem_free(modified);
-            fn_item = js_new_function_from_string(&body_item, 1);
-            if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
-                Item result = js_call_function(fn_item, ItemNull, NULL, 0);
-                // Do not call jm_finish_last_deferred_mir() — see note above
-                // about name_pool lifetime.
-                return result;
-            }
-        }
-    }
-
-    // Fallback: compile code directly as a top-level script (not wrapped in a function).
-    // This allows js_main to execute the code and return the completion value via
-    // eval_completion_reg, which tracks the last evaluated expression statement
-    // even inside control flow (for/while/if/switch/try).
+    // v37: Phase C — compile code directly as a top-level script (not wrapped in a function).
+    // Skip Phase B (return insertion) which still wrapped in function body (wrong scoping).
+    // Phase C handles completion values via eval_completion_reg and var export
+    // via is_eval_direct, making it spec-compliant for multi-statement code.
     {
         const char* source = code_str->chars;
         size_t source_len = code_str->len;
@@ -27257,7 +27311,17 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope) {
         }
 
         // Execute js_main directly — returns the completion value
+        // v37: Save/restore new.target, set to undefined for eval code.
+        // Per ES spec, eval in class field initializers runs "outside a constructor",
+        // so new.target should be undefined, not the enclosing constructor.
+        extern Item js_get_new_target();
+        extern void js_set_direct_new_target(Item);
+        Item prev_nt = js_get_new_target();
+        js_set_direct_new_target((Item){.item = ITEM_JS_UNDEFINED});
+
         Item result = js_main_fn((Context*)context);
+
+        js_set_direct_new_target(prev_nt);
 
         // Cleanup
         hashmap_free(mt->import_cache);

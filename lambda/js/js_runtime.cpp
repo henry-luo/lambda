@@ -134,6 +134,11 @@ static Item js_array_method_real_this = {0};
 // js_get_prototype() needs this fallback to walk up to Object.prototype.
 static Map* js_cached_object_proto = NULL;
 static bool js_resolving_object_proto = false; // re-entrancy guard
+static bool js_private_field_initializing = false; // v37: brand check bypass during field init
+
+// v37: Toggle private field initialization mode (called from transpiled code)
+extern "C" void js_private_field_init_begin() { js_private_field_initializing = true; }
+extern "C" void js_private_field_init_end() { js_private_field_initializing = false; }
 
 // v37: Lazily resolve and cache Object.prototype for prototype chain fallback.
 // Plain objects without __proto__ need this for HasProperty / property_get checks.
@@ -449,6 +454,7 @@ extern "C" void js_batch_reset() {
     // v37: clear cached Object.prototype (stale after heap reset)
     js_cached_object_proto = NULL;
     js_resolving_object_proto = false;
+    js_private_field_initializing = false;
     // clear Input context
     js_input = NULL;
     // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
@@ -573,6 +579,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // v37: reset cached Object.prototype — tests may modify Object.prototype
     js_cached_object_proto = NULL;
     js_resolving_object_proto = false;
+    js_private_field_initializing = false;
     // clear Input context (recreated per script by transpile_js_to_mir)
     js_input = NULL;
     // reset cached global objects — tests may modify them
@@ -5643,6 +5650,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
             }
         }
+        // v37: Private member brand check — accessing #field on wrong object throws TypeError
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* pk = it2s(key);
+            if (pk && pk->len > 10 && strncmp(pk->chars, "__private_", 10) == 0) {
+                char msg[256];
+                snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                         (int)(pk->len - 10), pk->chars + 10);
+                return js_throw_type_error(msg);
+            }
+        }
         return make_js_undefined();
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
@@ -5698,6 +5715,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (custom_proto.item != ItemNull.item) {
                         return js_property_get(custom_proto, key);
                     }
+                }
+                // v37: Private member brand check on array objects
+                if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Cannot read private member #%.*s from an object whose class did not declare it",
+                             (int)(str_key->len - 10), str_key->chars + 10);
+                    return js_throw_type_error(msg);
                 }
                 return make_js_undefined();
             }
@@ -6930,24 +6954,45 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
             else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
             if (str_key) {
+                ShapeEntry* found_entry = NULL;
                 // A1: Use hash table for O(1) existing-key check
                 if (map_type->field_count > 0) {
-                    ShapeEntry* found = typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len);
-                    if (found) {
-                        fn_map_set(object, key, value);
-                        return value;
-                    }
+                    found_entry = typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len);
                 } else {
                     ShapeEntry* entry = map_type->shape;
                     while (entry) {
                         if (entry->name && (entry->name->str == str_key->chars ||  // A6: interned pointer
                             (entry->name->length == (size_t)str_key->len
                              && strncmp(entry->name->str, str_key->chars, str_key->len) == 0))) {
-                            fn_map_set(object, key, value);
-                            return value;
+                            found_entry = entry;
+                            break;
                         }
                         entry = entry->next;
                     }
+                }
+                if (found_entry) {
+                    // v37: If deleted sentinel, move entry to end of list for correct enum order
+                    if (m->data) {
+                        Item cur = _map_read_field(found_entry, m->data);
+                        if (js_is_deleted_sentinel(cur)) {
+                            // Unlink from current position
+                            ShapeEntry* prev = NULL;
+                            ShapeEntry* scan = map_type->shape;
+                            while (scan && scan != found_entry) { prev = scan; scan = scan->next; }
+                            if (prev) prev->next = found_entry->next;
+                            else map_type->shape = found_entry->next;
+                            if (map_type->last == found_entry) {
+                                map_type->last = prev ? prev : map_type->shape;
+                            }
+                            // Append at end
+                            found_entry->next = NULL;
+                            if (map_type->last) map_type->last->next = found_entry;
+                            else map_type->shape = found_entry;
+                            map_type->last = found_entry;
+                        }
+                    }
+                    fn_map_set(object, key, value);
+                    return value;
                 }
             }
         }
@@ -14056,6 +14101,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
 
     // Fallback: property access + call
     Item fn = js_property_access(obj, method_name);
+    // v37: Check for pending exception (e.g., private brand check TypeError)
+    if (js_check_exception()) return ItemNull;
     if (get_type_id(fn) != LMD_TYPE_FUNC) {
         // ES spec: plain MAP objects with no Array prototype may still be used as
         // array-like receivers for Array.prototype methods (e.g., `f.every(cb)` where
