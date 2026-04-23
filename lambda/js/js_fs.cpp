@@ -7,6 +7,7 @@
 #include "js_runtime.h"
 #include "js_event_loop.h"
 #include "js_typed_array.h"
+#include "js_error_codes.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -176,16 +177,14 @@ extern "C" Item js_fs_readFileSync(Item path_item, Item encoding_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) {
-        log_error("fs: readFileSync: invalid path argument");
-        return ItemNull;
+        return js_throw_invalid_arg_type("path", "string", path_item);
     }
 
     uv_fs_t req;
     int fd = uv_fs_open(NULL, &req, path, UV_FS_O_RDONLY, 0, NULL);
     uv_fs_req_cleanup(&req);
     if (fd < 0) {
-        log_error("fs: readFileSync: cannot open '%s': %s", path, uv_strerror(fd));
-        return ItemNull;
+        return js_throw_system_error(fd, "open", path);
     }
 
     // stat to get file size
@@ -237,8 +236,7 @@ extern "C" Item js_fs_writeFileSync(Item path_item, Item data_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
     if (!path) {
-        log_error("fs: writeFileSync: invalid path argument");
-        return ItemNull;
+        return js_throw_invalid_arg_type("path", "string", path_item);
     }
 
     // convert data to string
@@ -288,7 +286,7 @@ extern "C" Item js_fs_existsSync(Item path_item) {
 extern "C" Item js_fs_unlinkSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_unlink(NULL, &req, path, NULL);
@@ -303,7 +301,7 @@ extern "C" Item js_fs_unlinkSync(Item path_item) {
 extern "C" Item js_fs_mkdirSync(Item path_item, Item options) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     int mode = 0777;
     bool recursive = false;
@@ -428,7 +426,7 @@ extern "C" Item js_fs_mkdir_async(Item path_item, Item options_or_cb, Item callb
 extern "C" Item js_fs_rmdirSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_rmdir(NULL, &req, path, NULL);
@@ -444,7 +442,8 @@ extern "C" Item js_fs_renameSync(Item old_path_item, Item new_path_item) {
     char old_buf[1024], new_buf[1024];
     const char* old_path = item_to_cstr(old_path_item, old_buf, sizeof(old_buf));
     const char* new_path = item_to_cstr(new_path_item, new_buf, sizeof(new_buf));
-    if (!old_path || !new_path) return ItemNull;
+    if (!old_path) return js_throw_invalid_arg_type("oldPath", "string", old_path_item);
+    if (!new_path) return js_throw_invalid_arg_type("newPath", "string", new_path_item);
 
     uv_fs_t req;
     int r = uv_fs_rename(NULL, &req, old_path, new_path, NULL);
@@ -459,7 +458,7 @@ extern "C" Item js_fs_renameSync(Item old_path_item, Item new_path_item) {
 extern "C" Item js_fs_readdirSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int n = uv_fs_scandir(NULL, &req, path, 0, NULL);
@@ -483,14 +482,13 @@ extern "C" Item js_fs_readdirSync(Item path_item) {
 extern "C" Item js_fs_statSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_stat(NULL, &req, path, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
-        log_error("fs: statSync: '%s': %s", path, uv_strerror(r));
-        return ItemNull;
+        return js_throw_system_error(r, "stat", path);
     }
 
     Item obj = make_stats_object(&req.statbuf);
@@ -502,7 +500,7 @@ extern "C" Item js_fs_statSync(Item path_item) {
 extern "C" Item js_fs_appendFileSync(Item path_item, Item data_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     Item str_item = js_to_string(data_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
@@ -534,7 +532,8 @@ extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
     char src_buf[1024], dest_buf[1024];
     const char* src = item_to_cstr(src_item, src_buf, sizeof(src_buf));
     const char* dest = item_to_cstr(dest_item, dest_buf, sizeof(dest_buf));
-    if (!src || !dest) return ItemNull;
+    if (!src) return js_throw_invalid_arg_type("src", "string", src_item);
+    if (!dest) return js_throw_invalid_arg_type("dest", "string", dest_item);
 
     uv_fs_t req;
     int r = uv_fs_copyfile(NULL, &req, src, dest, 0, NULL);
@@ -549,7 +548,7 @@ extern "C" Item js_fs_copyFileSync(Item src_item, Item dest_item) {
 extern "C" Item js_fs_realpathSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_realpath(NULL, &req, path, NULL);
@@ -568,7 +567,7 @@ extern "C" Item js_fs_realpathSync(Item path_item) {
 extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     int mode = 0; // F_OK by default
     if (get_type_id(mode_item) == LMD_TYPE_INT) {
@@ -579,8 +578,7 @@ extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
     int r = uv_fs_access(NULL, &req, path, mode, NULL);
     uv_fs_req_cleanup(&req);
     if (r < 0) {
-        log_error("fs: accessSync: '%s': %s", path, uv_strerror(r));
-        return js_throw_type_error("ENOENT: no such file or directory");
+        return js_throw_system_error(r, "access", path);
     }
     return make_js_undefined();
 }
@@ -589,7 +587,7 @@ extern "C" Item js_fs_accessSync(Item path_item, Item mode_item) {
 extern "C" Item js_fs_rmSync(Item path_item, Item options_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     bool recursive = false;
     if (get_type_id(options_item) == LMD_TYPE_MAP) {
@@ -646,7 +644,7 @@ extern "C" Item js_fs_mkdtempSync(Item prefix_item) {
 extern "C" Item js_fs_chmodSync(Item path_item, Item mode_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     int mode = 0;
     if (get_type_id(mode_item) == LMD_TYPE_INT) {
@@ -667,7 +665,8 @@ extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
     char target_buf[1024], path_buf[1024];
     const char* target = item_to_cstr(target_item, target_buf, sizeof(target_buf));
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!target || !path) return ItemNull;
+    if (!target) return js_throw_invalid_arg_type("target", "string", target_item);
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_symlink(NULL, &req, target, path, 0, NULL);
@@ -682,7 +681,7 @@ extern "C" Item js_fs_symlinkSync(Item target_item, Item path_item) {
 extern "C" Item js_fs_readlinkSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_readlink(NULL, &req, path, NULL);
@@ -700,14 +699,13 @@ extern "C" Item js_fs_readlinkSync(Item path_item) {
 extern "C" Item js_fs_lstatSync(Item path_item) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     uv_fs_t req;
     int r = uv_fs_lstat(NULL, &req, path, NULL);
     if (r < 0) {
         uv_fs_req_cleanup(&req);
-        log_error("fs: lstatSync: '%s': %s", path, uv_strerror(r));
-        return ItemNull;
+        return js_throw_system_error(r, "lstat", path);
     }
 
     Item obj = make_stats_object(&req.statbuf);
@@ -812,7 +810,7 @@ static void on_fs_open_for_read(uv_fs_t* req) {
 extern "C" Item js_fs_readFile(Item path_item, Item callback) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     JsFsReq* fsreq = (JsFsReq*)mem_calloc(1, sizeof(JsFsReq), MEM_CAT_JS_RUNTIME);
     if (!fsreq) return ItemNull;
@@ -875,7 +873,7 @@ static void on_fs_open_for_write(uv_fs_t* req) {
 extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
     char path_buf[1024];
     const char* path = item_to_cstr(path_item, path_buf, sizeof(path_buf));
-    if (!path) return ItemNull;
+    if (!path) return js_throw_invalid_arg_type("path", "string", path_item);
 
     Item str_item = js_to_string(data_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) return ItemNull;
@@ -902,7 +900,7 @@ extern "C" Item js_fs_writeFile(Item path_item, Item data_item, Item callback) {
 // =============================================================================
 
 extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
-    if (get_type_id(path_item) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(path_item) != LMD_TYPE_STRING) return js_throw_invalid_arg_type("path", "string", path_item);
     String* ps = it2s(path_item);
     char path[PATH_MAX];
     int plen = (int)ps->len;
@@ -935,7 +933,7 @@ extern "C" Item js_fs_truncateSync(Item path_item, Item len_item) {
 extern "C" Item js_fs_openSync(Item path_item, Item flags_item, Item mode_item) {
     char path[PATH_MAX];
     const char* p = item_to_cstr(path_item, path, sizeof(path));
-    if (!p) return ItemNull;
+    if (!p) return js_throw_invalid_arg_type("path", "string", path_item);
 
     int flags = UV_FS_O_RDONLY;
     if (get_type_id(flags_item) == LMD_TYPE_STRING) {

@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -22,6 +23,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <signal.h>
 #endif
 
 #ifdef __APPLE__
@@ -682,31 +684,102 @@ extern "C" Item js_get_os_namespace(void) {
     Item signals = js_new_object();
     Item errno_obj = js_new_object();
 
-    // Common POSIX signals
+    // POSIX signals (use system constants for correct platform values)
+#ifndef _WIN32
+    js_property_set(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(SIGHUP)});
+    js_property_set(signals, make_string_item("SIGINT"),  (Item){.item = i2it(SIGINT)});
+    js_property_set(signals, make_string_item("SIGQUIT"), (Item){.item = i2it(SIGQUIT)});
+    js_property_set(signals, make_string_item("SIGILL"),  (Item){.item = i2it(SIGILL)});
+    js_property_set(signals, make_string_item("SIGTRAP"), (Item){.item = i2it(SIGTRAP)});
+    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(SIGABRT)});
+    js_property_set(signals, make_string_item("SIGBUS"),  (Item){.item = i2it(SIGBUS)});
+    js_property_set(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(SIGFPE)});
+    js_property_set(signals, make_string_item("SIGKILL"), (Item){.item = i2it(SIGKILL)});
+    js_property_set(signals, make_string_item("SIGUSR1"), (Item){.item = i2it(SIGUSR1)});
+    js_property_set(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(SIGSEGV)});
+    js_property_set(signals, make_string_item("SIGUSR2"), (Item){.item = i2it(SIGUSR2)});
+    js_property_set(signals, make_string_item("SIGPIPE"), (Item){.item = i2it(SIGPIPE)});
+    js_property_set(signals, make_string_item("SIGALRM"), (Item){.item = i2it(SIGALRM)});
+    js_property_set(signals, make_string_item("SIGTERM"), (Item){.item = i2it(SIGTERM)});
+    js_property_set(signals, make_string_item("SIGCHLD"), (Item){.item = i2it(SIGCHLD)});
+    js_property_set(signals, make_string_item("SIGCONT"), (Item){.item = i2it(SIGCONT)});
+    js_property_set(signals, make_string_item("SIGSTOP"), (Item){.item = i2it(SIGSTOP)});
+    js_property_set(signals, make_string_item("SIGTSTP"), (Item){.item = i2it(SIGTSTP)});
+    js_property_set(signals, make_string_item("SIGTTIN"), (Item){.item = i2it(SIGTTIN)});
+    js_property_set(signals, make_string_item("SIGTTOU"), (Item){.item = i2it(SIGTTOU)});
+    js_property_set(signals, make_string_item("SIGURG"),  (Item){.item = i2it(SIGURG)});
+    js_property_set(signals, make_string_item("SIGXCPU"), (Item){.item = i2it(SIGXCPU)});
+    js_property_set(signals, make_string_item("SIGXFSZ"), (Item){.item = i2it(SIGXFSZ)});
+    js_property_set(signals, make_string_item("SIGVTALRM"), (Item){.item = i2it(SIGVTALRM)});
+    js_property_set(signals, make_string_item("SIGPROF"), (Item){.item = i2it(SIGPROF)});
+    js_property_set(signals, make_string_item("SIGWINCH"), (Item){.item = i2it(SIGWINCH)});
+    js_property_set(signals, make_string_item("SIGIO"),   (Item){.item = i2it(SIGIO)});
+    js_property_set(signals, make_string_item("SIGSYS"),  (Item){.item = i2it(SIGSYS)});
+#else
     js_property_set(signals, make_string_item("SIGHUP"),  (Item){.item = i2it(1)});
     js_property_set(signals, make_string_item("SIGINT"),  (Item){.item = i2it(2)});
-    js_property_set(signals, make_string_item("SIGQUIT"), (Item){.item = i2it(3)});
     js_property_set(signals, make_string_item("SIGILL"),  (Item){.item = i2it(4)});
-    js_property_set(signals, make_string_item("SIGTRAP"), (Item){.item = i2it(5)});
-    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(6)});
     js_property_set(signals, make_string_item("SIGFPE"),  (Item){.item = i2it(8)});
     js_property_set(signals, make_string_item("SIGKILL"), (Item){.item = i2it(9)});
     js_property_set(signals, make_string_item("SIGSEGV"), (Item){.item = i2it(11)});
-    js_property_set(signals, make_string_item("SIGPIPE"), (Item){.item = i2it(13)});
-    js_property_set(signals, make_string_item("SIGALRM"), (Item){.item = i2it(14)});
     js_property_set(signals, make_string_item("SIGTERM"), (Item){.item = i2it(15)});
-    js_property_set(signals, make_string_item("SIGCHLD"), (Item){.item = i2it(17)});
-    js_property_set(signals, make_string_item("SIGCONT"), (Item){.item = i2it(18)});
-    js_property_set(signals, make_string_item("SIGSTOP"), (Item){.item = i2it(19)});
-    js_property_set(signals, make_string_item("SIGTSTP"), (Item){.item = i2it(20)});
+    js_property_set(signals, make_string_item("SIGABRT"), (Item){.item = i2it(22)});
+#endif
+
+    // POSIX errno codes (use system values)
+    struct { const char* name; int value; } errcodes[] = {
+        {"E2BIG", E2BIG}, {"EACCES", EACCES}, {"EADDRINUSE", EADDRINUSE},
+        {"EADDRNOTAVAIL", EADDRNOTAVAIL}, {"EAGAIN", EAGAIN},
+        {"EALREADY", EALREADY}, {"EBADF", EBADF},
+        {"EBUSY", EBUSY}, {"ECANCELED", ECANCELED},
+        {"ECHILD", ECHILD}, {"ECONNABORTED", ECONNABORTED},
+        {"ECONNREFUSED", ECONNREFUSED}, {"ECONNRESET", ECONNRESET},
+        {"EDEADLK", EDEADLK}, {"EDESTADDRREQ", EDESTADDRREQ},
+        {"EDOM", EDOM}, {"EEXIST", EEXIST}, {"EFAULT", EFAULT},
+        {"EFBIG", EFBIG}, {"EHOSTUNREACH", EHOSTUNREACH},
+        {"EINPROGRESS", EINPROGRESS}, {"EINTR", EINTR},
+        {"EINVAL", EINVAL}, {"EIO", EIO}, {"EISCONN", EISCONN},
+        {"EISDIR", EISDIR}, {"ELOOP", ELOOP}, {"EMFILE", EMFILE},
+        {"EMLINK", EMLINK}, {"EMSGSIZE", EMSGSIZE},
+        {"ENAMETOOLONG", ENAMETOOLONG}, {"ENETDOWN", ENETDOWN},
+        {"ENETUNREACH", ENETUNREACH}, {"ENFILE", ENFILE},
+        {"ENOBUFS", ENOBUFS}, {"ENODEV", ENODEV},
+        {"ENOENT", ENOENT}, {"ENOMEM", ENOMEM},
+        {"ENOPROTOOPT", ENOPROTOOPT}, {"ENOSPC", ENOSPC},
+        {"ENOSYS", ENOSYS}, {"ENOTCONN", ENOTCONN},
+        {"ENOTDIR", ENOTDIR}, {"ENOTEMPTY", ENOTEMPTY},
+        {"ENOTSOCK", ENOTSOCK}, {"ENOTSUP", ENOTSUP},
+        {"EPERM", EPERM}, {"EPIPE", EPIPE},
+        {"EPROTONOSUPPORT", EPROTONOSUPPORT},
+        {"EPROTOTYPE", EPROTOTYPE}, {"ERANGE", ERANGE},
+        {"EROFS", EROFS}, {"ESPIPE", ESPIPE}, {"ESRCH", ESRCH},
+        {"ETIMEDOUT", ETIMEDOUT}, {"ETXTBSY", ETXTBSY},
+        {"EWOULDBLOCK", EWOULDBLOCK}, {"EXDEV", EXDEV},
+        {NULL, 0}
+    };
+    for (int i = 0; errcodes[i].name; i++) {
+        js_property_set(errno_obj, make_string_item(errcodes[i].name),
+            (Item){.item = i2it((int64_t)errcodes[i].value)});
+    }
+
+    // os.constants.priority
+    Item priority_obj = js_new_object();
+    js_property_set(priority_obj, make_string_item("PRIORITY_LOW"), (Item){.item = i2it(19)});
+    js_property_set(priority_obj, make_string_item("PRIORITY_BELOW_NORMAL"), (Item){.item = i2it(10)});
+    js_property_set(priority_obj, make_string_item("PRIORITY_NORMAL"), (Item){.item = i2it(0)});
+    js_property_set(priority_obj, make_string_item("PRIORITY_ABOVE_NORMAL"), (Item){.item = i2it(-7)});
+    js_property_set(priority_obj, make_string_item("PRIORITY_HIGH"), (Item){.item = i2it(-14)});
+    js_property_set(priority_obj, make_string_item("PRIORITY_HIGHEST"), (Item){.item = i2it(-20)});
 
     js_property_set(constants, make_string_item("signals"), signals);
     js_property_set(constants, make_string_item("errno"), errno_obj);
+    js_property_set(constants, make_string_item("priority"), priority_obj);
 
     // Freeze constants and sub-objects to match Node.js behavior
     extern Item js_object_freeze(Item obj);
     js_object_freeze(signals);
     js_object_freeze(errno_obj);
+    js_object_freeze(priority_obj);
     js_object_freeze(constants);
 
     js_property_set(os_namespace, make_string_item("constants"), constants);

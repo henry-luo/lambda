@@ -8,6 +8,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_error_codes.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -423,14 +424,11 @@ extern "C" Item js_buffer_of(Item a0, Item a1, Item a2) {
 
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
 extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
-    extern Item js_throw_type_error(const char* msg);
-    extern Item js_throw_range_error(const char* msg);
-
     // list must be an array-like
     int64_t count = js_array_length(list);
     if (count < 0) {
-        js_throw_type_error("\"list\" argument must be an instance of Array, Buffer, or Uint8Array");
-        return make_js_undefined();
+        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+            "The \"list\" argument must be an instance of Array, Buffer, or Uint8Array");
     }
 
     // Validate totalLength if provided (must be integer, >= 0)
@@ -451,20 +449,20 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
                     if (s->chars[i] == '.') { has_dot = true; break; }
                 }
                 if (has_dot) {
-                    js_throw_range_error("The value of \"totalLength\" is out of range. It must be an integer");
-                    return make_js_undefined();
+                    return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                        "The value of \"totalLength\" is out of range. It must be an integer");
                 }
                 if (is_neg) {
-                    js_throw_range_error("The value of \"totalLength\" is out of range. It must be >= 0");
-                    return make_js_undefined();
+                    return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                        "The value of \"totalLength\" is out of range. It must be >= 0");
                 }
             }
         } else if (tl_type == LMD_TYPE_INT) {
             // check negative
             int64_t v = it2i(total_length_item);
             if (v < 0) {
-                js_throw_range_error("The value of \"totalLength\" is out of range. It must be >= 0");
-                return make_js_undefined();
+                return js_throw_range_error_code("ERR_OUT_OF_RANGE",
+                    "The value of \"totalLength\" is out of range. It must be >= 0");
             }
         }
     }
@@ -473,8 +471,8 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
     for (int64_t i = 0; i < count; i++) {
         Item buf = js_array_get_int(list, i);
         if (!js_is_typed_array(buf)) {
-            js_throw_type_error("\"list[" "i" "]\" argument must be an instance of Buffer or Uint8Array");
-            return make_js_undefined();
+            return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
+                "\"list\" argument must be an instance of Buffer or Uint8Array");
         }
     }
 
@@ -1198,7 +1196,7 @@ extern "C" Item js_buffer_indexOf(Item buf, Item value, Item offset_item, Item e
     if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
         char msg[128];
         snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error(msg);
+        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
     }
 
     // search for string value
@@ -1349,7 +1347,7 @@ extern "C" Item js_buffer_lastIndexOf(Item buf, Item value, Item offset_item, It
     if (normalize_encoding(enc_item, enc, sizeof(enc)) && !is_known_encoding(enc)) {
         char msg[128];
         snprintf(msg, sizeof(msg), "Unknown encoding: %s", enc);
-        return js_throw_type_error(msg);
+        return js_throw_type_error_code("ERR_UNKNOWN_ENCODING", msg);
     }
 
     // search for string or buffer value
@@ -2463,6 +2461,10 @@ extern "C" Item js_get_buffer_namespace(void) {
     // buffer.SlowBuffer — legacy, alias for allocUnsafeSlow
     js_property_set(buffer_namespace, make_string_item("SlowBuffer"),
         js_new_function((void*)js_buffer_allocUnsafeSlow, 1));
+
+    // Buffer.poolSize — default 8192
+    js_property_set(buffer_namespace, make_string_item("poolSize"),
+        (Item){.item = i2it(8192)});
 
     return buffer_namespace;
 }

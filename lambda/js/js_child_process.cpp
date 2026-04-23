@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_event_loop.h"
+#include "js_error_codes.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -214,8 +215,7 @@ extern "C" Item js_cp_exec(Item command_item, Item callback_item) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
-        log_error("child_process: exec: invalid command");
-        return ItemNull;
+        return js_throw_invalid_arg_type("command", "string", command_item);
     }
 
     uv_loop_t* loop = lambda_uv_loop();
@@ -285,8 +285,7 @@ extern "C" Item js_cp_execSync(Item command_item, Item options_item) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
-        log_error("child_process: execSync: invalid command");
-        return ItemNull;
+        return js_throw_invalid_arg_type("command", "string", command_item);
     }
 
     (void)options_item; // options not currently used
@@ -445,8 +444,7 @@ extern "C" Item js_cp_spawn(Item command_item, Item args_item) {
     char cmd_buf[4096];
     const char* cmd = item_to_cstr(command_item, cmd_buf, sizeof(cmd_buf));
     if (!cmd) {
-        log_error("child_process: spawn: invalid command");
-        return ItemNull;
+        return js_throw_invalid_arg_type("command", "string", command_item);
     }
 
     uv_loop_t* loop = lambda_uv_loop();

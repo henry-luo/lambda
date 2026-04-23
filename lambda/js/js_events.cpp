@@ -35,6 +35,8 @@ static Item make_string_item(const char* str) {
 static Item events_key;       // "__events__"
 static Item once_key;         // "__once__"
 static Item max_listeners_key; // "__maxListeners__"
+static Item new_listener_key; // "newListener"
+static Item remove_listener_key; // "removeListener"
 static bool keys_initialized = false;
 
 static void ensure_keys() {
@@ -42,16 +44,22 @@ static void ensure_keys() {
     events_key = make_string_item("__events__");
     once_key = make_string_item("__once__");
     max_listeners_key = make_string_item("__maxListeners__");
+    new_listener_key = make_string_item("newListener");
+    remove_listener_key = make_string_item("removeListener");
     keys_initialized = true;
 }
 
 // Get or create the __events__ map on an emitter object
+// Also exposes as _events for Node.js compatibility
 static Item get_events_map(Item emitter) {
     ensure_keys();
     Item map = js_property_get(emitter, events_key);
     if (map.item == 0 || get_type_id(map) == LMD_TYPE_UNDEFINED) {
         map = js_new_object();
         js_property_set(emitter, events_key, map);
+        // Also set _events alias for Node.js compatibility
+        js_property_set(emitter, make_string_item("_events"), map);
+        js_property_set(emitter, make_string_item("_eventsCount"), (Item){.item = i2it(0)});
     }
     return map;
 }
@@ -89,12 +97,68 @@ static Item get_listeners_array(Item emitter, Item event_name) {
     return arr;
 }
 
+// Update _eventsCount on an emitter
+static void update_events_count(Item emitter) {
+    Item map = get_events_map(emitter);
+    Item all_keys = js_object_keys(map);
+    int64_t count = 0;
+    int64_t klen = js_array_length(all_keys);
+    for (int64_t i = 0; i < klen; i++) {
+        Item key = js_array_get_int(all_keys, i);
+        Item arr = js_property_get(map, key);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED && js_array_length(arr) > 0) {
+            count++;
+        }
+    }
+    js_property_set(emitter, make_string_item("_eventsCount"), (Item){.item = i2it(count)});
+}
+
+// Emit newListener event (before adding listener, per Node.js spec)
+static void emit_new_listener(Item emitter, Item event_name, Item listener) {
+    // Don't emit newListener for the newListener event itself (avoid infinite recursion)
+    if (get_type_id(event_name) == LMD_TYPE_STRING) {
+        String* en = it2s(event_name);
+        if (en->len == 11 && memcmp(en->chars, "newListener", 11) == 0) return;
+    }
+    Item map = get_events_map(emitter);
+    Item nl_arr = js_property_get(map, new_listener_key);
+    if (nl_arr.item == 0 || get_type_id(nl_arr) == LMD_TYPE_UNDEFINED) return;
+    int64_t nl_len = js_array_length(nl_arr);
+    if (nl_len == 0) return;
+    Item args[2] = {event_name, listener};
+    for (int64_t i = 0; i < nl_len; i++) {
+        Item fn = js_array_get_int(nl_arr, i);
+        js_call_function(fn, emitter, args, 2);
+    }
+}
+
+// Emit removeListener event (after removing listener, per Node.js spec)
+static void emit_remove_listener(Item emitter, Item event_name, Item listener) {
+    // Don't emit removeListener for the removeListener event itself
+    if (get_type_id(event_name) == LMD_TYPE_STRING) {
+        String* en = it2s(event_name);
+        if (en->len == 14 && memcmp(en->chars, "removeListener", 14) == 0) return;
+    }
+    Item map = get_events_map(emitter);
+    Item rl_arr = js_property_get(map, remove_listener_key);
+    if (rl_arr.item == 0 || get_type_id(rl_arr) == LMD_TYPE_UNDEFINED) return;
+    int64_t rl_len = js_array_length(rl_arr);
+    if (rl_len == 0) return;
+    Item args[2] = {event_name, listener};
+    for (int64_t i = 0; i < rl_len; i++) {
+        Item fn = js_array_get_int(rl_arr, i);
+        js_call_function(fn, emitter, args, 2);
+    }
+}
+
 // ─── emitter.on(event, listener) ─────────────────────────────────────────────
 // Adds listener to end of listeners array. Returns emitter for chaining.
 extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
     js_array_push(arr, listener);
+    update_events_count(emitter);
     return emitter;
 }
 
@@ -102,11 +166,13 @@ extern "C" Item js_ee_on(Item emitter, Item event_name, Item listener) {
 // Adds a one-time listener. Returns emitter for chaining.
 extern "C" Item js_ee_once(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
     js_array_push(arr, listener);
     // mark this function as once
     Item set = get_once_set(emitter);
     js_array_push(set, listener);
+    update_events_count(emitter);
     return emitter;
 }
 
@@ -129,6 +195,8 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
                 if (j != i) js_array_push(new_arr, js_array_get_int(arr, j));
             }
             js_property_set(map, event_name, new_arr);
+            update_events_count(emitter);
+            emit_remove_listener(emitter, event_name, listener);
             break;
         }
     }
@@ -217,14 +285,13 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
         js_array_push(snapshot, js_array_get_int(arr, i));
     }
 
+    // Remove ALL once-listeners from the emitter BEFORE calling any of them.
+    // This prevents recursive emit() from re-firing once-listeners.
     for (int64_t i = 0; i < len; i++) {
         Item fn = js_array_get_int(snapshot, i);
-        js_call_function(fn, emitter, args, (int)argc);
-
-        // if once-listener, remove it
         if (is_once_listener(emitter, fn)) {
             js_ee_off(emitter, event_name, fn);
-            // also remove from once-set
+            // remove from once-set
             Item set = get_once_set(emitter);
             int64_t slen = js_array_length(set);
             Item new_set = js_array_new(0);
@@ -234,6 +301,13 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
             }
             js_property_set(emitter, once_key, new_set);
         }
+    }
+
+    // Now call all listeners from the snapshot
+    for (int64_t i = 0; i < len; i++) {
+        Item fn = js_array_get_int(snapshot, i);
+
+        js_call_function(fn, emitter, args, (int)argc);
     }
 
     return (Item){.item = b2it(true)};
@@ -246,9 +320,20 @@ extern "C" Item js_ee_removeAllListeners(Item emitter, Item event_name) {
     if (event_name.item == 0 || get_type_id(event_name) == LMD_TYPE_UNDEFINED) {
         // remove all events
         js_property_set(emitter, events_key, js_new_object());
+        js_property_set(emitter, make_string_item("_events"), js_new_object());
         js_property_set(emitter, once_key, js_array_new(0));
+        js_property_set(emitter, make_string_item("_eventsCount"), (Item){.item = i2it(0)});
     } else {
+        // Emit removeListener for each removed listener
+        Item arr = js_property_get(map, event_name);
+        if (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED) {
+            int64_t len = js_array_length(arr);
+            for (int64_t i = len - 1; i >= 0; i--) {
+                emit_remove_listener(emitter, event_name, js_array_get_int(arr, i));
+            }
+        }
         js_property_set(map, event_name, js_array_new(0));
+        update_events_count(emitter);
     }
     return emitter;
 }
@@ -339,6 +424,7 @@ extern "C" Item js_ee_getMaxListeners(Item emitter) {
 // Adds listener to beginning of listeners array.
 extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
     // rebuild with listener at front
     int64_t len = js_array_length(arr);
@@ -349,12 +435,14 @@ extern "C" Item js_ee_prependListener(Item emitter, Item event_name, Item listen
     }
     Item map = get_events_map(emitter);
     js_property_set(map, event_name, new_arr);
+    update_events_count(emitter);
     return emitter;
 }
 
 // ─── emitter.prependOnceListener(event, listener) ───────────────────────────
 extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item listener) {
     if (emitter.item == 0) return ItemNull;
+    emit_new_listener(emitter, event_name, listener);
     Item arr = get_listeners_array(emitter, event_name);
     int64_t len = js_array_length(arr);
     Item new_arr = js_array_new((int)(len + 1));
@@ -367,6 +455,7 @@ extern "C" Item js_ee_prependOnceListener(Item emitter, Item event_name, Item li
     // mark as once
     Item set = get_once_set(emitter);
     js_array_push(set, listener);
+    update_events_count(emitter);
     return emitter;
 }
 
@@ -433,7 +522,10 @@ extern "C" Item js_ee_constructor(void) {
         if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
             // Called via 'new' — initialize the pre-built object
             js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
-            js_property_set(this_val, events_key, js_new_object());
+            Item events_map = js_new_object();
+            js_property_set(this_val, events_key, events_map);
+            js_property_set(this_val, make_string_item("_events"), events_map);
+            js_property_set(this_val, make_string_item("_eventsCount"), (Item){.item = i2it(0)});
             js_property_set(this_val, once_key, js_array_new(0));
             return make_js_undefined();
         }
@@ -441,7 +533,10 @@ extern "C" Item js_ee_constructor(void) {
     // Direct call (not via new) — create a new object with prototype
     Item emitter = js_new_object();
     js_property_set(emitter, make_string_item("__class_name__"), make_string_item("EventEmitter"));
-    js_property_set(emitter, events_key, js_new_object());
+    Item events_map = js_new_object();
+    js_property_set(emitter, events_key, events_map);
+    js_property_set(emitter, make_string_item("_events"), events_map);
+    js_property_set(emitter, make_string_item("_eventsCount"), (Item){.item = i2it(0)});
     js_property_set(emitter, once_key, js_array_new(0));
     if (ee_prototype.item != 0) {
         js_set_prototype(emitter, ee_prototype);
@@ -453,17 +548,71 @@ extern "C" Item js_ee_constructor(void) {
 // with an array of args when the event fires, or rejects on 'error'.
 static Item js_ee_static_once(Item emitter, Item event_name) {
     extern Item js_promise_with_resolvers(void);
+    extern Item js_new_function(void* fptr, int param_count);
+    extern Item js_bind_function(Item func, Item this_val, Item* args, int arg_count);
 
     Item resolvers = js_promise_with_resolvers();
     Item promise = js_property_get(resolvers, make_string_item("promise"));
     Item resolve_fn = js_property_get(resolvers, make_string_item("resolve"));
+    Item reject_fn = js_property_get(resolvers, make_string_item("reject"));
 
-    // Call emitter.once(eventName, resolve) — the listener is called with args
-    // and resolve_fn will resolve the promise with the first arg.
+    // Create a wrapper that collects all args into an array and resolves.
+    // Use a variadic lambda-like approach: bind resolve_fn as first bound arg.
+    // The wrapper receives (...args) and calls resolve([...args]).
+    struct OnceWrapper {
+        static Item handler(Item rest_args) {
+            // rest_args is the variadic args array
+            // 'this' is the emitter, but we stored resolve_fn via bind
+            // We need resolve_fn — it's bound as first arg in rest
+            // Actually, we'll use a different approach: store resolve in a closure
+
+            // The first element is resolve_fn (we prepended it via bind)
+            Item resolve = js_array_get_int(rest_args, 0);
+            // remaining elements are the actual event args
+            int64_t total = js_array_length(rest_args);
+            Item args_array = js_array_new(0);
+            for (int64_t i = 1; i < total; i++) {
+                js_array_push(args_array, js_array_get_int(rest_args, i));
+            }
+            Item call_args[1] = {args_array};
+            js_call_function(resolve, make_js_undefined(), call_args, 1);
+            return make_js_undefined();
+        }
+    };
+
+    // Create wrapper fn(-1 = variadic), bind resolve_fn as first bound arg
+    Item wrapper = js_new_function((void*)OnceWrapper::handler, -1);
+    Item bound = js_bind_function(wrapper, make_js_undefined(), &resolve_fn, 1);
+
+    // Call emitter.once(eventName, bound_wrapper)
     Item once_method = js_property_get(emitter, make_string_item("once"));
     if (get_type_id(once_method) == LMD_TYPE_FUNC) {
-        Item args[2] = {event_name, resolve_fn};
+        Item args[2] = {event_name, bound};
         js_call_function(once_method, emitter, args, 2);
+    }
+
+    // Also listen for 'error' event to reject the promise (unless event IS 'error')
+    bool is_error_event = false;
+    if (get_type_id(event_name) == LMD_TYPE_STRING) {
+        String* en = it2s(event_name);
+        if (en->len == 5 && memcmp(en->chars, "error", 5) == 0) is_error_event = true;
+    }
+    if (!is_error_event) {
+        // On 'error', reject the promise
+        struct ErrorWrapper {
+            static Item handler(Item rest_args) {
+                Item reject = js_array_get_int(rest_args, 0);
+                int64_t total = js_array_length(rest_args);
+                Item err = (total > 1) ? js_array_get_int(rest_args, 1) : make_js_undefined();
+                Item call_args[1] = {err};
+                js_call_function(reject, make_js_undefined(), call_args, 1);
+                return make_js_undefined();
+            }
+        };
+        Item err_wrapper = js_new_function((void*)ErrorWrapper::handler, -1);
+        Item err_bound = js_bind_function(err_wrapper, make_js_undefined(), &reject_fn, 1);
+        Item err_once_args[2] = {make_string_item("error"), err_bound};
+        js_call_function(once_method, emitter, err_once_args, 2);
     }
 
     return promise;
@@ -478,6 +627,16 @@ static Item js_ee_once_combined(Item emitter, Item event_name, Item listener) {
 }
 
 // ─── Namespace ───────────────────────────────────────────────────────────────
+
+// static EventEmitter.getEventListeners(emitter, eventName)
+static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
+    return js_ee_listeners(emitter, event_name);
+}
+
+// static EventEmitter.listenerCount(emitter, eventName)
+static Item js_ee_static_listenerCount(Item emitter, Item event_name) {
+    return js_ee_listenerCount(emitter, event_name, ItemNull);
+}
 
 static Item events_namespace = {0};
 
@@ -547,6 +706,20 @@ extern "C" Item js_get_events_namespace(void) {
 
     // static property: defaultMaxListeners = 10
     js_property_set(events_namespace, make_string_item("defaultMaxListeners"), (Item){.item = i2it(10)});
+
+    // static property: captureRejections = false
+    js_property_set(events_namespace, make_string_item("captureRejections"), (Item){.item = b2it(false)});
+
+    // static property: captureRejectionSymbol
+    js_property_set(events_namespace, make_string_item("captureRejectionSymbol"),
+        make_string_item("nodejs.rejection"));
+
+    // static method: getEventListeners
+    ee_set_method(events_namespace, "getEventListeners", (void*)js_ee_static_getEventListeners, 2);
+
+    // static EventEmitter.listenerCount(emitter, event) — the 3-arg form at line ~627
+    // already handles this: when called with 2 args, 3rd param (listener) is null/0,
+    // and the function falls through to return total count. No override needed.
 
     // default export is the constructor
     js_property_set(events_namespace, make_string_item("default"), events_namespace);

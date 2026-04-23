@@ -1107,6 +1107,54 @@ extern "C" Item js_util_debuglog(Item section) {
     return js_new_function((void*)js_debuglog_noop, -1);
 }
 
+// util.stripVTControlCharacters(str)
+// Strips ANSI escape codes from a string
+static Item js_util_stripVTControlCharacters(Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) {
+        return js_throw_type_error("The \"str\" argument must be of type string");
+    }
+    String* s = it2s(str);
+    if (!s || s->len == 0) return str;
+
+    // allocate worst case (same size as input)
+    char* buf = (char*)alloca(s->len + 1);
+    int out = 0;
+    for (int i = 0; i < (int)s->len; i++) {
+        unsigned char c = (unsigned char)s->chars[i];
+        if (c == 0x1b || c == 0x9b) {
+            // skip ESC [ ... final_byte sequence
+            i++;
+            if (i < (int)s->len && (s->chars[i] == '[' || c == 0x9b)) {
+                if (c == 0x1b) i++; // skip '['
+                // skip parameter bytes (0x30-0x3f), intermediate bytes (0x20-0x2f), final byte (0x40-0x7e)
+                while (i < (int)s->len) {
+                    unsigned char cc = (unsigned char)s->chars[i];
+                    if (cc >= 0x40 && cc <= 0x7e) { break; } // final byte — consumed
+                    i++;
+                }
+            } else if (i < (int)s->len) {
+                // single-char ESC sequence (e.g. ESC D, ESC M) — skip the char after ESC
+            }
+        } else {
+            buf[out++] = s->chars[i];
+        }
+    }
+    return (Item){.item = s2it(heap_create_name(buf, out))};
+}
+
+// util._extend(target, source) — deprecated Object.assign equivalent
+static Item js_util_extend(Item target, Item source) {
+    if (get_type_id(source) == LMD_TYPE_MAP) {
+        Item keys = js_object_keys(source);
+        int64_t len = js_array_length(keys);
+        for (int64_t i = 0; i < len; i++) {
+            Item key = js_array_get_int(keys, i);
+            js_property_set(target, key, js_property_get(source, key));
+        }
+    }
+    return target;
+}
+
 // =============================================================================
 // util Module Namespace Object
 // =============================================================================
@@ -1141,6 +1189,10 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "debuglog",            (void*)js_util_debuglog, 1);
     js_util_set_method(util_namespace, "styleText",           (void*)js_util_styleText, 2);
     js_util_set_method(util_namespace, "getSystemErrorName",  (void*)js_util_getSystemErrorName, 1);
+    js_util_set_method(util_namespace, "stripVTControlCharacters", (void*)js_util_stripVTControlCharacters, 1);
+    js_util_set_method(util_namespace, "_extend",             (void*)js_util_extend, 2);
+    // util.debug is an alias for util.debuglog
+    js_util_set_method(util_namespace, "debug",               (void*)js_util_debuglog, 1);
 
     // util.types sub-namespace
     Item types = js_new_object();

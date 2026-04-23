@@ -1,204 +1,204 @@
-# Node.js Official Test Baseline (auto-updated)
-# Commit: ae6bed1d8
-# Source: ref/node/test/parallel/
-# Total passing: 1399 / 3527  (skipped: 0)
 #
-# Feature modules enabled:
+#
 #   assert
+#   async_wrap
 #   buffer
 #   child_process
+#   cluster
 #   crypto
 #   dns
+#   domain
 #   events
 #   events
-#   fs
-#   os
-#   path
-#   process
-#   querystring
-#   stream
-#   string_decoder
-#   url
-#   util
-#   zlib
-#   async_wrap
 #   eventsource
-#   stringbytes
+#   fs
 #   http
 #   https
+#   inspector
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
+#   misc
 #   module
 #   net
+#   os
+#   path
+#   perf_hooks
+#   process
+#   querystring
 #   readline
+#   repl
+#   stream
+#   string_decoder
+#   stringbytes
 #   timers
 #   tls
-#   vm
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   misc
-#   cluster
-#   domain
-#   inspector
-#   perf_hooks
-#   repl
 #   tty
+#   url
+#   util
+#   vm
 #   worker
-#
+#   zlib
+# Commit: fbd0e111d
+# Feature modules enabled:
+# Node.js Official Test Baseline (auto-updated)
+# Source: ref/node/test/parallel/
+# Total passing: 1410 / 3527  (skipped: 0)
 test-abort-controller-any-timeout.js
 test-abortcontroller-internal.js
 test-aborted-util.js
@@ -207,6 +207,7 @@ test-assert-esm-cjs-message-verify.js
 test-assert-fail.js
 test-async-hooks-execution-async-resource-await.js
 test-async-hooks-execution-async-resource.js
+test-async-hooks-recursive-stack-runInAsyncScope.js
 test-async-hooks-run-in-async-scope-caught-exception.js
 test-async-hooks-run-in-async-scope-this-arg.js
 test-async-local-storage-contexts.js
@@ -218,6 +219,7 @@ test-async-wrap-tlssocket-asyncreset.js
 test-async-wrap-uncaughtexception.js
 test-atomics-wake.js
 test-beforeexit-event-exit.js
+test-blob-file-backed.js
 test-buffer-alloc-unsafe-is-initialized-with-zero-fill-flag.js
 test-buffer-alloc-unsafe-is-uninitialized.js
 test-buffer-bytelength.js
@@ -226,6 +228,7 @@ test-buffer-constructor-deprecation-error.js
 test-buffer-constructor-outside-node-modules.js
 test-buffer-equals.js
 test-buffer-failed-alloc-typed-arrays.js
+test-buffer-inheritance.js
 test-buffer-isencoding.js
 test-buffer-iterator.js
 test-buffer-no-negative-allocation.js
@@ -359,6 +362,7 @@ test-disable-sigusr1.js
 test-domain-abort-on-uncaught.js
 test-domain-dep0097.js
 test-domain-ee-error-listener.js
+test-domain-load-after-set-uncaught-exception-capture.js
 test-domain-multi.js
 test-domain-nested-throw.js
 test-domain-no-error-handler-abort-on-uncaught-0.js
@@ -371,6 +375,7 @@ test-domain-no-error-handler-abort-on-uncaught-6.js
 test-domain-no-error-handler-abort-on-uncaught-7.js
 test-domain-no-error-handler-abort-on-uncaught-8.js
 test-domain-no-error-handler-abort-on-uncaught-9.js
+test-domain-set-uncaught-exception-capture-after-load.js
 test-domain-throw-error-then-throw-from-uncaught-exception-handler.js
 test-domain-with-abort-on-uncaught-exception.js
 test-domexception-cause.js
@@ -413,8 +418,10 @@ test-event-emitter-get-max-listeners.js
 test-event-emitter-listener-count.js
 test-event-emitter-max-listeners-warning-for-null.js
 test-event-emitter-max-listeners-warning-for-symbol.js
+test-event-emitter-max-listeners-warning.js
 test-event-emitter-modify-in-emit.js
 test-event-emitter-num-args.js
+test-event-emitter-once.js
 test-event-emitter-symbols.js
 test-events-listener-count-with-listener.js
 test-events-once.js
@@ -441,6 +448,7 @@ test-file-write-stream3.js
 test-file-write-stream4.js
 test-file-write-stream5.js
 test-filehandle-close.js
+test-filehandle-readablestream.js
 test-fileurltopathbuffer.js
 test-fs-append-file-flush.js
 test-fs-append-file-sync.js
@@ -486,6 +494,8 @@ test-fs-promises-file-handle-write.js
 test-fs-promises-mkdtempDisposable.js
 test-fs-promises-readfile-with-fd.js
 test-fs-promises-statfs-validate-path.js
+test-fs-promises-watch-iterator.js
+test-fs-promises-watch.js
 test-fs-promises-writefile-typedarray.js
 test-fs-promises-writefile-with-fd.js
 test-fs-promises-writefile.js
@@ -510,14 +520,15 @@ test-fs-readfile-zero-byte-liar.js
 test-fs-readfile.js
 test-fs-readfilesync-enoent.js
 test-fs-readfilesync-pipe-large.js
+test-fs-readlink-type-check.js
 test-fs-readv-promises.js
 test-fs-readv-sync.js
 test-fs-readv.js
 test-fs-realpath-on-substed-drive.js
 test-fs-realpath-pipe.js
-test-fs-rmSync-special-char.js
 test-fs-rmdir-throws-not-found.js
 test-fs-rmdir-throws-on-file.js
+test-fs-rmSync-special-char.js
 test-fs-sir-writes-alot.js
 test-fs-stat-bigint.js
 test-fs-stream-construct-compat-error-read.js
@@ -933,7 +944,6 @@ test-https-timeout-server.js
 test-https-timeout.js
 test-https-truncate.js
 test-https-unix-socket-self-signed.js
-test-icu-env.js
 test-icu-transcode.js
 test-inspect-address-in-use.js
 test-inspect-async-hook-setup-at-inspect.js
@@ -1041,7 +1051,6 @@ test-net-bind-twice.js
 test-net-buffersize.js
 test-net-bytes-read.js
 test-net-bytes-written-large.js
-test-net-can-reset-timeout.js
 test-net-child-process-connect-reset.js
 test-net-client-bind-twice.js
 test-net-connect-abort-controller.js
@@ -1117,6 +1126,7 @@ test-next-tick-domain.js
 test-next-tick-ordering.js
 test-next-tick-ordering2.js
 test-next-tick-when-exiting.js
+test-next-tick.js
 test-no-node-snapshot.js
 test-node-run.js
 test-npm-install.js
@@ -1161,6 +1171,7 @@ test-process-abort.js
 test-process-available-memory.js
 test-process-beforeexit-throw-exit.js
 test-process-beforeexit.js
+test-process-binding-internalbinding-allowlist.js
 test-process-chdir.js
 test-process-constants-noatime.js
 test-process-constrained-memory.js
@@ -1181,6 +1192,7 @@ test-process-exit-from-before-exit.js
 test-process-exit-handler.js
 test-process-exit-recursive.js
 test-process-exit.js
+test-process-features.js
 test-process-getactivehandles.js
 test-process-getactiveresources-track-active-handles.js
 test-process-getgroups.js
@@ -1212,17 +1224,20 @@ test-release-npm.js
 test-repl-autocomplete.js
 test-repl-custom-eval-previews.js
 test-repl-custom-eval.js
+test-repl-domain.js
 test-repl-eval-error-after-close.js
 test-repl-history-init-fail-leak.js
 test-repl-history-navigation.js
 test-repl-history-perm.js
 test-repl-inspector.js
+test-repl-let-process.js
 test-repl-load-multiline-from-history.js
 test-repl-multiline-navigation-while-adding.js
 test-repl-multiline-navigation.js
 test-repl-persistent-history.js
 test-repl-preview-newlines.js
 test-repl-preview-timeout.js
+test-repl-preview.js
 test-repl-programmatic-history-setup-history.js
 test-repl-programmatic-history.js
 test-repl-require-after-write.js
@@ -1254,7 +1269,6 @@ test-runner-coverage-thresholds.js
 test-runner-coverage.js
 test-runner-error-reporter.js
 test-runner-filter-warning.js
-test-runner-mock-timers-scheduler.js
 test-runner-mock-timers-with-timeout.js
 test-runner-module-mocking.js
 test-runner-reporters.js
@@ -1263,6 +1277,7 @@ test-runner-root-duration.js
 test-runner-snapshot-file-tests.js
 test-runner-snapshot-tests.js
 test-runner-test-filepath.js
+test-runner-test-rerun-failures.js
 test-runner-worker-id.js
 test-set-http-max-http-headers.js
 test-set-process-debug-port.js
@@ -1394,13 +1409,14 @@ test-timers-clear-timeout-interval-equivalent.js
 test-timers-clearImmediate.js
 test-timers-max-duration-warning.js
 test-timers-nan-duration-emit-once-per-process.js
-test-timers-nan-duration-warning-promises.js
 test-timers-negative-duration-warning-emit-once-per-process.js
 test-timers-non-integer-delay.js
 test-timers-not-emit-duration-zero.js
 test-timers-process-tampering.js
+test-timers-promises.js
 test-timers-setimmediate-infinite-loop.js
 test-timers-socket-timeout-removes-other-socket-unref-timer.js
+test-timers-throw-when-cb-not-function.js
 test-timers-timeout-with-non-integer.js
 test-timers-unrefd-interval-still-fires.js
 test-timers-unrefed-in-beforeexit.js
@@ -1508,7 +1524,6 @@ test-v8-global-setter.js
 test-v8-stop-coverage.js
 test-v8-take-coverage-noop.js
 test-v8-take-coverage.js
-test-vm-access-process-env.js
 test-vm-api-handles-getter-errors.js
 test-vm-create-context-arg.js
 test-vm-create-context-circular-reference.js
