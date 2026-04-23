@@ -586,6 +586,7 @@ Item js_iterable_to_array(Item iterable);
 Item js_get_iterator(Item iterable);
 Item js_iterator_step(Item iterator);
 Item js_iterator_close(Item iterator);
+Item js_iterator_collect_rest(Item iterator);
 
 // =============================================================================
 // v14: Promise Runtime

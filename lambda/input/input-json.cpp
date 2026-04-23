@@ -176,13 +176,21 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         (*json)++; // Skip opening quote
         tracker.advance(1);
 
-        // Parse key content (simplified - no escape handling needed for keys typically)
+        // Parse key content
         while (**json && **json != '"') {
+            unsigned char kc = (unsigned char)**json;
+            // JSON does not allow unescaped control characters U+0000-U+001F in keys
+            if (kc < 0x20) {
+                ctx.addError(tracker.location(), "Unexpected control character in string");
+                return ctx.builder.createNull();
+            }
             if (**json == '\\') {
                 (*json)++;
                 tracker.advance(1);
                 if (**json) {
-                    stringbuf_append_char(sb, **json);
+                    int consumed = parse_escape_char(json, sb);
+                    tracker.advance(consumed);
+                    continue;
                 }
             } else {
                 stringbuf_append_char(sb, **json);
