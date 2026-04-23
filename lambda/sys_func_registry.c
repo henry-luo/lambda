@@ -1542,6 +1542,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_iterator", FPTR(js_get_iterator)},
     {"js_iterator_step", FPTR(js_iterator_step)},
     {"js_iterator_close", FPTR(js_iterator_close)},
+    {"js_iterator_collect_rest", FPTR(js_iterator_collect_rest)},
     // v14: Promise runtime
     {"js_promise_create", FPTR(js_promise_create)},
     {"js_promise_resolve", FPTR(js_promise_resolve)},

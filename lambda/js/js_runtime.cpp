@@ -5165,8 +5165,6 @@ extern "C" Item js_property_get(Item object, Item key) {
                     }
                     Item ta_proto = js_get_prototype(object);
                     if (ta_proto.item == ITEM_NULL) {
-                        // TypedArray instances don't store __proto__ in properties;
-                        // use the implicit %TypedArray%.prototype for method lookup
                         extern Item js_get_typed_array_base_proto();
                         ta_proto = js_get_typed_array_base_proto();
                     }
@@ -5203,6 +5201,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (own_result.item != ITEM_NULL) return own_result;
                     }
                 }
+                // prototype chain lookup (for Reflect.construct with custom newTarget)
+                {
+                    Item ab_proto = js_get_prototype(object);
+                    if (ab_proto.item != ITEM_NULL) {
+                        Item result = js_property_get(ab_proto, key);
+                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+                    }
+                }
                 return (Item){.item = ITEM_NULL};
             }
             case MAP_KIND_DATAVIEW: {
@@ -5233,6 +5239,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (object.map->data_cap > 0) {
                         Item own_result = map_get(object.map, key);
                         if (own_result.item != ITEM_NULL) return own_result;
+                    }
+                }
+                // prototype chain lookup (for Reflect.construct with custom newTarget)
+                {
+                    Item dv_proto = js_get_prototype(object);
+                    if (dv_proto.item != ITEM_NULL) {
+                        Item result = js_property_get(dv_proto, key);
+                        if (result.item != ITEM_NULL && get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
                     }
                 }
                 return (Item){.item = ITEM_NULL};
@@ -5620,11 +5634,29 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         if (idx >= 0 && idx < object.array->length) {
-            // v25: check for deleted sentinel (array hole) — return undefined
-            if (object.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
-                return make_js_undefined();
+            // v25: check for deleted sentinel (array hole) — fall through to prototype chain
+            if (object.array->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+                return object.array->items[idx];
             }
-            return object.array->items[idx];
+            // hole — fall through to prototype chain lookup below
+        } else {
+            // Arguments overflow: numeric index stored in companion map
+            if (idx >= 0 && object.array->is_content == 1 && object.array->extra != 0) {
+                char idx_buf[32];
+                snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+                Map* pm = (Map*)(uintptr_t)object.array->extra;
+                bool pm_found = false;
+                Item pm_val = js_map_get_fast_ext(pm, idx_buf, (int)strlen(idx_buf), &pm_found);
+                if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+            }
+        }
+        // prototype chain lookup for numeric indices (holes, out-of-range)
+        {
+            Item proto = js_get_prototype_of(object);
+            if (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED) {
+                Item result = js_property_get(proto, key);
+                if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+            }
         }
         return make_js_undefined();
     } else if (type == LMD_TYPE_STRING) {
@@ -5798,6 +5830,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
                             Item lk = (Item){.item = s2it(heap_create_name("length", 6))};
                             js_property_set(fn->prototype, lk, js_make_number(0));
+                            // ES spec: length is {writable:true, enumerable:false, configurable:false}
+                            Item ne_k = (Item){.item = s2it(heap_create_name("__ne_length", 11))};
+                            js_property_set(fn->prototype, ne_k, (Item){.item = b2it(true)});
+                            Item nc_k = (Item){.item = s2it(heap_create_name("__nc_length", 11))};
+                            js_property_set(fn->prototype, nc_k, (Item){.item = b2it(true)});
                         }
                         // Boolean.prototype.[[BooleanData]] = false (ES spec 20.3.4)
                         if (nl == 7 && strncmp(nm, "Boolean", 7) == 0) {
@@ -6567,6 +6604,26 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if (nw_found && js_is_truthy(nw_val)) {
                     return value; // silently ignore assignment to non-writable
                 }
+            }
+        }
+        // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
+        if (object.array->is_content == 1) {
+            double idx_d = js_get_number(key);
+            int64_t idx = (int64_t)idx_d;
+            if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
+                Array* arr = object.array;
+                Map* pm;
+                if (arr->extra == 0) {
+                    Item obj = js_new_object();
+                    arr->extra = (int64_t)(uintptr_t)obj.map;
+                }
+                pm = (Map*)(uintptr_t)arr->extra;
+                Item map_item = (Item){.map = pm};
+                char idx_buf[32];
+                snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+                Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+                js_property_set(map_item, str_key, value);
+                return value;
             }
         }
         return js_array_set(object, key, value);
@@ -7462,11 +7519,30 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             }
         }
         if (index >= 0 && index < arr->length) {
-            // v25: check for deleted sentinel (array hole) — return undefined
-            if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) {
-                return make_js_undefined();
+            // v25: check for deleted sentinel (array hole) — fall through to prototype chain
+            if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
+                return arr->items[index];
             }
-            return arr->items[index];
+            // hole — fall through to prototype chain lookup below
+        } else {
+            // Arguments overflow: numeric index stored in companion map
+            if (index >= 0 && arr->is_content == 1 && arr->extra != 0) {
+                char idx_buf[32];
+                snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+                Map* pm = (Map*)(uintptr_t)arr->extra;
+                bool pm_found = false;
+                Item pm_val = js_map_get_fast_ext(pm, idx_buf, (int)strlen(idx_buf), &pm_found);
+                if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+            }
+        }
+        // prototype chain lookup for numeric indices (holes, out-of-range)
+        {
+            Item key = (Item){.item = i2it((int)index)};
+            Item proto = js_get_prototype_of(array);
+            if (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED) {
+                Item result = js_property_get(proto, key);
+                if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+            }
         }
         return make_js_undefined();
     }
@@ -7508,6 +7584,21 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         if (nw_found) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
+    }
+    // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
+    if (arr->is_content == 1 && index >= 0 && index >= arr->length) {
+        Map* pm;
+        if (arr->extra == 0) {
+            Item obj = js_new_object();
+            arr->extra = (int64_t)(uintptr_t)obj.map;
+        }
+        pm = (Map*)(uintptr_t)arr->extra;
+        Item map_item = (Item){.map = pm};
+        char idx_buf[32];
+        snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+        Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+        js_property_set(map_item, str_key, value);
+        return value;
     }
     if (index >= 0 && index < arr->length) {
         arr->items[index] = value;
@@ -7557,6 +7648,22 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
+    }
+
+    // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
+    if (arr->is_content == 1 && idx >= 0 && idx >= arr->length) {
+        Map* pm;
+        if (arr->extra == 0) {
+            Item obj = js_new_object();
+            arr->extra = (int64_t)(uintptr_t)obj.map;
+        }
+        pm = (Map*)(uintptr_t)arr->extra;
+        Item map_item = (Item){.map = pm};
+        char idx_buf[32];
+        snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+        Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, (int)strlen(idx_buf)))};
+        js_property_set(map_item, str_key, value);
+        return value;
     }
 
     if (idx >= 0 && idx < arr->length) {
@@ -7965,12 +8072,17 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     struct { const char* getter_key; int gk_len; } accessors[] = {
         {"__get_buffer", 12}, {"__get_byteLength", 16}, {"__get_byteOffset", 16}, {NULL, 0}
     };
+    const char* accessor_names[] = {"buffer", "byteLength", "byteOffset", NULL};
+    int accessor_name_lens[] = {6, 10, 10};
     for (int i = 0; accessors[i].getter_key; i++) {
         Item gk = (Item){.item = s2it(heap_create_name(accessors[i].getter_key, accessors[i].gk_len))};
         JsFunction* gf = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
         gf->type_id = LMD_TYPE_FUNC;
         gf->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
         js_property_set(proto, gk, (Item){.function = (Function*)gf});
+        // mark the accessor property as non-enumerable
+        Item prop_name = (Item){.item = s2it(heap_create_name(accessor_names[i], accessor_name_lens[i]))};
+        js_mark_non_enumerable(proto, prop_name);
     }
 
     // Install static methods from/of on %TypedArray% constructor (base_ctor)
@@ -17947,7 +18059,16 @@ extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
     // P10f+P10d: direct first-match lookup with interned key
-    return js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
+    Item proto = js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
+    // TypedArray instances don't store __proto__; use per-type prototype
+    if (proto.item == ITEM_NULL && m->map_kind == MAP_KIND_TYPED_ARRAY) {
+        JsTypedArray* ta = js_get_typed_array_ptr(m);
+        if (ta) {
+            extern Item js_get_typed_array_per_type_proto(int element_type);
+            return js_get_typed_array_per_type_proto((int)ta->element_type);
+        }
+    }
+    return proto;
 }
 
 // Walk the prototype chain to find a property
@@ -18011,21 +18132,82 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
     if (!tm) return js_new_object();
     ShapeEntry* e = tm->shape;
     Item rest = js_new_object();
+    // pass 1: copy own enumerable data properties (using js_property_get to invoke getters)
     while (e) {
         if (e->name) {
+            const char* n = e->name->str;
+            int nlen = (int)e->name->length;
+            // skip internal marker properties (but allow __sym_ symbol keys)
+            if (nlen >= 2 && n[0] == '_' && n[1] == '_') {
+                if (!(nlen >= 6 && n[2] == 's' && n[3] == 'y' && n[4] == 'm' && n[5] == '_')) {
+                    e = e->next;
+                    continue;
+                }
+            }
+            // skip non-enumerable properties (ES spec: CopyDataProperties only copies own enumerable)
+            char ne_buf[256];
+            snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", nlen, n);
+            bool ne_found = false;
+            extern Item js_map_get_fast_ext(Map* m, const char* key, int key_len, bool* found);
+            Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
+            if (ne_found && js_is_truthy(ne_val)) {
+                e = e->next;
+                continue;
+            }
             bool excluded = false;
             for (int i = 0; i < exclude_count; i++) {
                 String* ek = it2s(exclude_keys[i]);
-                if (ek && e->name->length == ek->len && memcmp(e->name->str, ek->chars, ek->len) == 0) {
+                if (ek && (int)e->name->length == (int)ek->len && memcmp(e->name->str, ek->chars, ek->len) == 0) {
                     excluded = true;
                     break;
                 }
             }
             if (!excluded) {
-                Item val = _map_read_field(e, m->data);
+                Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
+                Item val = js_property_get(src, key);
                 if (!js_is_deleted_sentinel(val)) {
-                    String* key_str = heap_create_name(e->name->str, e->name->length);
-                    js_property_set(rest, (Item){.item = s2it(key_str)}, val);
+                    js_property_set(rest, key, val);
+                }
+            }
+        }
+        e = e->next;
+    }
+    // pass 2: detect accessor-only properties (__get_<name> with no data entry)
+    e = tm->shape;
+    while (e) {
+        if (e->name) {
+            const char* s = e->name->str;
+            int slen = (int)e->name->length;
+            if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
+                const char* prop_name = s + 6;
+                int prop_len = slen - 6;
+                if (prop_len > 0 && prop_len < 200) {
+                    // skip non-enumerable accessors
+                    char ne_buf[256];
+                    snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", prop_len, prop_name);
+                    bool ne_found = false;
+                    Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
+                    if (!(ne_found && js_is_truthy(ne_val))) {
+                        // skip if already copied (had a data entry)
+                        bool data_found = false;
+                        js_map_get_fast_ext(m, prop_name, prop_len, &data_found);
+                        if (!data_found) {
+                            // check exclusion list
+                            bool excluded = false;
+                            for (int i = 0; i < exclude_count; i++) {
+                                String* ek = it2s(exclude_keys[i]);
+                                if (ek && prop_len == (int)ek->len && memcmp(prop_name, ek->chars, ek->len) == 0) {
+                                    excluded = true;
+                                    break;
+                                }
+                            }
+                            if (!excluded) {
+                                Item key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
+                                Item val = js_property_get(src, key);
+                                js_property_set(rest, key, val);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -18087,19 +18269,22 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
 }
 
 extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async) {
-    // Try to recycle a completed generator slot first
+    // Allocate a new generator slot (no recycling — old generator objects may still
+    // hold __gen_idx references to completed slots, causing index collisions)
     int idx = -1;
-    for (int i = 0; i < js_generator_count; i++) {
-        if (js_generators[i].done) {
-            idx = i;
-            break;
+    if (js_generator_count >= JS_MAX_GENERATORS) {
+        // Last resort: recycle oldest completed slot
+        for (int i = 0; i < js_generator_count; i++) {
+            if (js_generators[i].done) {
+                idx = i;
+                break;
+            }
         }
-    }
-    if (idx < 0) {
-        if (js_generator_count >= JS_MAX_GENERATORS) {
+        if (idx < 0) {
             log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
             return ItemNull;
         }
+    } else {
         idx = js_generator_count++;
     }
     JsGenerator* gen = &js_generators[idx];
@@ -18635,6 +18820,18 @@ extern "C" Item js_iterator_close(Item iterator) {
         }
     }
     return make_js_undefined();
+}
+
+// collect remaining iterator values into a new array (for rest elements in destructuring)
+extern "C" Item js_iterator_collect_rest(Item iterator) {
+    Item arr = js_array_new(0);
+    while (true) {
+        Item val = js_iterator_step(iterator);
+        if (val.item == JS_ITER_DONE_SENTINEL) break;
+        if (js_exception_pending) return ItemNull;
+        array_push(arr.array, val);
+    }
+    return arr;
 }
 
 // v15: Convert an iterable to an array. If it's a generator, drain it.
