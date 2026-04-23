@@ -7712,6 +7712,51 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                             return boxed_new;
                         }
                     }
+                    if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
+                        asgn->op == JS_OP_NULLISH_ASSIGN) {
+                        // Logical assignment with short-circuit for module vars
+                        MIR_reg_t result = jm_new_reg(mt, "la_res", MIR_T_I64);
+                        MIR_reg_t old_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                        MIR_label_t l_assign = jm_new_label(mt);
+                        MIR_label_t l_end = jm_new_label(mt);
+                        MIR_reg_t cond;
+                        if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+                            cond = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_assign),
+                                MIR_new_reg_op(mt->ctx, cond)));
+                        } else {
+                            cond = jm_emit_is_truthy(mt, old_val, NULL);
+                            if (asgn->op == JS_OP_AND_ASSIGN) {
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                    MIR_new_label_op(mt->ctx, l_assign),
+                                    MIR_new_reg_op(mt->ctx, cond)));
+                            } else {
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                                    MIR_new_label_op(mt->ctx, l_assign),
+                                    MIR_new_reg_op(mt->ctx, cond)));
+                            }
+                        }
+                        // Short-circuit: return old value
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_reg_op(mt->ctx, old_val)));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                        // Assign path: evaluate RHS, store, return RHS
+                        jm_emit_label(mt, l_assign);
+                        MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                        jm_scope_env_mark_and_writeback(mt, vname, rhs);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_reg_op(mt->ctx, rhs)));
+                        jm_emit_label(mt, l_end);
+                        return result;
+                    }
                     MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                     if (asgn->op != JS_OP_ASSIGN) {
                         // Compound assignment: read current value, apply op, store result
@@ -7731,9 +7776,6 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                         case JS_OP_LSHIFT_ASSIGN: fn = "js_left_shift"; break;
                         case JS_OP_RSHIFT_ASSIGN: fn = "js_right_shift"; break;
                         case JS_OP_URSHIFT_ASSIGN: fn = "js_unsigned_right_shift"; break;
-                        case JS_OP_NULLISH_ASSIGN: fn = "js_nullish_coalesce"; break;
-                        case JS_OP_AND_ASSIGN: fn = "js_logical_and"; break;
-                        case JS_OP_OR_ASSIGN: fn = "js_logical_or"; break;
                         default: fn = "js_add"; break;
                         }
                         rhs = jm_call_2(mt, fn, MIR_T_I64,
@@ -7750,6 +7792,52 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             }
             // Implicit global assignment: write to global object via js_set_global_property
             {
+                if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
+                    asgn->op == JS_OP_NULLISH_ASSIGN) {
+                    // Logical assignment with short-circuit for global vars
+                    MIR_reg_t result = jm_new_reg(mt, "la_res", MIR_T_I64);
+                    MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    MIR_reg_t old_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+                    MIR_label_t l_assign = jm_new_label(mt);
+                    MIR_label_t l_end = jm_new_label(mt);
+                    MIR_reg_t cond;
+                    if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+                        cond = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, l_assign),
+                            MIR_new_reg_op(mt->ctx, cond)));
+                    } else {
+                        cond = jm_emit_is_truthy(mt, old_val, NULL);
+                        if (asgn->op == JS_OP_AND_ASSIGN) {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_assign),
+                                MIR_new_reg_op(mt->ctx, cond)));
+                        } else {
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                                MIR_new_label_op(mt->ctx, l_assign),
+                                MIR_new_reg_op(mt->ctx, cond)));
+                        }
+                    }
+                    // Short-circuit: return old value
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, old_val)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                    // Assign path: evaluate RHS, store, return RHS
+                    jm_emit_label(mt, l_assign);
+                    MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
+                    MIR_reg_t name_reg2 = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    jm_call_void_2(mt, "js_set_global_property",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg2),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, rhs)));
+                    jm_emit_label(mt, l_end);
+                    return result;
+                }
                 MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                 if (asgn->op != JS_OP_ASSIGN) {
                     // Compound assignment: read current value from global, apply op, store
@@ -7770,9 +7858,6 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                     case JS_OP_LSHIFT_ASSIGN: fn = "js_left_shift"; break;
                     case JS_OP_RSHIFT_ASSIGN: fn = "js_right_shift"; break;
                     case JS_OP_URSHIFT_ASSIGN: fn = "js_unsigned_right_shift"; break;
-                    case JS_OP_NULLISH_ASSIGN: fn = "js_nullish_coalesce"; break;
-                    case JS_OP_AND_ASSIGN: fn = "js_logical_and"; break;
-                    case JS_OP_OR_ASSIGN: fn = "js_logical_or"; break;
                     default: fn = "js_add"; break;
                     }
                     rhs = jm_call_2(mt, fn, MIR_T_I64,
@@ -7900,6 +7985,73 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                     jm_emit_set_function_name(mt, rhs, id->name->chars);
                 }
             }
+        } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
+                   asgn->op == JS_OP_NULLISH_ASSIGN) {
+            // Logical assignment with short-circuit: do NOT evaluate RHS if condition met
+            // &&= : if current is falsy, return current (don't eval RHS, don't assign)
+            // ||= : if current is truthy, return current (don't eval RHS, don't assign)
+            // ??= : if current is not nullish, return current (don't eval RHS, don't assign)
+            MIR_label_t l_assign = jm_new_label(mt);
+            MIR_label_t l_end = jm_new_label(mt);
+
+            MIR_reg_t cond;
+            if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+                cond = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+                // if nullish → evaluate RHS and assign
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, l_assign),
+                    MIR_new_reg_op(mt->ctx, cond)));
+            } else {
+                cond = jm_emit_is_truthy(mt, var->reg, NULL);
+                if (asgn->op == JS_OP_AND_ASSIGN) {
+                    // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_assign),
+                        MIR_new_reg_op(mt->ctx, cond)));
+                } else {
+                    // ||= : if falsy → evaluate RHS and assign; if truthy → short-circuit
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, l_assign),
+                        MIR_new_reg_op(mt->ctx, cond)));
+                }
+            }
+            // Short-circuit: skip to end, var->reg keeps its current value
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Evaluate RHS and assign
+            jm_emit_label(mt, l_assign);
+            rhs = jm_transpile_box_item(mt, asgn->right);
+
+            // v18: function name inference for logical assignment
+            if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                                asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
+                if (!fn_node->name && id->name && id->name->chars) {
+                    jm_emit_set_function_name(mt, rhs, id->name->chars);
+                }
+            }
+
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, rhs)));
+            if (var->from_env) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, var->reg)));
+            }
+            if (var->in_scope_env) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, var->reg)));
+            }
+            {
+                int api = jm_arguments_param_index(mt, vname);
+                if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
+            }
+
+            jm_emit_label(mt, l_end);
+            return var->reg;
         } else {
             // Compound assignment: var op= expr -> var = js_op(var, expr)
             MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
@@ -7917,9 +8069,6 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             case JS_OP_LSHIFT_ASSIGN: fn = "js_left_shift"; break;
             case JS_OP_RSHIFT_ASSIGN: fn = "js_right_shift"; break;
             case JS_OP_URSHIFT_ASSIGN: fn = "js_unsigned_right_shift"; break;
-            case JS_OP_NULLISH_ASSIGN: fn = "js_nullish_coalesce"; break;
-            case JS_OP_AND_ASSIGN: fn = "js_logical_and"; break;
-            case JS_OP_OR_ASSIGN: fn = "js_logical_or"; break;
             default: fn = "js_add"; break;
             }
             rhs = jm_call_2(mt, fn, MIR_T_I64,
@@ -8461,6 +8610,58 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
         MIR_reg_t new_val;
         if (asgn->op == JS_OP_ASSIGN) {
             new_val = jm_transpile_box_item(mt, asgn->right);
+        } else if (asgn->op == JS_OP_AND_ASSIGN || asgn->op == JS_OP_OR_ASSIGN ||
+                   asgn->op == JS_OP_NULLISH_ASSIGN) {
+            // Logical assignment with short-circuit for member expressions
+            // obj[key] &&= expr: if obj[key] is falsy, skip RHS eval and assignment
+            // obj[key] ||= expr: if obj[key] is truthy, skip RHS eval and assignment
+            // obj[key] ??= expr: if obj[key] is not nullish, skip RHS eval and assignment
+            MIR_reg_t result = jm_new_reg(mt, "la_res", MIR_T_I64);
+            MIR_reg_t cur_val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            MIR_label_t l_assign = jm_new_label(mt);
+            MIR_label_t l_end = jm_new_label(mt);
+            MIR_reg_t cond;
+            if (asgn->op == JS_OP_NULLISH_ASSIGN) {
+                cond = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_val));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, l_assign),
+                    MIR_new_reg_op(mt->ctx, cond)));
+            } else {
+                cond = jm_emit_is_truthy(mt, cur_val, NULL);
+                if (asgn->op == JS_OP_AND_ASSIGN) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_assign),
+                        MIR_new_reg_op(mt->ctx, cond)));
+                } else {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                        MIR_new_label_op(mt->ctx, l_assign),
+                        MIR_new_reg_op(mt->ctx, cond)));
+                }
+            }
+            // Short-circuit: return current value without evaluating RHS or setting property
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, cur_val)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // Evaluate RHS, set property, return RHS
+            jm_emit_label(mt, l_assign);
+            new_val = jm_transpile_box_item(mt, asgn->right);
+            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+            if (mt->is_global_strict || mt->is_module) {
+                jm_emit_exc_propagate_check(mt);
+            }
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, new_val)));
+            jm_emit_label(mt, l_end);
+            return result;
         } else {
             // Compound: get current value, apply operation, set result
             MIR_reg_t cur_val = jm_call_2(mt, "js_property_access", MIR_T_I64,
@@ -8481,9 +8682,6 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             case JS_OP_LSHIFT_ASSIGN: fn = "js_left_shift"; break;
             case JS_OP_RSHIFT_ASSIGN: fn = "js_right_shift"; break;
             case JS_OP_URSHIFT_ASSIGN: fn = "js_unsigned_right_shift"; break;
-            case JS_OP_NULLISH_ASSIGN: fn = "js_nullish_coalesce"; break;
-            case JS_OP_AND_ASSIGN: fn = "js_logical_and"; break;
-            case JS_OP_OR_ASSIGN: fn = "js_logical_or"; break;
             default: fn = "js_add"; break;
             }
             new_val = jm_call_2(mt, fn, MIR_T_I64,
@@ -8497,14 +8695,7 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
         // v27: propagate strict mode TypeError from property set
         if (mt->is_global_strict || mt->is_module) {
-            if (asgn->op != JS_OP_AND_ASSIGN && asgn->op != JS_OP_OR_ASSIGN &&
-                asgn->op != JS_OP_NULLISH_ASSIGN) {
-                jm_emit_exc_propagate_check(mt);
-            } else {
-                // Logical assignment may call js_property_set even when short-circuited;
-                // clear any stale exception to prevent it leaking to later checks
-                jm_call_void_0(mt, "js_clear_exception");
-            }
+            jm_emit_exc_propagate_check(mt);
         }
 
         // v20: arguments[i] → param aliasing
@@ -17726,6 +17917,35 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, forit_has_return),
             MIR_new_int_op(mt->ctx, 0)));
+        // In generators: register forit_return_val and forit_has_return as env-stored
+        // so they survive yield suspend/resume inside the for-of body
+        if (mt->in_generator && mt->gen_env_reg) {
+            int ret_slot = mt->gen_local_slot_count++;
+            int hret_slot = mt->gen_local_slot_count++;
+            {
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "_forit_ret_%d", mt->label_counter);
+                entry.var.reg = forit_return_val;
+                entry.var.from_env = true;
+                entry.var.env_slot = ret_slot;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+            {
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "_forit_hret_%d", mt->label_counter);
+                entry.var.reg = forit_has_return;
+                entry.var.from_env = true;
+                entry.var.env_slot = hret_slot;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+            mt->label_counter++;
+        }
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
         tc->catch_label = l_iter_exc;
         tc->finally_label = 0;
