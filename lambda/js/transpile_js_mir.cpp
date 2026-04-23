@@ -17616,11 +17616,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_result));
         }
 
-        // No explicit constructor: if class extends a builtin, call the builtin
-        // constructor with the arguments (implicit super(...args) behavior).
+        // No explicit constructor: if class extends a builtin (not resolved as a user-defined
+        // class), call the builtin constructor with the arguments (implicit super(...args)).
         // The builtin constructor (e.g., Array) creates and returns a new object,
         // so we replace obj with the returned value and set the subclass prototype.
-        if (!active_ctor && ce->node && ce->node->superclass &&
+        if (!active_ctor && !ce->superclass && ce->node && ce->node->superclass &&
             ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* sid = (JsIdentifierNode*)ce->node->superclass;
             if (sid->name) {

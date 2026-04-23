@@ -3031,6 +3031,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_TYPED_ARRAY_METHOD 4
 #define JS_FUNC_FLAG_STRICT    8
 #define JS_FUNC_FLAG_HAS_BOUND_THIS 16
+#define JS_FUNC_FLAG_METHOD    32
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
@@ -5786,9 +5787,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - global builtins (builtin_id == -2): parseInt, Math.abs, etc.
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
                 // - arrow functions
+                // - class methods (concise methods are not constructors per ES spec)
                 // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
-                    (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD)) ||
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
@@ -8482,6 +8484,12 @@ extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_ARROW;
+}
+
+extern "C" void js_mark_method_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_METHOD;
 }
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)

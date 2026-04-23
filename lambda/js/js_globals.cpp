@@ -4283,18 +4283,12 @@ extern "C" Item js_in(Item key, Item object) {
         return (Item){.item = b2it(false)};
     }
     if (type == LMD_TYPE_FUNC) {
-        // Check function own properties and prototype chain
-        // Use js_has_own_property (handles FUNC properties_map internally)
+        // Check function own properties (properties_map, name, length, prototype)
         if (it2b(js_has_own_property(object, key))) return (Item){.item = b2it(true)};
-        // Check built-in function properties (name, length, prototype)
+        // Check prototype chain and builtin methods
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk) {
-                if ((sk->len == 4 && strncmp(sk->chars, "name", 4) == 0) ||
-                    (sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) ||
-                    (sk->len == 9 && strncmp(sk->chars, "prototype", 9) == 0)) {
-                    return (Item){.item = b2it(true)};
-                }
                 // Walk prototype chain (Function.prototype → Object.prototype)
                 Item proto = js_get_prototype(object);
                 int depth = 0;
@@ -4608,6 +4602,7 @@ extern Item js_throw_type_error(const char* msg);
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
 #define JS_FUNC_FLAG_GENERATOR_G 1
 #define JS_FUNC_FLAG_ARROW_G     2
+#define JS_FUNC_FLAG_METHOD_G    32
 
 struct JsFunctionLayout {
     TypeId type_id;
@@ -4636,6 +4631,7 @@ static bool js_func_is_constructor(Item func_item) {
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
     if (fn->flags & JS_FUNC_FLAG_GENERATOR_G) return false;
+    if (fn->flags & JS_FUNC_FLAG_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false; // global builtin wrappers are not constructors
     return true;
@@ -4646,7 +4642,7 @@ static bool js_func_is_constructor(Item func_item) {
 static bool js_func_has_own_prototype(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
-    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G)) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
     return true;
