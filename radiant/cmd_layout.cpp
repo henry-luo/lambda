@@ -95,6 +95,12 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 static const int MAX_CSS_TREE_DEPTH = 512;
+
+// Current document charset for CSS fallback encoding (set before collect_linked_stylesheets)
+const char* g_css_document_charset = nullptr;
+
+// Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
+char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
@@ -866,6 +872,220 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
 }
 
 /**
+ * Detect the encoding of a CSS file per CSS Syntax §3.2.
+ * Resolution order: BOM → HTTP charset → link charset → @charset → document fallback → UTF-8.
+ * Returns the charset name or nullptr if UTF-8.
+ */
+const char* detect_css_encoding(const char* data, size_t len, const char* document_charset,
+                                      const char* http_charset = nullptr, const char* link_charset = nullptr) {
+    if (!data || len == 0) return nullptr;
+
+    // 1. BOM detection (takes absolute precedence)
+    if (len >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+        return nullptr; // UTF-8 BOM → UTF-8
+    }
+    // UTF-16 LE BOM
+    if (len >= 2 && (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xFE) {
+        return "utf-16le";
+    }
+    // UTF-16 BE BOM
+    if (len >= 2 && (unsigned char)data[0] == 0xFE && (unsigned char)data[1] == 0xFF) {
+        return "utf-16be";
+    }
+
+    // 2. HTTP Content-Type charset (highest after BOM) — must be a recognized charset
+    if (http_charset) {
+        if (str_ieq_const(http_charset, strlen(http_charset), "utf-8")) return nullptr;
+        // validate: only use if it's a recognized charset we can convert
+        if (strncasecmp(http_charset, "windows-", 8) == 0 ||
+            strncasecmp(http_charset, "iso-8859", 8) == 0 ||
+            strncasecmp(http_charset, "utf-16", 6) == 0) {
+            log_debug("[CSS charset] HTTP charset '%s'", http_charset);
+            return http_charset;
+        }
+        // bogus/unrecognized HTTP charset → ignore, fall through
+    }
+
+    // 3. @charset rule: must be the very first bytes, exactly: @charset "...";
+    //    Per spec, @charset "utf-16" and "utf-16be" are NOT valid (the file must
+    //    already be readable to parse @charset, meaning it's really UTF-8 or single-byte).
+    if (len >= 10 && strncmp(data, "@charset \"", 10) == 0) {
+        const char* start = data + 10;
+        const char* end = (const char*)memchr(start, '"', len - 10);
+        if (end && end > start) {
+            size_t clen = end - start;
+            if (clen < 32) {
+                static char cs_buf[32];
+                for (size_t i = 0; i < clen; i++) {
+                    cs_buf[i] = (start[i] >= 'A' && start[i] <= 'Z') ? start[i] + 32 : start[i];
+                }
+                cs_buf[clen] = '\0';
+                // @charset "utf-8" → no conversion needed
+                if (strcmp(cs_buf, "utf-8") == 0) return nullptr;
+                // @charset "utf-16" / "utf-16le" / "utf-16be" → treat as UTF-8 per spec
+                if (strncmp(cs_buf, "utf-16", 6) == 0) return nullptr;
+                // @charset "bogus" or unrecognized → fall through to document fallback
+                // valid recognized @charset declaration → use it
+                if (strcmp(cs_buf, "bogus") != 0) {
+                    // check if it's a charset we can convert
+                    if (strncmp(cs_buf, "windows-", 8) == 0 ||
+                        strncmp(cs_buf, "iso-8859", 8) == 0 ||
+                        strncmp(cs_buf, "cp12", 4) == 0 ||
+                        strcmp(cs_buf, "latin1") == 0 ||
+                        strcmp(cs_buf, "latin-1") == 0) {
+                        log_debug("[CSS charset] @charset declares '%s'", cs_buf);
+                        return cs_buf;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Fallback: <link charset=...> attribute overrides document charset
+    if (link_charset) {
+        if (str_ieq_const(link_charset, strlen(link_charset), "utf-8")) return nullptr;
+        // validate: only use if recognized
+        if (strncasecmp(link_charset, "windows-", 8) == 0 ||
+            strncasecmp(link_charset, "iso-8859", 8) == 0) {
+            log_debug("[CSS charset] <link charset='%s'>", link_charset);
+            return link_charset;
+        }
+    }
+
+    // 5. Fallback to referring document's encoding
+    if (document_charset) {
+        log_debug("[CSS charset] Falling back to document charset '%s'", document_charset);
+        return document_charset;
+    }
+
+    // 6. Default to UTF-8
+    return nullptr;
+}
+
+/**
+ * Sanitize UTF-8 content per CSS Syntax §3.3: replace invalid byte sequences with U+FFFD.
+ * Returns newly allocated sanitized content, or nullptr if no changes needed.
+ * Caller must free with mem_free().
+ */
+static char* sanitize_utf8_css(const char* data, size_t len) {
+    if (!data || len == 0) return nullptr;
+
+    // first pass: check if sanitization is needed and compute output size
+    bool needs_sanitize = false;
+    size_t out_size = 0;
+    for (size_t i = 0; i < len; ) {
+        unsigned char c = (unsigned char)data[i];
+        if (c == 0x00) {
+            // CSS §3.3: replace U+0000 NULL with U+FFFD
+            needs_sanitize = true;
+            out_size += 3;
+            i++;
+        } else if (c < 0x80) {
+            out_size++;
+            i++;
+        } else if (c < 0xC0) {
+            // unexpected continuation byte
+            needs_sanitize = true;
+            out_size += 3; // U+FFFD = EF BF BD
+            i++;
+        } else if (c < 0xE0) {
+            if (i + 1 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80) {
+                out_size += 2;
+                i += 2;
+            } else {
+                needs_sanitize = true;
+                out_size += 3;
+                i++;
+            }
+        } else if (c < 0xF0) {
+            if (i + 2 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+2] & 0xC0) == 0x80) {
+                out_size += 3;
+                i += 3;
+            } else {
+                needs_sanitize = true;
+                out_size += 3;
+                i++;
+            }
+        } else if (c < 0xF8) {
+            if (i + 3 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+2] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+3] & 0xC0) == 0x80) {
+                out_size += 4;
+                i += 4;
+            } else {
+                needs_sanitize = true;
+                out_size += 3;
+                i++;
+            }
+        } else {
+            needs_sanitize = true;
+            out_size += 3;
+            i++;
+        }
+    }
+
+    if (!needs_sanitize) return nullptr;
+
+    // second pass: build sanitized output
+    char* out = (char*)mem_alloc(out_size + 1, MEM_CAT_LAYOUT);
+    if (!out) return nullptr;
+    size_t o = 0;
+    for (size_t i = 0; i < len; ) {
+        unsigned char c = (unsigned char)data[i];
+        if (c == 0x00) {
+            out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+            i++;
+        } else if (c < 0x80) {
+            out[o++] = data[i++];
+        } else if (c < 0xC0) {
+            out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+            i++;
+        } else if (c < 0xE0) {
+            if (i + 1 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80) {
+                out[o++] = data[i++]; out[o++] = data[i++];
+            } else {
+                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+                i++;
+            }
+        } else if (c < 0xF0) {
+            if (i + 2 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+2] & 0xC0) == 0x80) {
+                out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++];
+            } else {
+                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+                i++;
+            }
+        } else if (c < 0xF8) {
+            if (i + 3 < len && ((unsigned char)data[i+1] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+2] & 0xC0) == 0x80 &&
+                ((unsigned char)data[i+3] & 0xC0) == 0x80) {
+                out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++]; out[o++] = data[i++];
+            } else {
+                out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+                i++;
+            }
+        } else {
+            out[o++] = (char)0xEF; out[o++] = (char)0xBF; out[o++] = (char)0xBD;
+            i++;
+        }
+    }
+    out[o] = '\0';
+    log_debug("[CSS charset] Sanitized UTF-8: replaced invalid bytes (%zu → %zu bytes)", len, o);
+    return out;
+}
+
+/**
+ * Convert CSS file content from detected encoding to UTF-8.
+ * Returns newly allocated UTF-8 content, or nullptr if no conversion needed.
+ * Caller must free with mem_free().
+ */
+static char* convert_css_to_utf8(const char* data, size_t len, const char* css_charset) {
+    if (!data || !css_charset) return nullptr;
+    return convert_charset_to_utf8(data, len, css_charset);
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -883,6 +1103,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
         const char* href = extract_element_attribute(elem, "href", nullptr);
 
         if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
+            // Extract optional charset attribute from <link>
+            const char* link_charset = extract_element_attribute(elem, "charset", nullptr);
+
             // Check media attribute - skip stylesheets that don't apply to screen
             const char* media = extract_element_attribute(elem, "media", nullptr);
             if (media && !css_evaluate_media_query(engine, media)) {
@@ -961,21 +1184,89 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
             // Load and parse CSS file (or download from HTTP URL)
             char* css_content = nullptr;
+            size_t css_file_size = 0;
             if (is_http_css) {
                 // Download CSS from HTTP URL
                 size_t content_size = 0;
                 css_content = download_http_content(css_path, &content_size, nullptr);
                 if (css_content) {
+                    css_file_size = content_size;
                     log_debug("[CSS] Downloaded stylesheet from URL: %s (%zu bytes)", css_path, content_size);
                 }
             } else {
-                css_content = read_text_file(css_path);
+                size_t content_size = 0;
+                css_content = read_binary_file(css_path, &content_size);
+                if (css_content) {
+                    css_file_size = content_size;
+                }
             }
             if (css_content) {
-                size_t css_len = strlen(css_content);
+                // Use binary size when available (handles null bytes); fallback to strlen
+                size_t css_len = css_file_size > 0 ? css_file_size : strlen(css_content);
+
+                // Check for .headers companion file (WPT HTTP charset simulation)
+                const char* http_charset = nullptr;
+                static char http_cs_buf[64];
+                if (!is_http_css) {
+                    char headers_path[1040];
+                    snprintf(headers_path, sizeof(headers_path), "%s.headers", css_path);
+                    if (access(headers_path, R_OK) == 0) {
+                        char* headers = read_text_file(headers_path);
+                        if (headers) {
+                        // parse: Content-Type: text/css; charset=XXX
+                        const char* cs = strstr(headers, "charset=");
+                        if (!cs) cs = strstr(headers, "Charset=");
+                        if (cs) {
+                            cs += 8; // skip "charset="
+                            size_t i = 0;
+                            while (cs[i] && cs[i] != '\n' && cs[i] != '\r' && cs[i] != ' ' && cs[i] != ';' && i < sizeof(http_cs_buf) - 1) {
+                                http_cs_buf[i] = cs[i];
+                                i++;
+                            }
+                            http_cs_buf[i] = '\0';
+                            if (i > 0) {
+                                http_charset = http_cs_buf;
+                                log_debug("[CSS charset] Found .headers file charset='%s' for %s", http_charset, css_path);
+                            }
+                        }
+                        mem_free(headers);
+                    }
+                    } // access check
+                }
+
+                // CSS Syntax §3.2: determine encoding and convert to UTF-8 if needed
+                const char* css_charset = detect_css_encoding(css_content, css_len, g_css_document_charset,
+                                                              http_charset, link_charset);
+                if (css_charset) {
+                    char* utf8_css = convert_css_to_utf8(css_content, css_len, css_charset);
+                    if (utf8_css) {
+                        mem_free(css_content);
+                        css_content = utf8_css;
+                        // Note: can't use strlen here if conversion output contains NUL bytes
+                        // (e.g., from UTF-16 encoded files). Sanitize first to replace NULs.
+                    }
+                }
+
+                // CSS Syntax §3.3: sanitize UTF-8 (replace invalid bytes + NUL bytes with U+FFFD)
+                char* sanitized = sanitize_utf8_css(css_content, css_len);
+                if (sanitized) {
+                    mem_free(css_content);
+                    css_content = sanitized;
+                }
+                // After sanitization, no NUL bytes remain — strlen is safe
+                css_len = strlen(css_content);
+
+                // CSS Syntax §3.3: strip UTF-8 BOM (U+FEFF) if present
+                char* css_data = css_content;  // track original alloc for free
+                if (css_len >= 3 && (unsigned char)css_data[0] == 0xEF &&
+                    (unsigned char)css_data[1] == 0xBB && (unsigned char)css_data[2] == 0xBF) {
+                    css_data += 3;
+                    css_len -= 3;
+                }
+
                 char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
                 if (css_pool_copy) {
-                    str_copy(css_pool_copy, css_len + 1, css_content, css_len);
+                    str_copy(css_pool_copy, css_len + 1, css_data, css_len);
                     mem_free(css_content);
 
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
@@ -1896,7 +2187,7 @@ static bool content_looks_utf8(const char* html, size_t len) {
  * Also skips conversion if content is already valid UTF-8 (e.g., file saved as UTF-8
  * but with a legacy meta charset tag).
  */
-static const char* detect_html_charset(const char* html, size_t len) {
+const char* detect_html_charset(const char* html, size_t len) {
     if (!html || len == 0) return nullptr;
 
     // Per HTML spec: BOM takes precedence over all other charset declarations
@@ -1982,7 +2273,10 @@ static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
     char* out = out_buf;
     for (size_t i = 0; i < content_len; i++) {
         unsigned char c = (unsigned char)content[i];
-        if (c < 0x80) {
+        if (c == 0x00) {
+            // CSS §3.3: replace NUL with U+FFFD
+            *out++ = (char)0xEF; *out++ = (char)0xBF; *out++ = (char)0xBD;
+        } else if (c < 0x80) {
             *out++ = (char)c;
         } else {
             uint16_t cp;
@@ -2011,12 +2305,110 @@ static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
 }
 
 /**
- * Convert HTML content from a non-UTF-8 charset to UTF-8.
+ * Convert content from a single-byte encoding to UTF-8 using a 128-entry mapping table.
+ * The table maps bytes 0x80-0xFF to Unicode code points.
+ * Bytes 0x00-0x7F are passed through as ASCII.
+ */
+static char* convert_single_byte_to_utf8(const char* content, size_t content_len, const uint16_t* table, const char* charset_name) {
+    if (!content || !table) return nullptr;
+    size_t out_size = content_len * 3 + 1;
+    char* out_buf = (char*)mem_alloc(out_size, MEM_CAT_LAYOUT);
+    if (!out_buf) return nullptr;
+
+    char* out = out_buf;
+    for (size_t i = 0; i < content_len; i++) {
+        unsigned char c = (unsigned char)content[i];
+        if (c == 0x00) {
+            // CSS §3.3: replace NUL with U+FFFD
+            *out++ = (char)0xEF; *out++ = (char)0xBF; *out++ = (char)0xBD;
+        } else if (c < 0x80) {
+            *out++ = (char)c;
+        } else {
+            uint16_t cp = table[c - 0x80];
+            if (cp < 0x80) {
+                *out++ = (char)cp;
+            } else if (cp < 0x800) {
+                *out++ = (char)(0xC0 | (cp >> 6));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            } else {
+                *out++ = (char)(0xE0 | (cp >> 12));
+                *out++ = (char)(0x80 | ((cp >> 6) & 0x3F));
+                *out++ = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    }
+    *out = '\0';
+    log_info("[charset] Converted %zu bytes %s to %zu bytes UTF-8", content_len, charset_name, (size_t)(out - out_buf));
+    return out_buf;
+}
+
+// Windows-1251 (Cyrillic) to Unicode mapping for 0x80-0xFF
+static const uint16_t win1251_table[128] = {
+    0x0402, 0x0403, 0x201A, 0x0453, 0x201E, 0x2026, 0x2020, 0x2021, // 80-87
+    0x20AC, 0x2030, 0x0409, 0x2039, 0x040A, 0x040C, 0x040B, 0x040F, // 88-8F
+    0x0452, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, // 90-97
+    0x0098, 0x2122, 0x0459, 0x203A, 0x045A, 0x045C, 0x045B, 0x045F, // 98-9F
+    0x00A0, 0x040E, 0x045E, 0x0408, 0x00A4, 0x0490, 0x00A6, 0x00A7, // A0-A7
+    0x0401, 0x00A9, 0x0404, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x0407, // A8-AF
+    0x00B0, 0x00B1, 0x0406, 0x0456, 0x0491, 0x00B5, 0x00B6, 0x00B7, // B0-B7
+    0x0451, 0x2116, 0x0454, 0x00BB, 0x0458, 0x0405, 0x0455, 0x0457, // B8-BF
+    0x0410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415, 0x0416, 0x0417, // C0-C7
+    0x0418, 0x0419, 0x041A, 0x041B, 0x041C, 0x041D, 0x041E, 0x041F, // C8-CF
+    0x0420, 0x0421, 0x0422, 0x0423, 0x0424, 0x0425, 0x0426, 0x0427, // D0-D7
+    0x0428, 0x0429, 0x042A, 0x042B, 0x042C, 0x042D, 0x042E, 0x042F, // D8-DF
+    0x0430, 0x0431, 0x0432, 0x0433, 0x0434, 0x0435, 0x0436, 0x0437, // E0-E7
+    0x0438, 0x0439, 0x043A, 0x043B, 0x043C, 0x043D, 0x043E, 0x043F, // E8-EF
+    0x0440, 0x0441, 0x0442, 0x0443, 0x0444, 0x0445, 0x0446, 0x0447, // F0-F7
+    0x0448, 0x0449, 0x044A, 0x044B, 0x044C, 0x044D, 0x044E, 0x044F, // F8-FF
+};
+
+// Windows-1250 (Central European) to Unicode mapping for 0x80-0xFF
+static const uint16_t win1250_table[128] = {
+    0x20AC, 0x0081, 0x201A, 0x0083, 0x201E, 0x2026, 0x2020, 0x2021, // 80-87
+    0x0088, 0x2030, 0x0160, 0x2039, 0x015A, 0x0164, 0x017D, 0x0179, // 88-8F
+    0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, // 90-97
+    0x0098, 0x2122, 0x0161, 0x203A, 0x015B, 0x0165, 0x017E, 0x017A, // 98-9F
+    0x00A0, 0x02C7, 0x02D8, 0x0141, 0x00A4, 0x0104, 0x00A6, 0x00A7, // A0-A7
+    0x00A8, 0x00A9, 0x015E, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x017B, // A8-AF
+    0x00B0, 0x00B1, 0x02DB, 0x0142, 0x00B4, 0x00B5, 0x00B6, 0x00B7, // B0-B7
+    0x00B8, 0x0105, 0x015F, 0x00BB, 0x013D, 0x02DD, 0x013E, 0x017C, // B8-BF
+    0x0154, 0x00C1, 0x00C2, 0x0102, 0x00C4, 0x0139, 0x0106, 0x00C7, // C0-C7
+    0x010C, 0x00C9, 0x0118, 0x00CB, 0x011A, 0x00CD, 0x00CE, 0x010E, // C8-CF
+    0x0110, 0x0143, 0x0147, 0x00D3, 0x00D4, 0x0150, 0x00D6, 0x00D7, // D0-D7
+    0x0158, 0x016E, 0x00DA, 0x0170, 0x00DC, 0x00DD, 0x0162, 0x00DF, // D8-DF
+    0x0155, 0x00E1, 0x00E2, 0x0103, 0x00E4, 0x013A, 0x0107, 0x00E7, // E0-E7
+    0x010D, 0x00E9, 0x0119, 0x00EB, 0x011B, 0x00ED, 0x00EE, 0x010F, // E8-EF
+    0x0111, 0x0144, 0x0148, 0x00F3, 0x00F4, 0x0151, 0x00F6, 0x00F7, // F0-F7
+    0x0159, 0x016F, 0x00FA, 0x0171, 0x00FC, 0x00FD, 0x0163, 0x02D9, // F8-FF
+};
+
+// Windows-1253 (Greek) to Unicode mapping for 0x80-0xFF
+static const uint16_t win1253_table[128] = {
+    0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, // 80-87
+    0x0088, 0x2030, 0x008A, 0x2039, 0x008C, 0x008D, 0x008E, 0x008F, // 88-8F
+    0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, // 90-97
+    0x0098, 0x2122, 0x009A, 0x203A, 0x009C, 0x009D, 0x009E, 0x009F, // 98-9F
+    0x00A0, 0x0385, 0x0386, 0x00A3, 0x00A4, 0x00A5, 0x00A6, 0x00A7, // A0-A7
+    0x00A8, 0x00A9, 0xFFFD, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x2015, // A8-AF
+    0x00B0, 0x00B1, 0x00B2, 0x00B3, 0x0384, 0x00B5, 0x00B6, 0x00B7, // B0-B7
+    0x0388, 0x0389, 0x038A, 0x00BB, 0x038C, 0x00BD, 0x038E, 0x038F, // B8-BF
+    0x0390, 0x0391, 0x0392, 0x0393, 0x0394, 0x0395, 0x0396, 0x0397, // C0-C7
+    0x0398, 0x0399, 0x039A, 0x039B, 0x039C, 0x039D, 0x039E, 0x039F, // C8-CF
+    0x03A0, 0x03A1, 0xFFFD, 0x03A3, 0x03A4, 0x03A5, 0x03A6, 0x03A7, // D0-D7
+    0x03A8, 0x03A9, 0x03AA, 0x03AB, 0x03AC, 0x03AD, 0x03AE, 0x03AF, // D8-DF
+    0x03B0, 0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B5, 0x03B6, 0x03B7, // E0-E7
+    0x03B8, 0x03B9, 0x03BA, 0x03BB, 0x03BC, 0x03BD, 0x03BE, 0x03BF, // E8-EF
+    0x03C0, 0x03C1, 0x03C2, 0x03C3, 0x03C4, 0x03C5, 0x03C6, 0x03C7, // F0-F7
+    0x03C8, 0x03C9, 0x03CA, 0x03CB, 0x03CC, 0x03CD, 0x03CE, 0xFFFD, // F8-FF
+};
+
+/**
+ * Convert content from a non-UTF-8 charset to UTF-8.
  * Currently supports ISO-8859-1 and Windows-1252 (covers ~95% of non-UTF-8 pages).
  * Returns a newly allocated UTF-8 string or nullptr if charset is unsupported.
  * Caller must free the returned string with mem_free().
  */
-static char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset) {
+char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset) {
     if (!content || !from_charset) return nullptr;
 
     // ISO-8859-1 and Windows-1252 use the same converter
@@ -2026,6 +2418,18 @@ static char* convert_charset_to_utf8(const char* content, size_t content_len, co
         strcmp(from_charset, "windows-1252") == 0 ||
         strcmp(from_charset, "cp1252") == 0) {
         return convert_latin1_to_utf8(content, content_len);
+    }
+
+    if (strcmp(from_charset, "windows-1251") == 0 || strcmp(from_charset, "cp1251") == 0) {
+        return convert_single_byte_to_utf8(content, content_len, win1251_table, "windows-1251");
+    }
+
+    if (strcmp(from_charset, "windows-1250") == 0 || strcmp(from_charset, "cp1250") == 0) {
+        return convert_single_byte_to_utf8(content, content_len, win1250_table, "windows-1250");
+    }
+
+    if (strcmp(from_charset, "windows-1253") == 0 || strcmp(from_charset, "cp1253") == 0) {
+        return convert_single_byte_to_utf8(content, content_len, win1253_table, "windows-1253");
     }
 
     log_warn("[charset] Unsupported charset '%s', proceeding with raw content", from_charset);
@@ -2128,11 +2532,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     }
 
     // Detect non-UTF-8 charset and convert if needed
+    const char* detected_charset = nullptr;
     if (html_content && html_content_owned) {
         size_t html_len = strlen(html_content);
-        const char* charset = detect_html_charset(html_content, html_len);
-        if (charset) {
-            char* utf8_content = convert_charset_to_utf8(html_content, html_len, charset);
+        detected_charset = detect_html_charset(html_content, html_len);
+        if (detected_charset) {
+            char* utf8_content = convert_charset_to_utf8(html_content, html_len, detected_charset);
             if (utf8_content) {
                 mem_free(html_content);
                 html_content = utf8_content;
@@ -2219,6 +2624,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_error("Failed to create DomDocument");
         return nullptr;
     }
+    dom_doc->document_charset = detected_charset;
 
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);
@@ -2292,8 +2698,10 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int inline_stylesheet_count = 0;
     int linked_stylesheet_count = 0;
     const char* css_base_path = url_get_href(html_url);
+    g_css_document_charset = dom_doc->document_charset; // set fallback encoding for CSS files
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, css_base_path, pool, &inline_stylesheet_count, &linked_stylesheet_count);
+    g_css_document_charset = nullptr; // reset after CSS collection
 
     auto t_css_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());

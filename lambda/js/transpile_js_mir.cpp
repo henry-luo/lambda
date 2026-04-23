@@ -6227,6 +6227,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     if (id->name->len == 4 && strncmp(id->name->chars, "$262", 4) == 0) {
         return jm_call_0(mt, "js_get_262_object_value", MIR_T_I64);
     }
+    if (id->name->len == 3 && strncmp(id->name->chars, "CSS", 3) == 0) {
+        return jm_call_0(mt, "js_get_css_object_value", MIR_T_I64);
+    }
 
     // v48: Global builtin functions as values (parseInt, parseFloat, isNaN, etc.)
     {

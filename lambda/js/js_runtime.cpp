@@ -3429,6 +3429,9 @@ enum JsBuiltinId {
     JS_BUILTIN_ATOMICS_SUB,
     JS_BUILTIN_ATOMICS_WAIT,
     JS_BUILTIN_ATOMICS_XOR,
+    // CSS namespace methods
+    JS_BUILTIN_CSS_SUPPORTS,
+    JS_BUILTIN_CSS_ESCAPE,
     JS_BUILTIN_MAX
 };
 
@@ -5264,6 +5267,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
             case MAP_KIND_CSSOM:
+                if (js_is_css_namespace(object)) return ItemNull; // methods only, no properties
                 if (js_is_stylesheet(object)) return js_cssom_stylesheet_get_property(object, key);
                 if (js_is_css_rule(object)) return js_cssom_rule_get_property(object, key);
                 return js_cssom_rule_decl_get_property(object, key);
@@ -11225,6 +11229,19 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_map_method(this_val, mn, &arg0, arg_count);
     }
 
+    case JS_BUILTIN_CSS_SUPPORTS: {
+        // CSS.supports(property, value) or CSS.supports(conditionText)
+        Item css_obj = js_get_css_object_value();
+        Item mn = (Item){.item = s2it(heap_create_name("supports", 8))};
+        return js_css_namespace_method(css_obj, mn, args, arg_count);
+    }
+    case JS_BUILTIN_CSS_ESCAPE: {
+        // CSS.escape(ident)
+        Item css_obj = js_get_css_object_value();
+        Item mn = (Item){.item = s2it(heap_create_name("escape", 6))};
+        return js_css_namespace_method(css_obj, mn, args, arg_count);
+    }
+
     default:
         log_error("js_dispatch_builtin: unknown builtin_id=%d", builtin_id);
         return undef;
@@ -12998,6 +13015,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return js_document_proxy_method(method_name, args, argc);
     }
     // CSSOM wrapper methods
+    if (js_is_css_namespace(obj)) {
+        return js_css_namespace_method(obj, method_name, args, argc);
+    }
     if (js_is_stylesheet(obj)) {
         return js_cssom_stylesheet_method(obj, method_name, args, argc);
     }
@@ -17221,6 +17241,49 @@ extern "C" Item js_get_json_object_value() {
         }
     }
     return js_json_object;
+}
+
+// =============================================================================
+// CSS Namespace Object (CSS.supports, CSS.escape)
+// =============================================================================
+static Item js_css_namespace_object = {.item = ITEM_NULL};
+extern "C" void js_reset_css_namespace_object() { js_css_namespace_object = (Item){.item = ITEM_NULL}; }
+
+extern "C" Item js_get_css_object_value() {
+    if (js_css_namespace_object.item != ITEM_NULL) {
+        return js_css_namespace_object;
+    }
+
+    js_css_namespace_object = js_object_create(ItemNull);
+    heap_register_gc_root(&js_css_namespace_object.item);
+
+    // tag as CSS namespace via MAP_KIND_CSSOM + sentinel marker
+    extern TypeMap js_css_namespace_marker;
+    if (get_type_id(js_css_namespace_object) == LMD_TYPE_MAP) {
+        Map* m = js_css_namespace_object.map;
+        m->map_kind = MAP_KIND_CSSOM;
+        m->type = (void*)&js_css_namespace_marker;
+    }
+
+    // register supports and escape as callable builtin function properties
+    struct { const char* name; int id; int pc; } methods[] = {
+        {"supports", JS_BUILTIN_CSS_SUPPORTS, 2},
+        {"escape", JS_BUILTIN_CSS_ESCAPE, 1},
+    };
+    for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
+        Item key = (Item){.item = s2it(heap_create_name(methods[i].name, strlen(methods[i].name)))};
+        Item fn = js_get_or_create_builtin(methods[i].id, methods[i].name, methods[i].pc);
+        js_property_set(js_css_namespace_object, key, fn);
+        js_mark_non_enumerable(js_css_namespace_object, key);
+    }
+
+    // toStringTag
+    Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    js_property_set(js_css_namespace_object, tag_k, (Item){.item = s2it(heap_create_name("CSS", 3))});
+    js_mark_non_writable(js_css_namespace_object, tag_k);
+    js_mark_non_enumerable(js_css_namespace_object, tag_k);
+
+    return js_css_namespace_object;
 }
 
 static Item js_console_object = {.item = ITEM_NULL};

@@ -147,6 +147,9 @@ extern Element* get_html_root_element(Input* input);
 extern DomDocument* dom_document_create(Input* input);
 extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
+extern const char* detect_html_charset(const char* html, size_t len);
+extern char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
+extern const char* g_css_document_charset;
 
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
@@ -1376,6 +1379,20 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
 
+                // Detect non-UTF-8 charset and convert HTML if needed
+                const char* doc_charset = nullptr;
+                {
+                    size_t html_len = strlen(html_content);
+                    doc_charset = detect_html_charset(html_content, html_len);
+                    if (doc_charset) {
+                        char* utf8_html = convert_charset_to_utf8(html_content, html_len, doc_charset);
+                        if (utf8_html) {
+                            mem_free(html_content);
+                            html_content = utf8_html;
+                        }
+                    }
+                }
+
                 // Use heap-allocated String* for type param (flexible array member)
                 String* html_type = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_SYSTEM);
                 html_type->len = 4;
@@ -1389,6 +1406,7 @@ int main(int argc, char *argv[]) {
                     if (html_root) {
                         DomDocument* dom_doc = dom_document_create(input);
                         if (dom_doc) {
+                            dom_doc->document_charset = doc_charset;
                             // init CSS property system before building DOM tree
                             // so inline style parsing resolves property IDs correctly
                             css_property_system_init(dom_doc->pool);
@@ -1402,8 +1420,10 @@ int main(int argc, char *argv[]) {
                                 CssEngine* css_engine = css_engine_create(dom_doc->pool);
                                 if (css_engine) {
                                     int sheet_count = 0;
+                                    g_css_document_charset = doc_charset;
                                     CssStylesheet** sheets = extract_and_collect_css(
                                         html_root, css_engine, html_file, dom_doc->pool, &sheet_count);
+                                    g_css_document_charset = nullptr;
                                     dom_doc->stylesheets = sheets;
                                     dom_doc->stylesheet_count = sheet_count;
                                     log_debug("JS document: extracted %d stylesheet(s)", sheet_count);

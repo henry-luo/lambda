@@ -151,6 +151,28 @@ Item js_cssom_get_document_stylesheets(void);
  */
 Item js_cssom_get_style_element_sheet(Item elem);
 
+// =============================================================================
+// CSS Namespace Object (CSS.supports, CSS.escape)
+// =============================================================================
+
+/** Check if an Item is the CSS namespace object */
+bool js_is_css_namespace(Item item);
+
+/**
+ * Get the global CSS namespace object (for CSS.supports(), CSS.escape()).
+ * @return Item wrapping the CSS namespace
+ */
+Item js_get_css_object_value(void);
+
+/**
+ * Call method on the CSS namespace object.
+ * Supported: supports(property, value), supports(conditionText), escape(ident)
+ */
+Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc);
+
+/** Reset the CSS namespace object (for cleanup between tests) */
+void js_reset_css_namespace_object(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -125,6 +125,9 @@ struct DomDocument {
     void* js_runtime_pool;          // Pool* — retained mmap pool for JS code
     void* js_event_registry;        // JsEventRegistry* — compiled event handler registry
 
+    // Document charset (from <meta charset> or HTTP Content-Type), for CSS fallback encoding
+    const char* document_charset;     // e.g. "windows-1251", nullptr means UTF-8
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -146,7 +149,8 @@ struct DomDocument {
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
                     js_runtime_name_pool(nullptr), js_runtime_pool(nullptr),
-                    js_event_registry(nullptr) {}
+                    js_event_registry(nullptr),
+                    document_charset(nullptr) {}
 };
 
 typedef struct {

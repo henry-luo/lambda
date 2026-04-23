@@ -1205,8 +1205,23 @@ run-radiant-baseline:
 		echo "   ⚠️  test/render/test_radiant_render.js not found"; \
 	fi; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + render_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + render_failed)); \
+	wpt_syntax_passed=0; wpt_syntax_failed=0; wpt_syntax_status="⏭️  SKIP"; \
+	echo ""; \
+	echo "📦 WPT CSS Syntax Conformance:"; \
+	if [ -f "test/test_wpt_css_syntax_gtest.exe" ]; then \
+		output=$$(./test/test_wpt_css_syntax_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[  PASSED|^\[  FAILED|^\[  SKIPPED" | tail -5; \
+		wpt_syntax_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		wpt_syntax_failed=$$(echo "$$output" | grep -E "^[0-9]+ FAILED TEST" | grep -oE "^[0-9]+" || echo "0"); \
+		wpt_syntax_passed=$${wpt_syntax_passed:-0}; wpt_syntax_failed=$${wpt_syntax_failed:-0}; \
+		wpt_syntax_baseline=25; \
+		if [ "$$wpt_syntax_passed" -ge "$$wpt_syntax_baseline" ] 2>/dev/null; then wpt_syntax_status="✅ PASS"; else wpt_syntax_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_wpt_css_syntax_gtest.exe not found"; \
+	fi; \
+	\
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1231,7 +1246,8 @@ run-radiant-baseline:
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
-	echo "   └── Render Visual       $$render_status  ($$render_passed passed, $$render_failed failed) (test_radiant_render.js)"; \
+	echo "   ├── Render Visual       $$render_status  ($$render_passed passed, $$render_failed failed) (test_radiant_render.js)"; \
+	echo "   └── WPT CSS Syntax      $$wpt_syntax_status  ($$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
