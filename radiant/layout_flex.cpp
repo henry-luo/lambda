@@ -4829,9 +4829,17 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     } else if (item->width <= 0.0f && item->fi->has_intrinsic_width) {
                         float intrinsic_width = item->fi->intrinsic_width.max_content;
                         if (intrinsic_width > 0.0f) {
-                            item->width = intrinsic_width;
-                            log_debug("INTRINSIC_WIDTH: Set item width=%.1f from intrinsic content (align=%d)",
-                                      intrinsic_width, align_type);
+                            // intrinsic_width is content-box, convert to border-box
+                            float border_box_width = intrinsic_width;
+                            if (item->bound) {
+                                border_box_width += item->bound->padding.left + item->bound->padding.right;
+                                if (item->bound->border) {
+                                    border_box_width += item->bound->border->width.left + item->bound->border->width.right;
+                                }
+                            }
+                            item->width = border_box_width;
+                            log_debug("INTRINSIC_WIDTH: Set item width=%.1f from intrinsic content %.1f + padding/border (align=%d)",
+                                      border_box_width, intrinsic_width, align_type);
                         }
                     }
                 } else {
@@ -5924,7 +5932,8 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                                     if (lh->type == CSS_VALUE_TYPE_NUMBER) {
                                                         line_height = font_size * (float)lh->data.number.value;
                                                     } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                                                        float lh_px = (float)lh->data.length.value;
+                                                        // use resolve_length_value to handle rem/em/etc. units
+                                                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
                                                         if (lh_px > 0) line_height = lh_px;
                                                     } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
                                                         line_height = font_size * (float)(lh->data.percentage.value / 100.0);
@@ -6015,6 +6024,18 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                         }
                     }
                     log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit width=%.1f (border-box)",
+                              i, j, hypothetical_cross);
+                } else if (item->fi && item->fi->has_intrinsic_width &&
+                           item->fi->intrinsic_width.max_content > 0) {
+                    // use intrinsic max-content width (stored as content-box, convert to border-box)
+                    hypothetical_cross = item->fi->intrinsic_width.max_content;
+                    if (item->bound) {
+                        hypothetical_cross += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            hypothetical_cross += item->bound->border->width.left + item->bound->border->width.right;
+                        }
+                    }
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using intrinsic max-content width=%.1f (border-box)",
                               i, j, hypothetical_cross);
                 } else {
                     // use measured/content width

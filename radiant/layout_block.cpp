@@ -284,7 +284,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // DON'T copy bound - pseudo-element should have its own BoundaryProp
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
     pseudo_elem->bound = nullptr;  // Will be allocated when CSS properties are applied
-    pseudo_elem->in_line = parent->in_line;
+    // DON'T copy in_line - pseudo-element should have its own InlineProp
+    // pseudo_elem->in_line = parent->in_line;  // BUG: causes shared opacity
+    pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
 
     // Get display value from pseudo-element's styles (before_styles or after_styles)
     // Default to inline for pseudo-elements per CSS spec
@@ -503,9 +505,14 @@ static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem)
 
     log_debug("%s [PSEUDO] Laying out %s content", pseudo_elem->source_loc(), pseudo_elem->tag_name);
 
-    // Resolve CSS styles for the pseudo-element BEFORE layout
-    // This ensures font-family and other properties from CSS are applied
+    // Resolve CSS styles for the pseudo-element BEFORE layout.
+    // IMPORTANT: Set lycon->view to the pseudo-element so that CSS property
+    // callbacks (which use (ViewSpan*)lycon->view) apply properties to the
+    // pseudo-element itself, not the parent element.
+    View* saved_view = lycon->view;
+    lycon->view = (View*)pseudo_elem;
     dom_node_resolve_style(pseudo_elem, lycon);
+    lycon->view = saved_view;
 
     // Layout the pseudo-element as inline (it will lay out its text child)
     layout_inline(lycon, pseudo_elem, pseudo_elem->display);
@@ -1786,6 +1793,10 @@ static float apply_text_box_trim(ViewBlock* block) {
 // (before the parent shrank). This function corrects their widths and repositions
 // text content for text-align center/right.
 static void adjust_block_children_after_shrink(ViewBlock* parent, float new_parent_cw, CssEnum inherited_text_align) {
+    // CSS Flexbox §9: Flex item widths are determined by the flex algorithm,
+    // not by normal block flow rules. Skip adjustment for flex containers.
+    if (parent->display.inner == CSS_VALUE_FLEX) return;
+
     for (View* child = ((ViewElement*)parent)->first_placed_child(); child; child = child->next()) {
         // only adjust block-level elements in normal flow
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
@@ -2590,7 +2601,9 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
     // allocate a new FontProp via alloc_font_prop(), which properly copies from
     // lycon->font.style (the parent's computed font values).
     pseudo_elem->font = nullptr;
-    pseudo_elem->in_line = parent_elem->in_line;
+    // DON'T copy in_line - pseudo-element should have its own InlineProp
+    // pseudo_elem->in_line = parent_elem->in_line;  // BUG: causes shared opacity
+    pseudo_elem->in_line = nullptr;  // Will be allocated when CSS properties are applied
 
     // Log font inheritance for debugging
     log_debug("[Pseudo-Element] font=nullptr for %s (will be allocated during style resolution)",
@@ -5752,31 +5765,35 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // CSS 2.1 §10.3.7: For absolutely positioned elements whose specified display
-    // was inline (blockified by §9.7), the static position is the inline cursor.
-    // Skip line_break to preserve the inline cursor in pa_line->advance_x.
-    // For originally block-level abs-pos elements, line_break is needed so the
-    // static position is at the start of a new line.
+    // was inline-level (inline or inline-block, blockified by §9.7), the static
+    // position is the inline cursor. Skip line_break to preserve the inline
+    // cursor in pa_line->advance_x. For originally block-level abs-pos elements,
+    // line_break is needed so the static position is at the start of a new line.
     // NOTE: elem->display and elem->position may not be resolved yet (dom_node_resolve_style
     // runs after this check), so we also check the specified_style tree.
     bool is_blockified_inline_abspos = false;
     if (elmt->is_element()) {
         DomElement* elem = elmt->as_element();
         // Try already-resolved properties first
-        bool was_inline = false;
+        bool was_inline_level = false;
         bool is_abspos = false;
         if (elem->styles_resolved && elem->display.inner != 0) {
-            was_inline = (elem->display.outer == CSS_VALUE_INLINE);
+            was_inline_level = (elem->display.outer == CSS_VALUE_INLINE ||
+                                elem->display.outer == CSS_VALUE_INLINE_BLOCK);
         } else if (elem->specified_style && elem->specified_style->tree) {
             AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
             if (disp_node) {
                 StyleNode* sn = (StyleNode*)disp_node->declaration;
                 if (sn && sn->winning_decl && sn->winning_decl->value &&
                     sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                    was_inline = (sn->winning_decl->value->data.keyword == CSS_VALUE_INLINE);
+                    CssEnum kw = sn->winning_decl->value->data.keyword;
+                    was_inline_level = (kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK);
                 }
             } else {
-                // No explicit display in style — use tag default. <span> etc. default to inline.
-                was_inline = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
+                // No explicit display in style — use tag default.
+                // Inline tags (span, a, em, etc.) and inline-block tags (input,
+                // select, textarea, img, button, etc.) are all inline-level.
+                was_inline_level = (elem->tag_id == HTM_TAG_SPAN || elem->tag_id == HTM_TAG_A ||
                               elem->tag_id == HTM_TAG_EM || elem->tag_id == HTM_TAG_STRONG ||
                               elem->tag_id == HTM_TAG_B || elem->tag_id == HTM_TAG_I ||
                               elem->tag_id == HTM_TAG_U || elem->tag_id == HTM_TAG_S ||
@@ -5785,7 +5802,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                               elem->tag_id == HTM_TAG_ABBR || elem->tag_id == HTM_TAG_CITE ||
                               elem->tag_id == HTM_TAG_Q || elem->tag_id == HTM_TAG_VAR ||
                               elem->tag_id == HTM_TAG_TIME || elem->tag_id == HTM_TAG_MARK ||
-                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI);
+                              elem->tag_id == HTM_TAG_BDO || elem->tag_id == HTM_TAG_BDI ||
+                              elem->tag_id == HTM_TAG_IMG || elem->tag_id == HTM_TAG_INPUT ||
+                              elem->tag_id == HTM_TAG_SELECT || elem->tag_id == HTM_TAG_TEXTAREA ||
+                              elem->tag_id == HTM_TAG_BUTTON || elem->tag_id == HTM_TAG_VIDEO ||
+                              elem->tag_id == HTM_TAG_IFRAME || elem->tag_id == HTM_TAG_CANVAS ||
+                              elem->tag_id == HTM_TAG_METER || elem->tag_id == HTM_TAG_PROGRESS ||
+                              elem->tag_id == HTM_TAG_EMBED || elem->tag_id == HTM_TAG_OBJECT ||
+                              elem->tag_id == HTM_TAG_SVG || elem->tag_id == HTM_TAG_LABEL);
             }
         }
         if (elem->position) {
@@ -5802,7 +5826,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
         }
-        if (was_inline && is_abspos) {
+        if (was_inline_level && is_abspos) {
             is_blockified_inline_abspos = true;
         }
     }
@@ -6997,6 +7021,19 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (!is_float) {
                 assert(lycon->line.is_line_start);
             }
+
+            // CSS 2.1 §10.8.1: Propagate last line baseline from block children
+            // to parent. When an inline-block contains only block-level children
+            // (no direct inline content), its baseline must come from the last
+            // in-flow block child's last line box. Each child's
+            // content_last_line_ascender is measured from its border-box top;
+            // translate to parent coordinates by adding child->y.
+            // Only the last in-flow child with line boxes matters — subsequent
+            // children with content_last_line_ascender > 0 naturally overwrite.
+            if (!is_float && content_last_line_ascender > 0) {
+                lycon->block.last_line_ascender = block->y + content_last_line_ascender;
+            }
+
             log_debug("%s block end, pa max_width: %f, pa advance_y: %f, block hg: %f", elmt->source_loc(),
                 lycon->block.max_width, lycon->block.advance_y, block->height);
         }

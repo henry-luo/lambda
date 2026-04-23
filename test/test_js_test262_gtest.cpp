@@ -818,6 +818,11 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     std::string combined;
     combined.reserve(source.size() + 4096);
 
+    // "use strict" must come FIRST (before includes) to act as a valid directive prologue
+    if (p.is_strict) {
+        combined += "\"use strict\";\n";
+    }
+
     for (auto& inc : p.includes) {
         // Skip includes already compiled into the preamble
         if (g_preamble_includes.count(inc)) continue;
@@ -828,9 +833,6 @@ static std::string assemble_test_source(const Test262Prepared& p) {
         }
     }
 
-    if (p.is_strict) {
-        combined += "\"use strict\";\n";
-    }
     combined += source;
     return combined;
 }
@@ -857,6 +859,12 @@ static std::string assemble_combined_source(const Test262Prepared& p) {
 
     std::string combined;
     combined.reserve(g_harness_sta.size() + g_harness_assert.size() + source.size() + 4096);
+
+    // "use strict" must come FIRST to act as a valid directive prologue
+    if (p.is_strict) {
+        combined += "\"use strict\";\n";
+    }
+
     combined += g_harness_sta;
     combined += '\n';
     combined += g_harness_assert;
@@ -870,9 +878,6 @@ static std::string assemble_combined_source(const Test262Prepared& p) {
         }
     }
 
-    if (p.is_strict) {
-        combined += "\"use strict\";\n";
-    }
     combined += source;
     return combined;
 }
@@ -1002,7 +1007,55 @@ static void load_partial_list(const char* path) {
     fclose(f);
 }
 
+// Clean up non-fully-passing list after baseline update.
+// Removes entries whose test names are now in the updated baseline (fully passing).
+// This prevents stale BATCH_KILL/CRASH/SLOW entries from accumulating across runs.
+static void clean_partial_list_after_baseline_update(
+    const std::vector<std::string>& new_baseline)
+{
+    std::unordered_set<std::string> baseline_set(new_baseline.begin(), new_baseline.end());
 
+    // Read existing partial file
+    FILE* f = fopen("temp/_t262_partial.txt", "r");
+    if (!f) return;
+    std::vector<std::string> kept_lines;
+    size_t removed = 0;
+    char buf[2048];
+    while (fgets(buf, sizeof(buf), f)) {
+        size_t len = strlen(buf);
+        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+        if (len == 0) { kept_lines.push_back(""); continue; }
+        if (buf[0] == '#') { kept_lines.push_back(std::string(buf)); continue; }
+        // Extract test name (second tab-separated field)
+        char* first_tab = strchr(buf, '\t');
+        if (!first_tab) { kept_lines.push_back(std::string(buf)); continue; }
+        char* name_start = first_tab + 1;
+        char* second_tab = strchr(name_start, '\t');
+        std::string name;
+        if (second_tab) name = std::string(name_start, second_tab - name_start);
+        else name = std::string(name_start);
+        if (baseline_set.count(name)) {
+            removed++;
+        } else {
+            // Restore the line (tabs were not modified since we only read)
+            *first_tab = '\t';  // already '\t' but be safe
+            if (second_tab) *second_tab = '\t';
+            kept_lines.push_back(std::string(buf));
+        }
+    }
+    fclose(f);
+
+    if (removed == 0) return;
+
+    // Write back the cleaned file
+    f = fopen("temp/_t262_partial.txt", "w");
+    if (!f) return;
+    // Strip trailing blank lines
+    while (!kept_lines.empty() && kept_lines.back().empty()) kept_lines.pop_back();
+    for (auto& line : kept_lines) fprintf(f, "%s\n", line.c_str());
+    fclose(f);
+    fprintf(stderr, "[test262] Cleaned temp/_t262_partial.txt: removed %zu stale entries (now in baseline)\n", removed);
+}
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
 //          Source assembly is deferred to Phase 2 workers (lazy assembly).
@@ -2417,6 +2470,7 @@ public:
             if (gate_ok) {
                 write_baseline_file(BASELINE_FILE, current_passing,
                                     g_total_tests, skipped, g_total_batched, failed);
+                clean_partial_list_after_baseline_update(current_passing);
                 printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: batch-lost=0 crash=0 min=%d)\n",
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }
@@ -2888,6 +2942,7 @@ int main(int argc, char** argv) {
             if (gate_ok) {
                 write_baseline_file(BASELINE_FILE, current_passing,
                                     g_total_tests, skipped, g_total_batched, failed);
+                clean_partial_list_after_baseline_update(current_passing);
                 printf("\n📝  Baseline updated: %s (%zu fully passing tests, gate: batch-lost=0 crash=0 min=%d)\n",
                        BASELINE_FILE, current_passing.size(), STABLE_BASELINE_MIN);
             }

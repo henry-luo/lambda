@@ -74,12 +74,40 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
 
-    // Chrome text input width: content width for default 20 chars = 147px (border-box 153).
-    // The content width is independent of font-size — Chrome uses system font average char width.
-    // For non-default sizes, scale proportionally from the default.
+    // HTML spec §4.10.5.3.7: The size attribute specifies the width in "average character widths".
+    // Chrome uses the advance width of '0' (U+0030) in the input's resolved font (the CSS 'ch'
+    // unit). The calibrated default (145px for 20 chars at 13.3333px) matches Chrome's system
+    // font. When CSS sets a different font-family (e.g. monospace), the '0' advance differs
+    // significantly, so we measure the actual glyph and use it instead.
     float def_bp_h = 2 * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
-    float default_content_w = FormDefaults::TEXT_WIDTH - def_bp_h;  // 147
-    float content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
+    float default_content_w = FormDefaults::TEXT_WIDTH - def_bp_h;  // 145
+    float ua_font_size = 13.3333f;
+    float calibrated_char_w = default_content_w / FormDefaults::TEXT_SIZE_CHARS;  // 7.25
+
+    float content_w = 0;
+    if (font && font->font_size > 0 && lycon->ui_context) {
+        FontBox temp_font;
+        setup_font(lycon->ui_context, &temp_font, font);
+        if (temp_font.font_handle) {
+            GlyphInfo zero_glyph = font_get_glyph(temp_font.font_handle, '0');
+            if (zero_glyph.advance_x > 0) {
+                // Scale the calibrated char width to the current font-size
+                float scaled_calibrated = calibrated_char_w * font->font_size / ua_font_size;
+                // If measured char width differs significantly from calibrated,
+                // the input has a custom font (e.g. monospace) — use actual glyph metrics
+                if (fabsf(zero_glyph.advance_x - scaled_calibrated) > 0.5f) {
+                    content_w = zero_glyph.advance_x * size;
+                }
+            }
+        }
+    }
+    if (content_w <= 0) {
+        // Use calibrated formula for default/system font
+        content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
+        if (font && font->font_size > 0 && font->font_size != ua_font_size) {
+            content_w = content_w * font->font_size / ua_font_size;
+        }
+    }
     form->intrinsic_width = content_w;
 
     // Height: Chrome uses max(default_content_height, normal_line_height).

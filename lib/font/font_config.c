@@ -376,8 +376,10 @@ static void add_macos_user_fonts(FontDatabase *db) {
     }
 }
 
-static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *entry) {
-    // Use Core Text APIs for enhanced metadata extraction on macOS
+static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *entry, Arena *arena) {
+    // Use Core Text APIs for accurate family name and weight on macOS.
+    // This is the authoritative source — avoids filename heuristics and TTF
+    // name table ambiguity (e.g. Name ID 1 containing style suffixes).
     CFStringRef path_str = CFStringCreateWithCString(NULL, file_path, kCFStringEncodingUTF8);
     CFURLRef url = CFURLCreateWithFileSystemPath(NULL, path_str, kCFURLPOSIXPathStyle, false);
 
@@ -392,17 +394,46 @@ static bool get_font_metadata_with_core_text(const char *file_path, FontEntry *e
     bool success = false;
     if (cg_font) {
         CTFontRef font = CTFontCreateWithGraphicsFont(cg_font, 12.0, NULL, NULL);
+
+        // family name
         CFStringRef family_name = CTFontCopyFamilyName(font);
         if (family_name) {
             char family_buffer[MAX_FONT_FAMILY_NAME];
             if (CFStringGetCString(family_name, family_buffer, sizeof(family_buffer), kCFStringEncodingUTF8)) {
-                // Update entry with Core Text metadata
-                // This is more accurate than TTF parsing for macOS system fonts
-                log_debug("Core Text family name: %s", family_buffer);
+                entry->family_name = arena_strdup(arena, family_buffer);
+                log_debug("font_config: Core Text family='%s' for %s", family_buffer, file_path);
                 success = true;
             }
             CFRelease(family_name);
         }
+
+        // weight — use CTFont traits dictionary to get the weight value
+        // kCTFontWeightTrait returns -1.0..1.0 (NSFontWeightXxx scale)
+        // map to CSS weight classes: thin=-0.8, light=-0.4, regular=0.0,
+        // medium=0.23, semibold=0.3, bold=0.4, heavy=0.56, black=0.62
+        CGFloat ct_weight = 0.0;
+        CFDictionaryRef traits_dict = CTFontCopyTraits(font);
+        if (traits_dict) {
+            CFNumberRef weight_num = CFDictionaryGetValue(traits_dict, kCTFontWeightTrait);
+            if (weight_num) {
+                CFNumberGetValue(weight_num, kCFNumberCGFloatType, &ct_weight);
+            }
+            CFRelease(traits_dict);
+        }
+        if      (ct_weight >= 0.56f) entry->weight = 900;
+        else if (ct_weight >= 0.40f) entry->weight = 700;
+        else if (ct_weight >= 0.30f) entry->weight = 600;
+        else if (ct_weight >= 0.23f) entry->weight = 500;
+        else if (ct_weight >= -0.20f) entry->weight = 400;
+        else if (ct_weight >= -0.40f) entry->weight = 300;
+        else                          entry->weight = 100;
+
+        // italic / oblique
+        CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font);
+        if (traits & kCTFontTraitItalic) {
+            entry->style = FONT_STYLE_ITALIC;
+        }
+
         CFRelease(font);
         CGFontRelease(cg_font);
     }
@@ -1495,6 +1526,11 @@ static bool parse_placeholder_font(FontEntry* placeholder, Arena* arena) {
     bool success = parse_font_metadata(placeholder->file_path, placeholder, arena);
     if (success) {
         placeholder->is_placeholder = false;  // No longer a placeholder
+#ifdef __APPLE__
+        // Override family name and weight with Core Text data — more accurate
+        // than TTF name table parsing for macOS system fonts.
+        get_font_metadata_with_core_text(placeholder->file_path, placeholder, arena);
+#endif
         return true;
     }
 

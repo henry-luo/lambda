@@ -36,9 +36,10 @@ static Item make_string_item(const char* str) {
 // Helper: get raw data pointer and length from a typed array Item
 static uint8_t* buffer_data(Item buf, int* out_len) {
     if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
-    // typed array keeps JsTypedArray* in map->data
+    // use js_get_typed_array_ptr to handle both original (data_cap==0)
+    // and upgraded layouts (after Object.defineProperty adds properties)
     Map* m = buf.map;
-    JsTypedArray* ta = (JsTypedArray*)m->data;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
     if (!ta || !ta->data) { *out_len = 0; return NULL; }
     *out_len = ta->byte_length;
     return (uint8_t*)ta->data;

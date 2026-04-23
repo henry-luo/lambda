@@ -1028,6 +1028,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 // Measure text content of button
                 DomNode* btn_child = elem->first_child;
                 float max_text_width = 0;
+                // Set up button's own font for measurement (UA default 13.3333px Arial,
+                // not parent's inherited font which may differ)
+                FontBox saved_font = lycon->font;
+                if (elem->font && elem->font->font_size > 0 && lycon->ui_context) {
+                    setup_font(lycon->ui_context, &lycon->font, elem->font);
+                }
                 while (btn_child) {
                     if (btn_child->is_text()) {
                         const char* text = (const char*)btn_child->text_data();
@@ -1041,6 +1047,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                     }
                     btn_child = btn_child->next_sibling;
                 }
+                lycon->font = saved_font;  // restore parent font
                 if (max_text_width > 0) {
                     // Store intrinsic size in form property for flex-basis calculation
                     elem->form->intrinsic_width = max_text_width;
@@ -1612,6 +1619,28 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                 min_width = widths.min_content;
                 max_width = widths.max_content;
+
+                // CSS Generated Content: add ::before/::after pseudo-element content widths.
+                // These inline pseudo-elements participate in the element's inline formatting
+                // context and contribute to its intrinsic size (CSS Sizing §5.1).
+                {
+                    DomElement* elem = item;
+                    for (int pi = 0; pi < 2; pi++) {
+                        bool is_before = (pi == 0);
+                        bool has_pseudo = is_before ? dom_element_has_before_content(elem)
+                                                    : dom_element_has_after_content(elem);
+                        if (!has_pseudo) continue;
+                        const char* pc = dom_element_get_pseudo_element_content(elem,
+                            is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER);
+                        if (pc && *pc) {
+                            TextIntrinsicWidths pw = measure_text_intrinsic_widths(lycon, pc, strlen(pc));
+                            max_width += pw.max_content;
+                            if (pw.min_content > min_width) min_width = pw.min_content;
+                            log_debug("calculate_item_intrinsic_sizes: %s content '%s' -> +%.1fpx width",
+                                      is_before ? "::before" : "::after", pc, pw.max_content);
+                        }
+                    }
+                }
 
                 // Calculate height using CSS line-height if available, otherwise font metrics
                 // Line-height is inherited, so walk up the parent chain to find it

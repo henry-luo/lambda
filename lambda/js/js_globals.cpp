@@ -1114,6 +1114,35 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
                 tm.tm_hour, tm.tm_min, tm.tm_sec, h_off, m_off);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
+        if (method_id == 50) { // getYear — Annex B: returns year - 1900
+            struct tm tm; localtime_r(&secs, &tm);
+            return (Item){.item = i2it(tm.tm_year)}; // tm_year is already year - 1900
+        }
+        if (method_id == 51) { // setYear — Annex B
+            // ES spec: ToNumber(symbol) throws TypeError
+            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
+                extern Item js_throw_type_error(const char* msg);
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            }
+            Item num = js_to_number(arg0);
+            if (js_check_exception()) return ItemNull;
+            double y = to_double(num);
+            if (isnan(y)) return store_ms(NAN);
+            int iy = (int)y;
+            // ES Annex B §B.2.4.1: if 0 ≤ y ≤ 99, year = y + 1900
+            if (iy >= 0 && iy <= 99) iy += 1900;
+            // ES Annex B §B.2.4.2 step 2: if t is NaN, let t be +0
+            double base_ms = isnan(ms) ? 0.0 : ms;
+            time_t base_secs = (time_t)(base_ms / 1000.0);
+            int old_millis = (int)(base_ms - (double)base_secs * 1000.0);
+            if (old_millis < 0) old_millis += 1000;
+            struct tm tm; localtime_r(&base_secs, &tm);
+            tm.tm_year = iy - 1900;
+            tm.tm_isdst = -1;
+            time_t new_secs = mktime(&tm);
+            double new_ms = (double)new_secs * 1000.0 + old_millis;
+            return store_ms(new_ms);
+        }
         return ItemNull;
     }
 
@@ -2814,6 +2843,34 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
             if (radix != 10) {
                 // v20: Handle float-to-radix conversion (integer + fractional parts)
                 TypeId nt = get_type_id(num);
+                // Fast path: small non-negative integer with hex radix (0-255)
+                // Avoids double conversion and division loop for the common case
+                // of n.toString(16) in encoding loops.
+                if (radix == 16 && nt == LMD_TYPE_INT) {
+                    int64_t iv = it2i(num);
+                    if (iv >= 0 && iv <= 0xFF) {
+                        static const char hex_lut[513] =
+                            "000102030405060708090a0b0c0d0e0f"
+                            "101112131415161718191a1b1c1d1e1f"
+                            "202122232425262728292a2b2c2d2e2f"
+                            "303132333435363738393a3b3c3d3e3f"
+                            "404142434445464748494a4b4c4d4e4f"
+                            "505152535455565758595a5b5c5d5e5f"
+                            "606162636465666768696a6b6c6d6e6f"
+                            "707172737475767778797a7b7c7d7e7f"
+                            "808182838485868788898a8b8c8d8e8f"
+                            "909192939495969798999a9b9c9d9e9f"
+                            "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+                            "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+                            "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf"
+                            "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+                            "e0e1e2e3e4e5e6e7e8e9eaebecedeeef"
+                            "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
+                        const char* p = &hex_lut[iv * 2];
+                        if (iv < 16) return (Item){.item = s2it(heap_create_name(p + 1, 1))};
+                        return (Item){.item = s2it(heap_create_name(p, 2))};
+                    }
+                }
                 double dval = 0;
                 if (nt == LMD_TYPE_INT) dval = (double)it2i(num);
                 else if (nt == LMD_TYPE_FLOAT) dval = it2d(num);
@@ -6223,8 +6280,9 @@ extern "C" Item js_object_from_entries(Item iterable) {
     for (int64_t i = 0; i < len; i++) {
         Item pair = js_array_get(arr, (Item){.item = i2it(i)});
         TypeId ptid = get_type_id(pair);
+        // Spec: entry must be an object. Accept arrays, maps (including string/number wrappers).
+        // Primitive strings are NOT objects — they should throw TypeError.
         if (ptid != LMD_TYPE_ARRAY && ptid != LMD_TYPE_MAP) {
-            // Spec: If Type(entry) is not Object, throw a TypeError
             extern Item js_new_error_with_name(Item type_name, Item message);
             extern void js_throw_value(Item error);
             Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
@@ -6232,10 +6290,21 @@ extern "C" Item js_object_from_entries(Item iterable) {
             js_throw_value(js_new_error_with_name(tn, msg));
             return ItemNull;
         }
-        Item key = js_array_get(pair, (Item){.item = i2it(0)});
-        Item val = js_array_get(pair, (Item){.item = i2it(1)});
-        Item key_str = js_to_string(key);
-        js_property_set(result, key_str, val);
+        Item key, val;
+        if (ptid == LMD_TYPE_ARRAY) {
+            key = js_array_get(pair, (Item){.item = i2it(0)});
+            val = js_array_get(pair, (Item){.item = i2it(1)});
+        } else {
+            // MAP or String: access [0] and [1] via property_get with string keys
+            Item k0 = (Item){.item = s2it(heap_create_name("0", 1))};
+            Item k1 = (Item){.item = s2it(heap_create_name("1", 1))};
+            key = js_property_get(pair, k0);
+            val = js_property_get(pair, k1);
+        }
+        // Use ToPropertyKey: preserves Symbol keys, converts others to string
+        extern Item js_to_property_key(Item key);
+        Item prop_key = js_to_property_key(key);
+        js_property_set(result, prop_key, val);
     }
     return result;
 }
@@ -7905,6 +7974,24 @@ static void js_stringify_escape_string(StrBuf* sb, const char* s, int len) {
                     char esc[8];
                     snprintf(esc, sizeof(esc), "\\u%04x", c);
                     strbuf_append_str_n(sb, esc, 6);
+                } else if (c >= 0xED && c <= 0xEF && i + 2 < len) {
+                    // Possible UTF-8 surrogate sequence (U+D800-U+DFFF) or BMP chars
+                    unsigned char c2 = (unsigned char)s[i + 1];
+                    unsigned char c3 = (unsigned char)s[i + 2];
+                    if ((c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
+                        unsigned int cp = ((c & 0x0F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+                        if (cp >= 0xD800 && cp <= 0xDFFF) {
+                            // ES2019: lone surrogate → \uXXXX escape
+                            char esc[8];
+                            snprintf(esc, sizeof(esc), "\\u%04x", cp);
+                            strbuf_append_str_n(sb, esc, 6);
+                            i += 2;
+                        } else {
+                            strbuf_append_char(sb, (char)c);
+                        }
+                    } else {
+                        strbuf_append_char(sb, (char)c);
+                    }
                 } else {
                     strbuf_append_char(sb, (char)c);
                 }
@@ -7947,7 +8034,7 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
         vtype = get_type_id(value);
     }
 
-    // Step 4: Unwrap Boolean/Number/String wrapper objects
+    // Step 4: Unwrap Boolean/Number/String/BigInt wrapper objects
     if (vtype == LMD_TYPE_MAP) {
         bool cn_own = false;
         Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
@@ -7965,6 +8052,10 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
                 } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
                     value = js_to_string(pv);
                     vtype = get_type_id(value);
+                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "BigInt", 6) == 0) {
+                    // ES spec step 10: BigInt → TypeError
+                    js_throw_type_error("Do not know how to serialize a BigInt");
+                    return false;
                 }
             }
         }
@@ -7974,6 +8065,15 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
     if (vtype == LMD_TYPE_UNDEFINED || vtype == LMD_TYPE_FUNC
         || js_is_symbol_item(value) || value.item == ITEM_JS_UNDEFINED) {
         return false;
+    }
+
+    // BigInt → TypeError (ES spec §24.5.2.9 step 10)
+    if (vtype == LMD_TYPE_DECIMAL) {
+        Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
+        if (dec && dec->unlimited == DECIMAL_BIGINT) {
+            js_throw_type_error("Do not know how to serialize a BigInt");
+            return false;
+        }
     }
     if (value.item == ItemNull.item) {
         strbuf_append_str_n(sb, "null", 4);
@@ -10403,6 +10503,8 @@ extern "C" Item js_symbol_well_known(Item name) {
             return js_make_symbol_item(JS_SYMBOL_ID_SPECIES);
         if (s->len == 5 && strncmp(s->chars, "match", 5) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_MATCH);
+        if (s->len == 8 && strncmp(s->chars, "matchAll", 8) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_MATCH_ALL);
         if (s->len == 7 && strncmp(s->chars, "replace", 7) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_REPLACE);
         if (s->len == 6 && strncmp(s->chars, "search", 6) == 0)

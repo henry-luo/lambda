@@ -51,6 +51,9 @@ typedef enum {
     // box-shadow blur (deferred so it runs after the shadow fill is rasterised)
     DL_BOX_BLUR_REGION,
     DL_BOX_BLUR_INSET,       // inset shadow blur: blur expanded region, restore outer pixels
+    // outer box-shadow clip: save pixels before shadow fill, restore inside element after blur
+    DL_SHADOW_CLIP_SAVE,
+    DL_SHADOW_CLIP_RESTORE,
     // element group markers (for retained sub-trees, Phase 2+)
     DL_BEGIN_ELEMENT,
     DL_END_ELEMENT,
@@ -199,6 +202,8 @@ typedef struct {
     float blur_radius;        // CSS blur radius in pixels
     int clip_type;            // ClipShapeType (0 = none, clips blur to CSS clip-path)
     float clip_params[8];    // serialized clip shape parameters
+    int exclude_type;         // ClipShapeType for element border-box exclusion (outer box-shadow)
+    float exclude_params[8]; // serialized exclude shape: restore pixels INSIDE this shape after blur
 } DlBoxBlurRegion;
 
 // Inset box-shadow blur: blur expanded region, restore pixels outside inner rect
@@ -208,6 +213,23 @@ typedef struct {
     float blur_radius;        // CSS blur radius in pixels
     uint32_t bg_color;        // element background color (surface pixel format)
 } DlBoxBlurInset;
+
+// Outer box-shadow clip save: saves a rectangular pixel region BEFORE the shadow
+// fill so that pixels inside the element border-box can be restored after blur.
+// Per CSS spec, outer box-shadow is never visible inside the border-box.
+typedef struct {
+    int rx, ry, rw, rh;      // pixel region to save (element border-box)
+} DlShadowClipSave;
+
+// Box-shadow clip restore: restores pixels from the preceding DL_SHADOW_CLIP_SAVE.
+// For outer shadows (restore_inside=1): restores pixels INSIDE the shape (element border-box).
+// For inset shadows (restore_inside=0): restores pixels OUTSIDE the shape (rounded corners).
+typedef struct {
+    int exclude_type;         // ClipShapeType for element border-box
+    float exclude_params[8]; // serialized shape parameters
+    int save_rx, save_ry, save_rw, save_rh;  // must match the save region
+    int restore_inside;       // 1 = restore inside shape (outer shadow), 0 = restore outside (inset)
+} DlShadowClipRestore;
 
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
 // The actual video frame pixels are blitted after tile compositing in the render loop.
@@ -254,6 +276,8 @@ typedef struct DisplayItem {
         DlApplyFilter        apply_filter;
         DlBoxBlurRegion      box_blur_region;
         DlBoxBlurInset       box_blur_inset;
+        DlShadowClipSave     shadow_clip_save;
+        DlShadowClipRestore  shadow_clip_restore;
         DlVideoPlaceholder   video_placeholder;
         DlWebviewLayerPlaceholder webview_layer_placeholder;
     };
@@ -353,9 +377,15 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      void* filter, const Bound* clip);
 
 void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
-                        int clip_type, const float* clip_params);
+                        int clip_type, const float* clip_params,
+                        int exclude_type = 0, const float* exclude_params = nullptr);
 
 void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color);
+
+void dl_shadow_clip_save(DisplayList* dl, int rx, int ry, int rw, int rh);
+void dl_shadow_clip_restore(DisplayList* dl, int exclude_type, const float* exclude_params,
+                            int save_rx, int save_ry, int save_rw, int save_rh,
+                            int restore_inside);
 
 // Video placeholder (rect + clip only; actual blit is post-composite)
 void dl_video_placeholder(DisplayList* dl, void* video,

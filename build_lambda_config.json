@@ -1155,6 +1155,46 @@
                     "description": "GNU OpenMP library (required by ThorVG)",
                     "lib": "-lgomp",
                     "link": "dynamic"
+                },
+                {
+                    "name": "webkit2gtk-4.1",
+                    "description": "WebKitGTK 4.1 — native web view for <webview> element",
+                    "include": "/usr/include/webkit2gtk-4.1",
+                    "lib": "-lwebkit2gtk-4.1",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gtk+-3.0",
+                    "description": "GTK 3 — required by WebKitGTK",
+                    "include": "/usr/include/gtk-3.0",
+                    "lib": "-lgtk-3",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "glib-2.0",
+                    "description": "GLib — required by GTK/WebKitGTK",
+                    "include": "/usr/include/glib-2.0",
+                    "lib": "-lglib-2.0",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gobject-2.0",
+                    "description": "GObject — required by GTK/WebKitGTK",
+                    "lib": "-lgobject-2.0",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "cairo",
+                    "description": "Cairo — required for WebKitGTK snapshot conversion",
+                    "lib": "-lcairo",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "javascriptcoregtk-4.1",
+                    "description": "JavaScriptCore — required by webkit2gtk-4.1 for JSC* API",
+                    "include": "/usr/include/webkitgtk-4.1",
+                    "lib": "-ljavascriptcoregtk-4.1",
+                    "link": "dynamic"
                 }
             ],
             "dev_libraries": [
@@ -1264,6 +1304,12 @@
                     "name": "CoreGraphics",
                     "include": null,
                     "lib": "-framework CoreGraphics",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "CoreText",
+                    "include": null,
+                    "lib": "-framework CoreText",
                     "link": "dynamic"
                 },
                 {
@@ -1435,7 +1481,10 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc"
+                            "rpmalloc",
+                            "CoreFoundation",
+                            "CoreGraphics",
+                            "CoreText"
                         ],
                         "additional_sources": [
                             "lib/font/font_config.c",

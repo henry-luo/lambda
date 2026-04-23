@@ -949,6 +949,19 @@ DisplayValue resolve_display_value(void* child) {
             return none_display;
         }
 
+        // HTML spec §4.11.1: Non-summary children of closed <details> are hidden.
+        // This must be checked here (not just in layout_flow_node) to cover all
+        // layout paths including flex and grid when CSS overrides display.
+        if (node->parent && node->parent->is_element()) {
+            DomElement* parent_elem = node->parent->as_element();
+            if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->has_attribute("open")) {
+                if (tag_id != HTM_TAG_SUMMARY) {
+                    DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+                    return none_display;
+                }
+            }
+        }
+
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
         // when display:none is set by UA defaults for hidden inputs, respect it
@@ -972,9 +985,11 @@ DisplayValue resolve_display_value(void* child) {
         // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
         // HTML §4.8.7: <object> is replaced only when it has a data attribute
         // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
+        // Note: <button> is NOT replaced — it contains flow content (text, spans, etc.)
+        // per HTML spec. Its children are laid out normally via CSS_VALUE_FLOW.
         bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-                            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+                            tag_id == HTM_TAG_TEXTAREA ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
                             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
@@ -1269,7 +1284,7 @@ DisplayValue resolve_display_value(void* child) {
             display.list_item = true;
         } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
-            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+            tag_id == HTM_TAG_TEXTAREA ||
             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
             tag_id == HTM_TAG_PROGRESS || tag_id == HTM_TAG_CANVAS ||
             tag_id == HTM_TAG_WEBVIEW ||
@@ -1278,6 +1293,10 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_BUTTON) {
+            // <button> is inline-block with flow children (not replaced)
+            display.outer = CSS_VALUE_INLINE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
         } else if (tag_id == HTM_TAG_OBJECT) {
             // <object> without data attribute: inline flow (renders fallback children)
             display.outer = CSS_VALUE_INLINE;
@@ -2935,6 +2954,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     CssUnit unit = alh->data.length.unit;
                     if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
                         needs_compute = (ancestor_fs > 0);
+                    } else if (unit == CSS_UNIT_REM) {
+                        // rem resolves against root font-size, not ancestor's
+                        needs_compute = true;
                     }
                 } else if (alh->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     needs_compute = (ancestor_fs > 0);
@@ -2952,6 +2974,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                             px = val * ancestor_fs;
                         } else if (unit == CSS_UNIT_EX) {
                             px = val * ancestor_fs * 0.5f; // approximate x-height
+                        } else if (unit == CSS_UNIT_REM) {
+                            // resolve rem against root font-size
+                            px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, alh);
                         } else { // CSS_UNIT_CH
                             px = val * ancestor_fs * 0.5f; // approximate ch width
                         }
@@ -2962,7 +2987,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               alh->type == CSS_VALUE_TYPE_PERCENTAGE ? alh->data.percentage.value :
                               alh->data.length.value,
                               alh->type == CSS_VALUE_TYPE_PERCENTAGE ? "%" :
-                              alh->data.length.unit == CSS_UNIT_EM ? "em" : "ex/ch",
+                              alh->data.length.unit == CSS_UNIT_EM ? "em" :
+                              alh->data.length.unit == CSS_UNIT_REM ? "rem" : "ex/ch",
                               px, ancestor_fs);
                     span->blk->line_height = computed;
                 } else {
@@ -3377,7 +3403,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle list of values (common case for shorthand)
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
-                size_t count = value->data.list.count;
+                // The CSS parser may produce comma-separated groups for font shorthand
+                // (e.g. "bold 10px Arial, Helvetica, sans-serif" → 3 groups).
+                // Detect this: if the first child is itself a list, we have nested
+                // comma groups.  Flatten the first group (which has style/weight/size/
+                // first-family) and collect remaining groups as extra font-family names.
+                const CssValue* effective_value = value;
+                if (value->data.list.count >= 2 &&
+                    value->data.list.values[0] &&
+                    value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+                    // First group is the main shorthand; use it as the value to parse
+                    effective_value = value->data.list.values[0];
+                    log_debug("[CSS] Font shorthand: detected comma-separated groups, using first group (%zu values)",
+                              effective_value->data.list.count);
+                }
+                size_t count = effective_value->data.list.count;
                 log_debug("[CSS] Font shorthand: %zu values", count);
 
                 // CSS 2.1 §15.8: If 'inherit' appears mixed with other values
@@ -3387,7 +3427,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 {
                     bool has_inherit = false;
                     for (size_t i = 0; i < count; i++) {
-                        const CssValue* v = value->data.list.values[i];
+                        const CssValue* v = effective_value->data.list.values[i];
                         if (v && v->type == CSS_VALUE_TYPE_KEYWORD) {
                             const CssEnumInfo* ki = css_enum_info(v->data.keyword);
                             if (ki && ki->group == CSS_VALUE_GROUP_GLOBAL) {
@@ -3410,7 +3450,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 size_t family_start_index = count; // Index where font-family starts
 
                 for (size_t i = 0; i < count; i++) {
-                    const CssValue* v = value->data.list.values[i];
+                    const CssValue* v = effective_value->data.list.values[i];
                     if (!v) continue;
 
                     log_debug("[CSS] Font shorthand value[%zu]: type=%d", i, v->type);
@@ -3426,7 +3466,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                             // Skip "/" delimiter if present
                             if (next_idx < count) {
-                                const CssValue* next = value->data.list.values[next_idx];
+                                const CssValue* next = effective_value->data.list.values[next_idx];
                                 // Check if next is "/" (could be CUSTOM type with name "/")
                                 if (next && next->type == CSS_VALUE_TYPE_CUSTOM &&
                                     next->data.custom_property.name &&
@@ -3437,7 +3477,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     // Next should be line-height
                                     // CSS 2.1 §15.7: line-height accepts: normal | <number> | <length> | <percentage> | inherit
                                     if (next_idx < count) {
-                                        const CssValue* lh = value->data.list.values[next_idx];
+                                        const CssValue* lh = effective_value->data.list.values[next_idx];
                                         if (lh && (lh->type == CSS_VALUE_TYPE_LENGTH ||
                                                    lh->type == CSS_VALUE_TYPE_PERCENTAGE ||
                                                    lh->type == CSS_VALUE_TYPE_NUMBER ||
@@ -3455,7 +3495,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             // Everything from next_idx onwards is font-family
                             family_start_index = next_idx;
                             if (family_start_index < count) {
-                                family_value = value->data.list.values[family_start_index];
+                                family_value = effective_value->data.list.values[family_start_index];
                             }
                             break;  // Found size, done scanning for size
                         }
@@ -3477,16 +3517,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 size_value = v;
                                 // Check if next value is "/line-height"
                                 if (i + 2 < count) {
-                                    CssValue* maybe_slash = value->data.list.values[i + 1];
+                                    CssValue* maybe_slash = effective_value->data.list.values[i + 1];
                                     if (maybe_slash && maybe_slash->type == CSS_VALUE_TYPE_CUSTOM &&
                                         maybe_slash->data.custom_property.name &&
                                         strcmp(maybe_slash->data.custom_property.name, "/") == 0 &&
                                         i + 2 < count) {
-                                        line_height_value = value->data.list.values[i + 2];
+                                        line_height_value = effective_value->data.list.values[i + 2];
                                         int next_idx = i + 3;
                                         family_start_index = next_idx;
                                         if (family_start_index < count) {
-                                            family_value = value->data.list.values[family_start_index];
+                                            family_value = effective_value->data.list.values[family_start_index];
                                         }
                                         break;
                                     }
@@ -3494,7 +3534,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 // Everything after size is font-family
                                 family_start_index = i + 1;
                                 if (family_start_index < count) {
-                                    family_value = value->data.list.values[family_start_index];
+                                    family_value = effective_value->data.list.values[family_start_index];
                                 }
                                 break;
                             } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
@@ -6660,6 +6700,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->top_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.top = 0;
+                    span->bound->border->width.top_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-top-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6677,6 +6722,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->right_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.right = 0;
+                    span->bound->border->width.right_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-right-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6694,6 +6744,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->bottom_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.bottom = 0;
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-bottom-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6711,6 +6766,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 span->bound->border->left_style = val;
+                // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+                if (val == CSS_VALUE_NONE || val == CSS_VALUE_HIDDEN) {
+                    span->bound->border->width.left = 0;
+                    span->bound->border->width.left_specificity = specificity;
+                }
                 const CssEnumInfo* info = css_enum_info(val);
                 log_debug("[CSS] Border-left-style: %s -> %d", info ? info->name : "unknown", val);
             }
@@ -6906,6 +6966,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
                 border_width = 3.0f;  // medium
             }
+            // CSS Backgrounds 3 §4.4: When border-style is 'none' or 'hidden',
+            // the computed border-width is 0, regardless of any specified width.
+            if (border_style == CSS_VALUE_NONE || border_style == CSS_VALUE_HIDDEN) {
+                border_width = 0;
+            }
             // CSS spec: when no color specified, default to currentColor (text color)
             if (border_color.c == 0 && border_style >= 0 &&
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
@@ -6982,6 +7047,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->top_color = get_current_color(lycon);
                 span->bound->border->top_color_specificity = specificity;
             }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.top = 0;
+                span->bound->border->width.top_specificity = specificity;
+            }
             break;
         }
         case CSS_PROPERTY_BORDER_RIGHT: {
@@ -7022,6 +7093,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                        border.style->data.keyword != CSS_VALUE_HIDDEN) {
                 span->bound->border->right_color = get_current_color(lycon);
                 span->bound->border->right_color_specificity = specificity;
+            }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.right = 0;
+                span->bound->border->width.right_specificity = specificity;
             }
             break;
         }
@@ -7064,6 +7141,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->bottom_color = get_current_color(lycon);
                 span->bound->border->bottom_color_specificity = specificity;
             }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.bottom = 0;
+                span->bound->border->width.bottom_specificity = specificity;
+            }
             break;
         }
         case CSS_PROPERTY_BORDER_LEFT: {
@@ -7104,6 +7187,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                        border.style->data.keyword != CSS_VALUE_HIDDEN) {
                 span->bound->border->left_color = get_current_color(lycon);
                 span->bound->border->left_color_specificity = specificity;
+            }
+            // CSS Backgrounds 3 §4.4: style none/hidden → computed width is 0
+            if (border.style && (border.style->data.keyword == CSS_VALUE_NONE ||
+                border.style->data.keyword == CSS_VALUE_HIDDEN)) {
+                span->bound->border->width.left = 0;
+                span->bound->border->width.left_specificity = specificity;
             }
             break;
         }
@@ -8645,6 +8734,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // grid-row-gap is the legacy name for row-gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_ROW_GAP:
         case CSS_PROPERTY_ROW_GAP: {
             log_debug("[CSS] Processing row-gap property");
             if (!block) {
@@ -8677,6 +8768,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // grid-column-gap is the legacy name for column-gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_COLUMN_GAP:
         case CSS_PROPERTY_COLUMN_GAP: {
             log_debug("[CSS] Processing column-gap property");
             if (!block) {
@@ -10930,6 +11023,36 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
 
+            // Resolve var() before routing through background shorthand logic
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name && strcmp(value->data.function->name, "var") == 0) {
+                const CssValue* resolved = resolve_var_function(lycon, value);
+                if (resolved && resolved != value) {
+                    CssDeclaration resolved_decl = *decl;
+                    resolved_decl.value = const_cast<CssValue*>(resolved);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &resolved_decl, lycon);
+                    return;
+                }
+                // var() didn't resolve — fall through (will be logged as unimplemented)
+            }
+
+            // Handle 'background: none' → transparent background (CSS spec: background-image: none)
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
+                if (!span->bound) {
+                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                }
+                if (!span->bound->background) {
+                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+                }
+                span->bound->background->color.r = 0;
+                span->bound->background->color.g = 0;
+                span->bound->background->color.b = 0;
+                span->bound->background->color.a = 0;  // fully transparent
+                log_debug("[Lambda CSS Shorthand] background: none/transparent -> transparent");
+                return;
+            }
+
             // Handle multiple background layers (comma-separated list)
             // CSS stacks backgrounds bottom-to-top, so last item is base layer
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 1) {
@@ -11594,6 +11717,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             return;
         }
 
+        // grid-gap is the legacy name for gap (CSS Grid Level 1)
+        case CSS_PROPERTY_GRID_GAP:
         case CSS_PROPERTY_GAP: {
             // gap shorthand: 1-2 values (row-gap column-gap)
             // If only one value is specified, it's used for both row and column gap

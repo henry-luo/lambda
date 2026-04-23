@@ -508,7 +508,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         }
         strbuf_append_format(buf, "align-content:%s ", align_content_str);
 
-        strbuf_append_format(buf, "row-gap:%d column-gap:%d",
+        strbuf_append_format(buf, "row-gap:%.0f column-gap:%.0f",
             block->embed->flex->row_gap, block->embed->flex->column_gap);
         strbuf_append_str(buf, "}\n");
     }
