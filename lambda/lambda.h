@@ -1322,6 +1322,12 @@ extern "C" {
     // Mark arrow functions as non-constructable
     void js_mark_arrow_func(Item fn_item);
 
+    // Mark method functions (non-constructable, no prototype)
+    void js_mark_method_func(Item fn_item);
+
+    // Mark generator functions
+    void js_mark_generator_func(Item fn_item);
+
     // Mark functions as strict mode
     void js_mark_strict_func(Item fn_item);
 

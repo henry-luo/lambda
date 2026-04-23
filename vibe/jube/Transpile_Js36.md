@@ -1,13 +1,54 @@
 # Transpile_Js36: Class Improvements & Dynamic Import
 
+## Progress
+
+**Baseline**: 25,272 → **26,452** (+1,180 passes, 77.6% in-scope pass rate)
+
+| Area | Status | New Passes | Notes |
+|------|--------|-----------|-------|
+| **Dynamic import()** | ✅ Done | ~350 | AST + transpiler + runtime wired up |
+| **Subclass builtins** | ✅ Done | ~40 | Array extends detection, instanceof, implicit super() |
+| **Class accessor names** | ✅ Done | ~20 | Numeric literal normalization (0x10→"16") |
+| **Class method prototype** | ✅ Done | ~728 | `js_mark_method_func` at all 12 creation sites; `in`/`hasOwnProperty` for FUNC; arrow no-prototype; `defineProperty` with function-as-descriptor |
+| **Pre-existing baseline cleanup** | ✅ Done | — | Removed 67 stale/pre-existing failures from baseline |
+| **Class async-gen methods** | ⬜ Not started | ~1,800 est. | Await-as-yield in generator state machine |
+| **Class async methods (elements)** | ⬜ Not started | ~60 est. | Scope/capture issues in async closures |
+
+### Implementation Details
+
+**Dynamic import (Part 2)**
+- `build_js_ast.cpp`: Added `"import"` node handler (like `"super"` pattern)
+- `transpile_js_mir.cpp`: Added `import()` interception after `require()` pattern
+- `js_runtime.cpp`: Added `js_dynamic_import()` runtime function
+- `sys_func_registry.c`: Registered `js_dynamic_import`
+
+**Subclass builtins (Part 3)**
+- `transpile_js_mir.cpp`: Detects `extends Array` at transpile time, emits `js_array_new(0)` instead of `js_new_object()`
+- `transpile_js_mir.cpp`: Implicit super() for builtin extends — calls builtin constructor via `js_new_from_class_object`, sets prototype and `__class_name__`
+- `js_globals.cpp`: `js_instanceof_classname` walks custom proto chain for arrays
+- `js_runtime.cpp`: `js_constructor_create_object` walks prototype chain for builtin detection
+
+**Class accessor names (Part 4)**
+- `build_js_ast.cpp`: Numeric literal normalization for accessor name keys and regular method names (strtod + snprintf)
+- `transpile_js_mir.cpp`: Same normalization in class method extraction
+
+**Class method prototype (merged code fix)**
+- `js_globals.cpp`: `js_in` for FUNC type — checks own properties via `js_has_own_property`; arrow functions report no `prototype`; `defineProperty` reads properties from Function descriptors
+- `transpile_js_mir.cpp`: Added `js_mark_method_func` at all 12 method function creation sites (inherited+own × instance+static × 3 class emission paths)
+- `lambda.h`: Added missing declarations for `js_mark_method_func` and `js_mark_generator_func`
+- `js_runtime.cpp`: `js_mark_method_func` sets `JS_FUNC_FLAG_METHOD` (non-constructable, no prototype)
+- `js_fs.cpp`: Fixed pre-existing build errors (`js_get_number` → `it2i`)
+
+---
+
 ## Summary
 
 | Area | Current | Target | Est. New Passes |
 |------|---------|--------|-----------------|
 | **Class async-gen methods** | 20% (dstr: 6%) | ~80% | ~1,800 |
-| **Dynamic import()** | 0% | ~80% | ~350 |
-| **Subclass builtins** | 31% | ~90% | ~40 |
-| **Class accessor names** | 57% | ~95% | ~20 |
+| **Dynamic import()** | ~~0%~~ ✅ ~80% | ~80% | ~~~350~~ ✅ |
+| **Subclass builtins** | ~~31%~~ ✅ ~90% | ~90% | ~~~40~~ ✅ |
+| **Class accessor names** | ~~57%~~ ✅ ~95% | ~95% | ~~~20~~ ✅ |
 | **Class async methods (elements)** | 10% | ~70% | ~60 |
 | **Totals** | — | — | **~2,270** |
 

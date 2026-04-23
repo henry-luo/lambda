@@ -15187,6 +15187,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                                 jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                             }
                             if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                            if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
                                 // generator spill: save cls_obj and fn_item before yield-containing key expr
@@ -15248,6 +15249,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                     }
                     if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                    if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
 
                     MIR_reg_t mk;
                     if (me->computed && me->key_expr) {
@@ -15447,6 +15449,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                                 jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                             }
                             if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                            if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
                                 // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
@@ -15510,6 +15513,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                     }
                     if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                    if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                     MIR_reg_t mk;
                     if (me->computed && me->key_expr) {
                         // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
@@ -18680,6 +18684,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                                 }
                                 if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                                if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                                 MIR_reg_t mk;
                                 if (me->computed && me->key_expr) {
                                     mk = jm_transpile_box_item(mt, me->key_expr);
@@ -18729,6 +18734,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                         }
                         if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                        if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                         MIR_reg_t mk;
                         if (me->computed && me->key_expr) {
                             // generator spill: save cls_obj and fn_item before yield-containing key expr
@@ -18854,6 +18860,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                         jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                                     }
                                     if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                                    if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                                     MIR_reg_t mk;
                                     if (me->computed && me->key_expr) {
                                         // generator spill: save proto_obj and fn_item before yield-containing key expr
@@ -18899,6 +18906,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                             }
                             if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                            if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
                                 // generator spill: save proto_obj and fn_item before yield-containing key expr
@@ -25320,6 +25328,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                                 }
                                 if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                                if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                                 MIR_reg_t mk;
                                 if (me->computed && me->key_expr) {
                                     mk = jm_transpile_box_item(mt, me->key_expr);
@@ -25373,6 +25382,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                         }
                         if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                        if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
 
                         // Determine the property key
                         MIR_reg_t mk;
@@ -25557,6 +25567,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                         jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                                     }
                                     if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                                    if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                                     MIR_reg_t mk;
                                     if (me->computed && me->key_expr) {
                                         mk = jm_transpile_box_item(mt, me->key_expr);
@@ -25607,6 +25618,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
                             }
                             if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
+                            if (!me->is_getter && !me->is_setter) jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                             MIR_reg_t mk;
                             if (me->computed && me->key_expr) {
                                 mk = jm_transpile_box_item(mt, me->key_expr);
