@@ -312,45 +312,57 @@ static std::vector<FeatureModule> g_feature_modules = {
     {"worker",         "worker",          true,  nullptr},  // enabled: some spawn tests pass
 };
 
-// Tests skipped by filename — known to be incompatible, non-deterministic, or
-// requiring features beyond our scope (e.g., native addons, spawning node).
-static const std::map<std::string, std::string> SKIPPED_TESTS = {
-    // Tests that spawn 'node' binary directly
-    {"test-child-process-exec-kill-throws.js",     "spawns node binary"},
-    {"test-child-process-fork.js",                 "uses child_process.fork (spawns node)"},
-    {"test-child-process-fork-abort-signal.js",    "uses child_process.fork"},
-    {"test-child-process-fork-close.js",           "uses child_process.fork"},
-    {"test-child-process-fork-dgram.js",           "uses child_process.fork + dgram"},
-    {"test-child-process-fork-exec-path.js",       "uses child_process.fork"},
-    {"test-child-process-fork-net.js",             "uses child_process.fork + net"},
-    {"test-child-process-fork-net-socket.js",      "uses child_process.fork + net"},
-    {"test-child-process-fork-ref.js",             "uses child_process.fork"},
-    {"test-child-process-fork-ref2.js",            "uses child_process.fork"},
+// Tests skipped by filename — loaded from test/node/skip_list.txt at runtime.
+// Known to be incompatible, non-deterministic, or requiring features beyond
+// our scope (e.g., native addons, spawning node, ICU).
+static const char* SKIP_LIST_FILE = "test/node/skip_list.txt";
+static std::map<std::string, std::string> g_skipped_tests;
+static bool g_skip_list_loaded = false;
 
-    // Tests requiring native addons / node-gyp
-    {"test-crypto-fips.js",                        "requires FIPS OpenSSL build"},
+static void load_skip_list() {
+    if (g_skip_list_loaded) return;
+    g_skip_list_loaded = true;
 
-    // Tests depending on process.execPath being 'node'
-    // NOTE: test-process-execpath.js now passes with the common shim
+    FILE* f = fopen(SKIP_LIST_FILE, "r");
+    if (!f) {
+        fprintf(stderr, "[node-official] WARNING: Skip list not found (%s)\n", SKIP_LIST_FILE);
+        return;
+    }
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        // skip blank lines and comment-only lines
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+        if (len == 0 || line[0] == '#') continue;
 
-    // Non-deterministic tests
-    {"test-crypto-random.js",                      "non-deterministic (random output)"},
+        // format: test-filename.js  # reason
+        // split on first '#' to get filename and reason
+        std::string entry(line, len);
+        std::string filename, reason;
+        size_t hash_pos = entry.find('#');
+        if (hash_pos != std::string::npos) {
+            filename = entry.substr(0, hash_pos);
+            reason = entry.substr(hash_pos + 1);
+        } else {
+            filename = entry;
+            reason = "in skip list";
+        }
+        // trim whitespace from filename and reason
+        while (!filename.empty() && (filename.back() == ' ' || filename.back() == '\t'))
+            filename.pop_back();
+        while (!reason.empty() && (reason.front() == ' ' || reason.front() == '\t'))
+            reason.erase(reason.begin());
+        while (!filename.empty() && (filename.front() == ' ' || filename.front() == '\t'))
+            filename.erase(filename.begin());
 
-    // --- Genuine timeouts: event loop / async / unimplemented features ---
-    // These hang because they depend on Node.js event loop (process.nextTick,
-    // setImmediate, event callbacks) which Lambda doesn't implement.
-    {"test-stream-pipe-needDrain.js",              "hangs: requires event loop (process.nextTick)"},
-    {"test-stream-writable-write-cb-error.js",     "hangs: requires event loop (process.nextTick, common.mustCall)"},
-    {"test-string-decoder-fuzz.js",                "hangs: Date.now() loop + StringDecoder instance methods"},
-    {"test-util-inspect-long-running.js",          "hangs: util.inspect depth:Infinity on 1000-node circular graph"},
-    {"test-zlib-brotli.js",                        "hangs: requires fixtures module + brotli compression"},
-    {"test-os-process-priority.js",                "hangs: requires os.constants.priority (not implemented)"},
-    {"test-buffer-alloc.js",                       "timeout: 1192-line test, JIT compilation exceeds 30s"},
-
-    // Tests that use child_process.fork which spawns Node binary
-    {"test-child-process-fork-stdio.js",           "uses child_process.fork"},
-    // test-child-process-fork-exec-argv.js — now passes, removed from skip list
-};
+        if (!filename.empty()) {
+            g_skipped_tests[filename] = reason;
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[node-official] Loaded skip list: %zu tests from %s\n",
+            g_skipped_tests.size(), SKIP_LIST_FILE);
+}
 
 // =============================================================================
 // Global state
@@ -567,8 +579,9 @@ static std::vector<NodeOfficialParam> discover_node_official_tests() {
         // check if module is enabled
         if (g_enabled_prefixes.find(mod) == g_enabled_prefixes.end()) continue;
 
-        // check if test is explicitly skipped
-        if (SKIPPED_TESTS.find(filename) != SKIPPED_TESTS.end()) continue;
+        // check if test is explicitly skipped (loaded from skip_list.txt)
+        load_skip_list();
+        if (g_skipped_tests.find(filename) != g_skipped_tests.end()) continue;
 
         NodeOfficialParam p;
         p.test_path = dir_path + "/" + filename;

@@ -1,0 +1,57 @@
+# Node.js Official Test Skip List
+#
+# Tests listed here are permanently skipped because they require features
+# that are fundamentally unavailable in the Lambda JS engine.
+#
+# Format: test-filename.js  # reason
+# Lines starting with # are comments. Blank lines are ignored.
+#
+# Categories:
+#   [fork]       Uses child_process.fork() which spawns a Node binary
+#   [icu]        Requires full ICU internationalization support
+#   [sea]        Requires Node.js Single Executable Application support
+#   [snapshot]   Requires V8 snapshot building API
+#   [native]     Requires native C++ addons / node-gyp
+#   [hang]       Known to hang (infinite loop, unimplemented event loop feature)
+#   [spawn-node] Spawns 'node' binary with Node-specific CLI flags
+#
+
+# --- child_process.fork (spawns Node binary via IPC channel) ---
+test-child-process-exec-kill-throws.js      # [spawn-node] spawns node binary directly
+test-child-process-fork.js                  # [fork] uses child_process.fork
+test-child-process-fork-abort-signal.js     # [fork] uses child_process.fork
+test-child-process-fork-close.js            # [fork] uses child_process.fork
+test-child-process-fork-dgram.js            # [fork] uses child_process.fork + dgram
+test-child-process-fork-exec-path.js        # [fork] uses child_process.fork
+test-child-process-fork-net.js              # [fork] uses child_process.fork + net
+test-child-process-fork-net-socket.js       # [fork] uses child_process.fork + net
+test-child-process-fork-ref.js              # [fork] uses child_process.fork
+test-child-process-fork-ref2.js             # [fork] uses child_process.fork
+test-child-process-fork-stdio.js            # [fork] uses child_process.fork
+
+# --- ICU / Intl (no full ICU in engine) ---
+test-icu-data-dir.js                        # [icu] requires ICU data dir loading + internalBinding('config')
+test-icu-env.js                             # [icu] requires full ICU locale data + ICU version fixtures
+test-icu-minimum-version.js                 # [icu] reads V8 source tree for ICU version check
+test-icu-stringwidth.js                     # [icu] requires internal/util/inspect.getStringWidth with ICU tables
+
+# --- Single Executable Application (no SEA support) ---
+test-sea-get-asset-keys.js                  # [sea] requires node:sea module
+
+# --- V8 Snapshot API (no V8) ---
+test-snapshot-api.js                        # [snapshot] requires v8.startupSnapshot.isBuildingSnapshot()
+
+# --- Native addons ---
+test-crypto-fips.js                         # [native] requires FIPS OpenSSL build
+
+# --- Non-deterministic ---
+test-crypto-random.js                       # non-deterministic random output
+
+# --- Known hangs (timeout / infinite loop) ---
+test-stream-pipe-needDrain.js               # [hang] requires event loop (process.nextTick drain)
+test-stream-writable-write-cb-error.js      # [hang] requires event loop (process.nextTick)
+test-string-decoder-fuzz.js                 # [hang] Date.now() loop + StringDecoder instance methods
+test-util-inspect-long-running.js           # [hang] util.inspect depth:Infinity on circular graph
+test-zlib-brotli.js                         # [hang] requires fixtures module + brotli compression
+test-os-process-priority.js                 # [hang] requires os.constants.priority
+test-buffer-alloc.js                        # [hang] 1192-line test, JIT compilation exceeds timeout

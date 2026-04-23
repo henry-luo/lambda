@@ -2,15 +2,49 @@
 
 ## 1. Executive Summary
 
-Lambda's Node.js layer passes **1,399 of 3,527** official parallel tests (39.7%). This proposal identifies the structural gaps blocking the remaining ~2,128 tests and defines a phased plan targeting **1,900+ passes (54%+)** through six work areas ordered by impact-per-effort.
+Lambda's Node.js layer passes **1,414 of 3,527** official parallel tests (40.1%). This proposal identifies the structural gaps blocking the remaining ~2,113 tests and defines a phased plan targeting **1,900+ passes (54%+)** through six work areas ordered by impact-per-effort.
 
 ### Current Baseline Snapshot
 
 | Metric | Count |
 |--------|-------|
 | Total official parallel tests | 3,527 |
-| Baseline passing | **1,399** (39.7%) |
-| Remaining failures | 2,128 |
+| Baseline passing | **1,414** (40.1%) |
+| Remaining failures | 2,113 |
+
+### Implementation Progress
+
+> **Updated: 2025-04-23** — Baseline moved from 1,399 → 1,414 (+15 net).
+
+| Area | Status | Key Changes |
+|------|--------|-------------|
+| **Error code infrastructure** (Phase 6) | 🟡 Partial | `js_throw_invalid_arg_type()`, `js_throw_out_of_range()`, `js_throw_system_error()` helpers implemented. ~36 call sites use codes (mostly buffer). Hundreds of `js_throw_type_error()` calls still lack codes. |
+| **Stream internals** (Phase 7) | 🔴 Not started | 848 LOC stubs only. No internal state machine. |
+| **Crypto expansion** (Phase 8) | 🔴 Not started | Hash/HMAC/random only. No cipher/sign/DH/keygen. |
+| **Module resolution** (Phase 9) | 🟡 Partial | `timers/promises` ✅, `internalBinding('uv')` ✅. `dns/promises`, `common/wpt`, `common/internet` still missing. |
+| **Process & OS** (Phase 10) | 🟢 Mostly done | `process.nextTick` (variadic) ✅, `process.emitWarning` ✅, `process.features` ✅, `process.kill` ✅, `process.getuid/getgid` ✅. Missing: `process.binding()`, `process.allowedNodeEnvironmentFlags`, `os.constants.priority`. |
+| **child_process & REPL** (Phase 11) | 🔴 Not started | fork/IPC/signal gaps remain. |
+| **zlib streaming** (Phase 12) | 🔴 Not started | Blocked by Phase 7 (streams). |
+| **Buffer & util hardening** (Phase 13) | 🟡 Partial | `util.stripVTControlCharacters` ✅, `util._extend` ✅, `util.debug` ✅, `assert.ifError` fixed ✅. Buffer error code sites ~60% complete. |
+| **Test infrastructure** (Phase 14) | 🟢 Done | External `test/node/skip_list.txt` (26 entries) with GTest runtime loading ✅. |
+
+#### Specific Fixes Landed (since plan creation)
+
+| Fix | File(s) | Tests Unblocked |
+|-----|---------|-----------------|
+| `timers.promises` property on timers namespace | `js_runtime.cpp` | test-timers-promises |
+| Set/Map constructor iterator fallback | `js_runtime.cpp` | (prerequisite for collection tests) |
+| `process.nextTick` variadic args | `js_globals.cpp` | test-next-tick |
+| `process.features` minimal object | `js_globals.cpp` | test-process-features |
+| EventEmitter static `listenerCount` fix | `js_events.cpp` | test-event-emitter-max-listeners-warning |
+| `events.once()` promise resolves with array | `js_events.cpp` | test-event-emitter-once |
+| Once-listener snapshot before emit | `js_events.cpp` | (correctness fix) |
+| `newListener`/`removeListener` events, `_events`/`_eventsCount` | `js_events.cpp` | (prerequisite for event tests) |
+| `util.stripVTControlCharacters`, `util._extend`, `util.debug` | `js_util.cpp` | (prerequisite for util tests) |
+| `assert.ifError` null/undefined handling | `js_assert.cpp` | (correctness fix) |
+| External skip list + GTest integration | `skip_list.txt`, `test_node_official_gtest.cpp` | Infra improvement |
+
+---
 
 ### Per-Module Gap Analysis (top 20 by gap)
 
@@ -57,7 +91,7 @@ assert.throws(() => Buffer.alloc(-1), {
 
 **Impact**: Cuts across buffer, fs, path, stream, process, crypto, zlib, util, assert — nearly every module.
 
-**Current state**: `js_throw_type_error_code()` / `js_throw_range_error_code()` exist in `js_runtime.h` but are used in only ~36 call sites (30 in buffer, 4 in globals, 2 in fs). Hundreds of `js_throw_type_error(msg)` calls throughout the runtime omit the code.
+**Current state**: `js_throw_type_error_code()` / `js_throw_range_error_code()` exist in `js_runtime.h` along with higher-level helpers (`js_throw_invalid_arg_type()`, `js_throw_out_of_range()`, `js_throw_system_error()`). Used in ~36 call sites (30 in buffer, 4 in globals, 2 in fs). Hundreds of `js_throw_type_error(msg)` calls throughout the runtime still omit the code.
 
 ### Pattern B: Async Streaming API Gaps (~25% of failures)
 
@@ -643,17 +677,17 @@ Explicitly out of scope:
 
 | Milestone | Passes | Rate | Delta |
 |-----------|-------:|-----:|------:|
-| Current baseline | 1,399 | 39.7% | — |
-| After Phase 6 (error codes) | 1,479 | 41.9% | +80 |
-| After Phase 7 (streams) | 1,579 | 44.8% | +100 |
-| After Phase 8 (crypto) | 1,639 | 46.5% | +60 |
-| After Phase 9 (module resolution) | 1,689 | 47.9% | +50 |
-| After Phase 10 (process/os) | 1,729 | 49.0% | +40 |
-| After Phase 11 (child_process/repl) | 1,769 | 50.1% | +40 |
-| After Phase 12 (zlib streaming) | 1,804 | 51.1% | +35 |
-| After Phase 13 (buffer/util) | 1,834 | 52.0% | +30 |
-| After Phase 14 (test infra) | 1,859 | 52.7% | +25 |
-| **Stretch target** | **1,900+** | **54%+** | **+500** |
+| Current baseline | 1,414 | 40.1% | — |
+| After Phase 6 (error codes) | 1,494 | 42.4% | +80 |
+| After Phase 7 (streams) | 1,594 | 45.2% | +100 |
+| After Phase 8 (crypto) | 1,654 | 46.9% | +60 |
+| After Phase 9 (module resolution) | 1,704 | 48.3% | +50 |
+| After Phase 10 (process/os) | 1,744 | 49.4% | +40 |
+| After Phase 11 (child_process/repl) | 1,784 | 50.6% | +40 |
+| After Phase 12 (zlib streaming) | 1,819 | 51.6% | +35 |
+| After Phase 13 (buffer/util) | 1,849 | 52.4% | +30 |
+| After Phase 14 (test infra) | 1,874 | 53.1% | +25 |
+| **Stretch target** | **1,900+** | **54%+** | **+486** |
 
 ### Critical Path
 
