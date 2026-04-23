@@ -1578,6 +1578,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
+    // Dynamic import() support
+    {"js_dynamic_import", FPTR(js_dynamic_import)},
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers
