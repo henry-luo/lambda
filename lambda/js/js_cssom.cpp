@@ -22,6 +22,9 @@
 #include <cstring>
 #include <cctype>
 
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern String* heap_create_name(const char* name, size_t len);
+
 // Forward declaration
 static Pool* get_document_pool();
 
@@ -277,6 +280,7 @@ static const char* css_parse_unicode_range_canonical(const char* input, Pool* po
 static TypeMap js_stylesheet_marker = {};    // CSSStyleSheet wrapper
 static TypeMap js_css_rule_marker = {};      // CSSStyleRule wrapper
 static TypeMap js_rule_decl_marker = {};     // CSSStyleDeclaration (rule) wrapper
+TypeMap js_css_namespace_marker = {}; // CSS namespace object (CSS.supports, CSS.escape)
 
 // =============================================================================
 // Type Checking
@@ -1353,3 +1357,172 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
 
     return js_cssom_wrap_stylesheet(doc->stylesheets[sheet_idx]);
 }
+
+// =============================================================================
+// CSS Namespace Object (CSS.supports, CSS.escape)
+// =============================================================================
+
+extern "C" bool js_is_css_namespace(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return false;
+    Map* m = item.map;
+    return m->type == (void*)&js_css_namespace_marker;
+}
+
+/**
+ * CSS.supports(property, value) — two-argument form.
+ * Returns true if the property is known and the value parses successfully.
+ *
+ * CSS.supports(conditionText) — single-argument form.
+ * Parses "(property: value)" condition text.
+ */
+static Item js_css_supports(Item* args, int argc) {
+    if (argc < 1) return (Item){.item = b2it(false)};
+
+    Pool* pool = get_document_pool();
+    if (!pool) pool = pool_create();
+    bool free_pool = (pool != get_document_pool());
+
+    // ensure CSS property system is initialized so property lookups work
+    css_property_system_init(pool);
+
+    bool result = false;
+
+    if (argc >= 2) {
+        // two-argument form: CSS.supports(property, value)
+        String* prop_s = it2s(args[0]);
+        String* val_s = it2s(args[1]);
+        if (!prop_s || !val_s) {
+            if (free_pool) pool_destroy(pool);
+            return (Item){.item = b2it(false)};
+        }
+
+        // check if property is known (custom properties always pass)
+        char prop_buf[256];
+        size_t prop_len = prop_s->len < 255 ? prop_s->len : 255;
+        memcpy(prop_buf, prop_s->chars, prop_len);
+        prop_buf[prop_len] = '\0';
+
+        bool is_custom = (prop_len >= 2 && prop_buf[0] == '-' && prop_buf[1] == '-');
+        if (!is_custom) {
+            CssPropertyId pid = css_property_id_from_name(prop_buf);
+            if (pid == CSS_PROPERTY_UNKNOWN || pid == 0) {
+                if (free_pool) pool_destroy(pool);
+                return (Item){.item = b2it(false)};
+            }
+        }
+
+        // try parsing "property: value" as a CSS declaration
+        char decl_text[1024];
+        int n = snprintf(decl_text, sizeof(decl_text), "%.*s: %.*s",
+                         (int)prop_len, prop_buf,
+                         (int)(val_s->len < 700 ? val_s->len : 700), val_s->chars);
+        if (n <= 0 || n >= (int)sizeof(decl_text)) {
+            if (free_pool) pool_destroy(pool);
+            return (Item){.item = b2it(false)};
+        }
+
+        size_t token_count = 0;
+        CssToken* tokens = css_tokenize(decl_text, strlen(decl_text), pool, &token_count);
+        if (tokens && token_count > 0) {
+            int pos = 0;
+            CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
+            result = (decl != NULL);
+        }
+    } else {
+        // single-argument form: CSS.supports("(property: value)")
+        // or CSS.supports("property: value")
+        String* cond_s = it2s(args[0]);
+        if (!cond_s) {
+            if (free_pool) pool_destroy(pool);
+            return (Item){.item = b2it(false)};
+        }
+
+        const char* text = cond_s->chars;
+        size_t len = cond_s->len;
+
+        // strip outer parens if present: "(property: value)" → "property: value"
+        if (len >= 2 && text[0] == '(') {
+            // find matching closing paren
+            if (text[len - 1] == ')') {
+                text++;
+                len -= 2;
+            }
+        }
+
+        // skip leading whitespace
+        while (len > 0 && (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r')) {
+            text++;
+            len--;
+        }
+
+        // try to parse as a declaration
+        char decl_buf[1024];
+        size_t copy_len = len < sizeof(decl_buf) - 1 ? len : sizeof(decl_buf) - 1;
+        memcpy(decl_buf, text, copy_len);
+        decl_buf[copy_len] = '\0';
+
+        size_t token_count = 0;
+        CssToken* tokens = css_tokenize(decl_buf, copy_len, pool, &token_count);
+        if (tokens && token_count > 0) {
+            int pos = 0;
+            CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
+            result = (decl != NULL);
+        }
+    }
+
+    if (free_pool) pool_destroy(pool);
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item js_css_namespace_method(Item obj, Item method_name, Item* args, int argc) {
+    (void)obj;
+    String* name = it2s(method_name);
+    if (!name) return ItemNull;
+
+    if (name->len == 8 && strncmp(name->chars, "supports", 8) == 0) {
+        return js_css_supports(args, argc);
+    }
+
+    if (name->len == 6 && strncmp(name->chars, "escape", 6) == 0) {
+        // CSS.escape(ident) — serialize a CSS identifier
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        String* ident = it2s(args[0]);
+        if (!ident) return (Item){.item = s2it(heap_create_name(""))};
+
+        // simple CSS serialization: escape special chars in ident
+        // per CSSOM §2: https://drafts.csswg.org/cssom/#serialize-an-identifier
+        char buf[1024];
+        int out = 0;
+        for (size_t i = 0; i < ident->len && out < (int)sizeof(buf) - 10; i++) {
+            unsigned char ch = (unsigned char)ident->chars[i];
+            if (i == 0 && ch >= '0' && ch <= '9') {
+                // escape first digit: \3N
+                out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
+            } else if (ch == 0) {
+                buf[out++] = '\\';
+                buf[out++] = 'f';
+                buf[out++] = 'f';
+                buf[out++] = 'f';
+                buf[out++] = 'd';
+                buf[out++] = ' ';
+            } else if ((ch >= 0x01 && ch <= 0x1f) || ch == 0x7f) {
+                out += snprintf(buf + out, sizeof(buf) - out, "\\%x ", ch);
+            } else if (i == 0 && ch == '-' && ident->len == 1) {
+                buf[out++] = '\\';
+                buf[out++] = '-';
+            } else if (ch == '-' || ch == '_' || (ch >= 'a' && ch <= 'z') ||
+                       (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch >= 0x80) {
+                buf[out++] = (char)ch;
+            } else {
+                buf[out++] = '\\';
+                buf[out++] = (char)ch;
+            }
+        }
+        return (Item){.item = s2it(heap_create_name(buf, (size_t)out))};
+    }
+
+    log_debug("js_css_namespace_method: unknown method '%.*s'", (int)name->len, name->chars);
+    return ItemNull;
+}
+
+// CSS namespace object is managed in js_runtime.cpp (needs access to builtin enum)

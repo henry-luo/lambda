@@ -1000,8 +1000,23 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
         }
 
         if (!decl || !decl->value) {
-            // return empty string for unset properties
-            return (Item){.item = s2it(heap_create_name(""))};
+            // return CSS initial values for common properties
+            switch (prop_id) {
+                case CSS_PROPERTY_VISIBILITY:
+                    return (Item){.item = s2it(heap_create_name("visible"))};
+                case CSS_PROPERTY_DISPLAY:
+                    return (Item){.item = s2it(heap_create_name("inline"))};
+                case CSS_PROPERTY_POSITION:
+                    return (Item){.item = s2it(heap_create_name("static"))};
+                case CSS_PROPERTY_FLOAT:
+                    return (Item){.item = s2it(heap_create_name("none"))};
+                case CSS_PROPERTY_OVERFLOW:
+                case CSS_PROPERTY_OVERFLOW_X:
+                case CSS_PROPERTY_OVERFLOW_Y:
+                    return (Item){.item = s2it(heap_create_name("visible"))};
+                default:
+                    return (Item){.item = s2it(heap_create_name(""))};
+            }
         }
     }
 
