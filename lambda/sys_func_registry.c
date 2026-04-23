@@ -1393,6 +1393,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
+    {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
@@ -1579,6 +1580,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
+    // Dynamic import() support
+    {"js_dynamic_import", FPTR(js_dynamic_import)},
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers

@@ -3748,6 +3748,7 @@ struct JsFuncName {
 };
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
+extern "C" Item js_array_get_custom_proto(Item arr);
 
 extern "C" Item js_instanceof(Item left, Item right) {
     return js_instanceof_impl(left, right, false);
@@ -3769,6 +3770,8 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
         js_throw_type_error("Right-hand side of 'instanceof' is not an object");
         return (Item){.item = b2it(false)};
     }
+
+
 
     // v16: Check for Symbol.hasInstance on the right-hand constructor FIRST (before type check)
     // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
@@ -3949,7 +3952,30 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
         }
     }
 
-    if (lt != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (lt != LMD_TYPE_MAP) {
+        // For Arrays with custom prototypes, walk the proto chain looking for class_name
+        if (lt == LMD_TYPE_ARRAY) {
+            Item custom_proto = js_array_get_custom_proto(left);
+            if (custom_proto.item != ItemNull.item && get_type_id(custom_proto) == LMD_TYPE_MAP) {
+                Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+                Item obj = custom_proto;
+                int depth = 0;
+                while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
+                    Item obj_name = map_get(obj.map, class_key);
+                    if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
+                        String* on = it2s(obj_name);
+                        if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
+                            return (Item){.item = b2it(true)};
+                        }
+                    }
+                    Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+                    obj = map_get(obj.map, proto_key);
+                    depth++;
+                }
+            }
+        }
+        return (Item){.item = b2it(false)};
+    }
 
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
 
@@ -4256,12 +4282,41 @@ extern "C" Item js_in(Item key, Item object) {
         }
         return (Item){.item = b2it(false)};
     }
+    if (type == LMD_TYPE_FUNC) {
+        // Check function own properties (properties_map, name, length, prototype)
+        if (it2b(js_has_own_property(object, key))) return (Item){.item = b2it(true)};
+        // Check prototype chain and builtin methods
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk) {
+                // Walk prototype chain (Function.prototype → Object.prototype)
+                Item proto = js_get_prototype(object);
+                int depth = 0;
+                while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                    bool found = false;
+                    Item pval = js_map_get_fast_ext(proto.map, sk->chars, (int)sk->len, &found);
+                    if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+                    if (sk->len < 200) {
+                        char gk[256];
+                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)sk->len, sk->chars);
+                        bool gfound = false;
+                        js_map_get_fast_ext(proto.map, gk, (int)strlen(gk), &gfound);
+                        if (gfound) return (Item){.item = b2it(true)};
+                    }
+                    proto = js_get_prototype(proto);
+                    depth++;
+                }
+                // Check builtin methods (call, apply, bind, toString, etc.)
+                Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, sk->chars, (int)sk->len);
+                if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
+                builtin = js_lookup_builtin_method(LMD_TYPE_MAP, sk->chars, (int)sk->len);
+                if (builtin.item != ItemNull.item) return (Item){.item = b2it(true)};
+            }
+        }
+        return (Item){.item = b2it(false)};
+    }
     return (Item){.item = b2it(false)};
 }
-
-// =============================================================================
-// nullish coalesce: a ?? b — returns b if a is null or undefined
-// =============================================================================
 
 extern "C" Item js_nullish_coalesce(Item left, Item right) {
     TypeId type = get_type_id(left);
@@ -4547,6 +4602,7 @@ extern Item js_throw_type_error(const char* msg);
 // Arrow functions, generators, and built-in prototype methods are NOT constructors.
 #define JS_FUNC_FLAG_GENERATOR_G 1
 #define JS_FUNC_FLAG_ARROW_G     2
+#define JS_FUNC_FLAG_METHOD_G    32
 
 struct JsFunctionLayout {
     TypeId type_id;
@@ -4575,6 +4631,7 @@ static bool js_func_is_constructor(Item func_item) {
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
     if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
     if (fn->flags & JS_FUNC_FLAG_GENERATOR_G) return false;
+    if (fn->flags & JS_FUNC_FLAG_METHOD_G) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false; // global builtin wrappers are not constructors
     return true;
@@ -4585,7 +4642,7 @@ static bool js_func_is_constructor(Item func_item) {
 static bool js_func_has_own_prototype(Item func_item) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) return false;
     JsFunctionLayout* fn = (JsFunctionLayout*)func_item.function;
-    if (fn->flags & JS_FUNC_FLAG_ARROW_G) return false;
+    if (fn->flags & (JS_FUNC_FLAG_ARROW_G | JS_FUNC_FLAG_METHOD_G)) return false;
     if (fn->builtin_id > 0) return false;
     if (fn->builtin_id == -2) return false;
     return true;

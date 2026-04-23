@@ -718,6 +718,7 @@ Item js_module_namespace_create(Item exports_map);
  * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
  */
 Item js_require(Item specifier);
+Item js_dynamic_import(Item specifier);
 
 // Native SHA hash functions (js_crypto.cpp)
 Item js_native_sha256(Item data, Item offset, Item length);

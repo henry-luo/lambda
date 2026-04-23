@@ -75,7 +75,12 @@ static const char* BASELINE_FILE   = "test/node/official_baseline.txt";
 static const char* CRASHER_FILE    = "temp/_node_official_crashers.txt";
 static int         g_timeout_ms    = 60000;    // per-test timeout (60s for JIT compilation)
 static bool        g_update_baseline = false;
-static const int   PARALLEL_WORKERS  = 4;      // concurrent test executions
+
+static int get_parallel_workers() {
+    int cores = std::thread::hardware_concurrency();
+    return (cores > 2) ? cores - 1 : 1;
+}
+static const int   PARALLEL_WORKERS  = get_parallel_workers();
 
 // =============================================================================
 // Feature modules — each can be enabled/disabled

@@ -815,6 +815,33 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                         accessor_name.length -= 2;
                     }
                     char acc_key[256];
+                    // Normalize numeric literal keys (e.g., 0x10 → "16", 1e2 → "100")
+                    char num_buf[64];
+                    if (strcmp(name_type, "number") == 0) {
+                        char tmp[64];
+                        int tl = (int)accessor_name.length;
+                        if (tl > 62) tl = 62;
+                        memcpy(tmp, accessor_name.str, tl);
+                        tmp[tl] = '\0';
+                        double d = strtod(tmp, NULL);
+                        // Check if it's an integer
+                        if (d == (double)(long long)d && d >= 0 && d < 1e15) {
+                            int nl = snprintf(num_buf, sizeof(num_buf), "%lld", (long long)d);
+                            accessor_name.str = num_buf;
+                            accessor_name.length = nl;
+                        } else {
+                            int nl = snprintf(num_buf, sizeof(num_buf), "%.17g", d);
+                            // Trim unnecessary trailing zeros for display
+                            char* dot = strchr(num_buf, '.');
+                            if (dot && !strchr(num_buf, 'e') && !strchr(num_buf, 'E')) {
+                                char* end = num_buf + nl - 1;
+                                while (end > dot && *end == '0') { *end-- = '\0'; nl--; }
+                                if (end == dot) { *end = '\0'; nl--; }
+                            }
+                            accessor_name.str = num_buf;
+                            accessor_name.length = nl;
+                        }
+                    }
                     // Decode Unicode escapes in accessor names
                     char dec_acc[256];
                     const char* acc_str = accessor_name.str;
@@ -857,6 +884,32 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     // Regular method: method_definition without get/set prefix
                     StrView method_name = js_node_source(tp, name_node);
                     JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                    // Normalize numeric literal keys (e.g., 0x10 → "16", 1e2 → "100")
+                    const char* mn_type = ts_node_type(name_node);
+                    char mn_num_buf[64];
+                    if (strcmp(mn_type, "number") == 0) {
+                        char tmp[64];
+                        int tl = (int)method_name.length;
+                        if (tl > 62) tl = 62;
+                        memcpy(tmp, method_name.str, tl);
+                        tmp[tl] = '\0';
+                        double d = strtod(tmp, NULL);
+                        if (d == (double)(long long)d && d >= 0 && d < 1e15) {
+                            int nl = snprintf(mn_num_buf, sizeof(mn_num_buf), "%lld", (long long)d);
+                            method_name.str = mn_num_buf;
+                            method_name.length = nl;
+                        } else {
+                            int nl = snprintf(mn_num_buf, sizeof(mn_num_buf), "%.17g", d);
+                            char* dot = strchr(mn_num_buf, '.');
+                            if (dot && !strchr(mn_num_buf, 'e') && !strchr(mn_num_buf, 'E')) {
+                                char* end = mn_num_buf + nl - 1;
+                                while (end > dot && *end == '0') { *end-- = '\0'; nl--; }
+                                if (end == dot) { *end = '\0'; nl--; }
+                            }
+                            method_name.str = mn_num_buf;
+                            method_name.length = nl;
+                        }
+                    }
                     // Decode Unicode escapes in method names
                     if (memchr(method_name.str, '\\', method_name.length) != NULL) {
                         char dec[512]; int oi = 0;
@@ -1403,6 +1456,13 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         super_node->name = name_pool_create_len(tp->name_pool, "super", 5);
         super_node->base.type = &TYPE_ANY;
         return (JsAstNode*)super_node;
+    } else if (strcmp(node_type, "import") == 0) {
+        // Handle dynamic import() — create identifier with name "import"
+        // Tree-sitter parses import(x) as call_expression with callee being an "import" node
+        JsIdentifierNode* import_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        import_node->name = name_pool_create_len(tp->name_pool, "import", 6);
+        import_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)import_node;
     } else if (strcmp(node_type, "meta_property") == 0) {
         // Handle new.target and import.meta
         // Tree-sitter produces: meta_property -> "new" "." "target" or "import" "." "meta"

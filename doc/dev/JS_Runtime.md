@@ -329,18 +329,9 @@ Classes compile to prototype-based constructor functions. The transpiler collect
 
 ### 4.6 Exception Handling
 
-Exceptions use global thread state rather than C++ exceptions:
+Exceptions use global thread state (`js_exception_pending` + `js_exception_value`) rather than C++ exceptions. `throw` calls `js_throw_value()`, `try` blocks emit `js_check_exception()` after each call to branch to the catch label, and `catch` calls `js_clear_exception()`. `finally` blocks use saved-return registers to delay returns until after cleanup.
 
-```c
-static bool js_exception_pending;
-static Item js_exception_value;
-```
-
-- `throw expr` → `js_throw_value(val)` sets the pending exception
-- After each function call inside a `try` block, `js_check_exception()` tests the flag; if set, jumps to the catch label
-- `catch(e)` → `js_clear_exception()` retrieves and clears the exception value
-- `finally` blocks execute regardless, using `return_val_reg` / `has_return_reg` to delay returns until after `finally`
-- `js_new_error(message)` / `js_new_error_with_name(name, message)` create Error objects (Maps with `name` and `message` properties)
+> See [JS_Runtime_Detailed.md §17](JS_Runtime_Detailed.md#17-error-handling--stack-overflow) for throw function variants, error object layout, try context stack, and signal-based stack overflow detection.
 
 ### 4.7 Optimization Strategies
 

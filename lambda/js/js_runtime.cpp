@@ -3031,6 +3031,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_TYPED_ARRAY_METHOD 4
 #define JS_FUNC_FLAG_STRICT    8
 #define JS_FUNC_FLAG_HAS_BOUND_THIS 16
+#define JS_FUNC_FLAG_METHOD    32
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
@@ -4217,6 +4218,28 @@ extern "C" Item js_constructor_create_object(Item callee) {
         if (fn->prototype.item != ItemNull.item) {
             TypeId pt = get_type_id(fn->prototype);
             if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_FUNC) {
+                // Subclass builtin detection: walk the prototype chain of fn->prototype
+                // to find if a builtin class (Array, etc.) is in the ancestor chain.
+                Item proto = js_get_prototype(fn->prototype);
+                int depth = 0;
+                while (proto.item != ItemNull.item && depth < 16) {
+                    TypeId proto_t = get_type_id(proto);
+                    if (proto_t == LMD_TYPE_MAP) {
+                        Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+                        Item pcn = js_property_get(proto, cn_key);
+                        if (get_type_id(pcn) == LMD_TYPE_STRING) {
+                            String* pcn_s = it2s(pcn);
+                            if (pcn_s && pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
+                                obj = js_array_new(0);
+                                break;
+                            }
+                        }
+                        proto = js_get_prototype(proto);
+                    } else {
+                        break;
+                    }
+                    depth++;
+                }
                 js_set_prototype(obj, fn->prototype);
             }
         }
@@ -4508,6 +4531,31 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             return ItemNull;
         }
         Item obj = js_new_object();
+        // Subclass builtin detection: walk the prototype chain of instance_proto
+        // to find if a builtin class (Array, etc.) is in the ancestor chain.
+        // If so, create the appropriate backing object instead of a plain MAP.
+        if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
+            Item proto = js_get_prototype(instance_proto);
+            int depth = 0;
+            while (proto.item != ItemNull.item && depth < 16) {
+                TypeId proto_t = get_type_id(proto);
+                if (proto_t == LMD_TYPE_MAP) {
+                    Item cn_key2 = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+                    Item pcn = js_property_get(proto, cn_key2);
+                    if (get_type_id(pcn) == LMD_TYPE_STRING) {
+                        String* pcn_s = it2s(pcn);
+                        if (pcn_s && pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
+                            obj = js_array_new(0);
+                            break;
+                        }
+                    }
+                    proto = js_get_prototype(proto);
+                } else {
+                    break;
+                }
+                depth++;
+            }
+        }
         // Copy __class_name__ from the class object
         if (class_name.item != ItemNull.item) {
             Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
@@ -4744,6 +4792,28 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
             js_property_get(callee, proto_key);
         }
         if (fn->prototype.item != ItemNull.item && get_type_id(fn->prototype) == LMD_TYPE_MAP) {
+            // Subclass builtin detection: walk the prototype chain of fn->prototype
+            // to check if a builtin (Array, etc.) is in the ancestor chain.
+            Item proto = js_get_prototype(fn->prototype);
+            int depth = 0;
+            while (proto.item != ItemNull.item && depth < 16) {
+                TypeId proto_t = get_type_id(proto);
+                if (proto_t == LMD_TYPE_MAP) {
+                    bool cn_own = false;
+                    Item pcn = js_map_get_fast(proto.map, "__class_name__", 14, &cn_own);
+                    if (cn_own && get_type_id(pcn) == LMD_TYPE_STRING) {
+                        String* pcn_s = it2s(pcn);
+                        if (pcn_s && pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
+                            obj = js_array_new(0);
+                            break;
+                        }
+                    }
+                    proto = js_get_prototype(proto);
+                } else {
+                    break;
+                }
+                depth++;
+            }
             js_set_prototype(obj, fn->prototype);
         }
     }
@@ -5717,9 +5787,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 // - global builtins (builtin_id == -2): parseInt, Math.abs, etc.
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
                 // - arrow functions
+                // - class methods (concise methods are not constructors per ES spec)
                 // - Proxy (ES spec: Proxy has no prototype property)
                 if (fn->builtin_id == -2 || fn->builtin_id > 0 ||
-                    (fn->flags & JS_FUNC_FLAG_ARROW) ||
+                    (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD)) ||
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
@@ -8413,6 +8484,12 @@ extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     fn->flags |= JS_FUNC_FLAG_ARROW;
+}
+
+extern "C" void js_mark_method_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_METHOD;
 }
 
 // Mark a function as strict mode (ES spec [[Strict]] internal slot)
