@@ -5585,17 +5585,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
                         if (str_key->len == 7 && strncmp(str_key->chars, "compile", 7) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
-                        // v83: Symbol-keyed methods
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_7", 7) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_MATCH, "[Symbol.match]", 1);
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_8", 7) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_REPLACE, "[Symbol.replace]", 2);
-                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_9", 7) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SEARCH, "[Symbol.search]", 1);
-                        if (str_key->len == 8 && strncmp(str_key->chars, "__sym_10", 8) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SPLIT, "[Symbol.split]", 2);
-                        if (str_key->len == 8 && strncmp(str_key->chars, "__sym_13", 8) == 0)
-                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_MATCHALL, "[Symbol.matchAll]", 1);
+                        // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
                     } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
                         // Array.prototype[Symbol.iterator] → values
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
@@ -11850,6 +11840,17 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
                            anchor, matches, num_groups);
 }
 
+// v90: Get RegExp.prototype for setting __proto__ on regex instances
+static Item js_get_regexp_prototype() {
+    extern Item js_get_constructor(Item name_item);
+    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        return js_property_get(ctor, proto_key);
+    }
+    return ItemNull;
+}
+
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
@@ -11880,6 +11881,12 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
+    // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
+    Item regexp_proto = js_get_regexp_prototype();
+    if (regexp_proto.item != ItemNull.item) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        js_property_set(regex_obj, proto_key, regexp_proto);
+    }
     return regex_obj;
 }
 
@@ -12403,6 +12410,12 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
+    // v90: set __proto__ so prototype chain overrides work
+    Item regexp_proto = js_get_regexp_prototype();
+    if (regexp_proto.item != ItemNull.item) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        js_property_set(regex_obj, proto_key, regexp_proto);
+    }
     // Store in regex compilation cache for future reuse
     g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
                                          (int)strlen(flg_buf), dot_all, has_unicode};
@@ -15426,81 +15439,81 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     // matchAll(regex) — returns an iterator of all match results (ES2020)
     if (method->len == 8 && strncmp(method->chars, "matchAll", 8) == 0) {
         // ES2023 §22.1.3.13: String.prototype.matchAll(regexp)
-        // Step 2: If regexp is not undefined/null, check if it's a regex
-        bool is_regexp = false;
+        // Step 1: O = RequireObjectCoercible(this) — already handled by caller
+        // Step 2: If regexp is neither undefined nor null
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL
             && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-            // Step 2a: Check isRegExp
+            // Step 2a: isRegExp check (only for objects)
+            bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
                 // Check for __sym_7 (Symbol.match) or __rd
                 bool has_match = false;
-                js_map_get_fast(args[0].map, "__sym_7", 7, &has_match);
-                if (!has_match) {
+                Item sym_match_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("__sym_7", 7))});
+                if (sym_match_val.item != ItemNull.item && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED) {
+                    is_regexp = js_is_truthy(sym_match_val);
+                } else {
                     bool has_rd = false;
                     js_map_get_fast(args[0].map, "__rd", 4, &has_rd);
                     if (has_rd) is_regexp = true;
-                } else {
-                    is_regexp = true;
                 }
             }
             // Step 2b: If isRegExp, check that 'g' flag is present
             if (is_regexp) {
                 Item flags_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("flags", 5))});
-                if (get_type_id(flags_val) != LMD_TYPE_STRING) {
-                    return js_throw_type_error("matchAll: flags is not a string");
+                // RequireObjectCoercible(flags) — throws TypeError for null/undefined
+                if (flags_val.item == ItemNull.item || get_type_id(flags_val) == LMD_TYPE_NULL
+                    || get_type_id(flags_val) == LMD_TYPE_UNDEFINED) {
+                    return js_throw_type_error("String.prototype.matchAll called with a non-global RegExp argument");
                 }
-                String* fl = it2s(flags_val);
+                Item flags_str = js_to_string(flags_val);
+                if (js_exception_pending) return make_js_undefined();
+                String* fl = it2s(flags_str);
+                if (!fl) return js_throw_type_error("matchAll: flags is not a string");
                 bool has_g = false;
                 for (int i = 0; i < (int)fl->len; i++) { if (fl->chars[i] == 'g') has_g = true; }
                 if (!has_g) {
                     return js_throw_type_error("String.prototype.matchAll called with a non-global RegExp argument");
                 }
             }
-            // Step 3: Check for [Symbol.matchAll] method
+            // Step 2c: matcher = GetMethod(regexp, @@matchAll)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_13", 8))};
             Item sym_fn = js_property_get(args[0], sym_key);
+            // GetMethod: undefined/null → skip, callable → use, else TypeError
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
+                && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.matchAll is not a function");
+                }
+                // Step 2d: Return Call(matcher, regexp, « O »)
                 Item call_args[1] = { str };
                 return js_call_function(sym_fn, args[0], call_args, 1);
             }
         }
-        // Step 4: Create a global regex and use iterator directly
+        // Steps 3-5: Create regex and invoke its @@matchAll
+        // Step 3: S = ToString(O) — str is already coerced by js_string_method
+        Item S = str;
+        // Step 4: rx = RegExpCreate(regexp, "g")
         Item regex = ItemNull;
-        if (is_regexp && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            // Clone the regex with same pattern and flags
-            Item source_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("source", 6))});
-            Item flags_val2 = js_property_get(args[0], (Item){.item = s2it(heap_create_name("flags", 5))});
-            const char* src = (get_type_id(source_val) == LMD_TYPE_STRING) ? it2s(source_val)->chars : "";
-            int src_len = (get_type_id(source_val) == LMD_TYPE_STRING) ? (int)it2s(source_val)->len : 0;
-            const char* flgs = (get_type_id(flags_val2) == LMD_TYPE_STRING) ? it2s(flags_val2)->chars : "g";
-            int flgs_len = (get_type_id(flags_val2) == LMD_TYPE_STRING) ? (int)it2s(flags_val2)->len : 1;
-            regex = js_create_regex(src, src_len, flgs, flgs_len);
-        } else {
-            const char* pat = "";
-            int pat_len = 0;
-            if (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-                Item arg_str = js_to_string(args[0]);
-                if (js_exception_pending) return make_js_undefined();
-                String* ps = it2s(arg_str);
-                if (ps) { pat = ps->chars; pat_len = (int)ps->len; }
-            }
-            regex = js_create_regex(pat, pat_len, "g", 1);
+        const char* pat = "";
+        int pat_len = 0;
+        if (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
+            && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_NULL) {
+            Item arg_str = js_to_string(args[0]);
+            if (js_exception_pending) return make_js_undefined();
+            String* ps = it2s(arg_str);
+            if (ps) { pat = ps->chars; pat_len = (int)ps->len; }
         }
+        regex = js_create_regex(pat, pat_len, "g", 1);
         if (regex.item == ItemNull.item) return js_array_new(0);
-        // Create iterator using the same logic as @@matchAll
-        Item iter = js_new_object();
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__regex__", 9))}, regex);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__string__", 10))}, str);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__global__", 10))}, (Item){.item = b2it(true)});
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(false)});
-        Item next_fn = js_get_or_create_builtin(JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT, "next", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
-        Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_1", 7))}, si_fn);
-        Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-        js_property_set(iter, tag_key, (Item){.item = s2it(heap_create_name("RegExp String Iterator", 22))});
-        return iter;
+        // Step 5: Return Invoke(rx, @@matchAll, « S »)
+        Item rx_sym_key = (Item){.item = s2it(heap_create_name("__sym_13", 8))};
+        Item rx_matcher = js_property_get(regex, rx_sym_key);
+        if (rx_matcher.item != ItemNull.item && get_type_id(rx_matcher) == LMD_TYPE_FUNC) {
+            Item invoke_args[1] = { S };
+            return js_call_function(rx_matcher, regex, invoke_args, 1);
+        }
+        // Fallback: if @@matchAll not found on rx, throw TypeError
+        return js_throw_type_error("matchAll: RegExp[Symbol.matchAll] is not a function");
     }
     if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
         return str;
