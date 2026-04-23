@@ -702,6 +702,13 @@ extern "C" Item js_get_os_namespace(void) {
 
     js_property_set(constants, make_string_item("signals"), signals);
     js_property_set(constants, make_string_item("errno"), errno_obj);
+
+    // Freeze constants and sub-objects to match Node.js behavior
+    extern Item js_object_freeze(Item obj);
+    js_object_freeze(signals);
+    js_object_freeze(errno_obj);
+    js_object_freeze(constants);
+
     js_property_set(os_namespace, make_string_item("constants"), constants);
 
     // default export

@@ -12,6 +12,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 
+#include <climits>
 #include <cstring>
 #include <zlib.h>
 
@@ -380,17 +381,61 @@ extern "C" Item js_get_zlib_namespace(void) {
     zlib_set_method(zlib_namespace, "unzipSync",           (void*)js_zlib_gunzipSync, 1);
     zlib_set_method(zlib_namespace, "crc32",               (void*)js_zlib_crc32, 2);
 
-    // constants
+    // constants — all zlib constants including flush modes, error codes, compression levels, strategies
+    extern Item js_object_freeze(Item obj);
     Item constants = js_new_object();
+    // flush modes
     js_property_set(constants, make_string_item("Z_NO_FLUSH"),      (Item){.item = i2it(Z_NO_FLUSH)});
+    js_property_set(constants, make_string_item("Z_PARTIAL_FLUSH"), (Item){.item = i2it(Z_PARTIAL_FLUSH)});
     js_property_set(constants, make_string_item("Z_SYNC_FLUSH"),    (Item){.item = i2it(Z_SYNC_FLUSH)});
+    js_property_set(constants, make_string_item("Z_FULL_FLUSH"),    (Item){.item = i2it(Z_FULL_FLUSH)});
     js_property_set(constants, make_string_item("Z_FINISH"),        (Item){.item = i2it(Z_FINISH)});
+    js_property_set(constants, make_string_item("Z_BLOCK"),         (Item){.item = i2it(Z_BLOCK)});
+    js_property_set(constants, make_string_item("Z_TREES"),         (Item){.item = i2it(Z_TREES)});
+    // error codes
+    js_property_set(constants, make_string_item("Z_OK"),            (Item){.item = i2it(Z_OK)});
+    js_property_set(constants, make_string_item("Z_STREAM_END"),    (Item){.item = i2it(Z_STREAM_END)});
+    js_property_set(constants, make_string_item("Z_NEED_DICT"),     (Item){.item = i2it(Z_NEED_DICT)});
+    js_property_set(constants, make_string_item("Z_ERRNO"),         (Item){.item = i2it(Z_ERRNO)});
+    js_property_set(constants, make_string_item("Z_STREAM_ERROR"),  (Item){.item = i2it(Z_STREAM_ERROR)});
+    js_property_set(constants, make_string_item("Z_DATA_ERROR"),    (Item){.item = i2it(Z_DATA_ERROR)});
+    js_property_set(constants, make_string_item("Z_MEM_ERROR"),     (Item){.item = i2it(Z_MEM_ERROR)});
+    js_property_set(constants, make_string_item("Z_BUF_ERROR"),     (Item){.item = i2it(Z_BUF_ERROR)});
+    js_property_set(constants, make_string_item("Z_VERSION_ERROR"), (Item){.item = i2it(Z_VERSION_ERROR)});
+    // compression levels
+    js_property_set(constants, make_string_item("Z_NO_COMPRESSION"),      (Item){.item = i2it(Z_NO_COMPRESSION)});
+    js_property_set(constants, make_string_item("Z_BEST_SPEED"),          (Item){.item = i2it(Z_BEST_SPEED)});
+    js_property_set(constants, make_string_item("Z_BEST_COMPRESSION"),    (Item){.item = i2it(Z_BEST_COMPRESSION)});
     js_property_set(constants, make_string_item("Z_DEFAULT_COMPRESSION"), (Item){.item = i2it(Z_DEFAULT_COMPRESSION)});
-    js_property_set(constants, make_string_item("Z_BEST_SPEED"),    (Item){.item = i2it(Z_BEST_SPEED)});
-    js_property_set(constants, make_string_item("Z_BEST_COMPRESSION"), (Item){.item = i2it(Z_BEST_COMPRESSION)});
+    // strategies
+    js_property_set(constants, make_string_item("Z_FILTERED"),         (Item){.item = i2it(Z_FILTERED)});
+    js_property_set(constants, make_string_item("Z_HUFFMAN_ONLY"),     (Item){.item = i2it(Z_HUFFMAN_ONLY)});
+    js_property_set(constants, make_string_item("Z_RLE"),              (Item){.item = i2it(Z_RLE)});
+    js_property_set(constants, make_string_item("Z_FIXED"),            (Item){.item = i2it(Z_FIXED)});
+    js_property_set(constants, make_string_item("Z_DEFAULT_STRATEGY"), (Item){.item = i2it(Z_DEFAULT_STRATEGY)});
+    // window bits / mem level
+    js_property_set(constants, make_string_item("Z_MIN_WINDOWBITS"),  (Item){.item = i2it(8)});
+    js_property_set(constants, make_string_item("Z_MAX_WINDOWBITS"),  (Item){.item = i2it(15)});
+    js_property_set(constants, make_string_item("Z_DEFAULT_WINDOWBITS"), (Item){.item = i2it(15)});
+    js_property_set(constants, make_string_item("Z_MIN_CHUNK"),       (Item){.item = i2it(64)});
+    js_property_set(constants, make_string_item("Z_MAX_CHUNK"),       (Item){.item = i2it(INT_MAX)}); // INT_CAST_OK: zlib constant
+    js_property_set(constants, make_string_item("Z_DEFAULT_CHUNK"),   (Item){.item = i2it(16384)});
+    js_property_set(constants, make_string_item("Z_MIN_MEMLEVEL"),    (Item){.item = i2it(1)});
+    js_property_set(constants, make_string_item("Z_MAX_MEMLEVEL"),    (Item){.item = i2it(9)});
+    js_property_set(constants, make_string_item("Z_DEFAULT_MEMLEVEL"),(Item){.item = i2it(8)});
+    js_property_set(constants, make_string_item("Z_MIN_LEVEL"),       (Item){.item = i2it(-1)});
+    js_property_set(constants, make_string_item("Z_MAX_LEVEL"),       (Item){.item = i2it(9)});
+    js_property_set(constants, make_string_item("DEFLATE"),           (Item){.item = i2it(1)});
+    js_property_set(constants, make_string_item("INFLATE"),           (Item){.item = i2it(2)});
+    js_property_set(constants, make_string_item("GZIP"),              (Item){.item = i2it(3)});
+    js_property_set(constants, make_string_item("GUNZIP"),            (Item){.item = i2it(4)});
+    js_property_set(constants, make_string_item("DEFLATERAW"),        (Item){.item = i2it(5)});
+    js_property_set(constants, make_string_item("INFLATERAW"),        (Item){.item = i2it(6)});
+    js_property_set(constants, make_string_item("UNZIP"),             (Item){.item = i2it(7)});
+    js_object_freeze(constants);
     js_property_set(zlib_namespace, make_string_item("constants"), constants);
 
-    // codes — error code map
+    // codes — error code map (frozen)
     Item codes = js_new_object();
     js_property_set(codes, make_string_item("Z_OK"),              (Item){.item = i2it(Z_OK)});
     js_property_set(codes, make_string_item("Z_STREAM_END"),      (Item){.item = i2it(Z_STREAM_END)});
@@ -401,6 +446,7 @@ extern "C" Item js_get_zlib_namespace(void) {
     js_property_set(codes, make_string_item("Z_MEM_ERROR"),       (Item){.item = i2it(Z_MEM_ERROR)});
     js_property_set(codes, make_string_item("Z_BUF_ERROR"),       (Item){.item = i2it(Z_BUF_ERROR)});
     js_property_set(codes, make_string_item("Z_VERSION_ERROR"),   (Item){.item = i2it(Z_VERSION_ERROR)});
+    js_object_freeze(codes);
     js_property_set(zlib_namespace, make_string_item("codes"), codes);
 
     Item default_key = make_string_item("default");

@@ -406,6 +406,20 @@ extern "C" Item js_buffer_from(Item data, Item encoding) {
     }
 }
 
+// ─── Buffer.of(...items) — create a Buffer from a list of byte values ───────
+// Note: receives up to 3 positional args; called from JS with spread args
+extern "C" Item js_buffer_of(Item a0, Item a1, Item a2) {
+    // build array from non-undefined args
+    Item arr = js_array_new(0);
+    if (get_type_id(a0) != LMD_TYPE_UNDEFINED)
+        js_array_push(arr, a0);
+    if (get_type_id(a1) != LMD_TYPE_UNDEFINED)
+        js_array_push(arr, a1);
+    if (get_type_id(a2) != LMD_TYPE_UNDEFINED)
+        js_array_push(arr, a2);
+    return js_buffer_from(arr, make_js_undefined());
+}
+
 // ─── Buffer.concat(list, totalLength?) ──────────────────────────────────────
 extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
     extern Item js_throw_type_error(const char* msg);
@@ -775,6 +789,11 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
 
     char enc_buf[32] = "utf8";
     TypeId enc_tid = get_type_id(encoding);
+    // Coerce object encodings to string (e.g. { toString: () => 'ascii' })
+    if (enc_tid == LMD_TYPE_MAP) {
+        encoding = js_to_string(encoding);
+        enc_tid = get_type_id(encoding);
+    }
     if (enc_tid == LMD_TYPE_STRING) {
         String* enc = it2s(encoding);
         int elen = (int)enc->len;
@@ -2333,6 +2352,7 @@ extern "C" Item js_get_buffer_namespace(void) {
     buf_set_method(buffer_namespace, "alloc",      (void*)js_buffer_alloc, 2);
     buf_set_method(buffer_namespace, "allocUnsafe", (void*)js_buffer_allocUnsafe, 1);
     buf_set_method(buffer_namespace, "from",       (void*)js_buffer_from, 2);
+    buf_set_method(buffer_namespace, "of",         (void*)js_buffer_of, 3);
     buf_set_method(buffer_namespace, "concat",     (void*)js_buffer_concat, 2);
     buf_set_method(buffer_namespace, "isBuffer",   (void*)js_buffer_isBuffer, 1);
     buf_set_method(buffer_namespace, "isEncoding", (void*)js_buffer_isEncoding, 1);

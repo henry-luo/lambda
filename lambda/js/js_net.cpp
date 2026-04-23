@@ -546,7 +546,15 @@ extern "C" Item js_net_createServer(Item handler) {
 // =============================================================================
 
 extern "C" Item js_net_isIP(Item input_item) {
-    if (get_type_id(input_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+    // Coerce to string (Node.js calls toString() on the input)
+    if (get_type_id(input_item) != LMD_TYPE_STRING) {
+        if (get_type_id(input_item) == LMD_TYPE_MAP || get_type_id(input_item) == LMD_TYPE_ELEMENT) {
+            input_item = js_to_string(input_item);
+            if (get_type_id(input_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
+        } else {
+            return (Item){.item = i2it(0)};
+        }
+    }
     String* s = it2s(input_item);
     char buf[256];
     int len = (int)s->len < 255 ? (int)s->len : 255;
@@ -556,6 +564,13 @@ extern "C" Item js_net_isIP(Item input_item) {
     struct sockaddr_in addr4;
     struct sockaddr_in6 addr6;
     if (uv_ip4_addr(buf, 0, &addr4) == 0) return (Item){.item = i2it(4)};
+    // Reject zone IDs with invalid characters (Node.js is stricter than libuv)
+    char* pct = strchr(buf, '%');
+    if (pct) {
+        for (char* p = pct + 1; *p; p++) {
+            if (*p == '@' || *p == '[' || *p == ']' || *p == '/') return (Item){.item = i2it(0)};
+        }
+    }
     if (uv_ip6_addr(buf, 0, &addr6) == 0) return (Item){.item = i2it(6)};
     return (Item){.item = i2it(0)};
 }

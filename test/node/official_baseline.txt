@@ -1,7 +1,7 @@
 # Node.js Official Test Baseline (auto-updated)
-# Commit: b5a8e09f0
+# Commit: ae6bed1d8
 # Source: ref/node/test/parallel/
-# Total passing: 1371 / 3525  (skipped: 0)
+# Total passing: 1399 / 3527  (skipped: 0)
 #
 # Feature modules enabled:
 #   assert
@@ -230,6 +230,7 @@ test-buffer-isencoding.js
 test-buffer-iterator.js
 test-buffer-no-negative-allocation.js
 test-buffer-nopendingdep-map.js
+test-buffer-of-no-deprecation.js
 test-buffer-over-max-length.js
 test-buffer-pending-deprecation.js
 test-buffer-readdouble.js
@@ -237,6 +238,7 @@ test-buffer-readfloat.js
 test-buffer-safe-unsafe.js
 test-buffer-swap-fast.js
 test-buffer-tojson.js
+test-buffer-tostring-range.js
 test-buffer-tostring.js
 test-buffer-zero-fill-cli.js
 test-buffer-zero-fill-reset.js
@@ -281,6 +283,7 @@ test-cluster-net-listen-relative-path.js
 test-cluster-net-server-drop-connection.js
 test-cluster-shared-handle-bind-error.js
 test-cluster-shared-handle-bind-privileged-port.js
+test-common-check.js
 test-common-countdown.js
 test-compile-cache-api-env.js
 test-compile-cache-api-flush.js
@@ -370,6 +373,7 @@ test-domain-no-error-handler-abort-on-uncaught-8.js
 test-domain-no-error-handler-abort-on-uncaught-9.js
 test-domain-throw-error-then-throw-from-uncaught-exception-handler.js
 test-domain-with-abort-on-uncaught-exception.js
+test-domexception-cause.js
 test-dotenv-node-options.js
 test-double-tls-server.js
 test-env-var-no-warnings.js
@@ -404,6 +408,7 @@ test-esm-loader-hooks-inspect-brk.js
 test-esm-loader-hooks-inspect-wait.js
 test-eval.js
 test-event-emitter-emit-context.js
+test-event-emitter-errors.js
 test-event-emitter-get-max-listeners.js
 test-event-emitter-listener-count.js
 test-event-emitter-max-listeners-warning-for-null.js
@@ -445,6 +450,7 @@ test-fs-chmod-mask.js
 test-fs-chmod.js
 test-fs-chown-negative-one.js
 test-fs-close.js
+test-fs-constants.js
 test-fs-copyfile-respect-permissions.js
 test-fs-cp-sync-dereference.js
 test-fs-error-messages.js
@@ -470,9 +476,18 @@ test-fs-open-numeric-flags.js
 test-fs-opendir.js
 test-fs-operations-with-surrogate-pairs.js
 test-fs-options-immutable.js
+test-fs-promises-file-handle-append-file.js
+test-fs-promises-file-handle-chmod.js
+test-fs-promises-file-handle-stat.js
+test-fs-promises-file-handle-stream.js
+test-fs-promises-file-handle-sync.js
+test-fs-promises-file-handle-truncate.js
+test-fs-promises-file-handle-write.js
 test-fs-promises-mkdtempDisposable.js
+test-fs-promises-readfile-with-fd.js
 test-fs-promises-statfs-validate-path.js
 test-fs-promises-writefile-typedarray.js
+test-fs-promises-writefile-with-fd.js
 test-fs-promises-writefile.js
 test-fs-read-file-sync-hostname.js
 test-fs-read-file-sync.js
@@ -585,6 +600,7 @@ test-fs-writev-promises.js
 test-fs-writev-sync.js
 test-fs-writev.js
 test-gc-http-client-connaborted.js
+test-global-domexception.js
 test-global-encoder.js
 test-heap-prof-basic.js
 test-heap-prof-dir-absolute.js
@@ -1048,6 +1064,7 @@ test-net-during-close.js
 test-net-eaddrinuse.js
 test-net-end-destroyed.js
 test-net-end-without-connect.js
+test-net-isip.js
 test-net-isipv4.js
 test-net-isipv6.js
 test-net-keepalive.js
@@ -1103,14 +1120,17 @@ test-next-tick-when-exiting.js
 test-no-node-snapshot.js
 test-node-run.js
 test-npm-install.js
+test-os-constants-signals.js
 test-os-eol.js
 test-os-fast.js
 test-os-userinfo-handles-getter-errors.js
+test-path-basename.js
 test-path-isabsolute.js
 test-path-posix-exists.js
 test-path-posix-relative-on-windows.js
 test-path-win32-exists.js
 test-path-win32-normalize-device-names.js
+test-path.js
 test-performance-resourcetimingbuffersize.js
 test-permission-allow-inspector.js
 test-permission-fs-read.js
@@ -1138,13 +1158,16 @@ test-preload-print-process-argv.js
 test-preload-self-referential.js
 test-preload-worker.js
 test-process-abort.js
+test-process-available-memory.js
 test-process-beforeexit-throw-exit.js
 test-process-beforeexit.js
 test-process-chdir.js
 test-process-constants-noatime.js
+test-process-constrained-memory.js
 test-process-dlopen-error-message-crash.js
 test-process-dlopen-undefined-exports.js
 test-process-domain-segfault.js
+test-process-emit.js
 test-process-env-delete.js
 test-process-env-deprecation.js
 test-process-env-sideeffects.js
@@ -1161,9 +1184,12 @@ test-process-exit.js
 test-process-getactivehandles.js
 test-process-getactiveresources-track-active-handles.js
 test-process-getgroups.js
+test-process-hrtime-bigint.js
 test-process-load-env-file.js
 test-process-redirect-warnings-env.js
 test-process-redirect-warnings.js
+test-process-release.js
+test-process-umask.js
 test-process-uptime.js
 test-promise-handled-rejection-no-warning.js
 test-promise-reject-callback-exception.js
@@ -1464,12 +1490,14 @@ test-ttywrap-stack.js
 test-tz-version.js
 test-uncaught-exception-handler-stack-overflow-on-stack-overflow.js
 test-uncaught-exception-handler-stack-overflow.js
+test-url-basic-check.js
 test-url-domain-ascii-unicode.js
 test-url-format-whatwg.js
 test-url-format.js
 test-url-parse-format.js
 test-utf8-scripts.js
 test-util-getcallsites.js
+test-util-inherits.js
 test-util-inspect-namespace.js
 test-util-primordial-monkeypatching.js
 test-util-types-exists.js
