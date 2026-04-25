@@ -8917,9 +8917,17 @@ static bool js_has_property(Item obj, Item key) {
         return false;
     }
     if (it2b(js_has_own_property(obj, key))) return true;
-    // walk prototype chain — use js_get_prototype_of which handles all types
-    // (arrays, functions, etc.) unlike js_get_prototype which only works for MAPs.
-    Item proto = js_get_prototype_of(obj);
+    // walk prototype chain — for plain MAPs without explicit __proto__, use js_get_prototype
+    // (returns ItemNull for bare object literals) rather than js_get_prototype_of (which returns
+    // implicit Object.prototype). This matches pre-v37 HasProperty semantics: an array-like
+    // object like {2:2, length:20} doesn't reach Object.prototype, so Object.prototype[k] values
+    // captured before getters can fire don't corrupt array-method snapshots.
+    Item proto;
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN) {
+        proto = js_get_prototype(obj);  // only explicit __proto__; ItemNull for plain object literals
+    } else {
+        proto = js_get_prototype_of(obj);  // arrays, functions, typed arrays, Objects with __proto__
+    }
     int depth = 0;
     while (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED && depth < 32) {
         if (it2b(js_has_own_property(proto, key))) return true;
@@ -11408,6 +11416,24 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         log_error("js_dispatch_builtin: unknown builtin_id=%d", builtin_id);
         return undef;
     }
+}
+
+// super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
+// If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
+// constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
+extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int argc) {
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        return js_call_function(callee, this_val, args, argc);
+    }
+    if (get_type_id(callee) == LMD_TYPE_MAP) {
+        bool own = false;
+        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
+        if (own && get_type_id(ctor) == LMD_TYPE_FUNC) {
+            return js_call_function(ctor, this_val, args, argc);
+        }
+        // Empty class with no constructor — no-op, this is already created
+    }
+    return this_val;
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {

@@ -9957,7 +9957,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                     jm_call_void_1(mt, "js_set_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
-                    jm_call_4(mt, "js_call_function", MIR_T_I64,
+                    // Use js_super_call_class: handles both FUNC and MAP (class expression) callee.
+                    // An empty class {} produces a MAP with no __ctor__, which js_call_function
+                    // would reject as "not a function". js_super_call_class treats that as a no-op.
+                    jm_call_4(mt, "js_super_call_class", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),

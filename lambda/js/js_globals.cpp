@@ -412,6 +412,29 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                         js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
                     }
                 }
+                // ES5 §15.4.5.1: if obj is an Array and name is a valid array index >= length,
+                // update length to index+1 and grow items array with hole sentinels.
+                if (get_type_id(obj) == LMD_TYPE_ARRAY && ns && ns->len > 0 && ns->len <= 10) {
+                    bool is_idx = true;
+                    int64_t idx = 0;
+                    for (size_t ci = 0; ci < ns->len; ci++) {
+                        char ch = ns->chars[ci];
+                        if (ch < '0' || ch > '9') { is_idx = false; break; }
+                        idx = idx * 10 + (ch - '0');
+                    }
+                    if (is_idx && (ns->len == 1 || ns->chars[0] != '0') && idx >= 0) {
+                        Array* arr = obj.array;
+                        int64_t gap = idx - (int64_t)arr->length;
+                        if (gap >= 0 && gap < 100000) {
+                            // Grow items array with hole sentinels up to and including idx
+                            extern void js_array_push_item_direct(Array* arr, Item value);
+                            Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                            while ((int64_t)arr->length <= idx) {
+                                js_array_push_item_direct(arr, hole);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
