@@ -11856,6 +11856,28 @@ void js_regex_cache_reset() {
     g_regex_compile_cache.clear();
 }
 
+// Permanent RE2 compilation cache — survives pool/batch resets within a process.
+// Keyed by FNV-1a content hash of pattern+flags. Only caches simple patterns (no wrapper).
+// Eliminates repeated recompilation of huge regex literals (e.g. UnicodeIDStart/Continue)
+// across test boundaries in batch mode.
+struct Re2PermanentEntry {
+    re2::RE2* re2;              // new-allocated, never freed
+    bool global, ignore_case, multiline, sticky, dot_all, has_unicode;
+    char* canonical_flags;      // new-allocated, never freed
+    int canonical_flags_len;
+    int source_len;             // length check for collision detection
+};
+static std::unordered_map<uint64_t, Re2PermanentEntry> g_re2_permanent_cache;
+
+// Content-based hash for permanent cache — valid across batch resets (uses string content, not pointers)
+static inline uint64_t js_regex_content_hash(const char* pat, int plen, const char* flg, int flen) {
+    uint64_t h = 14695981039346656037ULL;
+    for (int i = 0; i < plen; i++) { h ^= (uint8_t)pat[i]; h *= 1099511628211ULL; }
+    h ^= 0xFFFFFFFFFFFFFFFFULL; // separator
+    for (int i = 0; i < flen; i++) { h ^= (uint8_t)flg[i]; h *= 1099511628211ULL; }
+    return h;
+}
+
 // Helper: get the correct number of capturing groups for output
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
@@ -11943,6 +11965,29 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 }
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
+    uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
+    {
+        auto perm_it = g_re2_permanent_cache.find(perm_key);
+        if (perm_it != g_re2_permanent_cache.end()) {
+            auto& pe = perm_it->second;
+            if (pe.source_len == pattern_len) {
+                // reuse permanent RE2; create fresh JsRegexData (pool-allocated) for this test
+                JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
+                rd->re2 = pe.re2;
+                rd->wrapper = nullptr;
+                rd->global = pe.global;
+                rd->ignore_case = pe.ignore_case;
+                rd->multiline = pe.multiline;
+                rd->sticky = pe.sticky;
+                JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
+                uint64_t fast_key = js_regex_cache_key(pattern, flags);
+                g_regex_compile_cache[fast_key] = ce;
+                return js_regex_build_object_from_cache(ce);
+            }
+        }
+    }
+
     // Check regex compilation cache — avoids re-compiling the same literal in loops
     uint64_t cache_key = js_regex_cache_key(pattern, flags);
     auto cache_it = g_regex_compile_cache.find(cache_key);
@@ -12467,6 +12512,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     if (regexp_proto.item != ItemNull.item) {
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(regex_obj, proto_key, regexp_proto);
+    }
+    // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
+    // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
+    if (!wrapper || !wrapper->has_filters) {
+        re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
+        char* perm_flags = new char[flags_len + 1];
+        memcpy(perm_flags, flg_buf, flags_len + 1);
+        g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
+                                            dot_all, has_unicode, perm_flags, (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
     g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
