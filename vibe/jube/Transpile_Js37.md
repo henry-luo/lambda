@@ -8,17 +8,17 @@
 
 ### ES2020 Feature Status
 
-| Feature | Run Set | Passing | Failing | Pass Rate | Status |
-|---------|---------|---------|---------|-----------|--------|
-| `optional-chaining` | 50 | 48 | 2 | 96% | ✅ Near-complete (brand check fixed) |
-| `coalesce-expression` | 23 | 23 | 0 | 100% | ✅ Done |
-| `dynamic-import` | 194 | 156 | 38 | 80% | Near-complete (syntax edge cases) |
-| `for-in-order` | 9 | 9 | 0 | 100% | ✅ Done (Part 3) |
-| `String.prototype.matchAll` | 15 | 14 | 1 | 93% | ✅ Near-complete (Part 6 done) |
-| `globalThis` | 60 | 1 | 59 | 2% | Mostly eval-code/Iterator failures, not globalThis itself |
-| `import.meta` | 5 | 1 | 4 | 20% | Syntax tests (SyntaxError in non-module context) |
-| `Promise.allSettled` | 45 | 11 | 34 | 24% | Promise infrastructure gaps |
-| `BigInt` | 1,202 | 239 | 963 | 20% | Mostly TypedArray+BigInt interactions |
+| Feature                     | Run Set | Passing | Failing | Pass Rate | Status                                                    |
+| --------------------------- | ------- | ------- | ------- | --------- | --------------------------------------------------------- |
+| `optional-chaining`         | 50      | 48      | 2       | 96%       | ✅ Near-complete (brand check fixed)                       |
+| `coalesce-expression`       | 23      | 23      | 0       | 100%      | ✅ Done                                                    |
+| `dynamic-import`            | 194     | 156     | 38      | 80%       | Near-complete (syntax edge cases)                         |
+| `for-in-order`              | 9       | 9       | 0       | 100%      | ✅ Done (Part 3)                                           |
+| `String.prototype.matchAll` | 15      | 14      | 1       | 93%       | ✅ Near-complete (Part 6 done)                             |
+| `globalThis`                | 60      | 1       | 59      | 2%        | Mostly eval-code/Iterator failures, not globalThis itself |
+| `import.meta`               | 5       | 1       | 4       | 20%       | Syntax tests (SyntaxError in non-module context)          |
+| `Promise.allSettled`        | 45      | 11      | 34      | 24%       | Promise infrastructure gaps                               |
+| `BigInt`                    | 1,202   | 239     | 963     | 20%       | Mostly TypedArray+BigInt interactions                     |
 
 **Key insight**: ES2020 failures are mostly caused by cross-cutting engine gaps (eval wrapping, property order, private brand checks, TypedArray BigInt) rather than missing ES2020 feature implementations. The features themselves are largely implemented.
 

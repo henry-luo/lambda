@@ -26,6 +26,8 @@ typedef enum JsTypedArrayType {
     JS_TYPED_FLOAT32,
     JS_TYPED_FLOAT64,
     JS_TYPED_UINT8_CLAMPED,
+    JS_TYPED_BIGINT64,
+    JS_TYPED_BIGUINT64,
 } JsTypedArrayType;
 
 // ArrayBuffer: raw byte storage

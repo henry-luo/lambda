@@ -10061,6 +10061,7 @@ extern "C" Item js_get_global_this() {
             {"Int16Array", 10}, {"Uint16Array", 11},
             {"Int32Array", 10}, {"Uint32Array", 11},
             {"Float32Array", 12}, {"Float64Array", 12},
+            {"BigInt64Array", 13}, {"BigUint64Array", 14},
             {"Proxy", 5},
             {"Event", 5}, {"CustomEvent", 11},
             {NULL, 0}
@@ -10452,6 +10453,8 @@ enum JsConstructorId {
     JS_CTOR_UINT32ARRAY,
     JS_CTOR_FLOAT32ARRAY,
     JS_CTOR_FLOAT64ARRAY,
+    JS_CTOR_BIGINT64ARRAY,
+    JS_CTOR_BIGUINT64ARRAY,
     JS_CTOR_AGGREGATE_ERROR,
     JS_CTOR_PROXY,
     JS_CTOR_EVENT,
@@ -10617,7 +10620,7 @@ static Item js_typed_array_base_proto = {0};
 
 // Per-type prototypes: Int8Array.prototype, Uint8Array.prototype, etc.
 // Indexed by JsTypedArrayType enum values (0-8).
-#define JS_TYPED_ARRAY_TYPE_COUNT 9
+#define JS_TYPED_ARRAY_TYPE_COUNT 11
 static Item js_typed_array_per_type_proto[JS_TYPED_ARRAY_TYPE_COUNT] = {{0}};
 
 // Get the per-type prototype for a given typed array element type.
@@ -10725,6 +10728,8 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
         case 6: ctor_name = "Float32Array";       ctor_name_len = 12; bytes_per = 4; break;
         case 7: ctor_name = "Float64Array";       ctor_name_len = 12; bytes_per = 8; break;
         case 8: ctor_name = "Uint8ClampedArray";  ctor_name_len = 17; bytes_per = 1; break;
+        case 9: ctor_name = "BigInt64Array";      ctor_name_len = 13; bytes_per = 8; break;
+        case 10: ctor_name = "BigUint64Array";    ctor_name_len = 14; bytes_per = 8; break;
         default: return js_get_typed_array_base_proto();
     }
 
@@ -10851,7 +10856,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
              ctor_id == JS_CTOR_PROXY ||
-             (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY))
+             (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_BIGUINT64ARRAY))
         fn->func_ptr = (void*)js_ctor_requires_new;
     else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
@@ -10873,7 +10878,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
-    if (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY) {
+    if (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_BIGUINT64ARRAY) {
         // Map ctor_id to JsTypedArrayType element_type
         int element_type = -1;
         switch (ctor_id) {
@@ -10886,6 +10891,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
             case JS_CTOR_UINT32ARRAY:      element_type = 5; break; // JS_TYPED_UINT32
             case JS_CTOR_FLOAT32ARRAY:     element_type = 6; break; // JS_TYPED_FLOAT32
             case JS_CTOR_FLOAT64ARRAY:     element_type = 7; break; // JS_TYPED_FLOAT64
+            case JS_CTOR_BIGINT64ARRAY:    element_type = 9; break; // JS_TYPED_BIGINT64
+            case JS_CTOR_BIGUINT64ARRAY:   element_type = 10; break; // JS_TYPED_BIGUINT64
             default: break;
         }
         if (element_type >= 0) {
@@ -10942,6 +10949,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
         {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
         {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
+        {"BigInt64Array", 13, JS_CTOR_BIGINT64ARRAY, 3},
+        {"BigUint64Array", 14, JS_CTOR_BIGUINT64ARRAY, 3},
         {"Proxy", 5, JS_CTOR_PROXY, 2},
         {"Event", 5, JS_CTOR_EVENT, 1},
         {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 1},

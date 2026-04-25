@@ -4399,6 +4399,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
             else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
             else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
+            else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      ta_type = JS_TYPED_BIGINT64;
+            else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     ta_type = JS_TYPED_BIGUINT64;
             if (ta_type >= 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
@@ -4769,6 +4771,8 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
             else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
             else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
             else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
+            else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      ta_type = JS_TYPED_BIGINT64;
+            else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     ta_type = JS_TYPED_BIGUINT64;
             // "TypedArray" abstract base: use the exemplar's own element type
             else if (nl == 10 && strncmp(n, "TypedArray", 10) == 0)         ta_type = default_type;
             if (ta_type >= 0) {
@@ -9024,6 +9028,8 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
     else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        return JS_TYPED_UINT32;
     else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       return JS_TYPED_FLOAT32;
     else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       return JS_TYPED_FLOAT64;
+    else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      return JS_TYPED_BIGINT64;
+    else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     return JS_TYPED_BIGUINT64;
     return -1;
 }
 
