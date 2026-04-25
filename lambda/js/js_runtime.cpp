@@ -76,6 +76,10 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 // Forward declaration for js_map_get_fast (defined later in this file)
 static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found);
+// v95: Forward declaration for Array.prototype[Symbol.iterator] override check (defined near js_get_iterator)
+static Item js_check_array_sym_iterator();
+// v95: Global flag — set to 1 any time __sym_1 is assigned on any map (conservative guard)
+int g_array_sym_iter_ever_set = 0;
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
@@ -546,6 +550,8 @@ extern "C" void js_batch_reset() {
     js_assert_reset();
     extern void js_node_test_reset(void);
     js_node_test_reset();
+    // v95: reset Array.prototype[Symbol.iterator] override flag
+    g_array_sym_iter_ever_set = 0;
 }
 
 // Get current module var count (for checkpointing)
@@ -665,6 +671,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_assert_reset();
     extern void js_node_test_reset(void);
     js_node_test_reset();
+    // v95: reset Array.prototype[Symbol.iterator] override flag
+    g_array_sym_iter_ever_set = 0;
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -5700,7 +5708,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                     return js_get_prototype_of(object);
                 }
                 // Symbol.iterator → values method (Symbol.iterator has well-known ID=1, key "__sym_1")
+                // v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted
                 if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                    if (g_array_sym_iter_ever_set) {
+                        Item sym_override = js_check_array_sym_iterator();
+                        if (sym_override.item == ITEM_JS_UNDEFINED) return make_js_undefined();  // deleted
+                        if (sym_override.item != ItemNull.item) return sym_override;  // user-defined
+                    }
                     return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
                 }
                 // Check built-in array methods (push, slice, concat, etc.)
@@ -6632,6 +6646,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     // Convert Symbol keys to unique string keys for property storage
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
+    // v95: If __sym_1 (Symbol.iterator) is ever set on a map, note it for Array.prototype override detection
+    if (!g_array_sym_iter_ever_set && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+        String* _sk = it2s(key);
+        if (_sk && _sk->len == 7 && strncmp(_sk->chars, "__sym_1", 7) == 0)
+            g_array_sym_iter_ever_set = 1;
+    }
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
@@ -19085,6 +19105,27 @@ static Item js_create_typed_array_iterator(Item source) {
     return (Item){.map = m};
 }
 
+// v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted.
+// Returns: user-defined Item if overridden, ITEM_JS_UNDEFINED if deleted, ItemNull if still default.
+static Item js_check_array_sym_iterator() {
+    extern Item js_get_constructor(Item name_item);
+    Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
+    Item arr_ctor = js_get_constructor(arr_name);
+    if (get_type_id(arr_ctor) != LMD_TYPE_FUNC) return ItemNull;
+    JsFunction* afn = (JsFunction*)arr_ctor.function;
+    if (afn->prototype.item == 0 || afn->prototype.item == ItemNull.item) return ItemNull;
+    if (get_type_id(afn->prototype) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item sym_iter = js_map_get_fast(afn->prototype.map, "__sym_1", 7, &found);
+    if (!found) return ItemNull;  // not present on Array.prototype — use default
+    if (sym_iter.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();  // deleted
+    if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
+        JsFunction* sfn = (JsFunction*)sym_iter.function;
+        if (sfn->builtin_id == 0) return sym_iter;  // user-defined function
+    }
+    return ItemNull;  // still the default builtin
+}
+
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
@@ -19099,7 +19140,22 @@ extern "C" Item js_get_iterator(Item iterable) {
     }
 
     // Arrays: wrap in lightweight array iterator (v28: MAP_KIND_ITERATOR)
+    // v95: But first check if Array.prototype[Symbol.iterator] has been overridden or deleted
     if (tid == LMD_TYPE_ARRAY) {
+        if (g_array_sym_iter_ever_set) {
+            Item sym_override = js_check_array_sym_iterator();
+            if (sym_override.item == ITEM_JS_UNDEFINED) {
+                // Symbol.iterator was deleted — array is not iterable
+                js_throw_type_error("[object Array] is not iterable");
+                return ItemNull;
+            }
+            if (sym_override.item != ItemNull.item) {
+                // User-defined Symbol.iterator — call it with the array as 'this'
+                Item iterator = js_call_function(sym_override, iterable, NULL, 0);
+                if (js_check_exception()) return ItemNull;
+                return iterator;
+            }
+        }
         return js_create_array_iterator(iterable);
     }
 

@@ -9110,6 +9110,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
         key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
+    // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
+    extern int g_array_sym_iter_ever_set;
+    if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
+        String* _dk = it2s(key);
+        if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)
+            g_array_sym_iter_ever_set = 1;
+    }
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;

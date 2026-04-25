@@ -2,9 +2,9 @@
 
 ## Current State
 
-**Baseline**: 27,357 entries | **Run set**: 34,094 | **Failing**: ~6,737 (80.2% pass rate)
+**Baseline**: 27,570 entries | **Run set**: 34,167 | **Failing**: ~6,596 (80.7% pass rate)
 
-**Starting baseline**: 27,172 | **Net gain**: +185 tests
+**Starting baseline**: 27,172 | **Net gain**: +398 tests
 
 ### ES2020 Feature Status
 
@@ -393,7 +393,7 @@ HasProperty semantics correct for plain MAP objects in many other test scenarios
 
 ### Remaining Failure Areas
 
-From the ~6,739 failing tests in the run set:
+From the ~6,596 failing tests in the run set:
 
 | Area | Failing | Why Deferred |
 |------|---------|-------------|
@@ -424,3 +424,49 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 
 **Result**: +185 (Js37 original) + 976 (Part 7 regression fix) = +1,161 total new passes
 → baseline from 27,172 to 27,428 (run set pass rate: 76.6% → 80.3%)
+
+---
+
+## Part 8 — Array.prototype[Symbol.iterator] Override (+143 tests)
+
+### Problem
+
+136 `*array-prototype*` destructuring tests all failed because `js_get_iterator` had a fast path
+for `LMD_TYPE_ARRAY` that bypassed `Array.prototype[Symbol.iterator]` override/deletion:
+
+```js
+// Override: expects custom iterator values
+Array.prototype[Symbol.iterator] = function*() { yield 1; yield 2; yield 42; };
+var [x, y, z] = [1, 2, 3];  // z === 42
+
+// Delete: expects TypeError
+delete Array.prototype[Symbol.iterator];
+var [a, b, c] = [1, 2, 3];  // TypeError: not iterable
+```
+
+Tests appeared in all dstr contexts: `variable/dstr/`, `for-of/dstr/`, `function params/dstr/`,
+`arrow/dstr/`, `async-generator/dstr/`, `generator/dstr/`, etc.
+
+### Root Cause
+
+Two locations skipped Array.prototype lookup:
+1. `js_get_iterator` (js_runtime.cpp): `if (tid == LMD_TYPE_ARRAY) { return js_create_array_iterator(iterable); }` — no override check
+2. `js_property_get` for arrays with `__sym_1` key: returned `js_lookup_builtin_method(...)` directly
+
+### Fix
+
+**`lambda/js/js_runtime.cpp`**:
+- Added `int g_array_sym_iter_ever_set = 0` global flag (set conservatively when any `__sym_1` is written or deleted)
+- Added `js_check_array_sym_iterator()` helper: gets Array constructor via `js_get_constructor`, reads `fn->prototype.map`, calls `js_map_get_fast("__sym_1")`. Returns user function if overridden, `ITEM_JS_UNDEFINED` if deleted, `ItemNull` if still default builtin.
+- Updated `js_get_iterator` array fast path: checks flag first, then calls helper; throws TypeError if deleted, calls user function if overridden
+- Updated `js_property_get` `__sym_1` path: same guard
+- Reset flag in both `js_batch_reset()` and `js_batch_reset_to()`
+
+**`lambda/js/js_globals.cpp`**:
+- In `js_delete_property`: set `g_array_sym_iter_ever_set = 1` when `__sym_1` is deleted from a MAP
+
+The flag guard ensures zero overhead on normal code (flag stays 0 unless a test modifies `Array.prototype[Symbol.iterator]`).
+
+### Result
+
++143 new passes (27,428 → 27,570), 0 regressions
