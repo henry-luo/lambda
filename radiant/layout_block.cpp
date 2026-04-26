@@ -6143,7 +6143,46 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     block->x = effective_left;
                     // line_break→line_reset clears start_view; set it to
                     // this inline-block so text-align applies to the new line.
-                    if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
+                    // CSS 2.1 §16.2: Walk up to find the topmost ancestor inline span
+                    // whose first in-flow child is the path to this inline-block.
+                    // Using the inline-block itself as start_view would cause
+                    // view_line_align to stop at the block's parent (its DOM
+                    // next_sibling is NULL), missing wrapper spans and following
+                    // sibling spans on the new line. Using the topmost
+                    // wrapper-only ancestor lets view_line_align traverse
+                    // sibling chains correctly so the entire new line shifts.
+                    if (!lycon->line.start_view) {
+                        View* line_start = (View*)block;
+                        DomNode* p = ((DomNode*)block)->parent;
+                        while (p && p->is_element()) {
+                            DomElement* pe = p->as_element();
+                            if (pe->view_type != RDT_VIEW_INLINE) break;
+                            // first in-flow, non-nil child of pe must equal line_start
+                            View* fc = pe->first_child;
+                            while (fc) {
+                                if (fc->view_type != RDT_VIEW_NONE) {
+                                    bool oof = false;
+                                    DomNode* fn = (DomNode*)fc;
+                                    if (fn->is_element()) {
+                                        DomElement* fe = static_cast<DomElement*>(fn);
+                                        if (fe->position &&
+                                            (fe->position->position == CSS_VALUE_ABSOLUTE ||
+                                             fe->position->position == CSS_VALUE_FIXED ||
+                                             fe->position->float_prop == CSS_VALUE_LEFT ||
+                                             fe->position->float_prop == CSS_VALUE_RIGHT)) {
+                                            oof = true;
+                                        }
+                                    }
+                                    if (!oof) break;
+                                }
+                                fc = fc->next();
+                            }
+                            if (fc != line_start) break;
+                            line_start = (View*)pe;
+                            p = p->parent;
+                        }
+                        lycon->line.start_view = line_start;
+                    }
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —
                     // push below the float to find room

@@ -17,6 +17,7 @@
 #include "../lib/str.h"
 #include <string.h>
 #include "../lib/mem.h"
+#include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
 
@@ -1959,11 +1960,64 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     Tvg_Paint pic = tvg_picture_new();
     if (!pic) return;
 
-    Tvg_Result result = tvg_picture_load(pic, href);
-    if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] <image> failed to load: %s", href);
-        tvg_paint_unref(pic, true);
-        return;
+    Tvg_Result result;
+
+    // Handle data: URIs by decoding base64 and feeding raw bytes to ThorVG.
+    // The mime type embedded in the URI is sometimes wrong (e.g. "data:false;base64,...")
+    // so we always sniff the actual content from magic bytes.
+    if (strncmp(href, "data:", 5) == 0) {
+        size_t decoded_len = 0;
+        char declared_mime[64] = {0};
+        uint8_t* decoded = parse_data_uri(href, declared_mime, sizeof(declared_mime), &decoded_len);
+        if (!decoded || decoded_len == 0) {
+            log_debug("[SVG] <image> data URI decode failed");
+            if (decoded) mem_free(decoded);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+
+        // Sniff actual format from magic bytes (more reliable than declared mime)
+        const char* mime_hint = nullptr;
+        if (decoded_len >= 8 && decoded[0] == 0x89 && decoded[1] == 'P' &&
+            decoded[2] == 'N' && decoded[3] == 'G') {
+            mime_hint = "png";
+        } else if (decoded_len >= 3 && decoded[0] == 0xFF && decoded[1] == 0xD8 &&
+                   decoded[2] == 0xFF) {
+            mime_hint = "jpg";
+        } else if ((decoded_len >= 5 && memcmp(decoded, "<?xml", 5) == 0) ||
+                   (decoded_len >= 4 && memcmp(decoded, "<svg", 4) == 0)) {
+            mime_hint = "svg";
+        } else {
+            // fallback to declared mime if it looks meaningful
+            if (strstr(declared_mime, "png")) mime_hint = "png";
+            else if (strstr(declared_mime, "jpeg") || strstr(declared_mime, "jpg")) mime_hint = "jpg";
+            else if (strstr(declared_mime, "svg")) mime_hint = "svg";
+        }
+
+        if (!mime_hint) {
+            log_debug("[SVG] <image> unknown data URI format (declared mime='%s')", declared_mime);
+            mem_free(decoded);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+
+        // copy=true so ThorVG holds its own copy and we can free decoded
+        result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
+                                       mime_hint, NULL, true);
+        mem_free(decoded);
+        if (result != TVG_RESULT_SUCCESS) {
+            log_debug("[SVG] <image> failed to load data URI (mime=%s, declared=%s)",
+                      mime_hint, declared_mime);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+    } else {
+        result = tvg_picture_load(pic, href);
+        if (result != TVG_RESULT_SUCCESS) {
+            log_debug("[SVG] <image> failed to load: %s", href);
+            tvg_paint_unref(pic, true);
+            return;
+        }
     }
 
     // set size if specified
