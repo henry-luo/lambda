@@ -37,6 +37,7 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 
 // super property access (js_runtime.cpp)
 extern Item js_super_property_get(Item receiver, Item key);
+extern Item js_super_instance_method_get(Item receiver, Item key);
 extern Item js_super_property_set(Item receiver, Item key, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -1241,6 +1242,7 @@ JitImport jit_runtime_imports[] = {
     {"js_property_access", FPTR(js_property_access)},
     {"js_key_is_symbol_c", FPTR(js_key_is_symbol_c)},
     {"js_super_property_get", FPTR(js_super_property_get)},
+    {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_super_call_class", FPTR(js_super_call_class)},
     {"js_property_get_str", FPTR(js_property_get_str)},

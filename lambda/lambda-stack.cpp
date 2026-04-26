@@ -22,9 +22,11 @@
 #if defined(__APPLE__)
 #include <pthread.h>
 #include <signal.h>
+#include <execinfo.h>
 #elif defined(__linux__)
 #include <pthread.h>
 #include <signal.h>
+#include <execinfo.h>
 #elif defined(_WIN32)
 #include <windows.h>
 #endif

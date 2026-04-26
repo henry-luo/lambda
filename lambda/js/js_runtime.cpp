@@ -7268,6 +7268,46 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     return js_property_get(proto, key);
 }
 
+// Like js_super_property_get but for instance method context:
+// receiver.__proto__.__proto__ = ParentClass.prototype (skip current class override).
+extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
+    // Level 1: receiver.__proto__ = CurrentClass.prototype
+    Item cur_proto = js_get_prototype(receiver);
+    if (cur_proto.item == ItemNull.item) cur_proto = js_get_prototype_of(receiver);
+    if (cur_proto.item == ItemNull.item) return make_js_undefined();
+    // Level 2: CurrentClass.prototype.__proto__ = ParentClass.prototype
+    Item parent_proto = js_get_prototype(cur_proto);
+    if (parent_proto.item == ItemNull.item) parent_proto = js_get_prototype_of(cur_proto);
+    if (parent_proto.item == ItemNull.item) return make_js_undefined();
+
+    Item proto = parent_proto;
+    TypeId type = get_type_id(proto);
+    if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
+
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+
+    Item result = map_get(proto.map, key);
+    if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
+
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len < 128 && str_key->len > 0) {
+            char getter_key[256];
+            snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+            bool gk_found = false;
+            Item getter = js_map_get_fast(proto.map, getter_key, (int)strlen(getter_key), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, receiver, NULL, 0);
+            }
+        }
+    }
+
+    result = js_prototype_lookup(proto, key);
+    if (result.item != ItemNull.item) return result;
+
+    return js_property_get(proto, key);
+}
+
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
 extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {

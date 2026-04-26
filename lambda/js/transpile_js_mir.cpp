@@ -4138,6 +4138,16 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 me->name = method_name;
                                 me->fc = fc;
                                 me->param_count = jm_count_params(fn);
+                                // negate param_count if last param is ...rest (signals rest to js_invoke_fn)
+                                {
+                                    JsAstNode* last_p = NULL;
+                                    JsAstNode* pp = fn->params;
+                                    while (pp) { last_p = pp; pp = pp->next; }
+                                    if (last_p && (last_p->node_type == JS_AST_NODE_REST_ELEMENT ||
+                                                   last_p->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+                                        me->param_count = -me->param_count;
+                                    }
+                                }
                                 me->is_static = md->static_method;
                                 me->is_getter = (md->kind == JsMethodDefinitionNode::JS_METHOD_GET);
                                 me->is_setter = (md->kind == JsMethodDefinitionNode::JS_METHOD_SET);
@@ -5834,11 +5844,10 @@ static MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, 
             arg = arg->next;
         }
 
-        // Now all args are safely in env. Copy to ALLOCA for the call.
-        MIR_reg_t args_ptr = jm_new_reg(mt, "args", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-            MIR_new_reg_op(mt->ctx, args_ptr),
-            MIR_new_int_op(mt->ctx, arg_count * 8)));
+        // Now all args are safely in env. Copy to heap alloc for the call.
+        // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
+        MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
         for (int i = 0; i < arg_count; i++) {
             MIR_reg_t tmp = jm_new_reg(mt, "arl", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5852,11 +5861,11 @@ static MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, 
         return args_ptr;
     }
 
-    // Allocate stack space: ALLOCA(arg_count * 8)
-    MIR_reg_t args_ptr = jm_new_reg(mt, "args", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-        MIR_new_reg_op(mt->ctx, args_ptr),
-        MIR_new_int_op(mt->ctx, arg_count * 8)));
+    // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64,
+    // where MIR's top-alloca consolidation assigns wrong offsets when the top alloca
+    // appears after the inline call site.
+    MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 
     // Evaluate and store each argument
     JsAstNode* arg = first_arg;
@@ -7757,10 +7766,9 @@ static void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_n
                     if (pp->node_type == JS_AST_NODE_PROPERTY) exclude_count++;
                     pp = pp->next;
                 }
-                MIR_reg_t arr = jm_new_reg(mt, "rest_excl", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-                    MIR_new_reg_op(mt->ctx, arr),
-                    MIR_new_int_op(mt->ctx, (exclude_count > 0 ? exclude_count : 1) * 8)));
+                // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
+                MIR_reg_t arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (exclude_count > 0 ? exclude_count : 1)));
                 int ki = 0;
                 pp = pattern->properties;
                 while (pp && pp != prop) {
@@ -10043,6 +10051,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
             if (obj_id->name && obj_id->name->len == 5 && strncmp(obj_id->name->chars, "super", 5) == 0) {
                 // The key expression — we match by identifier name in the parent class methods
+                bool super_computed_handled = false;
                 if (mt->current_class && mt->current_class->superclass && m->property) {
                     JsClassEntry* parent = mt->current_class->superclass;
                     JsClassMethodEntry* found_method = NULL;
@@ -10092,16 +10101,47 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             log_debug("js-mir: super[%.*s]() → parent method '%s'",
                                 (int)key_id_name->len, key_id_name->chars,
                                 found_method->fc->name);
+                            super_computed_handled = true;
                             return jm_call_4(mt, "js_call_function", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-                        } else {
-                            log_debug("js-mir: super[%.*s]() computed key not found in parent class — falling through",
-                                (int)key_id_name->len, key_id_name->chars);
                         }
                     }
+                }
+                // Fallback for super[key]() when parent is a builtin (not in class_entries).
+                // Only emit the explicit super lookup when the parent is unknown (builtin),
+                // e.g. class RE extends RegExp. In this case, resolve via parent prototype
+                // (2 levels: skip current class prototype to avoid recursive dispatch).
+                // When the parent IS in class_entries but the key wasn't found as a computed
+                // method (e.g., super['namedMethod']()), fall through to generic dispatch
+                // which correctly handles it via js_property_access.
+                if (!super_computed_handled && mt->current_class && !mt->current_class->superclass) {
+                    // Builtin parent: use 2-level prototype skip
+                    log_debug("js-mir: super[computed]() — builtin parent, using js_super_instance_method_get");
+                    MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_reg_t key_val = jm_transpile_box_item(mt, m->property);
+                    MIR_reg_t fn_item = jm_call_2(mt, "js_super_instance_method_get", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_val));
+                    bool has_spread = false;
+                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { has_spread = true; break; }
+                    }
+                    if (has_spread) {
+                        MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+                        return jm_call_3(mt, "js_apply_function", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+                    }
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                    return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 }
             }
         }
@@ -17434,14 +17474,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         }
 
         if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
-            MIR_reg_t names_arr = jm_new_reg(mt, "ctor_names", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-                MIR_new_reg_op(mt->ctx, names_arr),
-                MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(void*))));
-            MIR_reg_t lens_arr = jm_new_reg(mt, "ctor_lens", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-                MIR_new_reg_op(mt->ctx, lens_arr),
-                MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(int))));
+            // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
+            MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+            MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
             for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
@@ -17779,15 +17816,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     MIR_reg_t obj;
     if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
-        // Emit static arrays of property name pointers and lengths
-        MIR_reg_t names_arr = jm_new_reg(mt, "ctor_names", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-            MIR_new_reg_op(mt->ctx, names_arr),
-            MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(void*))));
-        MIR_reg_t lens_arr = jm_new_reg(mt, "ctor_lens", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-            MIR_new_reg_op(mt->ctx, lens_arr),
-            MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(int))));
+        // Emit static arrays of property name pointers and lengths.
+        // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.
+        MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+        MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
 
         for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
             // Store pointer to pool-stable property name string
