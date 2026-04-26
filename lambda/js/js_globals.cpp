@@ -4427,6 +4427,11 @@ extern "C" Item js_in(Item key, Item object) {
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         }
+        // ES spec: ToPropertyKey converts non-symbol primitives to string
+        // Handle bool, null, undefined (and any other non-string type)
+        if (get_type_id(key) != LMD_TYPE_STRING && !(get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE)) {
+            key = js_to_string(key);
+        }
 
         if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();

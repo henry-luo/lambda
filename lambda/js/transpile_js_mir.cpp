@@ -6799,8 +6799,18 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 (rlen == 11 && strncmp(rname, "SyntaxError", 11) == 0) ||
                 (rlen == 14 && strncmp(rname, "ReferenceError", 14) == 0) ||
                 (rlen == 14 && strncmp(rname, "AggregateError", 14) == 0);
+            // Known non-constructor namespace objects must NOT use name-based instanceof
+            // — they are not callable constructors and must throw TypeError per ES spec
+            // 'this' also bypasses name-based check since its type is only known at runtime
+            bool is_known_non_constructor =
+                (rlen == 4 && strncmp(rname, "Math", 4) == 0) ||
+                (rlen == 4 && strncmp(rname, "JSON", 4) == 0) ||
+                (rlen == 4 && strncmp(rname, "this", 4) == 0) ||
+                (rlen == 7 && strncmp(rname, "Atomics", 7) == 0) ||
+                (rlen == 7 && strncmp(rname, "Reflect", 7) == 0) ||
+                (rlen == 7 && strncmp(rname, "console", 7) == 0);
             // Also check if the right side is an unresolved identifier
-            if (!is_builtin_class) {
+            if (!is_builtin_class && !is_known_non_constructor) {
                 char rv_name[128];
                 snprintf(rv_name, sizeof(rv_name), "_js_%.*s", rlen, rname);
                 JsMirVarEntry* rv = jm_find_var(mt, rv_name);
@@ -6824,9 +6834,14 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     }
 
     MIR_reg_t right = jm_transpile_box_item(mt, bin->right);
-    return jm_call_2(mt, fn_name, MIR_T_I64,
+    MIR_reg_t result = jm_call_2(mt, fn_name, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    // instanceof and in can throw TypeError — propagate exception to enclosing try/catch
+    if (bin->op == JS_OP_INSTANCEOF || bin->op == JS_OP_IN) {
+        jm_emit_exc_propagate_check(mt);
+    }
+    return result;
 }
 
 // Unary expression
@@ -7369,8 +7384,35 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
-            // delete identifier → evaluate for side effects, return false
-            // (can't delete declared variables in sloppy mode)
+            JsIdentifierNode* del_id = (JsIdentifierNode*)un->operand;
+            const char* del_name = del_id->name ? del_id->name->chars : NULL;
+            if (del_name) {
+                // vars are stored with _js_ prefix in var scopes and module_consts
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%s", del_name);
+                bool del_is_declared = (jm_find_var(mt, vname) != NULL);
+                if (!del_is_declared && mt->module_consts) {
+                    JsModuleConstEntry mclookup;
+                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    if (hashmap_get(mt->module_consts, &mclookup)) del_is_declared = true;
+                }
+                if (del_is_declared) {
+                    // declared variable (local, arg, catch, closure, module-level) — can't delete; return false
+                    MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE_VAL)));
+                    return r;
+                }
+                // not in local scope — check global at runtime
+                // (e.g. NaN/Infinity are non-configurable globals → false; undeclared vars → true)
+                MIR_reg_t global_obj = jm_call_0(mt, "js_get_global_object", MIR_T_I64);
+                MIR_reg_t key = jm_box_string_literal(mt, del_name, (int)del_id->name->len);
+                return jm_call_2(mt, "js_delete_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, global_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            }
+            // fallthrough: evaluate and return false (shouldn't normally reach here)
             jm_transpile_box_item(mt, un->operand);
             MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

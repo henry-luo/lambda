@@ -1252,6 +1252,12 @@ extern "C" Item js_to_numeric(Item value) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
         if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
     }
+    // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
+    // Symbols are encoded as LMD_TYPE_INT with value <= -(int64_t)JS_SYMBOL_BASE
+    if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     // ToPrimitive for objects (hint: number) — ES spec §7.1.3
     if (type == LMD_TYPE_MAP) {
         bool own_pv = false;
@@ -1264,6 +1270,7 @@ extern "C" Item js_to_numeric(Item value) {
             Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
             Item args[1] = { hint };
             Item result = js_call_function(to_prim, value, args, 1);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY) {
                 js_throw_type_error("Cannot convert object to primitive value");
@@ -1277,12 +1284,14 @@ extern "C" Item js_to_numeric(Item value) {
         if (!found_vo) vo_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
         if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(vo_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) return js_to_numeric(result);
         }
         Item ts_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("toString", 8))});
         if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(ts_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) return js_to_numeric(result);
         }
@@ -1294,12 +1303,14 @@ extern "C" Item js_to_numeric(Item value) {
         Item vo_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
         if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(vo_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_numeric(result);
         }
         Item ts_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("toString", 8))});
         if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(ts_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_numeric(result);
         }
@@ -5934,6 +5945,11 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     // Function: reading .prototype, .length, .name, .call, .apply, .bind properties
     if (type == LMD_TYPE_FUNC) {
+        // Convert integer/float keys to string for properties_map lookup (e.g. f[1] → f["1"])
+        TypeId key_tid = get_type_id(key);
+        if (key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_FLOAT) {
+            key = js_to_string(key);
+        }
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -9810,6 +9826,68 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 return result;
             }
             // Plain Map: treat as array-like object (has length + numeric indices)
+            // For indexOf/lastIndexOf: iterate directly to respect getter side-effects
+            // (ES spec accesses each element directly during the search loop)
+            if (builtin_id == JS_BUILTIN_ARR_INDEX_OF || builtin_id == JS_BUILTIN_ARR_LAST_INDEX_OF) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(this_val, len_key);
+                if (js_check_exception()) return ItemNull;
+                int64_t len = (int64_t)js_get_number(len_val);
+                if (len <= 0) return (Item){.item = i2it(-1)};
+                Item search_val = arg_count >= 1 ? args[0] : make_js_undefined();
+                // for plain MAP objects, js_has_property skips Object.prototype (v37 intentional).
+                // we must check Object.prototype manually to implement HasProperty correctly.
+                bool is_plain_map = (get_type_id(this_val) == LMD_TYPE_MAP &&
+                                     this_val.map->map_kind == MAP_KIND_PLAIN);
+                Map* op_for_idx = is_plain_map ? js_resolve_object_prototype() : NULL;
+                // HasProperty + Get helper: returns {present, value}
+                // for plain MAPs, explicitly walks to Object.prototype
+                auto idx_has_get = [&](Item obj, Item ikey) -> std::pair<bool, Item> {
+                    bool own = it2b(js_has_own_property(obj, ikey));
+                    if (own) return {true, js_property_get(obj, ikey)};
+                    if (is_plain_map && op_for_idx) {
+                        Item op_item = (Item){.map = op_for_idx};
+                        if (it2b(js_has_own_property(op_item, ikey)))
+                            return {true, js_property_get(op_item, ikey)};
+                    } else if (!is_plain_map && js_has_property(obj, ikey)) {
+                        return {true, js_property_get(obj, ikey)};
+                    }
+                    return {false, ItemNull};
+                };
+                if (builtin_id == JS_BUILTIN_ARR_INDEX_OF) {
+                    // ES spec: evaluate fromIndex (step 4) before loop — triggers side-effects
+                    double n = arg_count >= 2 ? js_get_number(args[1]) : 0;
+                    if (js_check_exception()) return ItemNull;
+                    int64_t k = isnan(n) ? 0 : (int64_t)n;
+                    if (k < 0) { k = len + k; if (k < 0) k = 0; }
+                    for (; k < len; k++) {
+                        char buf[32];
+                        int blen = snprintf(buf, sizeof(buf), "%lld", (long long)k);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                        auto [kPresent, elem] = idx_has_get(this_val, idx_key);
+                        if (!kPresent) continue;
+                        if (js_check_exception()) return ItemNull;
+                        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(k)};
+                    }
+                } else {
+                    // lastIndexOf: evaluate fromIndex first, then search backward
+                    double n = arg_count >= 2 ? js_get_number(args[1]) : (double)(len - 1);
+                    if (js_check_exception()) return ItemNull;
+                    int64_t k = isnan(n) ? len - 1 : (int64_t)n;
+                    if (k < 0) k = len + k;
+                    if (k >= len) k = len - 1;
+                    for (; k >= 0; k--) {
+                        char buf[32];
+                        int blen = snprintf(buf, sizeof(buf), "%lld", (long long)k);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                        auto [kPresent, elem] = idx_has_get(this_val, idx_key);
+                        if (!kPresent) continue;
+                        if (js_check_exception()) return ItemNull;
+                        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(k)};
+                    }
+                }
+                return (Item){.item = i2it(-1)};
+            }
             js_array_method_real_this = this_val;
             Item temp_arr = js_array_like_to_array(this_val);
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
@@ -17768,6 +17846,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* a = arr.array;
         int len = a->length;
+        // ES spec: ToInteger(start) and ToInteger(end) — throw TypeError for Symbol
+        if (argc > 1 && js_key_is_symbol(args[1]))
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        if (argc > 2 && js_key_is_symbol(args[2]))
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
         int start = argc > 1 ? (int)js_get_number(args[1]) : 0;
         int end   = argc > 2 ? (int)js_get_number(args[2]) : len;
         if (start < 0) start = len + start;
