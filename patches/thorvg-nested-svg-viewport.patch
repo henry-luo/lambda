@@ -1,0 +1,204 @@
+diff --git a/src/loaders/svg/tvgSvgLoader.cpp b/src/loaders/svg/tvgSvgLoader.cpp
+index cd2e3041..097320ec 100644
+--- a/src/loaders/svg/tvgSvgLoader.cpp
++++ b/src/loaders/svg/tvgSvgLoader.cpp
+@@ -3452,10 +3452,101 @@ static void _svgLoaderParserXmlOpen(SvgLoaderData* loader, const char* content,
+             node = method(loader, nullptr, attrs, attrsLength, xmlParseAttributes);
+             loader->doc = node;
+         } else {
+-            if (STR_AS(tagName, "svg")) return; //Already loaded <svg>(SvgNodeType::Doc) tag
+             if (loader->stack.count > 0) parent = loader->stack.last();
+             else parent = loader->doc;
+-            if (STR_AS(tagName, "style")) {
++            if (STR_AS(tagName, "svg")) {
++                if (!loader->outerSvgSkippedInMainParse) {
++                    // This is the outer <svg> being re-encountered in the main parse phase.
++                    // The header parser already created loader->doc and pushed it to the stack,
++                    // so we just skip it here (original behavior).
++                    loader->outerSvgSkippedInMainParse = true;
++                    return;
++                }
++                // truly nested <svg>: parse its viewport/viewBox and create a group with the computed transform
++                auto svgParse = loader->svgParse;
++                auto savedX = svgParse->global.x;
++                auto savedY = svgParse->global.y;
++                auto savedW = svgParse->global.w;
++                auto savedH = svgParse->global.h;
++
++                // parse nested <svg> attributes into a temporary doc node (not added to the tree)
++                auto tempDoc = tvg::calloc<SvgNode>(1, sizeof(SvgNode));
++                tempDoc->style = tvg::calloc<SvgStyleProperty>(1, sizeof(SvgStyleProperty));
++                tempDoc->type = SvgNodeType::Doc;
++                tempDoc->node.doc.align = AspectRatioAlign::XMidYMid;
++                tempDoc->node.doc.meetOrSlice = AspectRatioMeetOrSlice::Meet;
++                tempDoc->node.doc.viewFlag = SvgViewFlag::None;
++
++                auto savedParseNode = svgParse->node;
++                auto savedNodesToStyleCount = loader->nodesToStyle.count;
++                svgParse->node = tempDoc;
++                xmlParseAttributes(attrs, attrsLength, _attrParseSvgNode, loader);
++                svgParse->node = savedParseNode;
++                // remove any nodesToStyle entries added for tempDoc (they'd dangle after we free it)
++                loader->nodesToStyle.count = savedNodesToStyleCount;
++
++                // restore parent coordinate space for sibling element parsing
++                svgParse->global.x = savedX;
++                svgParse->global.y = savedY;
++                svgParse->global.w = savedW;
++                svgParse->global.h = savedH;
++
++                // create a G node as the nested viewport container (its close tag will pop it)
++                svgParse->node = _createNode(parent, SvgNodeType::G);
++                node = svgParse->node;
++
++                if (node) {
++                    auto& doc = tempDoc->node.doc;
++                    // viewport size: defaults to 100% of parent coordinate space if not specified
++                    auto vpW = (doc.viewFlag & SvgViewFlag::Width) ? doc.w : savedW;
++                    auto vpH = (doc.viewFlag & SvgViewFlag::Height) ? doc.h : savedH;
++
++                    // apply viewBox transform if a viewBox is present
++                    if ((doc.viewFlag & SvgViewFlag::Viewbox) && doc.vbox.w > 0 && doc.vbox.h > 0 && vpW > 0 && vpH > 0) {
++                        auto& vbox = doc.vbox;
++                        auto sx = vpW / vbox.w;
++                        auto sy = vpH / vbox.h;
++
++                        if (doc.meetOrSlice == AspectRatioMeetOrSlice::Meet) {
++                            if (sx < sy) sy = sx; else sx = sy;
++                        } else {
++                            if (sx < sy) sx = sy; else sy = sx;
++                        }
++
++                        auto tvx = vbox.x * sx;
++                        auto tvy = vbox.y * sy;
++                        auto tvw = vbox.w * sx;
++                        auto tvh = vbox.h * sy;
++
++                        switch (doc.align) {
++                            case AspectRatioAlign::XMinYMin: break;
++                            case AspectRatioAlign::XMidYMin: tvx -= (vpW - tvw) * 0.5f; break;
++                            case AspectRatioAlign::XMaxYMin: tvx -= vpW - tvw; break;
++                            case AspectRatioAlign::XMinYMid: tvy -= (vpH - tvh) * 0.5f; break;
++                            case AspectRatioAlign::XMidYMid:
++                                tvx -= (vpW - tvw) * 0.5f;
++                                tvy -= (vpH - tvh) * 0.5f;
++                                break;
++                            case AspectRatioAlign::XMaxYMid: tvx -= vpW - tvw; tvy -= (vpH - tvh) * 0.5f; break;
++                            case AspectRatioAlign::XMinYMax: tvy -= vpH - tvh; break;
++                            case AspectRatioAlign::XMidYMax: tvx -= (vpW - tvw) * 0.5f; tvy -= vpH - tvh; break;
++                            case AspectRatioAlign::XMaxYMax: tvx -= vpW - tvw; tvy -= vpH - tvh; break;
++                            default: break;
++                        }
++
++                        node->transform = tvg::malloc<Matrix>(sizeof(Matrix));
++                        if (node->transform) {
++                            *node->transform = {sx, 0, -tvx, 0, sy, -tvy, 0, 0, 1};
++                        }
++                    }
++                }
++
++                // free the temporary doc node (we extracted what we needed)
++                tvg::free(tempDoc->style->cssClass);
++                tvg::free(tempDoc->style);
++                tvg::free(tempDoc);
++
++            } else if (STR_AS(tagName, "style")) {
+                 // TODO: For now only the first style node is saved. After the css id selector
+                 // is introduced this if condition shouldn't be necessary any more
+                 if (!loader->cssStyle) {
+diff --git a/src/loaders/svg/tvgSvgLoaderCommon.h b/src/loaders/svg/tvgSvgLoaderCommon.h
+index 1d67282b..b3af0154 100644
+--- a/src/loaders/svg/tvgSvgLoaderCommon.h
++++ b/src/loaders/svg/tvgSvgLoaderCommon.h
+@@ -631,6 +631,7 @@ struct SvgLoaderData
+     Array<FontFace> fonts;
+     int level = 0;
+     bool result = false;
++    bool outerSvgSkippedInMainParse = false;  // true after the outer <svg> is skipped in main parse
+     OpenedTagType openedTag = OpenedTagType::Other;
+     SvgNode* currentGraphicsNode = nullptr;
+ };
+diff --git a/src/loaders/svg/tvgSvgSceneBuilder.cpp b/src/loaders/svg/tvgSvgSceneBuilder.cpp
+index b0c731e9..56e8dc78 100644
+--- a/src/loaders/svg/tvgSvgSceneBuilder.cpp
++++ b/src/loaders/svg/tvgSvgSceneBuilder.cpp
+@@ -631,22 +631,46 @@ static Paint* _imageBuildHelper(SvgLoaderData& loaderData, SvgNode* node, const
+         href += sizeof("data:") - 1;
+         const char* mimetype;
+         imageMimeTypeEncoding encoding;
+-        if (!_isValidImageMimeTypeAndEncoding(&href, &mimetype, &encoding)) return nullptr; //not allowed mime type or encoding
+-        char *decoded = nullptr;
+-        if (encoding == imageMimeTypeEncoding::base64) {
+-            auto size = b64Decode(href, strlen(href), &decoded);
+-            if (picture->load(decoded, size, mimetype) != Result::Success) {
++        if (!_isValidImageMimeTypeAndEncoding(&href, &mimetype, &encoding)) {
++            // Fallback: handle malformed MIME types (e.g. "data:false;base64,...")
++            // by detecting format from magic bytes after base64 decoding
++            const char* b64marker = strstr(node->node.image.href + 5, ";base64,");
++            if (!b64marker) return nullptr;
++            b64marker += 8; // skip ";base64,"
++            char *decoded = nullptr;
++            auto size = b64Decode(b64marker, strlen(b64marker), &decoded);
++            if (size < 4 || !decoded) { tvg::free(decoded); return nullptr; }
++            // Detect format from magic bytes
++            const char* detectedMime = nullptr;
++            if (size >= 8 && (uint8_t)decoded[0] == 0x89 && decoded[1] == 'P' && decoded[2] == 'N' && decoded[3] == 'G') {
++                detectedMime = "png";
++            } else if (size >= 2 && (uint8_t)decoded[0] == 0xFF && (uint8_t)decoded[1] == 0xD8) {
++                detectedMime = "jpeg";
++            } else if (size >= 4 && decoded[0] == 'R' && decoded[1] == 'I' && decoded[2] == 'F' && decoded[3] == 'F') {
++                detectedMime = "webp";
++            }
++            if (!detectedMime || picture->load(decoded, size, detectedMime) != Result::Success) {
+                 tvg::free(decoded);
+                 return nullptr;
+             }
++            loaderData.images.push(decoded);
+         } else {
+-            auto size = svgUtilURLDecode(href, &decoded);
+-            if (picture->load(decoded, size, mimetype) != Result::Success) {
+-                tvg::free(decoded);
+-                return nullptr;
++            char *decoded = nullptr;
++            if (encoding == imageMimeTypeEncoding::base64) {
++                auto size = b64Decode(href, strlen(href), &decoded);
++                if (picture->load(decoded, size, mimetype) != Result::Success) {
++                    tvg::free(decoded);
++                    return nullptr;
++                }
++            } else {
++                auto size = svgUtilURLDecode(href, &decoded);
++                if (picture->load(decoded, size, mimetype) != Result::Success) {
++                    tvg::free(decoded);
++                    return nullptr;
++                }
+             }
++            loaderData.images.push(decoded);
+         }
+-        loaderData.images.push(decoded);
+     } else {
+         if (!strncmp(href, "file://", sizeof("file://") - 1)) href += sizeof("file://") - 1;
+         //TODO: protect against recursive svg image loading
+@@ -1007,6 +1031,22 @@ static Scene* _sceneBuildHelper(SvgLoaderData& loaderData, const SvgNode* node,
+         if (_isGroupType(child->type)) {
+             if (child->type == SvgNodeType::Use)
+                 scene->push(_useBuildHelper(loaderData, child, vBox, svgPath, depth + 1));
++            else if (child->type == SvgNodeType::Doc) {
++                // nested <svg> element: apply its own viewBox transform to correctly
++                // position/scale content. Without this, the nested <svg>'s viewBox is ignored
++                // and its children render at raw user-space coordinates (wrong size/position).
++                auto& doc = child->node.doc;
++                float nestedW = (doc.viewFlag & SvgViewFlag::Width) ? doc.w : vBox.w;
++                float nestedH = (doc.viewFlag & SvgViewFlag::Height) ? doc.h : vBox.h;
++                auto nestedScene = _sceneBuildHelper(loaderData, child, vBox, svgPath, false, depth + 1);
++                if (nestedScene) {
++                    if ((doc.viewFlag & SvgViewFlag::Viewbox) && nestedW > 0 && nestedH > 0) {
++                        auto m = _calculateAspectRatioMatrix(doc.align, doc.meetOrSlice, nestedW, nestedH, doc.vbox);
++                        nestedScene->transform(m);
++                    }
++                    scene->push(nestedScene);
++                }
++            }
+             else if (!(child->type == SvgNodeType::Symbol && node->type != SvgNodeType::Use))
+                 scene->push(_sceneBuildHelper(loaderData, child, vBox, svgPath, false, depth + 1));
+             if (child->id) scene->id = djb2Encode(child->id);
