@@ -480,6 +480,16 @@ build_thorvg_v1_0_pre34_for_mac() {
         }
     fi
 
+    PATCH_FILE2="$SCRIPT_DIR/patches/thorvg-nested-svg-viewport.patch"
+    if [ -f "$PATCH_FILE2" ]; then
+        echo "Applying ThorVG nested SVG viewport patch..."
+        git apply "$PATCH_FILE2" 2>/dev/null || {
+            git apply --check "$PATCH_FILE2" 2>/dev/null && true || {
+                echo "  (patch already applied or skipped)"
+            }
+        }
+    fi
+
     # Check for meson build system
     if [ -f "meson.build" ]; then
         # Check if meson is available
