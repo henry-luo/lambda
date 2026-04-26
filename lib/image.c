@@ -48,6 +48,23 @@ static ImageType get_image_type(const char* filename) {
     return IMAGE_TYPE_UNKNOWN;
 }
 
+static ImageType get_image_type_from_memory(const unsigned char* data, size_t length);
+
+// Detect image type by reading magic bytes from a file. Falls back to extension
+// only when content cannot be read. Many files in the wild have wrong extensions
+// (e.g. JPEG content with .png extension), so content sniffing is preferred.
+static ImageType get_image_type_from_file(const char* filename) {
+    if (!filename) return IMAGE_TYPE_UNKNOWN;
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) return get_image_type(filename);
+    unsigned char header[16];
+    size_t n = fread(header, 1, sizeof(header), fp);
+    fclose(fp);
+    ImageType t = get_image_type_from_memory(header, n);
+    if (t != IMAGE_TYPE_UNKNOWN) return t;
+    return get_image_type(filename);
+}
+
 // Load PNG image using libpng
 static unsigned char* load_png(const char* filename, int* width, int* height, int* channels, int req_channels) {
     (void)req_channels; // Mark as unused for compatibility
@@ -554,7 +571,7 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
         return NULL;
     }
 
-    ImageType type = get_image_type(filename);
+    ImageType type = get_image_type_from_file(filename);
 
     switch (type) {
         case IMAGE_TYPE_PNG:
@@ -658,7 +675,7 @@ static int get_gif_dimensions(const char* filename, int* width, int* height) {
 int image_get_dimensions(const char* filename, int* width, int* height) {
     if (!filename || !width || !height) return 0;
 
-    ImageType type = get_image_type(filename);
+    ImageType type = get_image_type_from_file(filename);
     switch (type) {
         case IMAGE_TYPE_PNG:  return get_png_dimensions(filename, width, height);
         case IMAGE_TYPE_JPEG: return get_jpeg_dimensions(filename, width, height);
