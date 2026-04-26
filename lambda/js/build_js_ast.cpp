@@ -1606,9 +1606,12 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return (JsAstNode*)seq;
     } else if (strcmp(node_type, "computed_property_name") == 0) {
         // [expr] — computed key in class/object. Unwrap the inner expression.
-        // The inner expression is the first named child.
-        if (ts_node_named_child_count(expr_node) > 0) {
-            TSNode inner = ts_node_named_child(expr_node, 0);
+        // The inner expression is the first non-comment named child.
+        uint32_t nc = ts_node_named_child_count(expr_node);
+        for (uint32_t ci = 0; ci < nc; ci++) {
+            TSNode inner = ts_node_named_child(expr_node, ci);
+            const char* inner_type = ts_node_type(inner);
+            if (strcmp(inner_type, "comment") == 0) continue;
             return build_js_expression(tp, inner);
         }
         // Empty computed property — return null identifier
@@ -2933,9 +2936,23 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
                     while (pi < plen && (pfx[pi] == ' ' || pfx[pi] == '\t' || pfx[pi] == '\n' || pfx[pi] == '\r')) pi++;
                     if (pi >= plen) break;
                     if (pfx[pi] == '*') { pi++; continue; }
+                    // Skip block comments /* ... */
+                    if (pfx[pi] == '/' && pi + 1 < plen && pfx[pi+1] == '*') {
+                        pi += 2;
+                        while (pi + 1 < plen && !(pfx[pi] == '*' && pfx[pi+1] == '/')) pi++;
+                        if (pi + 1 < plen) pi += 2;
+                        continue;
+                    }
+                    // Skip line comments // ...
+                    if (pfx[pi] == '/' && pi + 1 < plen && pfx[pi+1] == '/') {
+                        pi += 2;
+                        while (pi < plen && pfx[pi] != '\n') pi++;
+                        continue;
+                    }
                     int ws = pi;
                     while (pi < plen && pfx[pi] >= 'a' && pfx[pi] <= 'z') pi++;
                     int wl = pi - ws;
+                    if (wl == 0) { pi++; continue; } // skip unknown char to avoid infinite loop
                     if (wl == 3 && memcmp(pfx + ws, "get", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
                     else if (wl == 3 && memcmp(pfx + ws, "set", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
                     else if (wl == 6 && memcmp(pfx + ws, "static", 6) == 0) method->static_method = true;
