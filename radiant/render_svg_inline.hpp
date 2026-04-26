@@ -70,6 +70,17 @@ struct SvgRenderContext {
     float opacity;
     bool fill_none;
     bool stroke_none;
+
+    // inherited text properties (used by <text>/<tspan> when not on element itself)
+    const char* inherited_font_family;   // pointer into Element attribute string memory (lifetime of SVG element tree)
+    float inherited_font_size;            // 0 means not set
+    int inherited_font_weight;            // 0 means not set
+    const char* inherited_text_anchor;
+
+    // current viewport size in user-coordinate units (parent for nested <svg>).
+    // Used to resolve omitted width/height on a nested <svg> element ("100%").
+    float current_viewport_w;
+    float current_viewport_h;
     
     // gradient/pattern definitions from <defs>
     HashMap* defs;               // id → SvgDefTable*

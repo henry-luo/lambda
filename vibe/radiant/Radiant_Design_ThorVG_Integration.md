@@ -299,6 +299,58 @@ Removed all remaining `tvg_*` / `Tvg_*` / `thorvg_capi.h` usage from every file 
 
 Zero `tvg_*` or `Tvg_*` references exist anywhere else in the codebase.
 
+### Stage 1.5: SVG Loader Replacement (complete)
+
+**Problem.**  ThorVG's bundled SVG loader (`tvg_picture_load`/`tvg_picture_load_data` for `mime_type="svg"`) matches `<text>` fonts by *family name only*.  When an SVG asset declares
+`font-family="Times New Roman" font-weight="bold"`, ThorVG renders with the
+registered "Times New Roman" face — never picking up "Times New Roman Bold"
+even when both are loaded via `tvg_font_load`.  Browsers, by contrast,
+resolve weighted family lookups to the appropriate face.  The bug surfaces
+in any SVG with bold text (chalk readme logo, badge SVGs, chart
+annotations).  Earlier mitigations — preloading bold variants and
+preprocessing the SVG source to rewrite `font-family` values — were brittle
+workarounds, not fixes.
+
+**Fix.**  External SVGs go through the *same* loader and renderer as inline
+`<svg>` in HTML body:
+
+1. `rdt_picture_load(path)` reads the file → calls `parse_xml()` → walks
+   the document wrapper to locate the root `<svg>` Element.
+2. `rdt_picture_load_data(data, size, "svg")` does the same on an
+   in-memory buffer (HTTP responses, data URIs).
+3. Intrinsic size is computed via `calculate_svg_intrinsic_size()` (same
+   helper used by inline SVG).
+4. `rdt_picture_draw()` dispatches by kind:
+   - `KIND_SVG_DOM`: calls `render_svg_to_vec(vec, svg_root, w, h, pool,
+     1.0f, font_ctx, transform, NULL)` from `render_svg_inline.cpp`.
+   - `KIND_TVG_PAINT`: legacy path retained for `<text>`/`<image>`
+     primitives that the SVG renderer wraps via
+     `rdt_picture_take_tvg_paint()`.
+
+`render_svg_to_vec` already resolves font weight/style correctly: each
+text segment calls `font_find_best_match()` → `resolve_svg_font_path()` →
+`tvg_font_load(bold_path)` and `tvg_text_set_font(bold_name)` per text
+node.  No preloaded fonts are needed.
+
+**Font context propagation.**  Inline SVG inside HTML body uses
+`RenderContext->ui_context->font_ctx`.  Pictures rendered off-screen
+(into `ImageSurface`) have no render context, so `rdt_set_font_context()`
+publishes a process-wide `FontContext*` pointer; `rdt_picture_draw()`
+passes it to `render_svg_to_vec`.  Set once from `ui_context_init()`
+right after the font context is created.
+
+**Removed workarounds.**
+- `radiant/surface.cpp::preprocess_svg_bold_fonts()` — ~170 lines of
+  textual rewriting of `font-family` values inside elements with
+  `font-weight: bold`.
+- `radiant/ui_context.cpp` bold-variant preload loop for Times New Roman,
+  Times, Georgia, Arial, Helvetica, Verdana, Geneva.
+
+**Status.**  ThorVG's SVG loader is still linked into the binary but no
+longer invoked from Radiant.  All file-, HTTP-, and data-URI SVG sources
+flow through the unified Radiant pipeline.  Stage 2's platform-native
+backends will not need an SVG loader at all.
+
 ### Stage 2: Platform-Native Backends (future)
 
 1. Implement `rdt_vector_cg.mm` — Core Graphics backend for macOS

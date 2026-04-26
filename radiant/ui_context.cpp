@@ -141,36 +141,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     rdt_engine_init(1);
     // init animation timing presets (cubic-bezier ease, ease-in, ease-out, ease-in-out)
     timing_init_presets();
-    // load default fonts for vector engine to render text later.
-    // ThorVG's SVG loader matches fonts by registered family/PS name and
-    // weight, but only across fonts already loaded via tvg_font_load.
-    // So we preload BOTH regular and bold variants for the common families
-    // used by SVGs in the wild (badges, logos, charts).
-    const char* vec_fonts[] = {
-        "Times New Roman", "Times",  // default serif
-        "Georgia",                    // common serif used in markdown logos
-        "Arial",                      // common sans-serif used in graph SVG
-        "Helvetica",                  // fallback sans-serif
-        "Verdana",                    // common in shields.io badge SVGs
-        "Geneva",                     // macOS fallback for Verdana
-        nullptr
-    };
-    for (int i = 0; vec_fonts[i]; i++) {
-        // regular weight
-        char* font_path = load_font_path(uicon->font_ctx, vec_fonts[i]);
-        if (font_path) {
-            rdt_font_load(font_path);
-            mem_free(font_path);
-        }
-        // bold weight (separate file on most systems — Georgia Bold,
-        // Times New Roman Bold, Arial Bold, etc.).  Skip if it resolves
-        // to the same path as regular (e.g., variable fonts).
-        FontMatchResult bm = font_find_best_match(
-            uicon->font_ctx, vec_fonts[i], 700, FONT_SLANT_NORMAL);
-        if (bm.found && bm.file_path && !strstr(bm.file_path, ".ttc")) {
-            rdt_font_load(bm.file_path);
-        }
-    }
+    // share font context with the vector backend so that picture-mode SVG
+    // (file-based and data-URI) can resolve fonts via the same code path
+    // used by inline <svg> in HTML body — including weight/style matching.
+    rdt_set_font_context(uicon->font_ctx);
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
     scroll_config_init(uicon->pixel_ratio);

@@ -3,11 +3,18 @@
 // Radiant rendering code calls only rdt_* functions.
 
 #include "rdt_vector.hpp"
+#include "render_svg_inline.hpp"
 #include "../lib/log.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
+#include "../lib/mempool.h"
+#include "../lib/url.h"
+#include "../lambda/input/input.hpp"
+#include "../lambda/input/input-parsers.h"
+#include "../lambda/lambda-data.hpp"
 #include <string.h>
 #include <pthread.h>
+#include <stdio.h>
 
 // ============================================================================
 // Internal types
@@ -37,10 +44,38 @@ struct RdtPath {
 };
 
 struct RdtPicture {
-    Tvg_Paint paint;  // tvg_picture
-    float width;
+    // Two kinds of pictures:
+    //  - SVG_DOM: Radiant-parsed SVG DOM (Element*) drawn via render_svg_to_vec.
+    //    Used by rdt_picture_load* for file/data SVG.  Goes through the same
+    //    code path as inline <svg> in HTML, so font weight/style/family
+    //    resolution is uniform with HTML body text.
+    //  - TVG_PAINT: a Tvg_Paint owned by ThorVG (text or image), wrapped via
+    //    rdt_picture_take_tvg_paint and used internally by render_svg_inline
+    //    for SVG <text>/<image> primitives.
+    enum Kind { KIND_TVG_PAINT, KIND_SVG_DOM };
+    Kind kind;
+
+    // KIND_TVG_PAINT
+    Tvg_Paint paint;
+
+    // KIND_SVG_DOM
+    Input* input;          // owns the parse arena (allocated from owned pool)
+    Pool* pool;            // owned pool (created by rdt_picture_load*); freed on rdt_picture_free
+    bool owns_pool;        // true for originals, false for dups
+    Element* svg_root;     // root <svg> element
+
+    // Common
+    float width;           // intrinsic width (from viewBox or width attr) or override via set_size
     float height;
+    RdtMatrix transform;   // optional explicit transform (set via rdt_picture_set_transform)
+    bool has_transform;
 };
+
+// Process-wide font context for SVG-DOM pictures (set by ui_context).
+// Inline <svg> uses RenderContext->ui_context->font_ctx; standalone pictures
+// rasterized off-screen via render_svg() do not have a render context, so
+// we keep a global pointer set once at startup.
+static FontContext* g_picture_font_ctx = nullptr;
 
 // ============================================================================
 // Helpers
@@ -558,58 +593,145 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 // Picture (SVG / vector image files)
 // ============================================================================
 
-RdtPicture* rdt_picture_load(const char* path) {
-    if (!path) return nullptr;
+// Helper: parse SVG content into an Element tree and locate the root <svg>.
+// On success, allocates a private Pool and Input, returns a fully-populated
+// RdtPicture* in SVG_DOM mode.  Returns nullptr on failure.
+static RdtPicture* svg_picture_create(const char* data, int size) {
+    if (!data || size <= 0) return nullptr;
 
-    Tvg_Paint pic = tvg_picture_new();
-    if (!pic) return nullptr;
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("svg_picture_create: pool_create failed");
+        return nullptr;
+    }
+    Input* input = Input::create(pool, nullptr);
+    if (!input) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+    input->ui_mode = true;  // allocate fat DomElements (matches inline SVG path)
 
-    if (tvg_picture_load(pic, path) != TVG_RESULT_SUCCESS) {
-        log_error("rdt_picture_load: failed to load %s", path);
-        tvg_paint_unref(pic, true);
+    // parse_xml expects a null-terminated string
+    char* buf = (char*)mem_alloc(size + 1, MEM_CAT_RENDER);
+    if (!buf) { pool_destroy(pool); return nullptr; }
+    memcpy(buf, data, size);
+    buf[size] = '\0';
+    parse_xml(input, buf);
+    mem_free(buf);
+
+    if (!input->root.item || input->root.item == ITEM_ERROR) {
+        log_error("svg_picture_create: parse_xml failed");
+        pool_destroy(pool);
         return nullptr;
     }
 
-    float w = 0, h = 0;
-    tvg_picture_get_size(pic, &w, &h);
+    // walk the document wrapper to find the first <svg> element
+    Element* svg_root = nullptr;
+    Element* document_wrapper = (Element*)input->root.item;
+    if (document_wrapper && document_wrapper->type) {
+        TypeElmt* doc_type = (TypeElmt*)document_wrapper->type;
+        if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "document") == 0) {
+            for (int64_t i = 0; i < document_wrapper->length; i++) {
+                Item child = document_wrapper->items[i];
+                if (!child.item) continue;
+                if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+                Element* ce = (Element*)child.item;
+                TypeElmt* ct = (TypeElmt*)ce->type;
+                if (!ct || !ct->name.str) continue;
+                // skip processing instructions and comments
+                if (ct->name.str[0] == '?' || ct->name.str[0] == '!') continue;
+                svg_root = ce;
+                break;
+            }
+        } else if (doc_type && doc_type->name.str && strcmp(doc_type->name.str, "svg") == 0) {
+            // root itself is the <svg>
+            svg_root = document_wrapper;
+        }
+    }
+    if (!svg_root) {
+        log_error("svg_picture_create: no <svg> root element found");
+        pool_destroy(pool);
+        return nullptr;
+    }
+
+    // intrinsic size
+    SvgIntrinsicSize isz = calculate_svg_intrinsic_size(svg_root);
+    float w = isz.width  > 0 ? isz.width  : 300.0f;
+    float h = isz.height > 0 ? isz.height : 150.0f;
 
     RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
-    p->paint = pic;
+    p->kind = RdtPicture::KIND_SVG_DOM;
+    p->input = input;
+    p->pool = pool;
+    p->owns_pool = true;
+    p->svg_root = svg_root;
     p->width = w;
     p->height = h;
+    p->has_transform = false;
+    return p;
+}
+
+RdtPicture* rdt_picture_load(const char* path) {
+    if (!path) return nullptr;
+
+    // Read file content; the SVG path is parsed by Radiant (not ThorVG).
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        log_error("rdt_picture_load: failed to open %s", path);
+        return nullptr;
+    }
+    fseek(fp, 0, SEEK_END);
+    long fsz = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (fsz <= 0) { fclose(fp); return nullptr; }
+    char* buf = (char*)mem_alloc((size_t)fsz, MEM_CAT_RENDER);
+    if (!buf) { fclose(fp); return nullptr; }
+    size_t rd = fread(buf, 1, (size_t)fsz, fp);
+    fclose(fp);
+
+    RdtPicture* p = svg_picture_create(buf, (int)rd);
+    mem_free(buf);
+    if (!p) {
+        log_error("rdt_picture_load: failed to parse %s", path);
+    }
     return p;
 }
 
 RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_type) {
     if (!data || size <= 0) return nullptr;
-
-    Tvg_Paint pic = tvg_picture_new();
-    if (!pic) return nullptr;
-
-    if (tvg_picture_load_data(pic, data, size, mime_type, NULL, true) != TVG_RESULT_SUCCESS) {
-        log_error("rdt_picture_load_data: failed to decode");
-        tvg_paint_unref(pic, true);
-        return nullptr;
-    }
-
-    float w = 0, h = 0;
-    tvg_picture_get_size(pic, &w, &h);
-
-    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
-    p->paint = pic;
-    p->width = w;
-    p->height = h;
-    return p;
+    // Currently the only vector format Radiant pictures handle is SVG.
+    // mime_type is accepted for API compatibility; non-svg types fall through
+    // to the SVG parser which will fail gracefully.
+    (void)mime_type;
+    return svg_picture_create(data, size);
 }
 
 RdtPicture* rdt_picture_dup(RdtPicture* pic) {
-    if (!pic || !pic->paint) return nullptr;
-    Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
-    if (!dup) return nullptr;
+    if (!pic) return nullptr;
+    if (pic->kind == RdtPicture::KIND_TVG_PAINT) {
+        if (!pic->paint) return nullptr;
+        Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
+        if (!dup) return nullptr;
+        RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+        p->kind = RdtPicture::KIND_TVG_PAINT;
+        p->paint = dup;
+        p->width = pic->width;
+        p->height = pic->height;
+        return p;
+    }
+    // SVG_DOM: shallow copy that shares the underlying Element/Pool with the
+    // original; only the original owns the pool.  Callers must ensure the
+    // dup outlives no longer than the source.
     RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
-    p->paint = dup;
+    p->kind = RdtPicture::KIND_SVG_DOM;
+    p->input = pic->input;
+    p->pool = pic->pool;
+    p->owns_pool = false;
+    p->svg_root = pic->svg_root;
     p->width = pic->width;
     p->height = pic->height;
+    p->transform = pic->transform;
+    p->has_transform = pic->has_transform;
     return p;
 }
 
@@ -625,9 +747,35 @@ void rdt_picture_set_size(RdtPicture* pic, float w, float h) {
     pic->height = h;
 }
 
+// Internal helper: render a SVG_DOM picture into vec at the picture's stored
+// w/h, applying the optional transform.  No tvg_* calls.
+static void svg_dom_picture_draw(RdtVector* vec, RdtPicture* pic,
+                                 uint8_t opacity, const RdtMatrix* transform) {
+    if (!pic->svg_root) return;
+    // Compose the explicit per-picture transform (set via set_transform) and
+    // the caller-provided transform.  Caller transform applies after.
+    RdtMatrix base = rdt_matrix_identity();
+    if (pic->has_transform) base = pic->transform;
+    if (transform) base = rdt_matrix_multiply(transform, &base);
+    // opacity at the picture level is currently not threaded through the SVG
+    // pipeline (inline SVG does its own opacity).  For now ignore opacity for
+    // SVG_DOM; it's only used for raster image draw via rdt_draw_image.
+    (void)opacity;
+    render_svg_to_vec(vec, pic->svg_root, pic->width, pic->height,
+                      pic->pool, 1.0f, g_picture_font_ctx, &base, nullptr);
+}
+
 void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                       uint8_t opacity, const RdtMatrix* transform) {
-    if (!vec || !vec->impl || !pic || !pic->paint) return;
+    if (!vec || !vec->impl || !pic) return;
+
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        svg_dom_picture_draw(vec, pic, opacity, transform);
+        return;
+    }
+
+    // KIND_TVG_PAINT
+    if (!pic->paint) return;
     RdtVectorImpl* impl = vec->impl;
 
     if (pic->width > 0 && pic->height > 0) {
@@ -653,9 +801,18 @@ static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
                           uint8_t opacity, const RdtMatrix* transform) {
-    // Thread-safe version: duplicate the paint so the original stays intact.
-    // Used by tile-based parallel rendering where multiple tiles may draw the same picture.
-    if (!vec || !vec->impl || !pic || !pic->paint) return;
+    if (!vec || !vec->impl || !pic) return;
+
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        // SVG_DOM pictures are immutable during draw — render_svg_to_vec
+        // builds its own SvgRenderContext on the stack.  Safe to call from
+        // multiple threads with distinct vecs.
+        svg_dom_picture_draw(vec, pic, opacity, transform);
+        return;
+    }
+
+    // KIND_TVG_PAINT: thread-safe duplicate so the original stays intact.
+    if (!pic->paint) return;
     RdtVectorImpl* impl = vec->impl;
 
     pthread_mutex_lock(&g_tvg_dup_mutex);
@@ -678,7 +835,14 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
 
 void rdt_picture_free(RdtPicture* pic) {
     if (!pic) return;
-    if (pic->paint) tvg_paint_unref(pic->paint, true);
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        if (pic->owns_pool && pic->pool) {
+            pool_destroy(pic->pool);
+        }
+        // input is allocated from the pool; destroyed implicitly above
+    } else {
+        if (pic->paint) tvg_paint_unref(pic->paint, true);
+    }
     mem_free(pic);
 }
 
@@ -689,6 +853,7 @@ void rdt_picture_free(RdtPicture* pic) {
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
     RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+    pic->kind = RdtPicture::KIND_TVG_PAINT;
     pic->paint = paint;
     pic->width = w;
     pic->height = h;
@@ -696,7 +861,13 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
 }
 
 bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
-    if (!pic || !pic->paint || !out) return false;
+    if (!pic || !out) return false;
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        if (!pic->has_transform) return false;
+        *out = pic->transform;
+        return true;
+    }
+    if (!pic->paint) return false;
     Tvg_Matrix m;
     if (tvg_paint_get_transform(pic->paint, &m) != TVG_RESULT_SUCCESS) return false;
     out->e11 = m.e11; out->e12 = m.e12; out->e13 = m.e13;
@@ -706,7 +877,13 @@ bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
 }
 
 void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
-    if (!pic || !pic->paint || !m) return;
+    if (!pic || !m) return;
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
+        pic->transform = *m;
+        pic->has_transform = true;
+        return;
+    }
+    if (!pic->paint) return;
     Tvg_Matrix tm;
     tm.e11 = m->e11; tm.e12 = m->e12; tm.e13 = m->e13;
     tm.e21 = m->e21; tm.e22 = m->e22; tm.e23 = m->e23;
@@ -728,7 +905,10 @@ void rdt_engine_term(void) {
 
 void rdt_font_load(const char* font_path) {
     if (font_path) {
-        Tvg_Result r = tvg_font_load(font_path);
-        log_debug("rdt_font_load: %s -> result=%d", font_path, (int)r);
+        tvg_font_load(font_path);
     }
+}
+
+void rdt_set_font_context(struct FontContext* ctx) {
+    g_picture_font_ctx = ctx;
 }
