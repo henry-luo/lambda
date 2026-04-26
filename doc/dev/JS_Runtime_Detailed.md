@@ -943,7 +943,7 @@ Worker responses:
 
 - **File**: `test/js262/test262_baseline.txt`
 - **Update gate**: 0 regressions, 0 batch-lost, 0 crash-exits, count ≥ `STABLE_BASELINE_MIN` (21824)
-- **Partial list**: `temp/_t262_partial.txt` with tags: `CRASH_N`, `SLOW_N`, `BATCH_KILL`, `TIMEOUT_N`
+- **Partial list**: `test/js262/t262_partial.txt` with tags: `CRASH_N`, `SLOW_N`, `BATCH_KILL`, `TIMEOUT_N`
 
 ---
 
