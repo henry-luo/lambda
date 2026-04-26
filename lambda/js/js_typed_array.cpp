@@ -5,6 +5,7 @@
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -50,6 +51,8 @@ static int typed_array_element_size(JsTypedArrayType type) {
     case JS_TYPED_UINT32:
     case JS_TYPED_FLOAT32:  return 4;
     case JS_TYPED_FLOAT64:  return 8;
+    case JS_TYPED_BIGINT64:
+    case JS_TYPED_BIGUINT64: return 8;
     default:                return 4;
     }
 }
@@ -71,6 +74,8 @@ extern "C" const char* js_typed_array_type_name(Item val) {
     case JS_TYPED_UINT32:        return "Uint32Array";
     case JS_TYPED_FLOAT32:       return "Float32Array";
     case JS_TYPED_FLOAT64:       return "Float64Array";
+    case JS_TYPED_BIGINT64:      return "BigInt64Array";
+    case JS_TYPED_BIGUINT64:     return "BigUint64Array";
     default:                     return NULL;
     }
 }
@@ -553,6 +558,20 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
         *fp = ((double*)ta->data)[idx];
         return (Item){.item = d2it(fp)};
     }
+    case JS_TYPED_BIGINT64: {
+        extern Item bigint_from_int64(int64_t val);
+        return bigint_from_int64(((int64_t*)ta->data)[idx]);
+    }
+    case JS_TYPED_BIGUINT64: {
+        extern Item bigint_from_int64(int64_t val);
+        extern Item bigint_from_string(const char* str, int len);
+        uint64_t v = ((uint64_t*)ta->data)[idx];
+        if (v <= (uint64_t)INT64_MAX) return bigint_from_int64((int64_t)v);
+        // Value exceeds int64 range — construct from string
+        char buf[32];
+        int blen = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)v);
+        return bigint_from_string(buf, blen);
+    }
     default:
         return (Item){.item = ITEM_NULL};
     }
@@ -566,6 +585,51 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     int idx = (int)it2i(index);
 
     if (idx < 0 || idx >= ta->length) return (Item){.item = ITEM_NULL};
+
+    // BigInt types: ToBigInt(value), then store as int64/uint64.
+    // Per ES spec §22.2.3.5.4 IntegerIndexedElementSet: BigInt typed arrays use ToBigInt
+    // which throws TypeError for Numbers; only BigInt, String (parseable), and Boolean coerce.
+    if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) {
+        extern Item js_bigint_constructor(Item value);
+        extern int64_t bigint_to_int64(Item bi);
+        // Inline BigInt detection (avoids exposing js_is_bigint as static)
+        TypeId vt = get_type_id(value);
+        bool is_bi = false;
+        if (vt == LMD_TYPE_DECIMAL) {
+            Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
+            is_bi = dec && dec->unlimited == DECIMAL_BIGINT;
+        }
+        Item bi;
+        if (is_bi) {
+            bi = value;
+        } else {
+            // ToBigInt rejects Number/null/undefined per spec
+            if (vt == LMD_TYPE_INT) {
+                int64_t iv = it2i(value);
+                if (iv > -(int64_t)JS_SYMBOL_BASE) {
+                    js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+                    return (Item){.item = ITEM_NULL};
+                }
+                // Symbol → handled by ctor (throws)
+            } else if (vt == LMD_TYPE_FLOAT) {
+                js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+                return (Item){.item = ITEM_NULL};
+            } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
+                js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+                return (Item){.item = ITEM_NULL};
+            }
+            bi = js_bigint_constructor(value);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        }
+        int64_t iv = bigint_to_int64(bi);  // truncates to int64 for both signed/unsigned
+        if (ta->element_type == JS_TYPED_BIGINT64) {
+            ((int64_t*)ta->data)[idx] = iv;
+        } else {
+            // BigUint64: take low 64 bits (unsigned wrap-around per spec)
+            ((uint64_t*)ta->data)[idx] = (uint64_t)iv;
+        }
+        return value;
+    }
 
     double num_val;
     TypeId vtype = get_type_id(value);

@@ -76,6 +76,10 @@ Item _map_read_field(ShapeEntry* field, void* map_data);
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 // Forward declaration for js_map_get_fast (defined later in this file)
 static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found);
+// v95: Forward declaration for Array.prototype[Symbol.iterator] override check (defined near js_get_iterator)
+static Item js_check_array_sym_iterator();
+// v95: Global flag — set to 1 any time __sym_1 is assigned on any map (conservative guard)
+int g_array_sym_iter_ever_set = 0;
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
@@ -546,6 +550,8 @@ extern "C" void js_batch_reset() {
     js_assert_reset();
     extern void js_node_test_reset(void);
     js_node_test_reset();
+    // v95: reset Array.prototype[Symbol.iterator] override flag
+    g_array_sym_iter_ever_set = 0;
 }
 
 // Get current module var count (for checkpointing)
@@ -665,6 +671,8 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_assert_reset();
     extern void js_node_test_reset(void);
     js_node_test_reset();
+    // v95: reset Array.prototype[Symbol.iterator] override flag
+    g_array_sym_iter_ever_set = 0;
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -4399,6 +4407,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
             else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
             else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
+            else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      ta_type = JS_TYPED_BIGINT64;
+            else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     ta_type = JS_TYPED_BIGUINT64;
             if (ta_type >= 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
@@ -4769,6 +4779,8 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
             else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        ta_type = JS_TYPED_UINT32;
             else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       ta_type = JS_TYPED_FLOAT32;
             else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       ta_type = JS_TYPED_FLOAT64;
+            else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      ta_type = JS_TYPED_BIGINT64;
+            else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     ta_type = JS_TYPED_BIGUINT64;
             // "TypedArray" abstract base: use the exemplar's own element type
             else if (nl == 10 && strncmp(n, "TypedArray", 10) == 0)         ta_type = default_type;
             if (ta_type >= 0) {
@@ -5696,7 +5708,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                     return js_get_prototype_of(object);
                 }
                 // Symbol.iterator → values method (Symbol.iterator has well-known ID=1, key "__sym_1")
+                // v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted
                 if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
+                    if (g_array_sym_iter_ever_set) {
+                        Item sym_override = js_check_array_sym_iterator();
+                        if (sym_override.item == ITEM_JS_UNDEFINED) return make_js_undefined();  // deleted
+                        if (sym_override.item != ItemNull.item) return sym_override;  // user-defined
+                    }
                     return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
                 }
                 // Check built-in array methods (push, slice, concat, etc.)
@@ -6628,6 +6646,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     // Convert Symbol keys to unique string keys for property storage
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
+    // v95: If __sym_1 (Symbol.iterator) is ever set on a map, note it for Array.prototype override detection
+    if (!g_array_sym_iter_ever_set && type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+        String* _sk = it2s(key);
+        if (_sk && _sk->len == 7 && strncmp(_sk->chars, "__sym_1", 7) == 0)
+            g_array_sym_iter_ever_set = 1;
+    }
 
     // Array: result[i] = val or arr.length = n
     if (type == LMD_TYPE_ARRAY) {
@@ -7241,6 +7265,46 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     if (result.item != ItemNull.item) return result;
 
     // builtin fallback
+    return js_property_get(proto, key);
+}
+
+// Like js_super_property_get but for instance method context:
+// receiver.__proto__.__proto__ = ParentClass.prototype (skip current class override).
+extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
+    // Level 1: receiver.__proto__ = CurrentClass.prototype
+    Item cur_proto = js_get_prototype(receiver);
+    if (cur_proto.item == ItemNull.item) cur_proto = js_get_prototype_of(receiver);
+    if (cur_proto.item == ItemNull.item) return make_js_undefined();
+    // Level 2: CurrentClass.prototype.__proto__ = ParentClass.prototype
+    Item parent_proto = js_get_prototype(cur_proto);
+    if (parent_proto.item == ItemNull.item) parent_proto = js_get_prototype_of(cur_proto);
+    if (parent_proto.item == ItemNull.item) return make_js_undefined();
+
+    Item proto = parent_proto;
+    TypeId type = get_type_id(proto);
+    if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
+
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+
+    Item result = map_get(proto.map, key);
+    if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
+
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len < 128 && str_key->len > 0) {
+            char getter_key[256];
+            snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+            bool gk_found = false;
+            Item getter = js_map_get_fast(proto.map, getter_key, (int)strlen(getter_key), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, receiver, NULL, 0);
+            }
+        }
+    }
+
+    result = js_prototype_lookup(proto, key);
+    if (result.item != ItemNull.item) return result;
+
     return js_property_get(proto, key);
 }
 
@@ -8917,9 +8981,17 @@ static bool js_has_property(Item obj, Item key) {
         return false;
     }
     if (it2b(js_has_own_property(obj, key))) return true;
-    // walk prototype chain — use js_get_prototype_of which handles all types
-    // (arrays, functions, etc.) unlike js_get_prototype which only works for MAPs.
-    Item proto = js_get_prototype_of(obj);
+    // walk prototype chain — for plain MAPs without explicit __proto__, use js_get_prototype
+    // (returns ItemNull for bare object literals) rather than js_get_prototype_of (which returns
+    // implicit Object.prototype). This matches pre-v37 HasProperty semantics: an array-like
+    // object like {2:2, length:20} doesn't reach Object.prototype, so Object.prototype[k] values
+    // captured before getters can fire don't corrupt array-method snapshots.
+    Item proto;
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN) {
+        proto = js_get_prototype(obj);  // only explicit __proto__; ItemNull for plain object literals
+    } else {
+        proto = js_get_prototype_of(obj);  // arrays, functions, typed arrays, Objects with __proto__
+    }
     int depth = 0;
     while (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED && depth < 32) {
         if (it2b(js_has_own_property(proto, key))) return true;
@@ -9016,6 +9088,8 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
     else if (nl == 11 && strncmp(n, "Uint32Array", 11) == 0)        return JS_TYPED_UINT32;
     else if (nl == 12 && strncmp(n, "Float32Array", 12) == 0)       return JS_TYPED_FLOAT32;
     else if (nl == 12 && strncmp(n, "Float64Array", 12) == 0)       return JS_TYPED_FLOAT64;
+    else if (nl == 13 && strncmp(n, "BigInt64Array", 13) == 0)      return JS_TYPED_BIGINT64;
+    else if (nl == 14 && strncmp(n, "BigUint64Array", 14) == 0)     return JS_TYPED_BIGUINT64;
     return -1;
 }
 
@@ -11410,6 +11484,24 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     }
 }
 
+// super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
+// If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
+// constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
+extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int argc) {
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        return js_call_function(callee, this_val, args, argc);
+    }
+    if (get_type_id(callee) == LMD_TYPE_MAP) {
+        bool own = false;
+        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
+        if (own && get_type_id(ctor) == LMD_TYPE_FUNC) {
+            return js_call_function(ctor, this_val, args, argc);
+        }
+        // Empty class with no constructor — no-op, this is already created
+    }
+    return this_val;
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
@@ -11804,6 +11896,28 @@ void js_regex_cache_reset() {
     g_regex_compile_cache.clear();
 }
 
+// Permanent RE2 compilation cache — survives pool/batch resets within a process.
+// Keyed by FNV-1a content hash of pattern+flags. Only caches simple patterns (no wrapper).
+// Eliminates repeated recompilation of huge regex literals (e.g. UnicodeIDStart/Continue)
+// across test boundaries in batch mode.
+struct Re2PermanentEntry {
+    re2::RE2* re2;              // new-allocated, never freed
+    bool global, ignore_case, multiline, sticky, dot_all, has_unicode;
+    char* canonical_flags;      // new-allocated, never freed
+    int canonical_flags_len;
+    int source_len;             // length check for collision detection
+};
+static std::unordered_map<uint64_t, Re2PermanentEntry> g_re2_permanent_cache;
+
+// Content-based hash for permanent cache — valid across batch resets (uses string content, not pointers)
+static inline uint64_t js_regex_content_hash(const char* pat, int plen, const char* flg, int flen) {
+    uint64_t h = 14695981039346656037ULL;
+    for (int i = 0; i < plen; i++) { h ^= (uint8_t)pat[i]; h *= 1099511628211ULL; }
+    h ^= 0xFFFFFFFFFFFFFFFFULL; // separator
+    for (int i = 0; i < flen; i++) { h ^= (uint8_t)flg[i]; h *= 1099511628211ULL; }
+    return h;
+}
+
 // Helper: get the correct number of capturing groups for output
 // When wrapper is active, use original JS group count (not RE2's inflated count)
 static int js_regex_num_groups(JsRegexData* rd) {
@@ -11891,6 +12005,29 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 }
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
+    uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
+    {
+        auto perm_it = g_re2_permanent_cache.find(perm_key);
+        if (perm_it != g_re2_permanent_cache.end()) {
+            auto& pe = perm_it->second;
+            if (pe.source_len == pattern_len) {
+                // reuse permanent RE2; create fresh JsRegexData (pool-allocated) for this test
+                JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
+                rd->re2 = pe.re2;
+                rd->wrapper = nullptr;
+                rd->global = pe.global;
+                rd->ignore_case = pe.ignore_case;
+                rd->multiline = pe.multiline;
+                rd->sticky = pe.sticky;
+                JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
+                uint64_t fast_key = js_regex_cache_key(pattern, flags);
+                g_regex_compile_cache[fast_key] = ce;
+                return js_regex_build_object_from_cache(ce);
+            }
+        }
+    }
+
     // Check regex compilation cache — avoids re-compiling the same literal in loops
     uint64_t cache_key = js_regex_cache_key(pattern, flags);
     auto cache_it = g_regex_compile_cache.find(cache_key);
@@ -12415,6 +12552,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     if (regexp_proto.item != ItemNull.item) {
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
         js_property_set(regex_obj, proto_key, regexp_proto);
+    }
+    // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
+    // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
+    if (!wrapper || !wrapper->has_filters) {
+        re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
+        char* perm_flags = new char[flags_len + 1];
+        memcpy(perm_flags, flg_buf, flags_len + 1);
+        g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
+                                            dot_all, has_unicode, perm_flags, (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
     g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
@@ -19053,6 +19199,27 @@ static Item js_create_typed_array_iterator(Item source) {
     return (Item){.map = m};
 }
 
+// v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted.
+// Returns: user-defined Item if overridden, ITEM_JS_UNDEFINED if deleted, ItemNull if still default.
+static Item js_check_array_sym_iterator() {
+    extern Item js_get_constructor(Item name_item);
+    Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
+    Item arr_ctor = js_get_constructor(arr_name);
+    if (get_type_id(arr_ctor) != LMD_TYPE_FUNC) return ItemNull;
+    JsFunction* afn = (JsFunction*)arr_ctor.function;
+    if (afn->prototype.item == 0 || afn->prototype.item == ItemNull.item) return ItemNull;
+    if (get_type_id(afn->prototype) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item sym_iter = js_map_get_fast(afn->prototype.map, "__sym_1", 7, &found);
+    if (!found) return ItemNull;  // not present on Array.prototype — use default
+    if (sym_iter.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();  // deleted
+    if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
+        JsFunction* sfn = (JsFunction*)sym_iter.function;
+        if (sfn->builtin_id == 0) return sym_iter;  // user-defined function
+    }
+    return ItemNull;  // still the default builtin
+}
+
 // Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
@@ -19067,7 +19234,22 @@ extern "C" Item js_get_iterator(Item iterable) {
     }
 
     // Arrays: wrap in lightweight array iterator (v28: MAP_KIND_ITERATOR)
+    // v95: But first check if Array.prototype[Symbol.iterator] has been overridden or deleted
     if (tid == LMD_TYPE_ARRAY) {
+        if (g_array_sym_iter_ever_set) {
+            Item sym_override = js_check_array_sym_iterator();
+            if (sym_override.item == ITEM_JS_UNDEFINED) {
+                // Symbol.iterator was deleted — array is not iterable
+                js_throw_type_error("[object Array] is not iterable");
+                return ItemNull;
+            }
+            if (sym_override.item != ItemNull.item) {
+                // User-defined Symbol.iterator — call it with the array as 'this'
+                Item iterator = js_call_function(sym_override, iterable, NULL, 0);
+                if (js_check_exception()) return ItemNull;
+                return iterator;
+            }
+        }
         return js_create_array_iterator(iterable);
     }
 

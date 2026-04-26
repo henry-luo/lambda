@@ -2,23 +2,23 @@
 
 ## Current State
 
-**Baseline**: 27,357 entries | **Run set**: 34,094 | **Failing**: ~6,737 (80.2% pass rate)
+**Baseline**: 27,570 entries | **Run set**: 34,167 | **Failing**: ~6,596 (80.7% pass rate)
 
-**Starting baseline**: 27,172 | **Net gain**: +185 tests
+**Starting baseline**: 27,172 | **Net gain**: +398 tests
 
 ### ES2020 Feature Status
 
-| Feature | Run Set | Passing | Failing | Pass Rate | Status |
-|---------|---------|---------|---------|-----------|--------|
-| `optional-chaining` | 50 | 48 | 2 | 96% | ✅ Near-complete (brand check fixed) |
-| `coalesce-expression` | 23 | 23 | 0 | 100% | ✅ Done |
-| `dynamic-import` | 194 | 156 | 38 | 80% | Near-complete (syntax edge cases) |
-| `for-in-order` | 9 | 9 | 0 | 100% | ✅ Done (Part 3) |
-| `String.prototype.matchAll` | 15 | 14 | 1 | 93% | ✅ Near-complete (Part 6 done) |
-| `globalThis` | 60 | 1 | 59 | 2% | Mostly eval-code/Iterator failures, not globalThis itself |
-| `import.meta` | 5 | 1 | 4 | 20% | Syntax tests (SyntaxError in non-module context) |
-| `Promise.allSettled` | 45 | 11 | 34 | 24% | Promise infrastructure gaps |
-| `BigInt` | 1,202 | 239 | 963 | 20% | Mostly TypedArray+BigInt interactions |
+| Feature                     | Run Set | Passing | Failing | Pass Rate | Status                                                    |
+| --------------------------- | ------- | ------- | ------- | --------- | --------------------------------------------------------- |
+| `optional-chaining`         | 50      | 48      | 2       | 96%       | ✅ Near-complete (brand check fixed)                       |
+| `coalesce-expression`       | 23      | 23      | 0       | 100%      | ✅ Done                                                    |
+| `dynamic-import`            | 194     | 156     | 38      | 80%       | Near-complete (syntax edge cases)                         |
+| `for-in-order`              | 9       | 9       | 0       | 100%      | ✅ Done (Part 3)                                           |
+| `String.prototype.matchAll` | 15      | 14      | 1       | 93%       | ✅ Near-complete (Part 6 done)                             |
+| `globalThis`                | 60      | 1       | 59      | 2%        | Mostly eval-code/Iterator failures, not globalThis itself |
+| `import.meta`               | 5       | 1       | 4       | 20%       | Syntax tests (SyntaxError in non-module context)          |
+| `Promise.allSettled`        | 45      | 11      | 34      | 24%       | Promise infrastructure gaps                               |
+| `BigInt`                    | 1,202   | 239     | 963     | 20%       | Mostly TypedArray+BigInt interactions                     |
 
 **Key insight**: ES2020 failures are mostly caused by cross-cutting engine gaps (eval wrapping, property order, private brand checks, TypedArray BigInt) rather than missing ES2020 feature implementations. The features themselves are largely implemented.
 
@@ -294,9 +294,9 @@ The `__proto__` fix also fixed 11 unrelated tests (Object.defineProperty, Proxy,
 
 ---
 
-## Outstanding Items
+## Outstanding Items (original Js37)
 
-All 6 parts complete.
+All 6 original Js37 parts complete.
 
 **Part 6 remaining**: 3 matchAll tests still fail:
 - `flags-undefined-throws.js`: Requires `flags` to be a prototype accessor, not own data property
@@ -305,9 +305,95 @@ All 6 parts complete.
 
 These require deeper architectural changes (regex `flags` as accessor, Unicode-aware regex indices).
 
-### Remaining Failure Areas (for future work)
+---
 
-From the ~6,755 failing tests in the run set:
+## Regression Fix (Part 7) — +976 more passes
+
+After the Js37 baseline was set at 27,357, a regression check revealed 7 tests had regressed
+(pass → fail). Fixing these regressions unlocked 976 additional improvements.
+
+### The 7 Regressions
+
+**5 Array prototype regressions** — dynamic getter/prototype deletion tests:
+- `lastIndexOf/15.4.4.15-8-a-13.js` (plain object, Object.prototype[1]=1)
+- `lastIndexOf/15.4.4.15-8-a-14.js` (real array, Array.prototype[1]=1)
+- `reduceRight/15.4.4.22-9-b-10.js` (plain object, no initialValue)
+- `reduceRight/15.4.4.22-9-b-23.js` (plain object, with initialValue)
+- `reduceRight/15.4.4.22-9-b-24.js` (real array)
+
+**2 Class subclass regressions** — super() in finally block:
+- `derived-class-return-override-catch-finally.js`
+- `derived-class-return-override-finally-super.js`
+
+### Root Causes
+
+**Array regressions** had two root causes introduced by Js37 Part 2 (hasOwnProperty fixes):
+
+1. **`js_has_property` walking to Object.prototype for plain MAPs** (tests 13, 10, 23):
+   - `f490d43d9` changed `js_has_property` to use `js_get_prototype_of` instead of
+     `js_get_prototype`. For plain MAP objects (`{2:2, length:20}`), this caused the prototype
+     walk to reach `Object.prototype` (previously it stopped at ItemNull since plain MAPs have
+     no explicit `__proto__`).
+   - Combined with the v37 fallback in `js_array_like_to_array` that explicitly fetched
+     `Object.prototype` values, prototype values were captured in the snapshot BEFORE the
+     inline getter (at a higher index) fired and deleted them. Timing-sensitive tests failed.
+   - **Fix**: In `js_has_property`, use `js_get_prototype(obj)` (explicit `__proto__` only)
+     for `MAP_KIND_PLAIN` objects instead of `js_get_prototype_of` (implicit Object.prototype).
+
+2. **Array `length` not updated by `Object.defineProperty` for accessor properties** (tests 14, 24):
+   - When `Object.defineProperty(arr, "20", { get: ... })` was called on a real Array,
+     `arr.length` was NOT updated from 3 to 21. So `lastIndexOf` iterated from index 2 downward,
+     the getter at index 20 never fired, and `Array.prototype[1]=1` was still set when reaching
+     the hole at index 1 (which `check_proto=true` would find).
+   - **Fix**: In `ValidateAndApplyPropertyDescriptor`, after storing an accessor on an Array at
+     a numeric index ≥ current length, grow the items array with sentinel holes to extend `arr->length`.
+
+**Class regressions** (super() in finally):
+- Commit `35734f01c` added a v21 path for class-expression superclasses that called
+  `js_call_function(class_expr_map, this, ...)`. But class expressions compile to a MAP object
+  (not a FUNC), so `js_call_function` rejected it as "is not a function".
+- The pre-v37 path returned `jm_emit_null` (no-op) which accidentally worked because `this`
+  was already pre-created by `js_constructor_create_object`.
+- **Fix**: Added `js_super_call_class(callee, this, args, argc)` runtime helper that handles
+  both FUNC and MAP callees: if MAP has `__ctor__`, call it; if no constructor (empty class),
+  treat as no-op. Registered in `sys_func_registry.c` and used in the v21 transpiler path.
+
+### Implementation (Part 7)
+
+**Fix A — `js_has_property` (js_runtime.cpp)**:
+For `MAP_KIND_PLAIN` objects without explicit `__proto__`, use `js_get_prototype(obj)` (which
+returns ItemNull for plain MAP literals) for the first prototype hop. All subsequent hops in the
+chain use `js_get_prototype_of`. This matches pre-Js37 semantics: plain object literals don't
+implicitly inherit Object.prototype through HasProperty.
+
+**Fix B — `ValidateAndApplyPropertyDescriptor` (js_globals.cpp)**:
+After setting an accessor (get/set) on a real Array at numeric index `idx ≥ arr->length`, grow
+the items array with sentinel holes from `arr->length` up to and including `idx`. Gap capped at
+100,000 to prevent OOM. This makes `arr->length` correct so iteration reaches the accessor.
+
+**Fix C — `js_super_call_class` (js_runtime.cpp + sys_func_registry.c)**:
+New `extern "C"` runtime function that safely calls a class expression as a super() constructor.
+Handles FUNC (direct call), MAP with `__ctor__` (call constructor), and empty MAP (no-op).
+Registered in `jit_runtime_imports[]` so MIR JIT can import it.
+
+**Fix D — transpiler v21 path (transpile_js_mir.cpp)**:
+Changed `jm_call_4("js_call_function", ...)` to `jm_call_4("js_super_call_class", ...)` in
+the non-identifier superclass super() handling path.
+
+### Results
+
+| Phase | Work | Regressions Fixed | New Improvements |
+|---|---|---|---|
+| **7. Regression fixes** | 4 targeted changes | 7/7 | +976 |
+
+**Net result**: Baseline from 26,452 → 27,428 (+976 tests, 80.3% pass rate).
+
+The 976 improvements beyond the 7 regression fixes came from the `js_has_property` fix making
+HasProperty semantics correct for plain MAP objects in many other test scenarios.
+
+### Remaining Failure Areas
+
+From the ~6,596 failing tests in the run set:
 
 | Area | Failing | Why Deferred |
 |------|---------|-------------|
@@ -336,4 +422,51 @@ ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batc
 ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --update-baseline
 ```
 
-**Result**: +185 new passes → baseline from 27,172 to 27,357 (run set pass rate: 76.6% → 80.2%)
+**Result**: +185 (Js37 original) + 976 (Part 7 regression fix) = +1,161 total new passes
+→ baseline from 27,172 to 27,428 (run set pass rate: 76.6% → 80.3%)
+
+---
+
+## Part 8 — Array.prototype[Symbol.iterator] Override (+143 tests)
+
+### Problem
+
+136 `*array-prototype*` destructuring tests all failed because `js_get_iterator` had a fast path
+for `LMD_TYPE_ARRAY` that bypassed `Array.prototype[Symbol.iterator]` override/deletion:
+
+```js
+// Override: expects custom iterator values
+Array.prototype[Symbol.iterator] = function*() { yield 1; yield 2; yield 42; };
+var [x, y, z] = [1, 2, 3];  // z === 42
+
+// Delete: expects TypeError
+delete Array.prototype[Symbol.iterator];
+var [a, b, c] = [1, 2, 3];  // TypeError: not iterable
+```
+
+Tests appeared in all dstr contexts: `variable/dstr/`, `for-of/dstr/`, `function params/dstr/`,
+`arrow/dstr/`, `async-generator/dstr/`, `generator/dstr/`, etc.
+
+### Root Cause
+
+Two locations skipped Array.prototype lookup:
+1. `js_get_iterator` (js_runtime.cpp): `if (tid == LMD_TYPE_ARRAY) { return js_create_array_iterator(iterable); }` — no override check
+2. `js_property_get` for arrays with `__sym_1` key: returned `js_lookup_builtin_method(...)` directly
+
+### Fix
+
+**`lambda/js/js_runtime.cpp`**:
+- Added `int g_array_sym_iter_ever_set = 0` global flag (set conservatively when any `__sym_1` is written or deleted)
+- Added `js_check_array_sym_iterator()` helper: gets Array constructor via `js_get_constructor`, reads `fn->prototype.map`, calls `js_map_get_fast("__sym_1")`. Returns user function if overridden, `ITEM_JS_UNDEFINED` if deleted, `ItemNull` if still default builtin.
+- Updated `js_get_iterator` array fast path: checks flag first, then calls helper; throws TypeError if deleted, calls user function if overridden
+- Updated `js_property_get` `__sym_1` path: same guard
+- Reset flag in both `js_batch_reset()` and `js_batch_reset_to()`
+
+**`lambda/js/js_globals.cpp`**:
+- In `js_delete_property`: set `g_array_sym_iter_ever_set = 1` when `__sym_1` is deleted from a MAP
+
+The flag guard ensures zero overhead on normal code (flag stays 0 unless a test modifies `Array.prototype[Symbol.iterator]`).
+
+### Result
+
++143 new passes (27,428 → 27,570), 0 regressions

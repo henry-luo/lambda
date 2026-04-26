@@ -104,7 +104,7 @@ static const char* TEST262_ROOT = "ref/test262";
 static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
 static std::string g_harness_dir = "ref/test262/harness";
 // Only tests with runtime < 3s (debug build) belong in the baseline.
-// Slow tests (>= 3s) should be moved to temp/_t262_partial.txt (non-fully-passing list) with SLOW status.
+// Slow tests (>= 3s) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
@@ -1016,7 +1016,7 @@ static void clean_partial_list_after_baseline_update(
     std::unordered_set<std::string> baseline_set(new_baseline.begin(), new_baseline.end());
 
     // Read existing partial file
-    FILE* f = fopen("temp/_t262_partial.txt", "r");
+    FILE* f = fopen("test/js262/t262_partial.txt", "r");
     if (!f) return;
     std::vector<std::string> kept_lines;
     size_t removed = 0;
@@ -1048,13 +1048,13 @@ static void clean_partial_list_after_baseline_update(
     if (removed == 0) return;
 
     // Write back the cleaned file
-    f = fopen("temp/_t262_partial.txt", "w");
+    f = fopen("test/js262/t262_partial.txt", "w");
     if (!f) return;
     // Strip trailing blank lines
     while (!kept_lines.empty() && kept_lines.back().empty()) kept_lines.pop_back();
     for (auto& line : kept_lines) fprintf(f, "%s\n", line.c_str());
     fclose(f);
-    fprintf(stderr, "[test262] Cleaned temp/_t262_partial.txt: removed %zu stale entries (now in baseline)\n", removed);
+    fprintf(stderr, "[test262] Cleaned test/js262/t262_partial.txt: removed %zu stale entries (now in baseline)\n", removed);
 }
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
@@ -1823,7 +1823,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         std::vector<std::string> timeout_lines;
         std::unordered_set<std::string> timeout_names;  // names to skip re-emitting as CRASH_
         {
-            FILE* old_f = fopen("temp/_t262_partial.txt", "r");
+            FILE* old_f = fopen("test/js262/t262_partial.txt", "r");
             if (old_f) {
                 char tbuf[2048];
                 while (fgets(tbuf, sizeof(tbuf), old_f)) {
@@ -1876,7 +1876,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             }
         }
 
-        FILE* partial_log = fopen("temp/_t262_partial.txt", "w");
+        FILE* partial_log = fopen("test/js262/t262_partial.txt", "w");
         if (partial_log) {
             // Write preserved TIMEOUT_ entries and comments first
             for (auto& line : timeout_lines) fprintf(partial_log, "%s\n", line.c_str());
@@ -2030,7 +2030,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
             fclose(partial_log);
             if (still_lost + crash_exit + slow_count + batch_kill_count > 0) {
-                fprintf(stderr, "[test262] Non-fully-passing: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → temp/_t262_partial.txt\n",
+                fprintf(stderr, "[test262] Non-fully-passing: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → test/js262/t262_partial.txt\n",
                         still_lost, crash_exit, slow_count, batch_kill_count);
             }
             // Expose crash-exit count for --update-baseline gate
@@ -2589,9 +2589,9 @@ int main(int argc, char** argv) {
     }
 
     // Load non-fully-passing list from previous run
-    load_partial_list("temp/_t262_partial.txt");
+    load_partial_list("test/js262/t262_partial.txt");
     if (!g_known_partial.empty()) {
-        fprintf(stderr, "[test262] Loaded %zu non-fully-passing entries from temp/_t262_partial.txt\n",
+        fprintf(stderr, "[test262] Loaded %zu non-fully-passing entries from test/js262/t262_partial.txt\n",
                 g_known_partial.size());
     }
 

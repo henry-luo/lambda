@@ -412,6 +412,29 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                         js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
                     }
                 }
+                // ES5 §15.4.5.1: if obj is an Array and name is a valid array index >= length,
+                // update length to index+1 and grow items array with hole sentinels.
+                if (get_type_id(obj) == LMD_TYPE_ARRAY && ns && ns->len > 0 && ns->len <= 10) {
+                    bool is_idx = true;
+                    int64_t idx = 0;
+                    for (size_t ci = 0; ci < ns->len; ci++) {
+                        char ch = ns->chars[ci];
+                        if (ch < '0' || ch > '9') { is_idx = false; break; }
+                        idx = idx * 10 + (ch - '0');
+                    }
+                    if (is_idx && (ns->len == 1 || ns->chars[0] != '0') && idx >= 0) {
+                        Array* arr = obj.array;
+                        int64_t gap = idx - (int64_t)arr->length;
+                        if (gap >= 0 && gap < 100000) {
+                            // Grow items array with hole sentinels up to and including idx
+                            extern void js_array_push_item_direct(Array* arr, Item value);
+                            Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                            while ((int64_t)arr->length <= idx) {
+                                js_array_push_item_direct(arr, hole);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -9087,6 +9110,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
         key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
+    // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
+    extern int g_array_sym_iter_ever_set;
+    if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
+        String* _dk = it2s(key);
+        if (_dk && _dk->len == 7 && strncmp(_dk->chars, "__sym_1", 7) == 0)
+            g_array_sym_iter_ever_set = 1;
+    }
     // v16: Frozen objects reject property deletion
     {
         Map* m = obj.map;
@@ -10038,6 +10068,7 @@ extern "C" Item js_get_global_this() {
             {"Int16Array", 10}, {"Uint16Array", 11},
             {"Int32Array", 10}, {"Uint32Array", 11},
             {"Float32Array", 12}, {"Float64Array", 12},
+            {"BigInt64Array", 13}, {"BigUint64Array", 14},
             {"Proxy", 5},
             {"Event", 5}, {"CustomEvent", 11},
             {NULL, 0}
@@ -10429,6 +10460,8 @@ enum JsConstructorId {
     JS_CTOR_UINT32ARRAY,
     JS_CTOR_FLOAT32ARRAY,
     JS_CTOR_FLOAT64ARRAY,
+    JS_CTOR_BIGINT64ARRAY,
+    JS_CTOR_BIGUINT64ARRAY,
     JS_CTOR_AGGREGATE_ERROR,
     JS_CTOR_PROXY,
     JS_CTOR_EVENT,
@@ -10594,7 +10627,7 @@ static Item js_typed_array_base_proto = {0};
 
 // Per-type prototypes: Int8Array.prototype, Uint8Array.prototype, etc.
 // Indexed by JsTypedArrayType enum values (0-8).
-#define JS_TYPED_ARRAY_TYPE_COUNT 9
+#define JS_TYPED_ARRAY_TYPE_COUNT 11
 static Item js_typed_array_per_type_proto[JS_TYPED_ARRAY_TYPE_COUNT] = {{0}};
 
 // Get the per-type prototype for a given typed array element type.
@@ -10702,6 +10735,8 @@ extern "C" Item js_get_typed_array_per_type_proto(int element_type) {
         case 6: ctor_name = "Float32Array";       ctor_name_len = 12; bytes_per = 4; break;
         case 7: ctor_name = "Float64Array";       ctor_name_len = 12; bytes_per = 8; break;
         case 8: ctor_name = "Uint8ClampedArray";  ctor_name_len = 17; bytes_per = 1; break;
+        case 9: ctor_name = "BigInt64Array";      ctor_name_len = 13; bytes_per = 8; break;
+        case 10: ctor_name = "BigUint64Array";    ctor_name_len = 14; bytes_per = 8; break;
         default: return js_get_typed_array_base_proto();
     }
 
@@ -10828,7 +10863,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
              ctor_id == JS_CTOR_PROXY ||
-             (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY))
+             (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_BIGUINT64ARRAY))
         fn->func_ptr = (void*)js_ctor_requires_new;
     else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
@@ -10850,7 +10885,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
-    if (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_FLOAT64ARRAY) {
+    if (ctor_id >= JS_CTOR_INT8ARRAY && ctor_id <= JS_CTOR_BIGUINT64ARRAY) {
         // Map ctor_id to JsTypedArrayType element_type
         int element_type = -1;
         switch (ctor_id) {
@@ -10863,6 +10898,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
             case JS_CTOR_UINT32ARRAY:      element_type = 5; break; // JS_TYPED_UINT32
             case JS_CTOR_FLOAT32ARRAY:     element_type = 6; break; // JS_TYPED_FLOAT32
             case JS_CTOR_FLOAT64ARRAY:     element_type = 7; break; // JS_TYPED_FLOAT64
+            case JS_CTOR_BIGINT64ARRAY:    element_type = 9; break; // JS_TYPED_BIGINT64
+            case JS_CTOR_BIGUINT64ARRAY:   element_type = 10; break; // JS_TYPED_BIGUINT64
             default: break;
         }
         if (element_type >= 0) {
@@ -10919,6 +10956,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
         {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
         {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
+        {"BigInt64Array", 13, JS_CTOR_BIGINT64ARRAY, 3},
+        {"BigUint64Array", 14, JS_CTOR_BIGUINT64ARRAY, 3},
         {"Proxy", 5, JS_CTOR_PROXY, 2},
         {"Event", 5, JS_CTOR_EVENT, 1},
         {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 1},
