@@ -313,15 +313,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_UL:  case HTM_TAG_OL:  case HTM_TAG_MENU:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->list_style_type = elmt_name == HTM_TAG_UL ? CSS_VALUE_DISC : CSS_VALUE_DECIMAL;
         if (!block->bound) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
         // UA stylesheet: nested lists have margin: 0
         // Chrome: :is(ul, ol, dir, menu, dl) ul, :is(ul, ol, dir, menu, dl) ol { margin-block: 0 }
+        // Also: ul ul { list-style-type: circle }, ul ul ul { list-style-type: square }
         {
             bool is_nested = false;
+            int ul_ancestor_count = 0;
             DomNode* ancestor = elmt->parent;
             while (ancestor) {
                 if (ancestor->is_element()) {
@@ -330,10 +331,21 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                         atag == HTM_TAG_MENU || atag == HTM_TAG_DIR ||
                         atag == HTM_TAG_DL) {
                         is_nested = true;
-                        break;
+                    }
+                    if (atag == HTM_TAG_UL) {
+                        ul_ancestor_count++;
                     }
                 }
                 ancestor = ancestor->parent;
+            }
+            if (elmt_name == HTM_TAG_UL) {
+                // Browser UA: ul=disc, ul ul=circle, ul ul ul (and deeper)=square
+                block->blk->list_style_type =
+                    (ul_ancestor_count == 0) ? CSS_VALUE_DISC :
+                    (ul_ancestor_count == 1) ? CSS_VALUE_CIRCLE :
+                                               CSS_VALUE_SQUARE;
+            } else {
+                block->blk->list_style_type = CSS_VALUE_DECIMAL;
             }
             if (!is_nested) {
                 block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;

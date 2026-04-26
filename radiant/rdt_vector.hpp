@@ -183,6 +183,12 @@ void rdt_engine_init(int threads);
 void rdt_engine_term(void);
 void rdt_font_load(const char* font_path);
 
+// Set the default FontContext used for SVG text rendering inside pictures
+// loaded from file/data via rdt_picture_load*.  Must be called once after
+// the application's font context is created (typically from ui_context_init).
+struct FontContext;
+void rdt_set_font_context(struct FontContext* ctx);
+
 // ---------------------------------------------------------------------------
 // Internal bridge for render_svg_inline.cpp (ThorVG text/image → RdtPicture)
 // ---------------------------------------------------------------------------

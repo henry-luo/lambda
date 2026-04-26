@@ -141,22 +141,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     rdt_engine_init(1);
     // init animation timing presets (cubic-bezier ease, ease-in, ease-out, ease-in-out)
     timing_init_presets();
-    // load default fonts for vector engine to render text later
-    const char* vec_fonts[] = {
-        "Times New Roman", "Times",  // default serif
-        "Arial",                      // common sans-serif used in graph SVG
-        "Helvetica",                  // fallback sans-serif
-        "Verdana",                    // common in shields.io badge SVGs
-        "Geneva",                     // macOS fallback for Verdana
-        nullptr
-    };
-    for (int i = 0; vec_fonts[i]; i++) {
-        char* font_path = load_font_path(uicon->font_ctx, vec_fonts[i]);
-        if (font_path) {
-            rdt_font_load(font_path);
-            mem_free(font_path);
-        }
-    }
+    // share font context with the vector backend so that picture-mode SVG
+    // (file-based and data-URI) can resolve fonts via the same code path
+    // used by inline <svg> in HTML body — including weight/style matching.
+    rdt_set_font_context(uicon->font_ctx);
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
     scroll_config_init(uicon->pixel_ratio);

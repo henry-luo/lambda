@@ -121,6 +121,15 @@ ol ul {
     margin-bottom: 0;
 }
 
+/* Nested unordered list bullet styles (browser default) */
+ul ul {
+    list-style-type: circle;
+}
+
+ul ul ul {
+    list-style-type: square;
+}
+
 /* Code - inline */
 code {
     font-family: Menlo, Monaco, Consolas, "Courier New", monospace;

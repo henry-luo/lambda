@@ -27,7 +27,7 @@
 // ============================================================================
 
 void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
-                                int face_index, FontSlant slant) {
+                                int face_index, FontWeight weight, FontSlant slant) {
     if (!data || len == 0 || size_px <= 0) return NULL;
 
     CFDataRef cf_data = CFDataCreate(NULL, data, (CFIndex)len);
@@ -65,6 +65,41 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
     if (!ct_font) {
         log_debug("font_rasterize_ct: failed to create CTFont from raw data");
         return NULL;
+    }
+
+    // for variable fonts (e.g., SFNS.ttf for -apple-system), set the 'wght'
+    // variation axis so the rasterizer produces glyphs at the requested
+    // weight.  Without this, raw-buffer-loaded variable fonts always render
+    // at their default instance (typically Regular/400), even though
+    // ct_font_ref (used for advances) was created with a weight trait.
+    // Non-variable fonts silently ignore the axis.
+    if ((int)weight != FONT_WEIGHT_NORMAL && weight > 0) {
+        FourCharCode wght_tag = 'wght';
+        CFNumberRef axis_id = CFNumberCreate(NULL, kCFNumberIntType, &wght_tag);
+        float w = (float)(int)weight;
+        CFNumberRef axis_val = CFNumberCreate(NULL, kCFNumberFloatType, &w);
+        CFDictionaryRef variation = CFDictionaryCreate(
+            NULL, (const void**)&axis_id, (const void**)&axis_val, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFDictionaryRef attrs = CFDictionaryCreate(
+            NULL,
+            (const void**)(CFStringRef[]){kCTFontVariationAttribute},
+            (const void**)&variation, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+        if (desc) {
+            CTFontRef varied = CTFontCreateCopyWithAttributes(ct_font, (CGFloat)size_px, NULL, desc);
+            if (varied) {
+                CFRelease(ct_font);
+                ct_font = varied;
+                log_debug("font_rasterize_ct: applied wght=%d variation (face=%d)", (int)weight, face_index);
+            }
+            CFRelease(desc);
+        }
+        CFRelease(attrs);
+        CFRelease(variation);
+        CFRelease(axis_val);
+        CFRelease(axis_id);
     }
 
     // synthesize italic when caller requested italic/oblique but the loaded

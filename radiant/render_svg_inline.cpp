@@ -17,6 +17,7 @@
 #include "../lib/str.h"
 #include <string.h>
 #include "../lib/mem.h"
+#include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
 
@@ -34,40 +35,40 @@
 static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color color,
                                  RdtFillRule rule, const RdtMatrix* xform) {
     if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
-    else svg_fill_path(ctx, path, color, rule, xform);
+    else rdt_fill_path(ctx->vec, path, color, rule, xform);
 }
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
     if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
-    else svg_stroke_path(ctx, path, color, width, cap, join, dash, dash_count, xform);
+    else rdt_stroke_path(ctx->vec, path, color, width, cap, join, dash, dash_count, 0, xform);
 }
 static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
     if (ctx->dl) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
-    else svg_fill_linear_gradient(ctx, path, x1, y1, x2, y2, stops, count, rule, xform);
+    else rdt_fill_linear_gradient(ctx->vec, path, x1, y1, x2, y2, stops, count, rule, xform);
 }
 static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float cx, float cy, float r,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
     if (ctx->dl) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
-    else svg_fill_radial_gradient(ctx, path, cx, cy, r, stops, count, rule, xform);
+    else rdt_fill_radial_gradient(ctx->vec, path, cx, cy, r, stops, count, rule, xform);
 }
 static inline void svg_draw_picture(SvgRenderContext* ctx, RdtPicture* pic,
                                     uint8_t opacity, const RdtMatrix* xform) {
     if (ctx->dl) dl_draw_picture(ctx->dl, pic, opacity, xform);
-    else svg_draw_picture(ctx, pic, opacity, xform);
+    else rdt_picture_draw(ctx->vec, pic, opacity, xform);
 }
 static inline void svg_push_clip(SvgRenderContext* ctx, RdtPath* path, const RdtMatrix* xform) {
     if (ctx->dl) dl_push_clip(ctx->dl, path, xform);
-    else svg_push_clip(ctx, path, xform);
+    else rdt_push_clip(ctx->vec, path, xform);
 }
 static inline void svg_pop_clip(SvgRenderContext* ctx) {
     if (ctx->dl) dl_pop_clip(ctx->dl);
-    else svg_pop_clip(ctx);
+    else rdt_pop_clip(ctx->vec);
 }
 
 static void render_svg_element(SvgRenderContext* ctx, Element* elem);
@@ -731,8 +732,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                 }
             }
             if (!gradient_applied) {
-                log_debug("[SVG] gradient fill not resolved: %s", fill);
-                fc = ctx->fill_color;   // fallback
+                // unresolved url() reference - per SVG spec, this should NOT
+                // fall back to a default solid color (black); skip the fill.
+                log_debug("[SVG] gradient fill not resolved: %s (skip fill)", fill);
+                has_fill = false;
             }
         } else if (strcmp(fill, "currentColor") == 0) {
             fc = ctx->current_color;
@@ -1372,15 +1375,65 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         used_font_name = "Arial";
     }
 
-    // For bold/non-normal weights, try font database best-match first
-    if (weight >= 600 && font_ctx) {
-        FontMatchResult match = font_find_best_match(font_ctx, font_family, weight, FONT_SLANT_NORMAL);
-        if (match.found && match.file_path) {
-            // skip TTC files
-            if (!strstr(match.file_path, ".ttc")) {
+    // SVG font-family is a comma-separated list of family names (with optional
+    // single/double quotes around multi-word names) and at most one generic
+    // family keyword (serif, sans-serif, monospace, cursive, fantasy).  Try
+    // each candidate in order, applying weight-aware matching for each, before
+    // falling back to a global default list.
+    char family_list[512];
+    strncpy(family_list, font_family, sizeof(family_list) - 1);
+    family_list[sizeof(family_list) - 1] = '\0';
+
+    // collect candidate family names by splitting on commas
+    const char* candidates[16];
+    int candidate_count = 0;
+    {
+        char* cursor = family_list;
+        while (cursor && *cursor && candidate_count < 16) {
+            // skip leading whitespace
+            while (*cursor == ' ' || *cursor == '\t') cursor++;
+            // strip surrounding quotes
+            char qc = 0;
+            if (*cursor == '"' || *cursor == '\'') { qc = *cursor; cursor++; }
+            char* start = cursor;
+            char* end;
+            if (qc) {
+                end = strchr(cursor, qc);
+                if (!end) end = cursor + strlen(cursor);
+                *end = '\0';
+                cursor = end + 1;
+                // skip until next comma (or end)
+                char* nc = strchr(cursor, ',');
+                cursor = nc ? nc + 1 : nullptr;
+            } else {
+                end = strchr(cursor, ',');
+                if (end) { *end = '\0'; cursor = end + 1; }
+                else { cursor = nullptr; }
+            }
+            // strip trailing whitespace
+            char* te = start + strlen(start);
+            while (te > start && (te[-1] == ' ' || te[-1] == '\t')) te--;
+            *te = '\0';
+            if (*start) {
+                // map generic CSS keywords to a concrete platform font
+                const char* mapped = start;
+                if (strcasecmp(start, "serif") == 0)            mapped = "Times New Roman";
+                else if (strcasecmp(start, "sans-serif") == 0)  mapped = "Arial";
+                else if (strcasecmp(start, "monospace") == 0)   mapped = "Courier New";
+                else if (strcasecmp(start, "cursive") == 0)     mapped = "Comic Sans MS";
+                else if (strcasecmp(start, "fantasy") == 0)     mapped = "Impact";
+                candidates[candidate_count++] = mapped;
+            }
+        }
+    }
+
+    // helper: try a single family with full resolution chain
+    auto try_family = [&](const char* fam) -> char* {
+        // weight-aware best match (covers bold for any weight >= 600)
+        if (weight >= 600 && font_ctx) {
+            FontMatchResult match = font_find_best_match(font_ctx, fam, weight, FONT_SLANT_NORMAL);
+            if (match.found && match.file_path && !strstr(match.file_path, ".ttc")) {
                 char* path = mem_strdup(match.file_path, MEM_CAT_RENDER);
-                // ThorVG registers fonts by filename without extension (e.g. "Arial Bold.ttf" -> "Arial Bold")
-                // We must use this as the font name, not the family name ("Arial")
                 if (out_font_name) {
                     const char* slash = strrchr(match.file_path, '/');
                     if (!slash) slash = strrchr(match.file_path, '\\');
@@ -1394,80 +1447,80 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                     *out_font_name = bold_font_name;
                 }
                 log_debug("[SVG] font resolved via best-match (weight=%d): %s -> %s (name='%s')",
-                          weight, font_family, path, out_font_name ? *out_font_name : "?");
+                          weight, fam, path, out_font_name ? *out_font_name : "?");
                 return path;
             }
         }
-    }
-
-    // try platform font lookup first (works on macOS/Windows)
-    char* path = font_platform_find_fallback(font_family);
-
-    // check if path is a TTC file - ThorVG TTF loader doesn't support TTC (TrueType Collection)
-    if (path && strstr(path, ".ttc")) {
-        log_debug("[SVG] skipping TTC file (not supported by ThorVG TTF loader): %s", path);
-        mem_free(path);
-        path = nullptr;
-    }
-
-    if (path) {
-        if (out_font_name) *out_font_name = used_font_name;
-        return path;
-    }
-
-    // try font database lookup (works on Linux where platform lookup returns NULL)
-    if (font_ctx) {
-        path = resolve_font_via_database(font_ctx, font_family, out_font_name);
-        if (path) {
-            log_debug("[SVG] font resolved via database: %s -> %s", font_family, path);
-            return path;
+        // platform lookup
+        char* p = font_platform_find_fallback(fam);
+        if (p && strstr(p, ".ttc")) { mem_free(p); p = nullptr; }
+        if (p) {
+            if (out_font_name) {
+                // derive font_name from the file basename (sans extension); the
+                // candidate `fam` may live in a stack buffer that goes out of
+                // scope after this function returns.
+                static char platform_font_name[256];
+                const char* slash = strrchr(p, '/');
+                if (!slash) slash = strrchr(p, '\\');
+                const char* base = slash ? slash + 1 : p;
+                const char* dot = strrchr(base, '.');
+                int name_len = dot ? (int)(dot - base) : (int)strlen(base);
+                if (name_len > 255) name_len = 255;
+                memcpy(platform_font_name, base, name_len);
+                platform_font_name[name_len] = '\0';
+                *out_font_name = platform_font_name;
+            }
+            log_debug("[SVG] font resolved via platform: %s -> %s (name='%s')",
+                      fam, p, out_font_name ? *out_font_name : "?");
+            return p;
         }
+        // database lookup
+        if (font_ctx) {
+            const char* dbname = nullptr;
+            p = resolve_font_via_database(font_ctx, fam, &dbname);
+            if (p) {
+                if (out_font_name) {
+                    static char db_font_name[256];
+                    if (dbname) {
+                        strncpy(db_font_name, dbname, sizeof(db_font_name) - 1);
+                        db_font_name[sizeof(db_font_name) - 1] = '\0';
+                    } else {
+                        const char* slash = strrchr(p, '/');
+                        if (!slash) slash = strrchr(p, '\\');
+                        const char* base = slash ? slash + 1 : p;
+                        const char* dot = strrchr(base, '.');
+                        int name_len = dot ? (int)(dot - base) : (int)strlen(base);
+                        if (name_len > 255) name_len = 255;
+                        memcpy(db_font_name, base, name_len);
+                        db_font_name[name_len] = '\0';
+                    }
+                    *out_font_name = db_font_name;
+                }
+                log_debug("[SVG] font resolved via database: %s -> %s", fam, p);
+                return p;
+            }
+        }
+        return nullptr;
+    };
+
+    // try each candidate from the SVG font-family list
+    for (int i = 0; i < candidate_count; i++) {
+        char* p = try_family(candidates[i]);
+        if (p) return p;
     }
 
     // try common fallbacks - prefer simple TTF files that ThorVG can load
-    // avoid fonts that are typically in TTC format
     static const char* fallbacks[] = {
-        "Arial",             // Windows + macOS (Supplemental)
-        "Segoe UI",          // Windows default UI font
-        "Calibri",           // Windows
-        "Verdana",           // Windows + macOS
-        "SFNS",              // /System/Library/Fonts/SFNS.ttf (macOS) - font name is "SF NS"
-        "Geneva",            // /System/Library/Fonts/Geneva.ttf (macOS)
-        "Arial Unicode MS",  // /System/Library/Fonts/Supplemental/Arial Unicode.ttf
-        "DejaVu Sans",       // Linux
-        "Liberation Sans",   // Linux
-        "Noto Sans",         // Linux
+        "Arial", "Segoe UI", "Calibri", "Verdana",
+        "SFNS", "Geneva", "Arial Unicode MS",
+        "DejaVu Sans", "Liberation Sans", "Noto Sans",
         nullptr
     };
-
     for (int i = 0; fallbacks[i]; i++) {
-        if (strcmp(fallbacks[i], font_family) != 0) {
-            // try platform first
-            path = font_platform_find_fallback(fallbacks[i]);
-
-            // skip TTC files
-            if (path && strstr(path, ".ttc")) {
-                log_debug("[SVG] skipping TTC file (not supported): %s", path);
-                mem_free(path);
-                path = nullptr;
-                continue;
-            }
-
-            if (path) {
-                log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
-                used_font_name = fallbacks[i];
-                if (out_font_name) *out_font_name = used_font_name;
-                return path;
-            }
-
-            // try database fallback
-            if (font_ctx) {
-                path = resolve_font_via_database(font_ctx, fallbacks[i], out_font_name);
-                if (path) {
-                    log_debug("[SVG] font fallback via database: %s -> %s", font_family, fallbacks[i]);
-                    return path;
-                }
-            }
+        char* p = try_family(fallbacks[i]);
+        if (p) {
+            log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
+            return p;
         }
     }
 
@@ -1653,29 +1706,45 @@ static float measure_svg_text_width(const char* text, float font_size_px,
 static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return;
 
-    // parse parent text attributes
+    // parse parent text attributes (fall back to inherited from parent <g>)
     float base_x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float base_y = parse_svg_length(get_svg_attr(elem, "y"), 0);
 
     const char* font_family = get_svg_attr(elem, "font-family");
-    float font_size = parse_svg_length(get_svg_attr(elem, "font-size"), 16);
+    if (!font_family) font_family = ctx->inherited_font_family;
+    const char* font_size_str = get_svg_attr(elem, "font-size");
+    float font_size;
+    if (font_size_str) {
+        font_size = parse_svg_length(font_size_str, 16);
+    } else if (ctx->inherited_font_size > 0) {
+        font_size = ctx->inherited_font_size;
+    } else {
+        font_size = 16;
+    }
 
     // parse text-anchor: start (default), middle, end
     const char* text_anchor_str = get_svg_attr(elem, "text-anchor");
+    if (!text_anchor_str) text_anchor_str = ctx->inherited_text_anchor;
     float anchor_x = 0.0f;
     if (text_anchor_str) {
         if (strcmp(text_anchor_str, "middle") == 0) anchor_x = 0.5f;
         else if (strcmp(text_anchor_str, "end") == 0) anchor_x = 1.0f;
     }
 
-    // get default fill from parent
+    // get default fill from element, then inherited group fill
     const char* parent_fill = get_svg_attr(elem, "fill");
-    if (!parent_fill) parent_fill = "black";
-    Color default_fill = parse_svg_color(parent_fill);
+    Color default_fill;
+    if (parent_fill) {
+        default_fill = parse_svg_color(parent_fill);
+    } else if (!ctx->fill_none) {
+        default_fill = ctx->fill_color;
+    } else {
+        default_fill = parse_svg_color("black");
+    }
 
     // parse font-weight: normal (400), bold (700), or numeric
     const char* font_weight_str = get_svg_attr(elem, "font-weight");
-    int font_weight = 400;
+    int font_weight = ctx->inherited_font_weight > 0 ? ctx->inherited_font_weight : 400;
     if (font_weight_str) {
         if (strcmp(font_weight_str, "bold") == 0) font_weight = 700;
         else if (strcmp(font_weight_str, "bolder") == 0) font_weight = 700;
@@ -1722,11 +1791,16 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         return;
     }
 
-    // resolve font handle once for accurate metrics
+    // resolve font handle once for accurate metrics. Use the resolved single
+    // font_name (e.g. "Verdana") rather than the raw comma-list font_family
+    // (e.g. "DejaVu Sans,Verdana,Geneva,sans-serif") which font_resolve does
+    // not parse — feeding it the list yields a generic fallback whose ascent
+    // ratio (e.g. Helvetica ~0.77) does not match the actually-drawn font.
     float font_ascent_ratio = 0.8f;  // fallback
-    if (ctx->font_ctx && font_family) {
+    const char* metrics_family = font_name ? font_name : font_family;
+    if (ctx->font_ctx && metrics_family) {
         FontStyleDesc style = {};
-        style.family = font_family;
+        style.family = metrics_family;
         style.size_px = font_size;
         style.weight = (FontWeight)font_weight;
         style.slant = FONT_SLANT_NORMAL;
@@ -1784,7 +1858,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                 if (is_whitespace_only(str->chars, str->len)) {
                     // SVG spec: whitespace between tspans collapses to a single space
                     if (has_tspan) {
-                        cur_x += measure_svg_text_width(" ", font_size, ctx->font_ctx, font_family, font_weight);
+                        cur_x += measure_svg_text_width(" ", font_size, ctx->font_ctx, metrics_family, font_weight);
                     }
                     continue;
                 }
@@ -1793,7 +1867,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_copy, cur_x, cur_y,
                                                               font_path, font_name, font_size, default_fill);
                     if (text_obj) {
-                        float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, font_family, font_weight);
+                        float w = measure_svg_text_width(text_copy, font_size, ctx->font_ctx, metrics_family, font_weight);
                         draw_text_paint(text_obj, cur_x, cur_y, font_size);
                         cur_x += w;
                     }
@@ -1840,7 +1914,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                     Tvg_Paint text_obj = create_text_segment(text_content, cur_x, cur_y,
                                                               font_path, font_name, tspan_font_size, fill);
                     if (text_obj) {
-                        float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, font_family, font_weight);
+                        float w = measure_svg_text_width(text_content, tspan_font_size, ctx->font_ctx, metrics_family, font_weight);
                         draw_text_paint(text_obj, cur_x, cur_y, tspan_font_size);
                         cur_x += w;
                     }
@@ -1886,11 +1960,64 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
     Tvg_Paint pic = tvg_picture_new();
     if (!pic) return;
 
-    Tvg_Result result = tvg_picture_load(pic, href);
-    if (result != TVG_RESULT_SUCCESS) {
-        log_debug("[SVG] <image> failed to load: %s", href);
-        tvg_paint_unref(pic, true);
-        return;
+    Tvg_Result result;
+
+    // Handle data: URIs by decoding base64 and feeding raw bytes to ThorVG.
+    // The mime type embedded in the URI is sometimes wrong (e.g. "data:false;base64,...")
+    // so we always sniff the actual content from magic bytes.
+    if (strncmp(href, "data:", 5) == 0) {
+        size_t decoded_len = 0;
+        char declared_mime[64] = {0};
+        uint8_t* decoded = parse_data_uri(href, declared_mime, sizeof(declared_mime), &decoded_len);
+        if (!decoded || decoded_len == 0) {
+            log_debug("[SVG] <image> data URI decode failed");
+            if (decoded) mem_free(decoded);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+
+        // Sniff actual format from magic bytes (more reliable than declared mime)
+        const char* mime_hint = nullptr;
+        if (decoded_len >= 8 && decoded[0] == 0x89 && decoded[1] == 'P' &&
+            decoded[2] == 'N' && decoded[3] == 'G') {
+            mime_hint = "png";
+        } else if (decoded_len >= 3 && decoded[0] == 0xFF && decoded[1] == 0xD8 &&
+                   decoded[2] == 0xFF) {
+            mime_hint = "jpg";
+        } else if ((decoded_len >= 5 && memcmp(decoded, "<?xml", 5) == 0) ||
+                   (decoded_len >= 4 && memcmp(decoded, "<svg", 4) == 0)) {
+            mime_hint = "svg";
+        } else {
+            // fallback to declared mime if it looks meaningful
+            if (strstr(declared_mime, "png")) mime_hint = "png";
+            else if (strstr(declared_mime, "jpeg") || strstr(declared_mime, "jpg")) mime_hint = "jpg";
+            else if (strstr(declared_mime, "svg")) mime_hint = "svg";
+        }
+
+        if (!mime_hint) {
+            log_debug("[SVG] <image> unknown data URI format (declared mime='%s')", declared_mime);
+            mem_free(decoded);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+
+        // copy=true so ThorVG holds its own copy and we can free decoded
+        result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
+                                       mime_hint, NULL, true);
+        mem_free(decoded);
+        if (result != TVG_RESULT_SUCCESS) {
+            log_debug("[SVG] <image> failed to load data URI (mime=%s, declared=%s)",
+                      mime_hint, declared_mime);
+            tvg_paint_unref(pic, true);
+            return;
+        }
+    } else {
+        result = tvg_picture_load(pic, href);
+        if (result != TVG_RESULT_SUCCESS) {
+            log_debug("[SVG] <image> failed to load: %s", href);
+            tvg_paint_unref(pic, true);
+            return;
+        }
     }
 
     // set size if specified
@@ -2048,6 +2175,10 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     bool saved_fill_none = ctx->fill_none;
     bool saved_stroke_none = ctx->stroke_none;
     RdtMatrix saved_transform = ctx->transform;
+    const char* saved_font_family = ctx->inherited_font_family;
+    float saved_font_size = ctx->inherited_font_size;
+    int saved_font_weight = ctx->inherited_font_weight;
+    const char* saved_text_anchor = ctx->inherited_text_anchor;
 
     // apply group opacity via save/composite for correct compositing
     const char* opacity_attr = get_svg_attr(elem, "opacity");
@@ -2116,6 +2247,23 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
     }
 
+    // inherited text properties from group attributes
+    const char* g_font_family = get_svg_attr(elem, "font-family");
+    if (g_font_family) ctx->inherited_font_family = g_font_family;
+    const char* g_font_size = get_svg_attr(elem, "font-size");
+    if (g_font_size) ctx->inherited_font_size = parse_svg_length(g_font_size, ctx->inherited_font_size);
+    const char* g_font_weight = get_svg_attr(elem, "font-weight");
+    if (g_font_weight) {
+        if (strcmp(g_font_weight, "bold") == 0) ctx->inherited_font_weight = 700;
+        else if (strcmp(g_font_weight, "normal") == 0) ctx->inherited_font_weight = 400;
+        else {
+            int w = atoi(g_font_weight);
+            if (w >= 100 && w <= 900) ctx->inherited_font_weight = w;
+        }
+    }
+    const char* g_text_anchor = get_svg_attr(elem, "text-anchor");
+    if (g_text_anchor) ctx->inherited_text_anchor = g_text_anchor;
+
     // apply group transform to accumulated transform
     ctx->transform = compose_element_transform(ctx, elem);
 
@@ -2139,6 +2287,10 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     ctx->fill_none = saved_fill_none;
     ctx->stroke_none = saved_stroke_none;
     ctx->transform = saved_transform;
+    ctx->inherited_font_family = saved_font_family;
+    ctx->inherited_font_size = saved_font_size;
+    ctx->inherited_font_weight = saved_font_weight;
+    ctx->inherited_text_anchor = saved_text_anchor;
 }
 
 static void render_svg_children(SvgRenderContext* ctx, Element* elem) {
@@ -2341,6 +2493,68 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
         render_svg_text(ctx, elem);
     } else if (strcmp(tag, "image") == 0) {
         render_svg_image(ctx, elem);
+    } else if (strcmp(tag, "svg") == 0) {
+        // Nested <svg>: applies its own viewBox/x/y/width/height transform,
+        // then renders children.  Used by badge SVGs that embed a logo as a
+        // sub-svg (e.g. codecov_badge.svg `<svg viewBox="140 -8 60 60">...`).
+        const char* vb_attr = get_svg_attr(elem, "viewBox");
+        SvgViewBox vb = parse_svg_viewbox(vb_attr);
+        float nx = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
+        float ny = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
+        // Per SVG spec, missing width/height defaults to "100%" of the parent
+        // viewport (in user coordinates), NOT the viewBox extents. Falling back
+        // to viewBox extents would make a viewBox like "140 -8 60 60" map to a
+        // 60×60 box that places content far off-canvas.
+        float nw = parse_svg_length(get_svg_attr(elem, "width"),  ctx->current_viewport_w);
+        float nh = parse_svg_length(get_svg_attr(elem, "height"), ctx->current_viewport_h);
+        RdtMatrix saved = ctx->transform;
+        float saved_vw = ctx->current_viewport_w;
+        float saved_vh = ctx->current_viewport_h;
+        RdtMatrix el_m = compose_element_transform(ctx, elem);
+        if (nx != 0.0f || ny != 0.0f) {
+            RdtMatrix t = rdt_matrix_translate(nx, ny);
+            ctx->transform = rdt_matrix_multiply(&el_m, &t);
+        } else {
+            ctx->transform = el_m;
+        }
+        if (vb.has_viewbox && vb.width > 0 && vb.height > 0 && nw > 0 && nh > 0) {
+            float sx = nw / vb.width;
+            float sy = nh / vb.height;
+            const char* par = get_svg_attr(elem, "preserveAspectRatio");
+            bool par_none  = par && strcmp(par, "none") == 0;
+            bool par_slice = par && strstr(par, "slice") != nullptr;
+            float scale_x, scale_y, tx, ty;
+            if (par_none) {
+                scale_x = sx; scale_y = sy;
+                tx = -vb.min_x * sx;
+                ty = -vb.min_y * sy;
+            } else {
+                float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
+                scale_x = scale_y = scale;
+                float align_x = 0.5f, align_y = 0.5f;
+                if (par) {
+                    if      (strstr(par, "xMin")) align_x = 0.0f;
+                    else if (strstr(par, "xMax")) align_x = 1.0f;
+                    if      (strstr(par, "YMin")) align_y = 0.0f;
+                    else if (strstr(par, "YMax")) align_y = 1.0f;
+                }
+                tx = -vb.min_x * scale + (nw - vb.width  * scale) * align_x;
+                ty = -vb.min_y * scale + (nh - vb.height * scale) * align_y;
+            }
+            RdtMatrix vb_m = {scale_x, 0, tx, 0, scale_y, ty, 0, 0, 1};
+            ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
+            // children of this <svg> see a viewport sized by the viewBox extents
+            ctx->current_viewport_w = vb.width;
+            ctx->current_viewport_h = vb.height;
+        } else {
+            // no viewBox: children inherit nw/nh as their viewport
+            if (nw > 0) ctx->current_viewport_w = nw;
+            if (nh > 0) ctx->current_viewport_h = nh;
+        }
+        render_svg_children(ctx, elem);
+        ctx->transform = saved;
+        ctx->current_viewport_w = saved_vw;
+        ctx->current_viewport_h = saved_vh;
     } else {
         // unknown element - try rendering children
         render_svg_children(ctx, elem);
@@ -2387,6 +2601,11 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
+    // initial viewport in user-coordinate units. With a viewBox this is the
+    // viewBox extents; without one, user coords == viewport pixels.
+    ctx.current_viewport_w = (vb.has_viewbox && vb.width > 0) ? vb.width : viewport_width;
+    ctx.current_viewport_h = (vb.has_viewbox && vb.height > 0) ? vb.height : viewport_height;
+
     if (vb.has_viewbox && vb.width > 0 && vb.height > 0) {
         ctx.viewbox_x = vb.min_x;
         ctx.viewbox_y = vb.min_y;
@@ -2429,13 +2648,72 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
         ctx.translate_x = ctx.translate_y = 0;
     }
 
-    // pre-pass: process all <defs> so gradients and id refs are ready before rendering shapes
+    // pre-pass: process all <defs> AND any top-level definition elements so
+    // gradients, masks, clipPaths, symbols and id'd elements are ready before
+    // rendering shapes.  Many real-world SVGs (badges, shields.io output)
+    // place <linearGradient>/<mask> directly under the root, not in <defs>.
     for (int64_t i = 0; i < svg_element->length; i++) {
         Element* child = get_child_element_at(svg_element, i);
         if (!child) continue;
         const char* child_tag = get_element_tag_name(child);
-        if (child_tag && strcmp(child_tag, "defs") == 0) {
+        if (!child_tag) continue;
+        if (strcmp(child_tag, "defs") == 0) {
             process_svg_defs(&ctx, child);
+        } else if (strcmp(child_tag, "linearGradient") == 0 ||
+                   strcmp(child_tag, "radialGradient") == 0 ||
+                   strcmp(child_tag, "clipPath") == 0 ||
+                   strcmp(child_tag, "mask") == 0 ||
+                   strcmp(child_tag, "symbol") == 0 ||
+                   strcmp(child_tag, "pattern") == 0) {
+            // Treat the root as if it were a <defs> container for this child.
+            // process_svg_defs iterates the *children* of its argument, so we
+            // wrap by passing a synthetic single-child view: easiest is to
+            // process inline here.
+            if (!ctx.defs) {
+                SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
+                memset(table, 0, sizeof(SvgDefTable));
+                ctx.defs = (HashMap*)table;
+            }
+            // reuse the same logic by constructing a minimal pseudo-defs walk:
+            // call process_svg_defs on the parent, but with only this child.
+            // Simpler: directly handle the gradient/elem-def cases here.
+            SvgDefTable* table = (SvgDefTable*)ctx.defs;
+            const char* id = get_svg_attr(child, "id");
+            if (strcmp(child_tag, "linearGradient") == 0 || strcmp(child_tag, "radialGradient") == 0) {
+                if (table->grad_count < SVG_MAX_GRAD_DEFS) {
+                    SvgGradDef* def = &table->grads[table->grad_count++];
+                    memset(def, 0, sizeof(SvgGradDef));
+                    if (id) str_copy(def->id, sizeof(def->id), id, strlen(id));
+                    def->is_radial = (strcmp(child_tag, "radialGradient") == 0);
+                    const char* gu = get_svg_attr(child, "gradientUnits");
+                    def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
+                    def->x1 = parse_svg_pct_or_num(get_svg_attr(child, "x1"), 0.0f);
+                    def->y1 = parse_svg_pct_or_num(get_svg_attr(child, "y1"), 0.0f);
+                    def->x2 = parse_svg_pct_or_num(get_svg_attr(child, "x2"), 1.0f);
+                    def->y2 = parse_svg_pct_or_num(get_svg_attr(child, "y2"), 0.0f);
+                    def->cx = parse_svg_pct_or_num(get_svg_attr(child, "cx"), 0.5f);
+                    def->cy = parse_svg_pct_or_num(get_svg_attr(child, "cy"), 0.5f);
+                    def->r  = parse_svg_pct_or_num(get_svg_attr(child, "r"),  0.5f);
+                    for (int64_t s = 0; s < child->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
+                        Element* stop_elem = get_child_element_at(child, s);
+                        if (!stop_elem) continue;
+                        const char* stag = get_element_tag_name(stop_elem);
+                        if (!stag || strcmp(stag, "stop") != 0) continue;
+                        SvgGradStop* gs = &def->stops[def->stop_count++];
+                        gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
+                        const char* sc = get_svg_attr(stop_elem, "stop-color");
+                        if (sc) gs->color = parse_svg_color(sc);
+                        else { gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255; }
+                        const char* so = get_svg_attr(stop_elem, "stop-opacity");
+                        if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
+                    }
+                    log_debug("[SVG] root-level def: %s id='%s' stops=%d", child_tag, id ? id : "", def->stop_count);
+                }
+            } else if (id && table->elem_count < SVG_MAX_ELEM_DEFS) {
+                SvgElemDef* ed = &table->elems[table->elem_count++];
+                str_copy(ed->id, sizeof(ed->id), id, strlen(id));
+                ed->elem = child;
+            }
         }
     }
 

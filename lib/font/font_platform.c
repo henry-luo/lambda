@@ -99,18 +99,50 @@ static void add_macos_dirs(FontDatabase* db) {
 }
 
 // CoreText-based font path fallback for macOS
+//
+// IMPORTANT: CTFontDescriptorCreateWithNameAndSize and CTFontCreateWithName both
+// SILENTLY substitute a default font (typically "Times" or "Helvetica") when the
+// requested font is not installed. Callers iterating a font-family list rely on
+// NULL being returned for unknown fonts so they can try the next candidate.
+// We therefore verify the resulting family/PostScript name matches what was asked.
 static char* find_font_path_macos(const char* font_name) {
     if (!font_name) return NULL;
 
     CFStringRef cf_name = CFStringCreateWithCString(NULL, font_name, kCFStringEncodingUTF8);
     if (!cf_name) return NULL;
 
-    CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(cf_name, 0.0);
-    CFRelease(cf_name);
-    if (!desc) return NULL;
+    CTFontRef ct_font = CTFontCreateWithName(cf_name, 0.0, NULL);
+    if (!ct_font) { CFRelease(cf_name); return NULL; }
 
-    CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
-    CFRelease(desc);
+    // verify the resolved font actually matches the requested name. CoreText
+    // returns a fallback (Times) for unknown families instead of failing.
+    bool name_matches = false;
+    CFStringRef family = CTFontCopyFamilyName(ct_font);
+    if (family && CFStringCompare(family, cf_name, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+        name_matches = true;
+    }
+    if (!name_matches && family) {
+        // also accept when requested name is a prefix of the family (e.g. "Helvetica" → "Helvetica Neue")
+        CFRange r = CFStringFind(family, cf_name, kCFCompareCaseInsensitive | kCFCompareAnchored);
+        if (r.location == 0 && r.length == CFStringGetLength(cf_name)) name_matches = true;
+    }
+    if (!name_matches) {
+        CFStringRef ps_name = CTFontCopyPostScriptName(ct_font);
+        if (ps_name && CFStringCompare(ps_name, cf_name, kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+            name_matches = true;
+        }
+        if (ps_name) CFRelease(ps_name);
+    }
+    if (family) CFRelease(family);
+    CFRelease(cf_name);
+
+    if (!name_matches) {
+        CFRelease(ct_font);
+        return NULL;
+    }
+
+    CFURLRef url = (CFURLRef)CTFontCopyAttribute(ct_font, kCTFontURLAttribute);
+    CFRelease(ct_font);
     if (!url) return NULL;
 
     char path[1024];

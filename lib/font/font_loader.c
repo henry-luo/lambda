@@ -106,7 +106,7 @@ static FontHandle* create_handle(FontContext* ctx,
     // create CoreText rasterizer from raw font data
     if (memory_buffer && memory_buffer_size > 0) {
         handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
-                                                          size_px, face_index, slant);
+                                                          size_px, face_index, weight, slant);
         if (!handle->ct_raster_ref) {
             log_debug("font_loader: ct_raster_ref creation failed (non-fatal)");
         }
