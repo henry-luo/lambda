@@ -1403,6 +1403,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
+    {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
@@ -1446,6 +1447,7 @@ JitImport jit_runtime_imports[] = {
     // v9: Array.from, JSON, delete
     {"js_array_from", FPTR(js_array_from)},
     {"js_array_from_with_mapper", FPTR(js_array_from_with_mapper)},
+    {"js_array_from_with_mapper_this", FPTR(js_array_from_with_mapper_this)},
     {"js_json_parse", FPTR(js_json_parse)},
     {"js_json_parse_full", FPTR(js_json_parse_full)},
     {"js_json_stringify", FPTR(js_json_stringify)},

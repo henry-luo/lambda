@@ -898,13 +898,14 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
 
-    // Convert offset to integer (default 0)
+    // Convert offset to integer (default 0) — spec: ToNumber(byteOffset), so valueOf is called
     int byte_offset = 0;
     TypeId ot = get_type_id(offset_item);
-    if (ot == LMD_TYPE_INT) byte_offset = (int)it2i(offset_item);
-    else if (ot == LMD_TYPE_FLOAT) {
-        double d = it2d(offset_item);
-        if (d != d) byte_offset = 0; // NaN → 0 (will trigger range error if buffer non-empty)
+    if (ot != LMD_TYPE_UNDEFINED && ot != LMD_TYPE_NULL) {
+        Item off_num = js_to_number(offset_item);
+        if (js_check_exception()) return ItemNull;
+        double d = (get_type_id(off_num) == LMD_TYPE_FLOAT) ? it2d(off_num) : (double)it2i(off_num);
+        if (d != d) byte_offset = 0; // NaN → 0
         else byte_offset = (int)d;
     }
 
@@ -982,23 +983,39 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     const char* mn = mname->chars;
     int ml = (int)mname->len;
 
-    int offset = (argc > 0) ? (int)it2i(args[0]) : 0;
+    // ES spec: ToIndex(requestIndex) — ToNumber first (so valueOf/toString are called), then validate
+    double offset_num = 0.0;
+    if (argc > 0) {
+        Item num_item = js_to_number(args[0]);
+        if (js_check_exception()) return ItemNull;
+        offset_num = (get_type_id(num_item) == LMD_TYPE_FLOAT) ? it2d(num_item) : (double)it2i(num_item);
+    }
+    if (js_check_exception()) return ItemNull;
+    // ToInteger: NaN → 0, otherwise truncate toward zero (so -0.99 → -0 → 0, not error)
+    if (offset_num != offset_num) offset_num = 0.0;  // NaN → 0
+    else if (offset_num > 0) offset_num = floor(offset_num);
+    else if (offset_num < 0) offset_num = ceil(offset_num);  // e.g. -0.99 → -0.0 → 0.0 after add 0
+    // Ensure -0 becomes +0 for comparison
+    if (offset_num == 0.0) offset_num = 0.0;
+    // ToIndex: negative integer throws RangeError
+    if (offset_num < 0 || offset_num > (double)INT_MAX) return js_throw_range_error("Invalid DataView offset");
+    int offset = (int)offset_num;
     bool sys_le = is_little_endian_system();
 
     // Getter methods
     if (ml == 7 && strncmp(mn, "getInt8", 7) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 1);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)(int8_t)*p)};
     }
     if (ml == 8 && strncmp(mn, "getUint8", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 1);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)*p)};
     }
     if (ml == 8 && strncmp(mn, "getInt16", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint16_t raw;
         memcpy(&raw, p, 2);
@@ -1007,7 +1024,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
     if (ml == 9 && strncmp(mn, "getUint16", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint16_t raw;
         memcpy(&raw, p, 2);
@@ -1016,7 +1033,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
     if (ml == 8 && strncmp(mn, "getInt32", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
@@ -1025,7 +1042,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
     if (ml == 9 && strncmp(mn, "getUint32", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
@@ -1034,7 +1051,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
     if (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint32_t raw;
         memcpy(&raw, p, 4);
@@ -1047,7 +1064,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     }
     if (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 8);
-        if (!p) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? (it2i(args[1]) != 0) : false;
         uint64_t raw;
         memcpy(&raw, p, 8);
@@ -1062,73 +1079,81 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     // Setter methods
     if (ml == 7 && strncmp(mn, "setInt8", 7) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 1);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
-        *p = (uint8_t)(int8_t)it2i(args[1]);
-        return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        int64_t raw_val = (argc >= 2) ? it2i(args[1]) : 0;
+        *p = (uint8_t)(int8_t)raw_val;
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setUint8", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 1);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
-        *p = (uint8_t)it2i(args[1]);
-        return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
+        int64_t raw_val = (argc >= 2) ? it2i(args[1]) : 0;
+        *p = (uint8_t)raw_val;
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setInt16", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint16_t val = (uint16_t)(int16_t)it2i(args[1]);
+        uint16_t val = (uint16_t)(int16_t)((argc >= 2) ? it2i(args[1]) : 0);
         if (little_endian != sys_le) val = swap16(val);
         memcpy(p, &val, 2);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 9 && strncmp(mn, "setUint16", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 2);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint16_t val = (uint16_t)it2i(args[1]);
+        uint16_t val = (uint16_t)((argc >= 2) ? it2i(args[1]) : 0);
         if (little_endian != sys_le) val = swap16(val);
         memcpy(p, &val, 2);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 8 && strncmp(mn, "setInt32", 8) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint32_t val = (uint32_t)(int32_t)it2i(args[1]);
+        uint32_t val = (uint32_t)(int32_t)((argc >= 2) ? it2i(args[1]) : 0);
         if (little_endian != sys_le) val = swap32(val);
         memcpy(p, &val, 4);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 9 && strncmp(mn, "setUint32", 9) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        uint32_t val = (uint32_t)it2i(args[1]);
+        uint32_t val = (uint32_t)((argc >= 2) ? it2i(args[1]) : 0);
         if (little_endian != sys_le) val = swap32(val);
         memcpy(p, &val, 4);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 10 && strncmp(mn, "setFloat32", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 4);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        float f = (float)it2d(args[1]);
+        Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        Item num_item2 = js_to_number(val_item);
+        if (js_check_exception()) return ItemNull;
+        float f = (float)it2d(num_item2);
         uint32_t raw;
         memcpy(&raw, &f, 4);
         if (little_endian != sys_le) raw = swap32(raw);
         memcpy(p, &raw, 4);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
     if (ml == 10 && strncmp(mn, "setFloat64", 10) == 0) {
         uint8_t* p = dv_ptr(dv, offset, 8);
-        if (!p || argc < 2) return (Item){.item = ITEM_NULL};
+        if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? (it2i(args[2]) != 0) : false;
-        double d = it2d(args[1]);
+        Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        Item num_item3 = js_to_number(val_item2);
+        if (js_check_exception()) return ItemNull;
+        double d = it2d(num_item3);
         uint64_t raw;
         memcpy(&raw, &d, 8);
         if (little_endian != sys_le) raw = swap64(raw);
         memcpy(p, &raw, 8);
-        return (Item){.item = ITEM_NULL};
+        return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
     log_error("DataView: unknown method '%.*s'", ml, mn);

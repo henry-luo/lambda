@@ -354,6 +354,7 @@ Item js_number_is_safe_integer(Item value);
 
 Item js_array_from(Item iterable);
 Item js_array_from_with_mapper(Item iterable, Item mapFn);
+Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
 Item js_json_stringify(Item value);
