@@ -586,7 +586,7 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     Tvg_Paint pic = tvg_picture_new();
     if (!pic) return nullptr;
 
-    if (tvg_picture_load_data(pic, data, size, mime_type, NULL, false) != TVG_RESULT_SUCCESS) {
+    if (tvg_picture_load_data(pic, data, size, mime_type, NULL, true) != TVG_RESULT_SUCCESS) {
         log_error("rdt_picture_load_data: failed to decode");
         tvg_paint_unref(pic, true);
         return nullptr;
@@ -728,6 +728,7 @@ void rdt_engine_term(void) {
 
 void rdt_font_load(const char* font_path) {
     if (font_path) {
-        tvg_font_load(font_path);
+        Tvg_Result r = tvg_font_load(font_path);
+        log_debug("rdt_font_load: %s -> result=%d", font_path, (int)r);
     }
 }
