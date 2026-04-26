@@ -2404,8 +2404,60 @@ static void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, J
     uint32_t len = end - start;
     // Cap source text to avoid overly large string literals in MIR
     if (len > 65536) return;
-    // Trim leading whitespace (class method indentation, newlines)
+    // Skip leading whitespace and comments, then strip "static" keyword if present.
+    // Class static methods span from (optional comment + "static" keyword) through body.
+    // We want source text to start at "get"/"set"/function-keyword, not "static".
+    // Helper lambda: skip whitespace in-place
+    auto skip_ws = [](const char* p, uint32_t& rem) {
+        while (rem > 0 && (p[0] == ' ' || p[0] == '\t' || p[0] == '\n' || p[0] == '\r')) { p++; rem--; }
+        return p;
+    };
+    (void)skip_ws; // suppress unused warning
+    // Step 1: trim leading whitespace
     while (len > 0 && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n' || text[0] == '\r')) { text++; len--; }
+    // Step 2: skip leading block comments (/* ... */) and then check for "static"
+    {
+        const char* scan = text;
+        uint32_t slen = len;
+        // skip any leading block/line comments
+        bool advanced = true;
+        while (advanced && slen > 0) {
+            advanced = false;
+            while (slen > 0 && (scan[0] == ' ' || scan[0] == '\t' || scan[0] == '\n' || scan[0] == '\r')) { scan++; slen--; advanced = true; }
+            if (slen >= 2 && scan[0] == '/' && scan[1] == '*') {
+                // skip block comment
+                scan += 2; slen -= 2;
+                while (slen >= 2 && !(scan[0] == '*' && scan[1] == '/')) { scan++; slen--; }
+                if (slen >= 2) { scan += 2; slen -= 2; }
+                advanced = true;
+            } else if (slen >= 2 && scan[0] == '/' && scan[1] == '/') {
+                // skip line comment
+                scan += 2; slen -= 2;
+                while (slen > 0 && scan[0] != '\n') { scan++; slen--; }
+                advanced = true;
+            }
+        }
+        // Now scan points past any leading comments. Check if next token is "static".
+        if (slen >= 7 && strncmp(scan, "static", 6) == 0 &&
+            (scan[6] == ' ' || scan[6] == '\t' || scan[6] == '\n' || scan[6] == '/' )) {
+            // Static method: advance scan past "static" and then skip whitespace/comments again
+            scan += 6; slen -= 6;
+            // skip whitespace/comments after "static"
+            bool adv2 = true;
+            while (adv2 && slen > 0) {
+                adv2 = false;
+                while (slen > 0 && (scan[0] == ' ' || scan[0] == '\t' || scan[0] == '\n' || scan[0] == '\r')) { scan++; slen--; adv2 = true; }
+                if (slen >= 2 && scan[0] == '/' && scan[1] == '*') {
+                    scan += 2; slen -= 2;
+                    while (slen >= 2 && !(scan[0] == '*' && scan[1] == '/')) { scan++; slen--; }
+                    if (slen >= 2) { scan += 2; slen -= 2; }
+                    adv2 = true;
+                }
+            }
+            text = scan;
+            len = slen;
+        }
+    }
     // Tree-sitter may extend node ranges to include trailing comments.
     // Trim back to the actual closing '}' for block-bodied functions.
     if (len > 0 && fn_node->body && fn_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -26849,7 +26901,8 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
             strbuf_append_str_n(sb, ps->chars, (int)ps->len);
         }
     }
-    strbuf_append_str(sb, ") {");
+    // Newline before ) is required by spec §20.2.1.1 to handle params ending with // comment
+    strbuf_append_str(sb, "\n) {");
 
     // body
     String* body = (argc > 0) ? it2s(args[argc - 1]) : NULL;
@@ -27024,6 +27077,37 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     js_transpiler_destroy(tp);
 
     log_debug("js-new-function: compiled dynamic function OK (type=%d)", get_type_id(fn_item));
+
+    // Set spec-correct toString() source: "function anonymous(params\n) {\nbody\n}"
+    // The internal source was (function(params) { body }) which doesn't match the spec.
+    if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
+        StrBuf* src_buf = strbuf_new_cap(256);
+        strbuf_append_str(src_buf, "function anonymous(");
+        for (int i = 0; i < argc - 1; i++) {
+            if (i > 0) strbuf_append_str(src_buf, ",");
+            String* ps2 = it2s(args[i]);
+            if (!ps2) {
+                Item si = js_to_string(args[i]);
+                ps2 = it2s(si);
+            }
+            if (ps2 && ps2->len > 0)
+                strbuf_append_str_n(src_buf, ps2->chars, (int)ps2->len);
+        }
+        strbuf_append_str(src_buf, "\n) {\n");
+        String* body2 = (argc > 0) ? it2s(args[argc - 1]) : NULL;
+        if (!body2 && argc > 0) {
+            Item si = js_to_string(args[argc - 1]);
+            body2 = it2s(si);
+        }
+        if (body2 && body2->len > 0)
+            strbuf_append_str_n(src_buf, body2->chars, (int)body2->len);
+        strbuf_append_str(src_buf, "\n}");
+        String* src_str = heap_create_name(src_buf->str, src_buf->length);
+        strbuf_free(src_buf);
+        Item src_item = (Item){.item = s2it(src_str)};
+        js_set_function_source(fn_item, src_item);
+    }
+
     return fn_item;
 }
 
