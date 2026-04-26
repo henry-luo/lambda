@@ -27,7 +27,7 @@
 // ============================================================================
 
 void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
-                                int face_index) {
+                                int face_index, FontSlant slant) {
     if (!data || len == 0 || size_px <= 0) return NULL;
 
     CFDataRef cf_data = CFDataCreate(NULL, data, (CFIndex)len);
@@ -67,8 +67,30 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
         return NULL;
     }
 
-    log_debug("font_rasterize_ct: created CTFont from raw data (%zu bytes, size=%.1f, face=%d)",
-              len, size_px, face_index);
+    // synthesize italic when caller requested italic/oblique but the loaded
+    // font face has no italic glyphs (e.g., -apple-system → SFNS.ttf has no
+    // italic variant in the system font database).  Apply a shear matrix to
+    // the font itself so that CTFontDrawGlyphs produces slanted glyph bitmaps.
+    // Skew angle ~12° (tan ≈ 0.2126) matches WebKit/Chrome synthetic italic.
+    if (slant == FONT_SLANT_ITALIC || slant == FONT_SLANT_OBLIQUE) {
+        CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(ct_font);
+        if (!(traits & kCTFontItalicTrait)) {
+            CGAffineTransform skew = CGAffineTransformMake(
+                1.0, 0.0,   // x-axis: identity
+                0.2126, 1.0, // y-axis: shear x by tan(12°)
+                0.0, 0.0);
+            CTFontRef italic_font = CTFontCreateCopyWithAttributes(
+                ct_font, (CGFloat)size_px, &skew, NULL);
+            if (italic_font) {
+                CFRelease(ct_font);
+                ct_font = italic_font;
+                log_debug("font_rasterize_ct: applied synthetic italic skew (face=%d)", face_index);
+            }
+        }
+    }
+
+    log_debug("font_rasterize_ct: created CTFont from raw data (%zu bytes, size=%.1f, face=%d, slant=%d)",
+              len, size_px, face_index, (int)slant);
     return (void*)ct_font;
 }
 

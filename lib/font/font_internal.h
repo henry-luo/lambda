@@ -423,7 +423,8 @@ float               font_platform_get_pair_kerning(void* ct_font_ref,
 
 // font_rasterize_ct.c — CoreText rasterization (macOS)
 void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
-                                              float size_px, int face_index);
+                                              float size_px, int face_index,
+                                              FontSlant slant);
 bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
                                                float bitmap_scale, GlyphInfo* out);
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
