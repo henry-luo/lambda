@@ -9999,11 +9999,19 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_FUNC_BIND:
         return js_func_bind(this_val, arg0, arg_count > 1 ? args + 1 : NULL, arg_count > 1 ? arg_count - 1 : 0);
     case JS_BUILTIN_FUNC_TO_STRING: {
-        // Handle class objects (MAPs with __instance_proto__): return "function ClassName() { [native code] }"
+        // Handle class objects (MAPs with __instance_proto__): return original
+        // class source text if available (per ES spec — Function.prototype.toString
+        // on a class returns the class declaration source).
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
             bool own_ip_ts = false;
             js_map_get_fast_ext(this_val.map, "__instance_proto__", 18, &own_ip_ts);
             if (own_ip_ts) {
+                // First, check for stored class source text
+                bool own_st = false;
+                Item st = js_map_get_fast(this_val.map, "__source_text__", 15, &own_st);
+                if (own_st && get_type_id(st) == LMD_TYPE_STRING) {
+                    return st;
+                }
                 bool own_cn_ts = false;
                 Item cn_ts = js_map_get_fast(this_val.map, "__class_name__", 14, &own_cn_ts);
                 StrBuf* sb_ts = strbuf_new();
@@ -12674,6 +12682,22 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 }
                 i++;
                 continue;
+            }
+            // ES spec §22.2.1.10 ControlEscape: \c followed by ASCII letter [A-Za-z]
+            // yields the character with code point (letter & 0x1F).
+            // RE2 doesn't support \c, so translate to \x{NN}.
+            // Annex B §B.1.4: inside a character class, \cN where N is a decimal digit or '_'
+            // is also accepted (yields N & 0x1F). For now, only handle the spec-mandated letter form.
+            if (next == 'c' && i + 2 < effective_pattern_len) {
+                char cl = effective_pattern[i + 2];
+                if ((cl >= 'A' && cl <= 'Z') || (cl >= 'a' && cl <= 'z')) {
+                    char buf[10];
+                    int cp = cl & 0x1F;
+                    snprintf(buf, sizeof(buf), "\\x{%X}", cp);
+                    processed_pattern += buf;
+                    i += 2; // consume \c and the letter (loop will i++)
+                    continue;
+                }
             }
             // consume the 2-char escape sequence as-is
             // but convert JS \uXXXX to RE2 \x{XXXX}

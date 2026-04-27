@@ -2469,6 +2469,32 @@ static void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, J
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
 }
 
+// Helper: emit js_property_set(cls_obj, "__source_text__", source) so that
+// Function.prototype.toString on the class returns the original source text
+// (per ES spec: Function.prototype.toString on a class returns its source).
+// Avoids the slow validateNativeFunctionSource fallback in test262 harness.
+static void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node) {
+    if (!cls_node || !mt->tp || !mt->tp->source) return;
+    TSNode node = cls_node->base.node;
+    if (ts_node_is_null(node)) return;
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    if (end <= start || end > mt->tp->source_length) return;
+    const char* text = mt->tp->source + start;
+    uint32_t len = end - start;
+    if (len > 65536) return;
+    // Trim leading whitespace
+    while (len > 0 && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n' || text[0] == '\r')) { text++; len--; }
+    // Tree-sitter may extend the node end past trailing comments; trim to closing '}'
+    while (len > 1 && text[len - 1] != '}') len--;
+    MIR_reg_t key = jm_box_string_literal(mt, "__source_text__", 15);
+    MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
+    jm_call_3(mt, "js_property_set", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
+}
+
 // Helper: emit js_set_formal_length if formal_length differs from param_count
 static void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length) {
     if (formal_length < 0) return; // -1 = same as param_count, no correction needed
@@ -15316,6 +15342,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // Return an object with __class_name__ for instanceof support.
         JsClassNode* cls_expr = (JsClassNode*)expr;
         MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        jm_emit_set_class_source(mt, cls_obj, cls_expr);
         // For anonymous class expressions (var X = class {}), find the class entry
         // by node pointer since cls_expr->name is NULL but the entry was named
         // from the variable during collect phase.
@@ -18898,6 +18925,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    jm_emit_set_class_source(mt, cls_obj, cls_node);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
                     MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
                     jm_call_3(mt, "js_property_set", MIR_T_I64,
@@ -25667,6 +25695,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                    jm_emit_set_class_source(mt, cls_obj, cls_node);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
                     MIR_reg_t cn_val = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
                     jm_call_3(mt, "js_property_set", MIR_T_I64,
