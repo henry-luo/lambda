@@ -4653,6 +4653,8 @@ extern "C" Item js_array_get_custom_proto(Item arr);
 // Its .constructor creates generator-flagged functions (non-constructable via 'new').
 static Item js_generator_function_proto_cache = {0};
 static Item js_async_generator_function_proto_cache = {0};
+// AsyncFunction.prototype singleton — returned by Object.getPrototypeOf for async (non-generator) functions.
+static Item js_async_function_proto_cache = {0};
 
 extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" void js_mark_generator_func(Item fn_item);
@@ -4666,6 +4668,12 @@ static Item js_gen_func_ctor_placeholder(Item* args, int argc) {
 // Must be a DIFFERENT function pointer so js_new_function returns a separate
 // cached JsFunction* for async vs sync generator constructors.
 static Item js_async_gen_func_ctor_placeholder(Item* args, int argc) {
+    (void)args; (void)argc;
+    return ItemNull;
+}
+
+// AsyncFunction constructor placeholder (distinct func_ptr for caching).
+static Item js_async_func_ctor_placeholder(Item* args, int argc) {
     (void)args; (void)argc;
     return ItemNull;
 }
@@ -4730,6 +4738,27 @@ static Item js_get_generator_function_prototype(bool is_async) {
     }
 
     *cache = proto;
+    return proto;
+}
+
+// AsyncFunction.prototype singleton — analog of generator-function prototype but for
+// non-generator async functions. Object.getPrototypeOf(asyncFn) === this.
+static Item js_get_async_function_prototype() {
+    if (js_async_function_proto_cache.item != 0) return js_async_function_proto_cache;
+    Item proto = js_object_create(ItemNull);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    Item ctor_fn = js_new_function((void*)js_async_func_ctor_placeholder, 1);
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
+        fn->name = heap_create_name("AsyncFunction", 13);
+    }
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    js_property_set(proto, ctor_key, ctor_fn);
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* cfn = (JsFuncFlagsAccess*)ctor_fn.function;
+        cfn->prototype = proto;
+    }
+    js_async_function_proto_cache = proto;
     return proto;
 }
 
@@ -4798,6 +4827,10 @@ extern "C" Item js_get_prototype_of(Item object) {
                 // Check if it's an async generator (ASYNC_GEN flag = 64)
                 bool is_async_gen = (fn->flags & 64) != 0;
                 return js_get_generator_function_prototype(is_async_gen);
+            }
+            // Async (non-generator) functions → AsyncFunction.prototype (flag 128)
+            if (fn->flags & 128) {
+                return js_get_async_function_prototype();
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -5465,6 +5498,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     (el == 8 && strncmp(en, "Function", 8) == 0) ||
                     (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
                     (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
+                    (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
                     js_is_typed_array_ctor_name(en, el);
             }
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
@@ -9817,6 +9851,7 @@ extern "C" void js_globals_batch_reset() {
     // reset GeneratorFunction.prototype caches — objects live in old heap after reset
     js_generator_function_proto_cache = (Item){0};
     js_async_generator_function_proto_cache = (Item){0};
+    js_async_function_proto_cache = (Item){0};
 }
 
 // =============================================================================

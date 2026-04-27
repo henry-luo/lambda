@@ -3164,6 +3164,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_HAS_BOUND_THIS 16
 #define JS_FUNC_FLAG_METHOD    32
 #define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
+#define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
 
 // forward declaration — defined near js_generator_create below
 extern "C" Item js_get_generator_shared_proto(bool is_async);
@@ -8865,6 +8866,13 @@ extern "C" void js_mark_async_generator_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
 }
 
+// Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
+extern "C" void js_mark_async_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_ASYNC;
+}
+
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
@@ -9543,6 +9551,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // v41: Generator functions → [object GeneratorFunction]
             if (fn->flags & JS_FUNC_FLAG_GENERATOR)
                 return (Item){.item = s2it(heap_create_name("[object GeneratorFunction]", 26))};
+            // Async (non-generator) functions → [object AsyncFunction]
+            if (fn->flags & JS_FUNC_FLAG_ASYNC)
+                return (Item){.item = s2it(heap_create_name("[object AsyncFunction]", 22))};
             return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
         }        if (tt == LMD_TYPE_BOOL)
             return (Item){.item = s2it(heap_create_name("[object Boolean]", 16))};
@@ -9934,6 +9945,25 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 return (Item){.item = i2it(-1)};
             }
             js_array_method_real_this = this_val;
+            // ES §23.1.3 ArraySpeciesCreate(O, count) → ArrayCreate validates count ≤ 2^32-1.
+            // For slice/map/filter on array-like, validate length up-front to throw RangeError
+            // before js_array_like_to_array silently truncates at 100000.
+            if (builtin_id == JS_BUILTIN_ARR_SLICE || builtin_id == JS_BUILTIN_ARR_MAP ||
+                builtin_id == JS_BUILTIN_ARR_FILTER) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(this_val, len_key);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                Item len_num = js_to_number(len_val);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                double dlen = 0;
+                TypeId ltid = get_type_id(len_num);
+                if (ltid == LMD_TYPE_INT || ltid == LMD_TYPE_INT64) dlen = (double)it2i(len_num);
+                else if (ltid == LMD_TYPE_FLOAT) dlen = len_num.get_double();
+                if (dlen > 4294967295.0) {  // > 2^32 - 1
+                    js_array_method_real_this = (Item){0};
+                    return js_throw_range_error("Invalid array length");
+                }
+            }
             Item temp_arr = js_array_like_to_array(this_val);
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
@@ -11904,6 +11934,31 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
         bool is_gen_ctor = (fn->name->len == 17 && strncmp(fn->name->chars, "GeneratorFunction", 17) == 0);
         bool is_async_gen_ctor = (fn->name->len == 22 && strncmp(fn->name->chars, "AsyncGeneratorFunction", 22) == 0);
+        bool is_async_ctor = (fn->name->len == 13 && strncmp(fn->name->chars, "AsyncFunction", 13) == 0);
+        if (is_async_ctor) {
+            Item result = js_new_function_from_string(args, arg_count);
+            if (get_type_id(result) == LMD_TYPE_FUNC) {
+                JsFunction* rfn = (JsFunction*)result.function;
+                rfn->flags |= JS_FUNC_FLAG_ASYNC;
+                // Update source text: "function anonymous(...)" → "async function anonymous(...)"
+                if (rfn->source_text && rfn->source_text->len > 8) {
+                    StrBuf* asb = strbuf_new_cap((int)rfn->source_text->len + 8);
+                    const char* src_c = rfn->source_text->chars;
+                    const char* paren = (const char*)memchr(src_c, '(', rfn->source_text->len);
+                    if (paren) {
+                        strbuf_append_str(asb, "async function anonymous(");
+                        size_t rest = rfn->source_text->len - (size_t)(paren - src_c + 1);
+                        strbuf_append_str_n(asb, paren + 1, (int)rest);
+                        String* new_src = heap_create_name(asb->str, asb->length);
+                        strbuf_free(asb);
+                        rfn->source_text = new_src;
+                    } else {
+                        strbuf_free(asb);
+                    }
+                }
+            }
+            return result;
+        }
         if (is_gen_ctor || is_async_gen_ctor) {
             Item result = js_new_function_from_string(args, arg_count);
             if (get_type_id(result) == LMD_TYPE_FUNC) {
@@ -17170,6 +17225,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 7  && strncmp(c, "reverse", 7) == 0) ||
             (len == 4  && strncmp(c, "fill", 4) == 0);
         if (is_generic) {
+            // Note: slice/map/filter length validation per ArraySpeciesCreate is done
+            // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
             arr = js_array_like_to_array(arr);
             if (js_exception_pending) return ItemNull;
             arr_type = get_type_id(arr);

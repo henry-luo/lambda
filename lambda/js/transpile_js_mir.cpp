@@ -14467,6 +14467,10 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
             jm_call_void_1(mt, "js_mark_generator_func",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
         }
+    } else if (fc->node && fc->node->is_async) {
+        // Async (non-generator): mark for [[Prototype]] = %AsyncFunction%.prototype
+        jm_call_void_1(mt, "js_mark_async_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     // Mark arrow functions as non-constructable
     if (fc->node && fc->node->is_arrow) {
@@ -14715,6 +14719,10 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
             jm_call_void_1(mt, "js_mark_generator_func",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
         }
+    } else if (fn->is_async) {
+        // Async (non-generator): mark for [[Prototype]] = %AsyncFunction%.prototype
+        jm_call_void_1(mt, "js_mark_async_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     // Mark arrow functions as non-constructable
     if (fn->is_arrow) {
@@ -25369,6 +25377,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             jm_call_void_1(mt, "js_mark_generator_func",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                         }
+                    } else if (fn->is_async) {
+                        jm_call_void_1(mt, "js_mark_async_func",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                     }
                     // v30: Mark strict mode functions
                     if (fc->is_strict) {

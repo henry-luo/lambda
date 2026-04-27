@@ -132,6 +132,8 @@ Item* js_alloc_env(int count);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);
+void js_mark_async_generator_func(Item fn_item);
+void js_mark_async_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);

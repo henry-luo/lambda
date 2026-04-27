@@ -1404,6 +1404,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_source", FPTR(js_set_function_source)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},
+    {"js_mark_async_func", FPTR(js_mark_async_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
