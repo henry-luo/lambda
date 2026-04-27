@@ -282,6 +282,7 @@ extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
     if (dt) {
         head_node = (DomNode*)dt;
         tail_node = (DomNode*)dt;
+        ((DomNode*)dt)->parent = (DomNode*)stub;
     }
     if (doc->root) {
         if (tail_node) {
@@ -293,6 +294,12 @@ extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
             tail_node->next_sibling = (DomNode*)doc->root;
         } else {
             head_node = (DomNode*)doc->root;
+        }
+        // Treat the stub as document root's parent (DOM semantics: the
+        // document IS the parent of the documentElement). Only set when
+        // currently null so we don't override real tree relationships.
+        if (!((DomNode*)doc->root)->parent) {
+            ((DomNode*)doc->root)->parent = (DomNode*)stub;
         }
         DomNode* c = (DomNode*)doc->root;
         while (c->next_sibling) c = c->next_sibling;
