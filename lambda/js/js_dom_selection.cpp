@@ -616,6 +616,15 @@ extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
 extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor_off_v,
                                                   Item focus_node_v,  Item focus_off_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    // Per WebIDL, all four arguments are required: missing args (passed as
+    // undefined) → TypeError.
+    TypeId ta = get_type_id(anchor_off_v);
+    TypeId tf = get_type_id(focus_off_v);
+    if (ta == LMD_TYPE_UNDEFINED || tf == LMD_TYPE_UNDEFINED ||
+        get_type_id(focus_node_v) == LMD_TYPE_UNDEFINED) {
+        throw_dom_exception("TypeError", "setBaseAndExtent: 4 arguments required");
+        return make_undef();
+    }
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
     if (!an || !fn) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }

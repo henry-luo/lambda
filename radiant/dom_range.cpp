@@ -626,6 +626,10 @@ bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, con
     if (offset > dom_node_boundary_length(node)) {
         set_exception(out_exception, "IndexSizeError"); return false;
     }
+    // Per WHATWG Selection.collapse: replace this's range with a *new* live
+    // range. Drop the existing primary range (if any) so getRangeAt(0)
+    // returns a freshly-allocated range object after collapse.
+    dom_selection_remove_all_ranges(s);
     DomRange* r = ensure_primary_range(s);
     if (!r) return false;
     r->start.node = r->end.node = node;

@@ -508,6 +508,7 @@ enum MapKind {
     MAP_KIND_PROCESS_ENV = 7,  // process.env — coerces all values to strings on set
     MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
+    MAP_KIND_FOREIGN_DOC = 10, // foreign document (createHTMLDocument/createDocument result)
 };
 
 // Array and List struct defintions needed for for-loop

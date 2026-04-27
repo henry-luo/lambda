@@ -106,6 +106,38 @@ Item js_document_proxy_get_property(Item prop_name);
 Item js_document_proxy_set_property(Item prop_name, Item value);
 
 // =============================================================================
+// Foreign documents & document.implementation
+// =============================================================================
+
+/** Returns DomDocument* if `item` is a foreign-doc wrapper, else null. */
+void* js_get_foreign_doc(Item item);
+
+/** Returns true if `item` is the document.implementation singleton. */
+bool js_is_dom_implementation(Item item);
+
+/** Get (lazily creating) the document.implementation singleton. */
+Item js_get_dom_implementation(void);
+
+/**
+ * Dispatch a method call on document.implementation.
+ * Returns true and sets *out if the method was handled.
+ */
+bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out);
+
+/** Build a foreign HTML document (used by createHTMLDocument). */
+Item js_create_foreign_html_doc(const char* title);
+
+/** Build a foreign XML/empty document (used by createDocument). */
+Item js_create_foreign_xml_doc(const char* qualified_name);
+
+/** Build a DocumentType node stub (used by createDocumentType). */
+Item js_create_doctype_node(const char* name, const char* public_id, const char* system_id);
+
+/** Save the current active document and switch to `new_doc`. Returns the prior doc. */
+void* js_dom_swap_active_document(void* new_doc);
+void  js_dom_restore_active_document(void* prev_doc);
+
+// =============================================================================
 // Document Method Dispatcher
 // =============================================================================
 
