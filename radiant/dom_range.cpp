@@ -1560,6 +1560,137 @@ static DomText* leftmost_text_in(DomNode* n) {
     return nullptr;
 }
 
+// Find the rightmost text descendant inside `n` (or `n` itself if it is text).
+static DomText* rightmost_text_in(DomNode* n) {
+    while (n) {
+        if (n->is_text()) return n->as_text();
+        if (n->is_element()) {
+            DomNode* lc = n->as_element()->last_child;
+            if (!lc) return nullptr;
+            n = lc;
+            continue;
+        }
+        return nullptr;
+    }
+    return nullptr;
+}
+
+// Case-insensitive ASCII tag name comparison (HTML tag names are stored
+// lowercased in Lambda, but we compare CI for robustness).
+static int tag_ieq(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+// Standard HTML block-level tag names (used as a layout-free heuristic for
+// paragraph/Range.toString block-boundary serialization). We also treat
+// any element whose computed display.outer is non-inline as block-like
+// so CSS-driven block contexts (e.g. flex/grid items styled inline-block)
+// fall back gracefully.
+static bool tag_is_block(const char* tag) {
+    if (!tag) return false;
+    static const char* const blocks[] = {
+        "p","div","h1","h2","h3","h4","h5","h6","blockquote","pre","address",
+        "article","aside","header","footer","section","nav","main","figure",
+        "figcaption","hr","ol","ul","li","dl","dt","dd","table","tr","td","th",
+        "tbody","thead","tfoot","caption","form","fieldset","legend","body",
+        "html","details","summary","dialog","menu","center", nullptr
+    };
+    for (int i = 0; blocks[i]; i++) {
+        if (tag_ieq(tag, blocks[i])) return true;
+    }
+    return false;
+}
+
+// Find the nearest ancestor element (or self) that is a block-level element.
+static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
+    DomNode* cur = n;
+    while (cur) {
+        if (cur->is_element()) {
+            DomElement* e = cur->as_element();
+            if (tag_is_block(e->tag_name)) return e;
+        }
+        cur = cur->parent;
+    }
+    return nullptr;
+}
+
+// True iff text node holds only ASCII whitespace.
+static bool text_is_ws_only(DomText* t) {
+    if (!t || !t->text || t->length == 0) return false;
+    for (size_t i = 0; i < t->length; i++) {
+        unsigned char c = (unsigned char)t->text[i];
+        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') return false;
+    }
+    return true;
+}
+
+// Step to the previous node in document order.
+static DomNode* prev_node_in_doc_order(DomNode* n) {
+    if (!n) return nullptr;
+    if (n->prev_sibling) {
+        DomNode* w = n->prev_sibling;
+        while (w->is_element()) {
+            DomNode* lc = w->as_element()->last_child;
+            if (!lc) break;
+            w = lc;
+        }
+        return w;
+    }
+    return n->parent;
+}
+
+// Step to the next node in document order.
+static DomNode* next_node_in_doc_order(DomNode* n) {
+    if (!n) return nullptr;
+    if (n->is_element()) {
+        DomNode* fc = n->as_element()->first_child;
+        if (fc) return fc;
+    }
+    DomNode* cur = n;
+    while (cur) {
+        if (cur->next_sibling) return cur->next_sibling;
+        cur = cur->parent;
+    }
+    return nullptr;
+}
+
+// True iff `n` is a <br> element.
+static bool node_is_br(DomNode* n) {
+    return n && n->is_element() && n->as_element()->tag_name &&
+           tag_ieq(n->as_element()->tag_name, "br");
+}
+
+// Find the next/prev paragraph-eligible text from `start`. Paragraph boundary
+// is recognized when the nearest block-level ancestor changes OR when a <br>
+// is crossed (browsers treat <br> as a soft paragraph delimiter inside an
+// otherwise-inline-only block).
+static DomText* find_paragraph_text(DomText* start, int dir) {
+    if (!start) return nullptr;
+    DomElement* start_block = nearest_block_ancestor_or_self((DomNode*)start);
+    bool br_crossed = false;
+    DomNode* cur = (DomNode*)start;
+    for (int safety = 0; safety < 100000; safety++) {
+        cur = (dir > 0) ? next_node_in_doc_order(cur) : prev_node_in_doc_order(cur);
+        if (!cur) return nullptr;
+        if (node_is_br(cur)) { br_crossed = true; continue; }
+        if (!cur->is_text()) continue;
+        DomText* tx = cur->as_text();
+        if (text_is_ws_only(tx)) continue;
+        DomElement* tx_block = nearest_block_ancestor_or_self(cur);
+        if (tx_block != start_block) return tx;
+        if (br_crossed) return tx;
+    }
+    return nullptr;
+}
+
 char* dom_range_to_string(const DomRange* r) {
     if (!r || !r->start.node || !r->end.node) {
         char* empty = (char*)malloc(1);
@@ -1571,6 +1702,8 @@ char* dom_range_to_string(const DomRange* r) {
 
     // Identify the first text node to consider.
     DomText* cur = nullptr;
+    DomElement* prev_block = nullptr;  // tracks last emitted text's block ancestor
+    bool sep_pending = false;            // emit "\n\n" before next non-skipped text
     if (r->start.node->is_text()) {
         cur = r->start.node->as_text();
     } else if (r->start.node->is_element()) {
@@ -1598,13 +1731,36 @@ char* dom_range_to_string(const DomRange* r) {
         if (dom_boundary_compare(&slice_end, &r->end) == DOM_BOUNDARY_AFTER) {
             slice_end = r->end;
         }
+        // Layout-free block-boundary serialization: when a whitespace-only
+        // intermediate text node sits between two different block-level
+        // ancestors, browsers emit "\n\n" instead of the literal whitespace
+        // (this is what their layout-aware Range.toString iterator produces
+        // for inter-block whitespace in source HTML).
+        DomElement* this_block = nearest_block_ancestor_or_self((DomNode*)cur);
+        bool intermediate = ((DomNode*)cur != r->start.node && (DomNode*)cur != r->end.node);
+        bool ws_only = text_is_ws_only(cur);
+        if (prev_block && this_block != prev_block) sep_pending = true;
+        if (intermediate && ws_only) {
+            // Skip emitting this text's content; the block separator (if any)
+            // is handled by sep_pending on the next non-empty emission.
+            prev_block = this_block;
+            if ((DomNode*)cur == r->end.node) break;
+            if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
+            cur = next_text_after((DomNode*)cur);
+            continue;
+        }
         // Append the in-text portion (skip if slice fell outside this node).
         if (slice_start.node == (DomNode*)cur && slice_end.node == (DomNode*)cur
             && slice_start.offset < slice_end.offset) {
             uint32_t b_start = dom_text_utf16_to_utf8(cur, slice_start.offset);
             uint32_t b_end = dom_text_utf16_to_utf8(cur, slice_end.offset);
             if (b_end > b_start && cur->text) {
+                if (sep_pending) {
+                    strbuf_append_str_n(sb, "\n\n", 2);
+                    sep_pending = false;
+                }
                 strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
+                prev_block = this_block;
             }
         }
         // Stop once we've covered the end-position.
@@ -1934,11 +2090,20 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     // Parse granularity
     DomModGranularity gran;
     bool line_like = false;
+    bool paragraph_like = false;     // "paragraph" — jump past current block
+    bool paragraph_boundary = false; // "paragraphboundary" — go to start/end of current block
     if (!granularity || strieq(granularity, "character")) gran = DOM_MOD_CHARACTER;
     else if (strieq(granularity, "word"))                  gran = DOM_MOD_WORD;
     else if (strieq(granularity, "documentboundary"))      gran = DOM_MOD_DOCUMENT;
+    else if (strieq(granularity, "paragraph")) {
+        paragraph_like = true;
+        gran = DOM_MOD_CHARACTER;
+    }
+    else if (strieq(granularity, "paragraphboundary")) {
+        paragraph_boundary = true;
+        gran = DOM_MOD_CHARACTER;
+    }
     else if (strieq(granularity, "line") || strieq(granularity, "lineboundary") ||
-             strieq(granularity, "paragraph") || strieq(granularity, "paragraphboundary") ||
              strieq(granularity, "sentence") || strieq(granularity, "sentenceboundary")) {
         // Without a real layout-aware iterator we approximate line/paragraph
         // motion by stepping to the previous/next text node in document order
@@ -1955,7 +2120,38 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     DomBoundary anchor{ s->anchor.node, s->anchor.offset };
     DomBoundary focus { s->focus.node,  s->focus.offset  };
     DomBoundary new_focus;
-    if (line_like) {
+    if (paragraph_boundary) {
+        // Move to the start (backward) or end (forward) of the nearest
+        // block-level (paragraph-like) ancestor of focus.
+        DomElement* B = nearest_block_ancestor_or_self(focus.node);
+        if (B) {
+            DomText* tx = (dir > 0) ? rightmost_text_in((DomNode*)B)
+                                    : leftmost_text_in((DomNode*)B);
+            if (tx) {
+                uint32_t off = (dir > 0) ? dom_text_utf16_length(tx) : 0;
+                new_focus = DomBoundary{ (DomNode*)tx, off };
+            } else {
+                new_focus = focus;
+            }
+        } else {
+            new_focus = focus;
+        }
+    } else if (paragraph_like) {
+        // Walk to the next paragraph-eligible text. Paragraph boundary is
+        // recognized when nearest block ancestor changes OR a <br> is crossed
+        // (browsers treat <br> as a soft paragraph delimiter inside an
+        // otherwise-inline-only block). The focus offset is preserved
+        // (clamped to the target text's length).
+        DomText* tx = focus.node && focus.node->is_text() ? focus.node->as_text() : nullptr;
+        DomText* land = tx ? find_paragraph_text(tx, dir) : nullptr;
+        if (land) {
+            uint32_t tlen = dom_text_utf16_length(land);
+            uint32_t off = focus.offset > tlen ? tlen : focus.offset;
+            new_focus = DomBoundary{ (DomNode*)land, off };
+        } else {
+            new_focus = focus;
+        }
+    } else if (line_like) {
         DomNode* base = focus.node;
         DomText* tx = nullptr;
         if (base && base->is_text()) tx = base->as_text();
