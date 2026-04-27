@@ -6970,6 +6970,11 @@ extern "C" Item js_object_from_entries(Item iterable) {
 extern "C" Item js_iterable_to_array(Item iterable);
 
 extern "C" Item js_object_group_by(Item items, Item callback) {
+    extern Item js_throw_type_error(const char* msg);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        js_throw_type_error("groupBy callback is not a function");
+        return ItemNull;
+    }
     // Convert iterable to array first
     Item arr = js_iterable_to_array(items);
     // Create null-prototype object per spec
@@ -7002,6 +7007,11 @@ extern "C" Item js_map_collection_new(void);
 
 extern "C" Item js_map_group_by(Item items, Item callback) {
     extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    extern Item js_throw_type_error(const char* msg);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        js_throw_type_error("Map.groupBy callback is not a function");
+        return ItemNull;
+    }
     Item result = js_map_collection_new();
     // Convert iterable to array first
     Item arr = js_iterable_to_array(items);
@@ -7836,7 +7846,22 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
                 Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
                 Item val = _map_read_field(e, m->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) {
+                    // Per ES spec: Set with Throw=true; throw TypeError if target
+                    // has a non-writable property of the same name
+                    if (get_type_id(target) == LMD_TYPE_MAP) {
+                        char nw_buf[256];
+                        snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", nlen, n);
+                        bool nw_found = false;
+                        Item nw_val = js_map_get_fast_ext(target.map, nw_buf, (int)strlen(nw_buf), &nw_found);
+                        if (nw_found && js_is_truthy(nw_val)) {
+                            char emsg[256];
+                            snprintf(emsg, sizeof(emsg), "Cannot assign to read only property '%.*s' of object", nlen > 200 ? 200 : nlen, n);
+                            js_throw_type_error(emsg);
+                            return ItemNull;
+                        }
+                    }
                     js_property_set(target, key, val);
+                    if (js_check_exception()) return ItemNull;
                 }
             }
             e = e->next;
@@ -10637,6 +10662,33 @@ static Item js_ctor_string_fn(Item arg) {
 // RegExp(pattern, flags) without 'new' should behave like new RegExp(pattern, flags)
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item);
 static Item js_ctor_regexp_fn(Item pattern, Item flags) {
+    // ES spec 21.2.3.1: when called without 'new', if IsRegExp(pattern) is true,
+    // flags is undefined, AND SameValue(NewTarget, pattern.constructor) is true,
+    // then return pattern unchanged. Here NewTarget is the RegExp constructor itself.
+    if (get_type_id(pattern) == LMD_TYPE_MAP) {
+        TypeId fid = get_type_id(flags);
+        if (fid == LMD_TYPE_NULL || fid == LMD_TYPE_UNDEFINED) {
+            bool has_rd = false;
+            js_map_get_fast_ext(pattern.map, "__rd", 4, &has_rd);
+            if (has_rd) {
+                // IsRegExp: check pattern[@@match] — if defined, use ToBoolean of it.
+                bool ok = true;
+                Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+                Item sym_match = js_property_get(pattern, sym_match_key);
+                if (sym_match.item != ItemNull.item && get_type_id(sym_match) != LMD_TYPE_UNDEFINED) {
+                    if (!js_is_truthy(sym_match)) ok = false;
+                }
+                // Check pattern.constructor === RegExp
+                if (ok) {
+                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                    Item pat_ctor = js_property_get(pattern, ctor_key);
+                    Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+                    if (pat_ctor.item != regexp_ctor.item) ok = false;
+                }
+                if (ok) return pattern;
+            }
+        }
+    }
     return js_regexp_construct(pattern, flags);
 }
 

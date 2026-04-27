@@ -641,6 +641,8 @@ Item js_text_decoder_decode(Item decoder, Item input);
 
 Item js_weakmap_new(void);
 Item js_weakset_new(void);
+Item js_weakmap_new_with_iter(Item iterable);
+Item js_weakset_new_with_iter(Item iterable);
 
 // Public collection type checks (for instanceof)
 bool js_is_map_instance(Item obj);

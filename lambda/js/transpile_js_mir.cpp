@@ -17217,6 +17217,9 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // v11: Map/Set
     else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) is_builtin = true;
     else if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) is_builtin = true;
+    // WeakMap/WeakSet
+    else if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) is_builtin = true;
+    else if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) is_builtin = true;
     // v14: Promise
     else if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) is_builtin = true;
     // RegExp constructor
@@ -17513,9 +17516,17 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // Phase 3: new WeakMap() / new WeakSet()
     if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) {
+        if (first_arg) {
+            return jm_call_1(mt, "js_weakmap_new_with_iter", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
+        }
         return jm_call_0(mt, "js_weakmap_new", MIR_T_I64);
     }
     if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) {
+        if (first_arg) {
+            return jm_call_1(mt, "js_weakset_new_with_iter", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
+        }
         return jm_call_0(mt, "js_weakset_new", MIR_T_I64);
     }
 

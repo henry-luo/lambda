@@ -1617,6 +1617,8 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
     {"js_weakset_new", FPTR(js_weakset_new)},
+    {"js_weakmap_new_with_iter", FPTR(js_weakmap_new_with_iter)},
+    {"js_weakset_new_with_iter", FPTR(js_weakset_new_with_iter)},
     // Proxy
     {"js_proxy_new", FPTR(js_proxy_new)},
     {"js_proxy_revocable", FPTR(js_proxy_revocable)},

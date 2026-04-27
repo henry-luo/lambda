@@ -1528,7 +1528,14 @@ extern "C" Item js_to_string(Item value) {
                 Item hint = (Item){.item = s2it(heap_create_name("string", 6))};
                 Item args[1] = { hint };
                 Item result = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
                 if (get_type_id(result) == LMD_TYPE_STRING) return result;
+                // Per ES spec: if Symbol.toPrimitive returns an Object, throw TypeError
+                TypeId rtid = get_type_id(result);
+                if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY || rtid == LMD_TYPE_FUNC || rtid == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
                 return js_to_string(result);
             }
         }
@@ -7826,6 +7833,19 @@ extern "C" Item js_array_get(Item array, Item index) {
         return make_js_undefined();
     }
 
+    // ES spec: boolean keys are coerced to "true"/"false" string property names,
+    // not numeric indices. Route to companion map lookup.
+    if (get_type_id(index) == LMD_TYPE_BOOL) {
+        Array* arr = array.array;
+        if (arr->extra == 0) return make_js_undefined();
+        Map* pm = (Map*)(uintptr_t)arr->extra;
+        const char* s = it2b(index) ? "true" : "false";
+        int sl = it2b(index) ? 4 : 5;
+        bool found = false;
+        Item v = js_map_get_fast(pm, s, sl, &found);
+        return found ? v : make_js_undefined();
+    }
+
     int idx = (int)js_get_number(index);
     Array* arr = array.array;
 
@@ -7973,6 +7993,24 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
 
 extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        return value;
+    }
+
+    // ES spec: boolean keys are converted to "true"/"false" strings, not numeric indices.
+    // Route to companion map.
+    TypeId itid = get_type_id(index);
+    if (itid == LMD_TYPE_BOOL) {
+        Array* arr = array.array;
+        if (arr->extra == 0) {
+            Item obj = js_new_object();
+            arr->extra = (int64_t)(uintptr_t)obj.map;
+        }
+        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Item map_item = (Item){.map = pm};
+        const char* s = it2b(index) ? "true" : "false";
+        int sl = it2b(index) ? 4 : 5;
+        Item key = (Item){.item = s2it(heap_create_name(s, sl))};
+        js_property_set(map_item, key, value);
         return value;
     }
 
@@ -9175,36 +9213,43 @@ static Item js_array_like_to_array(Item obj) {
         // ES spec: check HasProperty (includes prototype chain) to preserve holes
         bool has = js_has_property(obj, idx_key);
         Item val = hole;
+        // v37: For plain MAPs without __proto__, js_has_property/js_property_get
+        // skip Object.prototype. If property is missing or undefined here, check
+        // Object.prototype manually (unless it's an own setter-only accessor).
+        bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN);
+        bool is_own_setter_only = false;
+        if (plain_map && blen < 200) {
+            char sk[256];
+            int sklen = snprintf(sk, sizeof(sk), "__set_%.*s", blen, buf);
+            bool sk_found = false;
+            js_map_get_fast(obj.map, sk, sklen, &sk_found);
+            if (sk_found) {
+                bool gk_found = false;
+                char gk[256];
+                int gklen = snprintf(gk, sizeof(gk), "__get_%.*s", blen, buf);
+                js_map_get_fast(obj.map, gk, gklen, &gk_found);
+                if (!gk_found) is_own_setter_only = true;
+            }
+        }
         if (has) {
             val = js_property_get(obj, idx_key);
-            // v37: For plain MAPs without __proto__, js_property_get can't walk to
-            // Object.prototype. If result is undefined, check if the property is
-            // actually on Object.prototype (not a setter-only shadow).
-            if (get_type_id(val) == LMD_TYPE_UNDEFINED &&
-                get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN) {
-                // Check if this is a setter-only accessor (should NOT fall through)
-                bool is_own_setter_only = false;
-                if (blen < 200) {
-                    char sk[256];
-                    int sklen = snprintf(sk, sizeof(sk), "__set_%.*s", blen, buf);
-                    bool sk_found = false;
-                    js_map_get_fast(obj.map, sk, sklen, &sk_found);
-                    if (sk_found) {
-                        bool gk_found = false;
-                        char gk[256];
-                        int gklen = snprintf(gk, sizeof(gk), "__get_%.*s", blen, buf);
-                        js_map_get_fast(obj.map, gk, gklen, &gk_found);
-                        if (!gk_found) is_own_setter_only = true;
+            if (get_type_id(val) == LMD_TYPE_UNDEFINED && plain_map && !is_own_setter_only) {
+                Map* obj_proto = js_resolve_object_prototype();
+                if (obj_proto && obj.map != obj_proto) {
+                    Item proto_val = js_property_get((Item){.map = obj_proto}, idx_key);
+                    if (get_type_id(proto_val) != LMD_TYPE_UNDEFINED) {
+                        val = proto_val;
                     }
                 }
-                if (!is_own_setter_only) {
-                    Map* obj_proto = js_resolve_object_prototype();
-                    if (obj_proto && obj.map != obj_proto) {
-                        Item proto_val = js_property_get((Item){.map = obj_proto}, idx_key);
-                        if (get_type_id(proto_val) != LMD_TYPE_UNDEFINED) {
-                            val = proto_val;
-                        }
-                    }
+            }
+        } else if (plain_map && !is_own_setter_only) {
+            // js_has_property returned false because plain MAPs skip Object.prototype.
+            // Check Object.prototype explicitly: if property is present there, treat as inherited.
+            Map* obj_proto = js_resolve_object_prototype();
+            if (obj_proto && obj.map != obj_proto) {
+                Item op_item = (Item){.map = obj_proto};
+                if (it2b(js_has_own_property(op_item, idx_key))) {
+                    val = js_property_get(op_item, idx_key);
                 }
             }
         }
@@ -20373,9 +20418,23 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         // Symbol.iterator has well-known ID=1, stored as property key "__sym_1"
         Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
         Item iter_factory = js_property_get(iterable, iter_factory_key);
+        if (js_exception_pending) return ItemNull;
+        // Per ES GetIterator/GetMethod: if method exists but is not callable, throw TypeError
+        TypeId ift = get_type_id(iter_factory);
+        if (ift != LMD_TYPE_FUNC && ift != LMD_TYPE_UNDEFINED && ift != LMD_TYPE_NULL) {
+            js_throw_type_error("Symbol.iterator is not a function");
+            return ItemNull;
+        }
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_exception_pending) return ItemNull;
+            // Per ES GetIterator: if iterator is not an Object, throw TypeError
+            TypeId itt = get_type_id(iterator);
+            if (itt != LMD_TYPE_ARRAY && itt != LMD_TYPE_MAP && itt != LMD_TYPE_ELEMENT &&
+                itt != LMD_TYPE_FUNC && !js_is_generator(iterator)) {
+                js_throw_type_error("iterator result is not an object");
+                return ItemNull;
+            }
             // if [Symbol.iterator]() returned an array directly, use it as-is
             if (get_type_id(iterator) == LMD_TYPE_ARRAY) return iterator;
             // drain the iterator (generator or object with next())
@@ -20397,11 +20456,22 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 // plain iterator: call .next() in a loop
                 String* next_key2 = heap_create_name("next", 4);
                 Item next_fn2 = js_property_get(iterator, (Item){.item = s2it(next_key2)});
-                if (get_type_id(next_fn2) == LMD_TYPE_FUNC) {
+                if (js_exception_pending) return ItemNull;
+                // Per ES spec: if next is not callable, throw TypeError
+                if (get_type_id(next_fn2) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("iterator next is not a function");
+                    return ItemNull;
+                }
+                {
                     Item arr = js_array_new(0);
                     for (int safety = 0; safety < 100000; safety++) {
                         Item result = js_call_function(next_fn2, iterator, NULL, 0);
                         if (js_exception_pending) return ItemNull;
+                        TypeId rtid = get_type_id(result);
+                        if (rtid != LMD_TYPE_MAP && rtid != LMD_TYPE_ELEMENT && rtid != LMD_TYPE_ARRAY) {
+                            js_throw_type_error("iterator result is not an object");
+                            return ItemNull;
+                        }
                         String* done_key = heap_create_name("done", 4);
                         Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
                         if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
@@ -22988,6 +23058,81 @@ extern "C" Item js_weakset_new(void) {
     // Mark as weak collection
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) cd->is_weak = true;
+    return obj;
+}
+
+// new WeakMap(iterable) / new WeakSet(iterable) — validate adder is callable
+// and iterate, calling adder for each entry. If iterable is undefined or null,
+// behave like the no-arg constructor.
+extern "C" Item js_weakmap_new_with_iter(Item iterable) {
+    Item obj = js_weakmap_new();
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
+    // Get adder = obj.set
+    Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+    Item adder = js_property_get(obj, set_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("WeakMap.prototype.set is not callable");
+    }
+    // Convert iterable to array via iterator protocol (handles TypeError for bad iterators)
+    Item arr;
+    if (tid == LMD_TYPE_ARRAY) {
+        arr = iterable;
+    } else {
+        arr = js_iterable_to_array(iterable);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+            return js_throw_type_error("object is not iterable");
+        }
+    }
+    Array* a = arr.array;
+    for (int i = 0; i < a->length; i++) {
+        Item entry = a->items[i];
+        TypeId eid = get_type_id(entry);
+        if (eid != LMD_TYPE_MAP && eid != LMD_TYPE_ARRAY &&
+            eid != LMD_TYPE_FUNC && eid != LMD_TYPE_ELEMENT) {
+            return js_throw_type_error("Iterator value is not an entry object");
+        }
+        Item k, v;
+        if (eid == LMD_TYPE_ARRAY) {
+            k = (entry.array->length > 0) ? entry.array->items[0] : (Item){.item = ITEM_JS_UNDEFINED};
+            v = (entry.array->length > 1) ? entry.array->items[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        } else {
+            k = js_property_get(entry, (Item){.item = s2it(heap_create_name("0", 1))});
+            v = js_property_get(entry, (Item){.item = s2it(heap_create_name("1", 1))});
+        }
+        Item args[2] = { k, v };
+        js_call_function(adder, obj, args, 2);
+        if (js_check_exception()) return ItemNull;
+    }
+    return obj;
+}
+
+extern "C" Item js_weakset_new_with_iter(Item iterable) {
+    Item obj = js_weakset_new();
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
+    Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
+    Item adder = js_property_get(obj, add_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("WeakSet.prototype.add is not callable");
+    }
+    Item arr;
+    if (tid == LMD_TYPE_ARRAY) {
+        arr = iterable;
+    } else {
+        arr = js_iterable_to_array(iterable);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+            return js_throw_type_error("object is not iterable");
+        }
+    }
+    Array* a = arr.array;
+    for (int i = 0; i < a->length; i++) {
+        Item args[1] = { a->items[i] };
+        js_call_function(adder, obj, args, 1);
+        if (js_check_exception()) return ItemNull;
+    }
     return obj;
 }
 
