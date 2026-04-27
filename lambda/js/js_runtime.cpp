@@ -13039,6 +13039,24 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
+// Spec-internal Set(rx, "lastIndex", v, Throw=true): always throws TypeError on non-writable.
+// Returns true on success, false if exception was thrown (caller should propagate).
+static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
+    if (get_type_id(regex) == LMD_TYPE_MAP) {
+        Map* m = regex.map;
+        bool nw_found = false;
+        Item nw_val = js_map_get_fast(m, "__nw_lastIndex", 14, &nw_found);
+        if (nw_found && js_is_truthy(nw_val)) {
+            Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return false;
+        }
+    }
+    js_property_set(regex, li_key, (Item){.item = i2it(value)});
+    return !js_exception_pending;
+}
+
 extern "C" Item js_regex_exec(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.exec called on incompatible receiver");
@@ -13070,7 +13088,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             else start_pos = (int)d;
         }
         if (start_pos < 0 || start_pos > len) {
-            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
         }
     }
@@ -13084,7 +13102,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
-            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
         }
         return ItemNull;
     }
@@ -13094,7 +13112,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
         // advance at least 1 to avoid infinite loop on zero-length matches
         if (match_end == start_pos) match_end++;
-        js_property_set(regex, li_key, (Item){.item = i2it(match_end)});
+        if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
     // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
@@ -13279,10 +13297,9 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
     bool global = it2b(js_to_boolean(global_val));
     // Step 6: If global is false, return RegExpExec(rx, S)
     if (!global) return js_regexp_exec_dispatch(this_val, str);
-    // Step 7: Set rx.lastIndex = 0
+    // Step 7: Set rx.lastIndex = 0 (Throw=true)
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-    js_property_set(this_val, li_key, (Item){.item = i2it(0)});
-    if (js_exception_pending) return ItemNull;
+    if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     // Step 8: Loop collecting matches
     Item results = js_array_new(0);
     int match_count = 0;
@@ -13315,8 +13332,7 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
                 if (!isnan(d) && d >= 0)
                     idx = d > 9007199254740991.0 ? (int64_t)9007199254740991LL : (int64_t)d;
             }
-            js_property_set(this_val, li_key, (Item){.item = i2it(idx + 1)});
-            if (js_exception_pending) return ItemNull;
+            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
         }
     }
     return match_count == 0 ? ItemNull : results;
@@ -13364,9 +13380,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     bool global = it2b(js_to_boolean(global_val));
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
     if (global) {
-        // Step 8: Set rx.lastIndex = 0
-        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
-        if (js_exception_pending) return ItemNull;
+        // Step 8: Set rx.lastIndex = 0 (Throw=true)
+        if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     }
     // Steps 9-11: collect all RegExpExec results
     Item results_array = js_array_new(0);
@@ -13402,8 +13417,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 else idx = (int64_t)d;
             }
             // AdvanceStringIndex: +1 (simplified; for full Unicode surrogates use +2)
-            js_property_set(this_val, li_key, (Item){.item = i2it(idx + 1)});
-            if (js_exception_pending) return ItemNull;
+            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
         }
     }
     // Steps 12-15: build result string
