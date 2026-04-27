@@ -167,6 +167,16 @@ DomRange* dom_range_clone(const DomRange* r);
 // valid empty string.
 char* dom_range_to_string(const DomRange* r);
 
+// Phase 8B: stringification mode. RAW matches DOM Range.toString(); RENDERED
+// matches Selection.toString() and skips text excluded by CSS visibility
+// (`user-select: none`, `content-visibility: hidden`) or by the "not
+// rendered as text" tag list (<script>, <style>, <head>, ...).
+typedef enum {
+    DOM_STRINGIFY_RAW = 0,
+    DOM_STRINGIFY_RENDERED = 1,
+} DomStringifyMode;
+char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
+
 // ============================================================================
 // DomSelection — the document's editing selection (also the caret)
 // ============================================================================

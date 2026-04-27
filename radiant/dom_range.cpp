@@ -14,6 +14,9 @@
 #include "../lib/strbuf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_value.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -1784,6 +1787,113 @@ static DomText* find_paragraph_text(DomText* start, int dir) {
 }
 
 char* dom_range_to_string(const DomRange* r) {
+    return dom_range_to_string_ex(r, DOM_STRINGIFY_RAW);
+}
+
+// ----------------------------------------------------------------------------
+// Phase 8B — CSS visibility classifier for DOM_STRINGIFY_RENDERED.
+// We consult the element's specified_style AVL tree directly so the
+// classifier does not require layout to have run.
+// ----------------------------------------------------------------------------
+
+// Look up a single CSS keyword on this element's specified style. Returns the
+// CssEnum keyword or 0 if the property is not declared (or its value isn't a
+// keyword). Walks no ancestors; the cascade is built by the caller below.
+static CssEnum specified_keyword(const DomElement* e, CssPropertyId prop) {
+    if (!e || !e->specified_style || !e->specified_style->tree) return (CssEnum)0;
+    AvlNode* n = avl_tree_search(e->specified_style->tree, prop);
+    if (!n) return (CssEnum)0;
+    StyleNode* sn = (StyleNode*)n->declaration;
+    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return (CssEnum)0;
+    CssValue* v = sn->winning_decl->value;
+    if (v->type != CSS_VALUE_TYPE_KEYWORD) return (CssEnum)0;
+    return v->data.keyword;
+}
+
+// True iff `e` (or some ancestor) has `content-visibility: hidden`. The
+// property is not inherited per spec, but its visual effect cascades because
+// the element's subtree is skipped from rendering. We walk ancestors to
+// implement the per-spec subtree exclusion (any descendant text is skipped).
+static bool elem_subtree_content_visibility_hidden(const DomElement* e) {
+    while (e) {
+        // Lambda has no dedicated CSS_PROPERTY_CONTENT_VISIBILITY enum yet
+        // (the property isn't part of the interpreted style), so we look up
+        // the inline style attribute's "content-visibility" declaration via
+        // the DomElement's `style` attribute. If neither layout nor parser
+        // populated this, the test won't be hit and the function returns
+        // false — that's the correct conservative fallback.
+        if (e->native_element) {
+            const char* style = dom_element_get_attribute((DomElement*)e, "style");
+            if (style) {
+                const char* p = style;
+                while ((p = strstr(p, "content-visibility")) != nullptr) {
+                    p += strlen("content-visibility");
+                    while (*p == ' ' || *p == '\t' || *p == ':') p++;
+                    if (strncmp(p, "hidden", 6) == 0) return true;
+                    // skip to next declaration boundary
+                    while (*p && *p != ';') p++;
+                }
+            }
+        }
+        DomNode* parent = e->parent;
+        e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
+    }
+    return false;
+}
+
+// Compute the effective `user-select` value for `t` by walking up its
+// ancestors. The cascade follows the spec: a closer ancestor's explicit value
+// wins. `auto` resolves to the parent's value; for the document root,
+// `auto` resolves to `text` (the UA default for non-form content). Returns
+// CSS_VALUE_NONE / CSS_VALUE_TEXT / CSS_VALUE_ALL / CSS_VALUE_CONTAIN.
+static CssEnum effective_user_select(const DomNode* n) {
+    const DomElement* e = (n && n->parent && n->parent->is_element())
+                          ? n->parent->as_element() : nullptr;
+    while (e) {
+        CssEnum kw = specified_keyword(e, CSS_PROPERTY_USER_SELECT);
+        if (kw != 0 && kw != CSS_VALUE_AUTO) return kw;
+        DomNode* parent = e->parent;
+        e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
+    }
+    return CSS_VALUE_TEXT;
+}
+
+// True iff `t` should be excluded from a Selection.toString() result by CSS.
+static bool text_excluded_for_rendered_stringify(const DomText* t) {
+    if (!t || !t->parent || !t->parent->is_element()) return false;
+    const DomElement* parent = t->parent->as_element();
+
+    // user-select: none on any ancestor (without a closer `text`/`all` override)
+    if (effective_user_select((const DomNode*)t) == CSS_VALUE_NONE) return true;
+
+    // content-visibility: hidden on any ancestor → entire subtree skipped
+    if (elem_subtree_content_visibility_hidden(parent)) return true;
+
+    // Tag-based "not rendered as text" exclusions. Per spec these elements
+    // never contribute their text to the rendering, regardless of CSS:
+    //   <head>, <title>, <meta>, <link>, <noscript>, <template>, <noembed>
+    // <script> and <style> are excluded only when they have their default
+    // (display:none-equivalent UA rendering); we approximate by excluding
+    // them unless they have an explicit CSS_VALUE_BLOCK display.
+    static const char* never_rendered[] = {
+        "head", "title", "meta", "link", "noscript", "template", "noembed", nullptr
+    };
+    if (parent->tag_name) {
+        for (int i = 0; never_rendered[i]; i++) {
+            if (tag_ieq(parent->tag_name, never_rendered[i])) return true;
+        }
+        if (tag_ieq(parent->tag_name, "script") || tag_ieq(parent->tag_name, "style")) {
+            CssEnum disp = specified_keyword(parent, CSS_PROPERTY_DISPLAY);
+            // Only include script/style when an author override forces them
+            // to be visible (display: block or inline).
+            if (disp != CSS_VALUE_BLOCK && disp != CSS_VALUE_INLINE) return true;
+        }
+    }
+
+    return false;
+}
+
+char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     if (!r || !r->start.node || !r->end.node) {
         char* empty = (char*)malloc(1);
         if (empty) empty[0] = '\0';
@@ -1791,8 +1901,6 @@ char* dom_range_to_string(const DomRange* r) {
     }
     StrBuf* sb = strbuf_new();
     if (!sb) return nullptr;
-
-    // Identify the first text node to consider.
     DomText* cur = nullptr;
     DomElement* prev_block = nullptr;  // tracks last emitted text's block ancestor
     bool sep_pending = false;            // emit "\n\n" before next non-skipped text
@@ -1822,6 +1930,17 @@ char* dom_range_to_string(const DomRange* r) {
         }
         if (dom_boundary_compare(&slice_end, &r->end) == DOM_BOUNDARY_AFTER) {
             slice_end = r->end;
+        }
+        // Phase 8B: in rendered mode, skip text excluded by CSS
+        // (`user-select: none`, `content-visibility: hidden`) or by the
+        // tag table (<script>, <style>, <head>, etc.). The skip preserves
+        // surrounding text verbatim — no whitespace inserted.
+        if (mode == DOM_STRINGIFY_RENDERED &&
+            text_excluded_for_rendered_stringify(cur)) {
+            if ((DomNode*)cur == r->end.node) break;
+            if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
+            cur = next_text_after((DomNode*)cur);
+            continue;
         }
         // Layout-free block-boundary serialization: when a whitespace-only
         // intermediate text node sits between two different block-level
