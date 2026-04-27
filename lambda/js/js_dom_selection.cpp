@@ -610,8 +610,26 @@ extern "C" Item js_selection_collapse(Item node_v, Item offset_v) {
         return make_undef();
     }
     if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
+    if (n->node_type == DOM_NODE_DOCTYPE) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "Selection.collapse: node must not be a DocumentType");
+        return make_undef();
+    }
+    // Per spec: offset bounds check happens BEFORE the document-root check.
+    uint32_t off = (uint32_t)item_to_int(offset_v);
+    if (off > dom_node_boundary_length(n)) {
+        throw_dom_exception("IndexSizeError",
+                            "Selection.collapse: offset is out of bounds");
+        return make_undef();
+    }
+    // Per spec: if node's root is not the document associated with this,
+    // abort (no-op — the selection is unchanged, no range is added).
+    if (!node_in_active_document(n)) {
+        return make_undef();
+    }
     const char* exc = nullptr;
-    if (!dom_selection_collapse(s, n, (uint32_t)item_to_int(offset_v), &exc)) {
+    if (!dom_selection_collapse(s, n, off, &exc)) {
         throw_from_dom_exc(exc, "Selection.collapse failed");
         return make_undef();
     }
@@ -694,6 +712,17 @@ extern "C" Item js_selection_select_all_children(Item node_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomNode* n = node_arg(node_v);
     if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
+    if (n->node_type == DOM_NODE_DOCTYPE) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "Selection.selectAllChildren: node must not be a DocumentType");
+        return make_undef();
+    }
+    // Per spec: if node's root is not the document associated with this,
+    // abort (no-op).
+    if (!node_in_active_document(n)) {
+        return make_undef();
+    }
     const char* exc = nullptr;
     if (!dom_selection_select_all_children(s, n, &exc)) {
         throw_from_dom_exc(exc, "selectAllChildren failed");

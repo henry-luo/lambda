@@ -22362,7 +22362,7 @@ static bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double*
 
 // Module MIR contexts must survive until main program finishes
 // (exported functions have JIT-compiled pointers that must remain valid)
-#define MAX_MODULE_CONTEXTS 256
+#define MAX_MODULE_CONTEXTS 4096
 static MIR_context_t module_mir_contexts[MAX_MODULE_CONTEXTS];
 static NamePool* module_mir_name_pools[MAX_MODULE_CONTEXTS];
 static Pool* module_mir_ast_pools[MAX_MODULE_CONTEXTS];
@@ -22390,8 +22390,10 @@ static void jm_defer_mir_cleanup(MIR_context_t ctx) {
         module_mir_ast_pools[module_mir_context_count] = NULL;
         module_mir_contexts[module_mir_context_count++] = ctx;
     } else {
-        log_error("module: exceeded max deferred MIR contexts (%d)", MAX_MODULE_CONTEXTS);
-        MIR_finish(ctx);
+        // Cannot MIR_finish — JIT-compiled function pointers still live and
+        // would crash on call. Just leak the context (rare path; survives
+        // until process exit anyway).
+        log_error("module: exceeded max deferred MIR contexts (%d) — leaking ctx", MAX_MODULE_CONTEXTS);
     }
 }
 
