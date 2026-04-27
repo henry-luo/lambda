@@ -2075,6 +2075,22 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             // self → true (per DOM spec, node.contains(node) is true)
             Item doc_self = js_get_document_object_value();
             if (arg.item == doc_self.item) return (Item){.item = ITEM_TRUE};
+            // synthesized doctype (and any other direct child of the document
+            // stub other than the documentElement) — true.
+            DomDocument* doc = _js_current_document;
+            if (doc) {
+                void* stub_v = js_dom_get_or_create_doc_node(doc);
+                DomElement* stub = (DomElement*)stub_v;
+                void* nv = js_dom_unwrap_element(arg);
+                if (stub && nv) {
+                    DomNode* n = (DomNode*)nv;
+                    DomNode* cur = n;
+                    while (cur) {
+                        if (cur == (DomNode*)stub) return (Item){.item = ITEM_TRUE};
+                        cur = cur->parent;
+                    }
+                }
+            }
             Item doc_elem = js_document_get_property((Item){.item = s2it(heap_create_name("documentElement"))});
             if (doc_elem.item != ITEM_NULL && doc_elem.item != ITEM_JS_UNDEFINED) {
                 // also: documentElement itself is a descendant, contains(documentElement) → true
@@ -2237,6 +2253,28 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return (Item){.item = i2it(9)};
     }
 
+    // childNodes — return a NodeList-like Array of the document's children
+    // (synthesized doctype + documentElement). Backed by the document stub
+    // so iteration works.
+    if (strcmp(prop, "childNodes") == 0) {
+        DomDocument* doc = _js_current_document;
+        if (!doc) return ItemNull;
+        void* stub_v = js_dom_get_or_create_doc_node(doc);
+        if (!stub_v) return ItemNull;
+        DomElement* stub = (DomElement*)stub_v;
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        DomNode* child = stub->first_child;
+        while (child) {
+            array_push(arr, js_dom_wrap_element((void*)child));
+            child = child->next_sibling;
+        }
+        return (Item){.array = arr};
+    }
+
     // nodeName
     if (strcmp(prop, "nodeName") == 0) {
         return (Item){.item = s2it(heap_create_name("#document"))};
@@ -2268,8 +2306,20 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // doctype — DocumentType node (or null if document has none).
-    // For the parsed main document we don't track a doctype node; return null.
+    // We synthesize a DOCTYPE node as the first child of the document stub
+    // (see js_dom_get_or_create_doc_node). Expose it here so JS code that
+    // does `document.doctype` (and Range/Selection APIs that take it as a
+    // node argument) work.
     if (strcmp(prop, "doctype") == 0) {
+        DomDocument* doc = _js_current_document;
+        if (!doc) return ItemNull;
+        void* stub = js_dom_get_or_create_doc_node(doc);
+        if (!stub) return ItemNull;
+        DomElement* e = (DomElement*)stub;
+        DomNode* fc = e->first_child;
+        if (!fc) return ItemNull;
+        // synthesized doctype is the leading DomComment child
+        if (fc->is_comment()) return js_dom_wrap_element(fc);
         return ItemNull;
     }
 
@@ -2367,7 +2417,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                                          : (Item){.item = s2it(heap_create_name(""))};
         }
         if (strcmp(prop, "nodeType") == 0) {
-            return (Item){.item = i2it(8)}; // COMMENT_NODE
+            // Reflect the underlying DomNodeType so the synthesized DOCTYPE
+            // (created with node_type = DOM_NODE_DOCTYPE = 10) is visible to
+            // DOM-spec node tests; plain comments still report COMMENT_NODE (8).
+            return (Item){.item = i2it((int64_t)comment_node->node_type)};
         }
         if (strcmp(prop, "nodeName") == 0) {
             return (Item){.item = s2it(heap_create_name("#comment"))};

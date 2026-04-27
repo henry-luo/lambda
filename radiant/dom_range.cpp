@@ -11,6 +11,7 @@
 #include "dom_range.hpp"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/strbuf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -677,34 +678,40 @@ bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const
     if (!s) { set_exception(out_exception, "InvalidStateError"); return false; }
     if (s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return false; }
     if (!node) { set_exception(out_exception, "InvalidNodeTypeError"); return false; }
+    if (node->node_type == DOM_NODE_DOCTYPE) {
+        set_exception(out_exception, "InvalidNodeTypeError"); return false;
+    }
     if (offset > dom_node_boundary_length(node)) {
         set_exception(out_exception, "IndexSizeError"); return false;
     }
     DomBoundary new_focus = { node, offset };
     DomBoundary anchor = s->anchor;
-    DomRange* r = s->ranges[0];
 
-    // If anchor and new focus share a tree, set range to (min, max) and
-    // pick direction based on order; otherwise per spec collapse to focus.
+    // Compute new boundaries first, then replace the existing range with a
+    // freshly-allocated one (per WHATWG: extend must replace the range, not
+    // mutate the user-visible old range object).
+    DomBoundary new_start, new_end;
+    bool forward;
     DomBoundaryOrder ord = dom_boundary_compare(&anchor, &new_focus);
     if (ord == DOM_BOUNDARY_DISJOINT) {
-        r->start = r->end = new_focus;
-        dom_range_invalidate_layout(r);
-        sync_anchor_focus(s, true);
-        return true;
-    }
-    if (ord == DOM_BOUNDARY_AFTER) {
-        // anchor is after focus → backward selection
-        r->start = new_focus;
-        r->end = anchor;
-        dom_range_invalidate_layout(r);
-        sync_anchor_focus(s, /*forward=*/false);
+        new_start = new_end = new_focus;
+        forward = true;
+    } else if (ord == DOM_BOUNDARY_AFTER) {
+        new_start = new_focus;
+        new_end = anchor;
+        forward = false;
     } else {
-        r->start = anchor;
-        r->end = new_focus;
-        dom_range_invalidate_layout(r);
-        sync_anchor_focus(s, /*forward=*/true);
+        new_start = anchor;
+        new_end = new_focus;
+        forward = true;
     }
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return false;
+    r->start = new_start;
+    r->end = new_end;
+    dom_range_invalidate_layout(r);
+    sync_anchor_focus(s, forward);
     return true;
 }
 
@@ -721,10 +728,13 @@ bool dom_selection_set_base_and_extent(DomSelection* s,
     }
     DomBoundary a = { anchor_node, anchor_offset };
     DomBoundary f = { focus_node,  focus_offset  };
-    DomRange* r = ensure_primary_range(s);
-    if (!r) return false;
     DomBoundaryOrder ord = dom_boundary_compare(&a, &f);
     bool forward = (ord != DOM_BOUNDARY_AFTER);
+    // Replace the existing range with a fresh one (per WHATWG: must not
+    // mutate any user-visible old range).
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return false;
     if (forward) { r->start = a; r->end = f; }
     else         { r->start = f; r->end = a; }
     dom_range_invalidate_layout(r);
@@ -1534,6 +1544,86 @@ static DomText* prev_text_before(DomNode* n) {
     return nullptr;
 }
 
+// Find the leftmost text descendant inside `n` (or `n` itself if it is text),
+// or NULL if no text descendant exists.
+static DomText* leftmost_text_in(DomNode* n) {
+    while (n) {
+        if (n->is_text()) return n->as_text();
+        if (n->is_element()) {
+            DomNode* fc = n->as_element()->first_child;
+            if (!fc) return nullptr;
+            n = fc;
+            continue;
+        }
+        return nullptr;
+    }
+    return nullptr;
+}
+
+char* dom_range_to_string(const DomRange* r) {
+    if (!r || !r->start.node || !r->end.node) {
+        char* empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    StrBuf* sb = strbuf_new();
+    if (!sb) return nullptr;
+
+    // Identify the first text node to consider.
+    DomText* cur = nullptr;
+    if (r->start.node->is_text()) {
+        cur = r->start.node->as_text();
+    } else if (r->start.node->is_element()) {
+        DomElement* e = r->start.node->as_element();
+        DomNode* c = e->first_child;
+        for (uint32_t i = 0; i < r->start.offset && c; i++) c = c->next_sibling;
+        if (c) {
+            cur = leftmost_text_in(c);
+            if (!cur) cur = next_text_after(c);
+        } else {
+            // start is past last child: walk forward from element
+            cur = next_text_after(r->start.node);
+        }
+    }
+
+    while (cur) {
+        DomBoundary t_start{ (DomNode*)cur, 0 };
+        DomBoundary t_end{ (DomNode*)cur, dom_text_utf16_length(cur) };
+        // Slice this text node by clamping to range bounds.
+        DomBoundary slice_start = t_start;
+        DomBoundary slice_end = t_end;
+        if (dom_boundary_compare(&slice_start, &r->start) == DOM_BOUNDARY_BEFORE) {
+            slice_start = r->start;
+        }
+        if (dom_boundary_compare(&slice_end, &r->end) == DOM_BOUNDARY_AFTER) {
+            slice_end = r->end;
+        }
+        // Append the in-text portion (skip if slice fell outside this node).
+        if (slice_start.node == (DomNode*)cur && slice_end.node == (DomNode*)cur
+            && slice_start.offset < slice_end.offset) {
+            uint32_t b_start = dom_text_utf16_to_utf8(cur, slice_start.offset);
+            uint32_t b_end = dom_text_utf16_to_utf8(cur, slice_end.offset);
+            if (b_end > b_start && cur->text) {
+                strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
+            }
+        }
+        // Stop once we've covered the end-position.
+        if ((DomNode*)cur == r->end.node) break;
+        if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
+        cur = next_text_after((DomNode*)cur);
+    }
+
+    // Build NUL-terminated copy.
+    size_t len = sb->length;
+    char* out = (char*)malloc(len + 1);
+    if (out) {
+        if (len > 0 && sb->str) memcpy(out, sb->str, len);
+        out[len] = '\0';
+    }
+    strbuf_free(sb);
+    return out;
+}
+
 // Find the document root (top-most ancestor) for `n`.
 static DomNode* root_of(DomNode* n) {
     if (!n) return nullptr;
@@ -1658,8 +1748,15 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
             DomNode* c = e->first_child;
             for (uint32_t i = 0; i < b.offset && c; i++) c = c->next_sibling;
             if (c && c->is_text()) return DomBoundary{ c, 0 };
-            // skip past element child
-            return DomBoundary{ (DomNode*)e, b.offset + 1 };
+            // skip past element child; if the next child is a text node,
+            // descend into it so callers see (text, 0) rather than the
+            // ambiguous (parent, offset+1) position.
+            uint32_t new_off = b.offset + 1;
+            DomNode* next_child = c ? c->next_sibling : nullptr;
+            if (next_child && next_child->is_text()) {
+                return DomBoundary{ next_child, 0 };
+            }
+            return DomBoundary{ (DomNode*)e, new_off };
         }
         // ascend
         DomNode* p = e->parent;
@@ -1674,6 +1771,17 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
             for (uint32_t i = 0; i + 1 < b.offset && c; i++) c = c->next_sibling;
             if (c && c->is_text())
                 return DomBoundary{ c, dom_text_utf16_length(c->as_text()) };
+            // skip past element child backwards; if the previous child is a
+            // text node, descend to its end so callers see (text, len).
+            DomNode* prev_child = (b.offset >= 2 && c) ? c : nullptr;
+            // Find child at index (b.offset - 2) — the one before the one we
+            // just skipped over (which was at index b.offset - 1).
+            if (b.offset >= 2) {
+                DomNode* pc = e->first_child;
+                for (uint32_t i = 0; i + 2 < b.offset && pc; i++) pc = pc->next_sibling;
+                if (pc && pc->is_text())
+                    return DomBoundary{ pc, dom_text_utf16_length(pc->as_text()) };
+            }
             return DomBoundary{ (DomNode*)e, b.offset - 1 };
         }
         DomNode* p = e->parent;
@@ -1825,15 +1933,20 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
 
     // Parse granularity
     DomModGranularity gran;
+    bool line_like = false;
     if (!granularity || strieq(granularity, "character")) gran = DOM_MOD_CHARACTER;
     else if (strieq(granularity, "word"))                  gran = DOM_MOD_WORD;
     else if (strieq(granularity, "documentboundary"))      gran = DOM_MOD_DOCUMENT;
     else if (strieq(granularity, "line") || strieq(granularity, "lineboundary") ||
              strieq(granularity, "paragraph") || strieq(granularity, "paragraphboundary") ||
              strieq(granularity, "sentence") || strieq(granularity, "sentenceboundary")) {
-        // Fallback: approximate line/paragraph/sentence as documentboundary
-        // (no layout-aware iterator yet). Word-walk would also be acceptable.
-        gran = DOM_MOD_DOCUMENT;
+        // Without a real layout-aware iterator we approximate line/paragraph
+        // motion by stepping to the previous/next text node in document order
+        // and clamping the offset to that text node's length. This is enough
+        // for simple cases like `text<br>text` inside one element where each
+        // text node corresponds to a single visual line.
+        line_like = true;
+        gran = DOM_MOD_CHARACTER;  // unused when line_like is true
     }
     else { if (out_exception) *out_exception = "SyntaxError"; return false; }
 
@@ -1841,7 +1954,44 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
     if (!r) return true;
     DomBoundary anchor{ s->anchor.node, s->anchor.offset };
     DomBoundary focus { s->focus.node,  s->focus.offset  };
-    DomBoundary new_focus = dom_boundary_move(focus, gran, dir);
+    DomBoundary new_focus;
+    if (line_like) {
+        DomNode* base = focus.node;
+        DomText* tx = nullptr;
+        if (base && base->is_text()) tx = base->as_text();
+        DomText* target = nullptr;
+        if (tx) {
+            // Walk past whitespace-only text nodes (typical between block-level
+            // siblings) so the visual "line" we land on contains real text.
+            DomText* it = tx;
+            while (true) {
+                it = (dir > 0) ? next_text_after((DomNode*)it)
+                               : prev_text_before((DomNode*)it);
+                if (!it) break;
+                bool ws_only = true;
+                if (it->text) {
+                    for (size_t i = 0; i < it->length; i++) {
+                        unsigned char c = (unsigned char)it->text[i];
+                        if (c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != '\f') {
+                            ws_only = false; break;
+                        }
+                    }
+                } else {
+                    ws_only = false;
+                }
+                if (!ws_only) { target = it; break; }
+            }
+        }
+        if (target) {
+            uint32_t tlen = dom_text_utf16_length(target);
+            uint32_t off = focus.offset > tlen ? tlen : focus.offset;
+            new_focus = DomBoundary{ (DomNode*)target, off };
+        } else {
+            new_focus = focus;
+        }
+    } else {
+        new_focus = dom_boundary_move(focus, gran, dir);
+    }
 
     if (extend) {
         const char* exc = nullptr;
