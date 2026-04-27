@@ -210,6 +210,33 @@ static DomSelection* sync_ensure_selection(RadiantState* state) {
     return state->dom_selection;
 }
 
+// Phase B (consolidation) — called from `dom_selection_create` (in
+// dom_range.cpp) immediately after the DomSelection is allocated. Allocates
+// the embedded CaretState and SelectionState into the same arena and
+// aliases `state->caret` / `state->selection` onto them. Result: a single
+// owner for the legacy interactive-state structs (DomSelection), no more
+// lazy allocations scattered through caret_*/selection_* entry points.
+extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
+                                                    RadiantState* state) {
+    if (!s || !state || !state->arena) return;
+    if (!s->caret) {
+        s->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
+        if (s->caret) {
+            memset(s->caret, 0, sizeof(CaretState));
+            s->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
+        }
+    }
+    if (!s->selection) {
+        s->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
+        if (s->selection) {
+            memset(s->selection, 0, sizeof(SelectionState));
+        }
+    }
+    // Alias — single source of truth for the legacy field-access syntax.
+    state->caret     = s->caret;
+    state->selection = s->selection;
+}
+
 // View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
 // Convert (View*, byte_offset) → DomBoundary (UTF-16 offset for text nodes).
 static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
@@ -241,10 +268,12 @@ extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
     DomBoundary foc = boundary_from_legacy(sel->focus_view,  sel->focus_offset);
     if (!anc.node || !foc.node) return;
     const char* exc = NULL;
+    state->dom_selection_sync_depth++;  // suppress inverse sync re-entry
     if (!dom_selection_set_base_and_extent(ds,
             anc.node, anc.offset, foc.node, foc.offset, &exc)) {
         log_debug("[DOM-SYNC] set_base_and_extent rejected: %s", exc ? exc : "?");
     }
+    state->dom_selection_sync_depth--;
     state->selection_layout_dirty = true;
 }
 
@@ -255,10 +284,109 @@ extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
     DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
     if (!b.node) return;
     const char* exc = NULL;
+    state->dom_selection_sync_depth++;  // suppress inverse sync re-entry
     if (!dom_selection_collapse(ds, b.node, b.offset, &exc)) {
         log_debug("[DOM-SYNC] collapse rejected: %s", exc ? exc : "?");
     }
+    state->dom_selection_sync_depth--;
     state->selection_layout_dirty = true;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — DomSelection → legacy mirroring (single-source-of-truth direction).
+//
+// The renderer (radiant/render.cpp) and event code (radiant/event.cpp) still
+// read `state->selection` / `state->caret`. When the spec algorithms or JS
+// bindings mutate `state->dom_selection` we must keep the legacy structs in
+// sync so the visual selection reflects the change. Layout cache fields
+// (caret x/y/height) are derived via the resolver. View* IS DomNode*, so
+// the node→view conversion is just a cast; UTF-16→UTF-8 for text offsets.
+// ---------------------------------------------------------------------------
+extern "C" void legacy_sync_from_dom_selection(RadiantState* state) {
+    if (!state) return;
+    if (state->dom_selection_sync_depth > 0) return;  // re-entry guard
+    DomSelection* ds = state->dom_selection;
+    if (!ds) return;
+
+    // Empty selection: clear legacy state too.
+    if (ds->range_count == 0 || !ds->anchor.node) {
+        if (state->selection) {
+            state->selection->is_collapsed = true;
+            state->selection->is_selecting = false;
+        }
+        state->needs_repaint = true;
+        return;
+    }
+
+    state->dom_selection_sync_depth++;  // suppress legacy→DOM re-entry
+
+    // Convert DomBoundary (node, utf16-or-child-offset) → (View*, byte_offset).
+    auto to_legacy = [](const DomBoundary& b, View** out_view, int* out_off) {
+        DomNode* n = b.node;
+        if (!n) { *out_view = NULL; *out_off = 0; return; }
+        *out_view = (View*)n;
+        if (n->is_text()) {
+            DomText* t = (DomText*)n;
+            *out_off = (int)dom_text_utf16_to_utf8(t, b.offset);
+        } else {
+            *out_off = (int)b.offset;  // element child-index
+        }
+    };
+
+    View* anc_view = NULL; int anc_off = 0;
+    View* foc_view = NULL; int foc_off = 0;
+    to_legacy(ds->anchor, &anc_view, &anc_off);
+    to_legacy(ds->focus,  &foc_view, &foc_off);
+
+    // Phase B: legacy storage is owned by DomSelection (allocated in
+    // dom_selection_create via dom_selection_attach_legacy_storage), so
+    // state->caret / state->selection are guaranteed non-null here.
+    if (!state->selection || !state->caret) {
+        state->dom_selection_sync_depth--;
+        return;
+    }
+    SelectionState* sel = state->selection;
+    sel->anchor_view   = anc_view;
+    sel->focus_view    = foc_view;
+    sel->view          = foc_view;  // legacy single-view fallback
+    sel->anchor_offset = anc_off;
+    sel->focus_offset  = foc_off;
+    sel->is_collapsed  = ds->is_collapsed;
+
+    {
+        CaretState* caret = state->caret;
+        caret->view        = foc_view;
+        caret->char_offset = foc_off;
+        caret->visible     = true;
+        caret->blink_time  = 0;
+
+        // Resolve layout cache (x/y/height) via the resolver. Best-effort:
+        // if no layout has run yet, leave previous cache values in place.
+        DomRange* r = ds->ranges[0];
+        if (r) {
+            // Force re-resolve to reflect possibly-mutated layout.
+            r->layout_valid = false;
+            if (dom_range_resolve_layout(r)) {
+                // Use END boundary (focus) for caret position when range is
+                // forward-directed; spec direction tells us which is focus.
+                bool focus_at_end = (ds->direction != DOM_SEL_DIR_BACKWARD);
+                caret->x      = focus_at_end ? r->end_x : r->start_x;
+                caret->y      = focus_at_end ? r->end_y : r->start_y;
+                caret->height = focus_at_end ? r->end_height : r->start_height;
+                // Mirror into selection start/end for legacy renderer.
+                sel->start_x = r->start_x;
+                sel->start_y = r->start_y;
+                sel->end_x   = r->end_x;
+                sel->end_y   = r->end_y;
+            }
+        }
+    }
+
+    state->selection_layout_dirty = false;
+    state->needs_repaint = true;
+    state->dom_selection_sync_depth--;
+    log_debug("[DOM-SYNC] legacy_sync_from_dom_selection: anc=(%p,%d) foc=(%p,%d) collapsed=%d",
+              (void*)anc_view, anc_off, (void*)foc_view, foc_off, ds->is_collapsed);
 }
 
 void radiant_state_destroy(RadiantState* state) {
@@ -901,15 +1029,10 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
     log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
-    // Allocate caret state if needed
-    if (!state->caret) {
-        state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
-        if (!state->caret) {
-            log_error("caret_set: failed to allocate CaretState");
-            return;
-        }
-        memset(state->caret, 0, sizeof(CaretState));
-        state->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
+    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
+    if (!sync_ensure_selection(state) || !state->caret) {
+        log_error("caret_set: failed to ensure DomSelection / legacy storage");
+        return;
     }
 
     CaretState* caret = state->caret;
@@ -930,13 +1053,7 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
 void caret_set_position(RadiantState* state, View* view, int line, int column) {
     if (!state) return;
 
-    // Allocate caret state if needed
-    if (!state->caret) {
-        state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
-        if (!state->caret) return;
-        memset(state->caret, 0, sizeof(CaretState));
-        state->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
-    }
+    if (!sync_ensure_selection(state) || !state->caret) return;
 
     CaretState* caret = state->caret;
     caret->view = view;
@@ -1913,13 +2030,10 @@ void caret_toggle_blink(RadiantState* state) {
 void selection_start(RadiantState* state, View* view, int char_offset) {
     if (!state) return;
 
-    // Allocate selection state if needed
-    if (!state->selection) {
-        state->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
-        if (!state->selection) {
-            log_error("selection_start: failed to allocate SelectionState");
-            return;
-        }
+    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
+    if (!sync_ensure_selection(state) || !state->selection) {
+        log_error("selection_start: failed to ensure DomSelection / legacy storage");
+        return;
     }
 
     SelectionState* sel = state->selection;
@@ -1994,11 +2108,8 @@ void selection_extend_to_view(RadiantState* state, View* view, int char_offset) 
 void selection_set(RadiantState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
-    // Allocate selection state if needed
-    if (!state->selection) {
-        state->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
-        if (!state->selection) return;
-    }
+    // Phase B: ensure DomSelection (and its embedded legacy storage) exists.
+    if (!sync_ensure_selection(state) || !state->selection) return;
 
     SelectionState* sel = state->selection;
     sel->view = view;

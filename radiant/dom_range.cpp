@@ -18,6 +18,20 @@
 #include <stdlib.h>
 #include <limits.h>
 
+// Phase 6 — single source of truth: after every selection-state mutation
+// inside this file, mirror the result back into the legacy
+// CaretState/SelectionState so the renderer (which still reads the legacy
+// structs) reflects spec-driven and JS-driven changes. Implemented in
+// state_store.cpp; declared here as a forward to avoid pulling in
+// state_store.hpp (which transitively includes GLFW). A weak default
+// no-op is provided so unit-test targets that don't link state_store.cpp
+// (e.g. test_dom_range_gtest) still link successfully — the strong
+// definition in state_store.cpp wins for the full binary.
+extern "C" void legacy_sync_from_dom_selection(struct RadiantState* state);
+extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct RadiantState* /*state*/) {
+    // weak fallback for test targets without state_store
+}
+
 // We do NOT include state_store.hpp here — it transitively pulls in GLFW
 // and the full Radiant render stack, which would force every unit test
 // linking dom_range.cpp to drag in the world. Instead we declare the two
@@ -25,6 +39,16 @@
 // state_store.cpp (production) or in a unit-test stub.
 struct Arena;
 extern "C" Arena*    dom_range_state_arena(RadiantState* state);
+// Implemented in state_store.cpp — allocates the embedded CaretState /
+// SelectionState into `state`'s arena and stores pointers on `s`. Also
+// aliases `state->caret` / `state->selection` to the same pointers so
+// the legacy field-access syntax keeps working.
+extern "C" void      dom_selection_attach_legacy_storage(struct DomSelection* s,
+                                                         RadiantState* state);
+extern "C" __attribute__((weak)) void dom_selection_attach_legacy_storage(
+        struct DomSelection* /*s*/, RadiantState* /*state*/) {
+    // weak fallback for test targets that don't link state_store.cpp.
+}
 extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state);
 extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state);
 
@@ -472,6 +496,9 @@ DomSelection* dom_selection_create(RadiantState* state) {
     memset(s, 0, sizeof(*s));
     s->state = state;
     s->is_collapsed = true;
+    // Allocate the embedded legacy storage and alias state->caret/selection
+    // onto it. Strong def in state_store.cpp; weak no-op for unit tests.
+    dom_selection_attach_legacy_storage(s, state);
     return s;
 }
 
@@ -529,6 +556,11 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     s->is_collapsed = dom_range_collapsed(r);
     if (s->is_collapsed) s->direction = DOM_SEL_DIR_NONE;
     else s->direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
+
+    // Phase 6: mirror DOM selection into legacy state for the renderer.
+    // Re-entry guarded inside legacy_sync_from_dom_selection so it's a no-op
+    // when invoked transitively from a legacy→DOM sync.
+    if (s->state) legacy_sync_from_dom_selection(s->state);
 }
 
 void dom_selection_add_range(DomSelection* s, DomRange* range) {

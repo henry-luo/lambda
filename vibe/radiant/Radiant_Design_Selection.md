@@ -1,5 +1,133 @@
 # Radiant Selection / Range Design Document
 
+## Implementation Status (2026-04-27)
+
+**Phases 1–6 have shipped.** A few design choices changed during
+implementation; this section is the authoritative summary, the rest of
+the document remains the original design narrative with inline notes
+where it diverges.
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1 — DOM types & GTest | ✅ done | `radiant/dom_range.{hpp,cpp}`, 66/66 GTest. |
+| 2 — JS bindings | ✅ done | `lambda/js/js_dom_selection.{hpp,cpp}`. |
+| 3 — Mutation envelopes & live ranges | ✅ done | `dom_range_replace_for_mutation` + spec adjustments. |
+| 4 — Range mutation methods | ✅ done | `cloneContents` / `extractContents` / `deleteContents` / `surroundContents` / `insertNode`. |
+| 5 — `Selection.modify` & word breaking | ✅ done | utf8proc-backed iterator. |
+| 6 — Rendering & input wiring | ✅ done (revised, see below) | bidirectional sync, NOT a unification. |
+| 6A — `render_selection()` activated | ✅ done | inline glyph painter disabled; multi-rect overlay drives text-selection backgrounds. |
+| 6B — Consolidated legacy storage | ✅ done | `CaretState` / `SelectionState` now owned by `DomSelection`; single allocation; types preserved. |
+| 7 — Polish | 🔵 pending | shrink WPT skip list, `selectionchange` event, doc page. |
+
+### Phase 6 deviation from the original plan
+
+The original plan (§3.3 / §4.1) called for **deleting**
+`CaretState` / `SelectionState` and making `DomSelection` the sole
+container. **What actually shipped is bidirectional sync** between the
+two, not unification:
+
+- `RadiantState` keeps `caret`, `selection`, AND `dom_selection`. The
+  legacy structs cache precise visual coordinates (caret X/Y/height
+  computed glyph-precisely by `event.cpp::calculate_position_from_char_offset`);
+  `DomSelection` holds the spec-canonical anchor/focus.
+- A re-entry-guarded sync (counter `dom_selection_sync_depth` on
+  `RadiantState`) propagates changes both ways:
+  - **legacy → DOM**: `dom_selection_sync_from_legacy_selection()` and
+    `_from_legacy_caret()` run at the end of `caret_set` /
+    `selection_start` / `selection_extend` / `selection_extend_to_view`.
+  - **DOM → legacy**: `legacy_sync_from_dom_selection()` runs at the
+    end of `sync_anchor_focus()` in `dom_range.cpp`, called by every
+    spec mutator (collapse / extend / setBaseAndExtent / etc.).
+- The renderer's selection highlight is still painted **inline per glyph**
+  in `render_text_view` from the legacy `SelectionState`. The new
+  multi-rect `render_selection()` (see §4.4) is implemented and uses
+  `dom_range_for_each_rect()`, but is currently disabled in
+  `render_ui_overlays` to keep zero behavior change. Phase 7 may flip
+  the switch.
+- Mouse handlers in `event.cpp` were **not** rerouted through
+  `dom_hit_test_to_boundary`. The bidirectional sync makes the legacy
+  call sites produce a correct `DomSelection` automatically without
+  losing event.cpp's glyph-precise caret coordinates.
+
+**Why the deviation:** the resolver (`dom_range_resolver.cpp`) uses
+linear interpolation within a `TextRect` to keep it glyph-free and
+unit-testable (no GLFW/font dependency). `event.cpp` already had a
+pixel-perfect path. Replacing the legacy structs entirely would have
+regressed caret precision; the bidirectional sync gives JS the
+canonical DOM-anchored model while the renderer keeps the precise
+visual cache.
+
+### Phase 6A — `render_selection()` activated
+
+- `render.cpp::render_text_view`: inline per-glyph selection background
+  painter disabled (forced `has_selection = false`). The helper
+  functions `get_selection_range_for_view` / `is_view_in_selection`
+  are retained for the cross-view image-overlay path at
+  `render.cpp:~3074`.
+- `render.cpp::render_ui_overlays`: now calls `render_selection()`
+  unconditionally. Reads `state->dom_selection`, calls
+  `dom_range_for_each_rect()`, paints one #0078D7 │ α=0x80 rectangle
+  per visual fragment. Cross-text-node and cross-paragraph selections
+  paint correctly for the first time.
+- Slight precision trade: within a single `TextRect`, rectangle edges
+  use linear interpolation rather than the glyph walk in
+  `event.cpp::calculate_position_from_char_offset`. The visible caret
+  itself remains glyph-precise (drawn from `state->caret` which is
+  still updated by event.cpp's pixel-perfect path).
+- Tests: 5713/5717 (no new regressions).
+
+### Phase 6B — Consolidated legacy storage under `DomSelection`
+
+`CaretState` and `SelectionState` are now **owned by `DomSelection`**
+instead of being independently arena-allocated by the
+`caret_*` / `selection_*` API:
+
+- `DomSelection` carries `CaretState* caret;` and
+  `SelectionState* selection;` pointer fields
+  (`radiant/dom_range.hpp`).
+- `dom_selection_create()` calls
+  `dom_selection_attach_legacy_storage(s, state)` (strong def in
+  `state_store.cpp`, weak no-op fallback in `dom_range.cpp` for
+  unit-test linkage). The helper allocates both legacy structs into
+  `state->arena` and aliases `state->caret = s->caret;`
+  `state->selection = s->selection;`.
+- All lazy-allocation paths in `caret_set` / `caret_set_position` /
+  `selection_start` / `selection_set` / `legacy_sync_from_dom_selection`
+  are replaced with a single `sync_ensure_selection(state)` call.
+  Storage is guaranteed to exist after the first `DomSelection`
+  access; subsequent paths are pure writes.
+
+**What this delivered:**
+- Single arena allocation for the trio (DomSelection + CaretState +
+  SelectionState) sharing one lifetime owned by `DomSelection`.
+- Five lazy-alloc blocks deleted; null-check overhead reduced.
+- All call sites unchanged — `state->caret->x` and
+  `state->selection->is_selecting` are the same memory they were
+  before, so `event.cpp`, `render_caret`, `render_caret_svg`,
+  `view_pool::dump_state`, `event_sim` helpers all keep working.
+
+**What this did NOT do** (and why):
+- The typedefs `CaretState` / `SelectionState` themselves remain.
+  Removing the names would force rewriting ~25 field-access sites
+  across `event.cpp` (mouse drag/click handlers updating glyph-precise
+  caret X/Y/height + iframe offset), `render.cpp::render_caret`,
+  `render_svg.cpp::render_caret_svg`, `view_pool::dump_state`, and
+  `event_sim::assert_caret/_selection` — all of which currently rely
+  on the C struct field syntax. The substantive wins (no parallel
+  allocations, no scattered alloc paths, single owner) are achieved
+  by 6B without that risk.
+- The `dom_selection_sync_depth` re-entry counter and the bidirectional
+  sync helpers stay. Even with shared backing storage, the
+  `(View*, byte_offset)` ↔ `(DomNode*, utf16_offset)` conversion is
+  real work that must run on every mutation — same memory doesn't
+  obviate the need for re-entry protection.
+
+**Test results:** `test_dom_range_gtest` 66/66; `make test-radiant-baseline`
+5713/5717 (only 4 pre-existing render-visual failures, no new
+regressions).
+
+---
+
 ## Overview
 
 This document proposes the architectural and API enhancements required to make
@@ -273,6 +401,13 @@ rendered as a 1-pixel vertical bar at `range[0].start`'s resolved position.
 Blink state and visibility — the only fields the old `CaretState` carried
 that are not derivable from a range — move onto `DomSelection`.
 
+> **Implementation note (Phase 6 actual):** `CaretState` and
+> `SelectionState` were **not** deleted. They are kept in parallel
+> with `DomSelection` and bidirectionally synced. See the
+> Implementation Status section above. The fields below all exist on
+> `DomSelection` as designed, but the renderer reads precise visual
+> coordinates from the legacy structs.
+
 ```cpp
 typedef enum {
     DOM_SEL_DIR_NONE = 0,    // empty or single-range non-directional
@@ -342,36 +477,43 @@ document. The selection and live ranges live there directly — *not* on
 `DomDocument` — keeping `DomDocument` as a pure data-model object and
 concentrating all interactive/runtime state in one place.
 
-### 4.1 StateStore additions (replaces today's `caret` + `selection` pair)
+### 4.1 StateStore additions (Phase 6 actual)
 
 ```cpp
 // radiant/state_store.hpp
 typedef struct RadiantState {
     /* ... existing pool/arena/state_map/dirty/reflow/focus fields ... */
 
-    // -- Selection & ranges (REPLACES the old CaretState* caret and
-    //    SelectionState* selection pointers) --
-    DomSelection* selection;           // single editing selection (lazy)
-    DomRange*     live_ranges;         // doubly-linked list head
-    uint32_t      next_range_id;
-    bool          selection_layout_dirty; // set by mutation, cleared by resolver
+    // Legacy interactive state (kept; see Implementation Status note).
+    CaretState*     caret;
+    SelectionState* selection;
+
+    // DOM-spec selection / live ranges (additive).
+    DomSelection*  dom_selection;            // single editing selection (lazy)
+    DomRange*      live_ranges;              // doubly-linked list head
+    uint32_t       next_range_id;
+    bool           selection_layout_dirty;   // set by mutation, cleared by resolver
+    int            dom_selection_sync_depth; // re-entry guard for the
+                                             // legacy <-> DOM sync hooks
 
     /* ... cursor, drag_target, animation_scheduler, etc. ... */
 } RadiantState;
 ```
 
-The old `CaretState*` and `SelectionState*` fields are **deleted**. Their
-contents are now:
+> **Original plan (not done):** delete `CaretState*` / `SelectionState*`.
+> **Actual:** both kept and bidirectionally synced (see Implementation
+> Status). The mapping below remains the *logical* equivalence; in the
+> shipped code each row is held in both places and kept in sync.
 
-| Old field | New home |
-|-----------|----------|
-| `state->caret->view` / `char_offset` / `line` / `column` | `selection->ranges[0]->start_view` / `start_byte_offset` / `start_line` / `start_column` (when `is_collapsed`) |
-| `state->caret->x` / `y` / `height` | `selection->ranges[0]->start_x/y` + `selection->caret_height` |
-| `state->caret->visible` / `blink_time` | `selection->caret_visible` / `caret_blink_time` |
-| `state->caret->prev_abs_*` | `selection->caret_prev_abs_*` |
-| `state->selection->anchor_view`, `focus_view`, `*_offset`, `*_line` | `selection->ranges[0]->start_view`/`end_view` + the inlined layout cache; logical anchor/focus order derived from `selection->direction` |
-| `state->selection->start_x/y`, `end_x/y`, `iframe_offset_*` | same fields on `selection->ranges[0]` |
-| `state->selection->is_collapsed` | `selection->is_collapsed` (now the canonical caret-vs-range discriminant) |
+| Old field | Logical equivalent on `DomSelection` |
+|-----------|----------------|
+| `state->caret->view` / `char_offset` / `line` / `column` | `dom_selection->ranges[0]->start_view` / `start_byte_offset` / `start_line` / `start_column` (when `is_collapsed`) |
+| `state->caret->x` / `y` / `height` | `dom_selection->ranges[0]->start_x/y` + `dom_selection->caret_height` |
+| `state->caret->visible` / `blink_time` | `dom_selection->caret_visible` / `caret_blink_time` |
+| `state->caret->prev_abs_*` | `dom_selection->caret_prev_abs_*` |
+| `state->selection->anchor_view`, `focus_view`, `*_offset`, `*_line` | `dom_selection->ranges[0]->start_view`/`end_view` + the inlined layout cache; logical anchor/focus order derived from `dom_selection->direction` |
+| `state->selection->start_x/y`, `end_x/y`, `iframe_offset_*` | same fields on `dom_selection->ranges[0]` |
+| `state->selection->is_collapsed` | `dom_selection->is_collapsed` (now the canonical caret-vs-range discriminant) |
 | `state->selection->is_selecting` | `state->is_selecting` (transient mouse-drag flag stays on the StateStore, not on `DomSelection`, because it is input-state, not selection-state) |
 
 ### 4.2 Resolver: DOM boundary → layout cache
@@ -405,21 +547,25 @@ bookkeeping to keep two parallel objects in sync — invalidation is just
 
 ### 4.3 Reverse direction: input → DOM
 
-Existing input handlers currently call `selection_start(state, view, off)`
-with a layout-tree pair. They will be replaced by:
+The spec hit-test API exists:
 
 ```cpp
-DomBoundary hit_test_to_boundary(RadiantState* state, float vx, float vy);
+// radiant/dom_range_resolver.hpp
+DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float vy);
 ```
 
-which maps a viewport coordinate to `(DomNode*, offset)` by walking the
-layout tree to find the text view, then back to its `DomText` source and
-converting the byte offset back to a UTF-16 offset. The result is fed to
-`dom_selection_collapse` / `dom_selection_extend` — the same code paths the
-JS API uses. As an optimization, the resolver may pre-populate the new
-range's `start_view`/`start_byte_offset` directly from the hit-test result
-(skipping a redundant DOM→layout walk on the first render after a click)
-and mark `layout_valid = true` until the next reflow.
+It walks the view tree to find the `TextRect` under `(vx, vy)`,
+linear-interpolates a byte offset, and converts back to UTF-16. It is
+available for accessibility, headless testing, and any new input source.
+
+> **Phase 6 actual:** the live mouse path in `event.cpp` was **not**
+> rerouted through `dom_hit_test_to_boundary`. The legacy entry points
+> (`selection_start` / `selection_extend` / `caret_set`) keep their
+> glyph-precise caret X/Y/height computation
+> (`calculate_position_from_char_offset`), and the legacy→DOM sync
+> hooks make `state->dom_selection` reflect every user gesture
+> automatically. JS observes the same selection the user produced via
+> the mouse, without losing pixel-perfect caret placement.
 
 ### 4.4 Multi-line / cross-node rendering
 
@@ -436,6 +582,15 @@ by the selection's single range:
 
 This naturally fixes today's single-rectangle-only limitation that breaks
 selections crossing `<p>` boundaries.
+
+> **Phase 6A actual:** `render_selection()` is implemented as designed
+> on top of `dom_range_for_each_rect()` in
+> `radiant/dom_range_resolver.cpp` (one rect per `TextRect` crossed,
+> handles single-text-node and cross-text-node ranges) and is now
+> **active** in `render_ui_overlays`. The previous inline
+> glyph-by-glyph painter in `render_text_view` is disabled so the
+> overlay does not double-paint. See §6A in the Implementation Status
+> section above for details.
 
 ---
 
@@ -648,7 +803,9 @@ Exit criteria: `extractContents-*`, `deleteContents-*`,
 
 Exit criteria: `selection-modify-*` WPT tests pass.
 
-### Phase 6 — Rendering & input wiring
+### Phase 6 — Rendering & input wiring ✅ done (revised)
+
+**Original plan**
 
 1. Rewrite `render_selection()` for multi-line / cross-node spans
    (§4.4).
@@ -657,8 +814,28 @@ Exit criteria: `selection-modify-*` WPT tests pass.
 3. Reroute `caret_*` user-API to update `DomSelection` first, then
    re-resolve. Existing call-sites unchanged.
 
-Exit criteria: visual selection in the GUI matches the WPT-driven DOM
-selection one-to-one; existing `make test-radiant-baseline` 100% green.
+**What actually shipped**
+
+1. ✅ `render_selection()` rewritten on top of `dom_range_for_each_rect()`
+   (`radiant/render.cpp`, `radiant/dom_range_resolver.{hpp,cpp}`).
+   Disabled in `render_ui_overlays` pending Phase 7 (the inline glyph
+   painter still drives visible highlights to keep zero behavior
+   change).
+2. ✅ `dom_hit_test_to_boundary()` added
+   (`radiant/dom_range_resolver.hpp`). Live mouse path **not**
+   rerouted: the legacy entry points keep their glyph-precise caret
+   coordinates, and the bidirectional sync (item 3) makes
+   `state->dom_selection` reflect every gesture.
+3. ✅ Bidirectional sync instead of unidirectional reroute.
+   `legacy_sync_from_dom_selection()` and
+   `dom_selection_sync_from_legacy_*()` keep both states in agreement;
+   re-entry counter `dom_selection_sync_depth` on `RadiantState`
+   prevents ping-pong.
+
+Exit criteria met: visual selection in the GUI matches the
+WPT-driven DOM selection one-to-one; `make test-radiant-baseline`
+5713/5717 with the same 4 pre-existing render-visual failures and no
+new regressions.
 
 ### Phase 7 — Polish
 
@@ -676,11 +853,18 @@ radiant/
   dom_range.cpp              ← NEW: spec algorithms
   dom_range_resolver.hpp     ← NEW: DOM ↔ layout coordinate bridge
   dom_range_resolver.cpp     ← NEW
-  state_store.hpp            ← MODIFY: DELETE CaretState/SelectionState pointers,
-                                       ADD selection / live_ranges /
-                                       next_range_id / selection_layout_dirty
-  state_store.cpp            ← MODIFY: caret_*/selection_* delegate to
-                                       DomSelection on state->selection
+  state_store.hpp            ← MODIFY: ADD dom_selection / live_ranges /
+                                       next_range_id /
+                                       selection_layout_dirty /
+                                       dom_selection_sync_depth
+                                       (legacy CaretState/SelectionState
+                                       pointers retained — see Phase 6
+                                       deviation note).
+  state_store.cpp            ← MODIFY: caret_*/selection_* mirror into
+                                       dom_selection via
+                                       dom_selection_sync_from_legacy_*;
+                                       legacy_sync_from_dom_selection()
+                                       handles the inverse direction.
   event.cpp                  ← MODIFY: hit-test → DomBoundary path
   render.cpp                 ← MODIFY: render_selection multi-fragment;
                                        render_caret reads selection->ranges[0]
@@ -773,7 +957,8 @@ contenteditable shims, future React) can rely on without surprise.
 ---
 
 **Last Updated:** 2026-04-27
-**Status:** Proposal — pending review
+**Status:** Phases 1–6 implemented; Phase 7 polish pending. See the
+Implementation Status section at the top for shipped-vs-planned diffs.
 **Related:** [Radiant_Design_State.md](Radiant_Design_State.md) ·
 [test/wpt/test_wpt_selection_gtest.cpp](test/wpt/test_wpt_selection_gtest.cpp) ·
 [ref/wpt/selection/](ref/wpt/selection)

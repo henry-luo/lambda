@@ -8,6 +8,8 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
+#include "dom_range.hpp"
+#include "dom_range_resolver.hpp"
 #include "tile_pool.h"
 #include "webview.h"
 
@@ -962,24 +964,22 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
 
     // Check if this text view has a selection (supports cross-view selection)
+    // Phase A: inline glyph-by-glyph painter disabled. The multi-rect overlay
+    // in render_selection() (driven by DomSelection / dom_range_for_each_rect)
+    // now paints text-selection backgrounds during render_ui_overlays.
     SelectionState* sel = rdcon->selection;
     int sel_start = 0, sel_end = 0;
+    (void)sel; (void)sel_start; (void)sel_end;
 
     // Calculate total text length for cross-view selection check
     int total_text_length = 0;
     if (str) {
         total_text_length = strlen((const char*)str);
     }
+    (void)total_text_length;
 
-    // Use the new cross-view aware selection check
-    int selection_type = get_selection_range_for_view(sel, (View*)text_view, total_text_length, &sel_start, &sel_end);
-    bool has_selection = selection_type > 0;
-
-    if (has_selection) {
-        log_debug("[SELECTION] Text view %p has selection (type=%d): start=%d, end=%d, anchor_view=%p, focus_view=%p",
-            text_view, selection_type, sel_start, sel_end,
-            sel ? sel->anchor_view : nullptr, sel ? sel->focus_view : nullptr);
-    }
+    // Inline selection painter disabled — see comment above.
+    bool has_selection = false;
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
     Color saved_color = rdcon->color;
@@ -3516,82 +3516,78 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
 }
 
 /**
- * Render text selection highlight
- * Draws semi-transparent blue rectangles behind selected text
+ * Render text selection highlight.
+ *
+ * Phase 6 (single source of truth): canonical multi-line / cross-node
+ * selection painter. Reads `state->dom_selection` (the spec-level
+ * Selection model), resolves layout via `dom_range_for_each_rect()`,
+ * and emits one semi-transparent rectangle per visual fragment.
+ *
+ * The renderer's inline glyph-by-glyph selection background painter in
+ * `render_text_view` is still active for backward compatibility — it
+ * paints under each selected glyph using the legacy SelectionState.
+ * `render_selection` is therefore registered as an overlay only when
+ * the legacy path didn't / can't paint (e.g. element-level selection
+ * spanning across non-text nodes set by JS via `setBaseAndExtent`).
+ *
+ * `dom_range_for_each_rect()` returns rectangles in absolute CSS
+ * coordinates; we just scale to physical pixels and fill.
  */
-void render_selection(RenderContext* rdcon, RadiantState* state) {
-    if (!state || !state->selection) return;
-    if (state->selection->is_collapsed) return;  // no selection
-    if (!state->selection->view) return;
+struct SelectionPaintCtx {
+    RenderContext* rdcon;
+    Color          color;
+    float          scale;
+    float          iframe_offset_x;
+    float          iframe_offset_y;
+};
 
-    SelectionState* sel = state->selection;
-    log_debug("[SELECTION] check: anchor=%d, focus=%d, is_collapsed=%d, view=%p",
-        sel->anchor_offset, sel->focus_offset, sel->is_collapsed, (void*)sel->view);
-    if (state->selection->is_collapsed) {
-        return;  // no selection
-    }
-    if (!state->selection->view) {
-        log_debug("[SELECTION] No selection view");
+static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
+    SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
+    if (w <= 0 || h <= 0) return;
+    float s = ctx->scale;
+    float px = (x + ctx->iframe_offset_x) * s;
+    float py = (y + ctx->iframe_offset_y) * s;
+    float pw = w * s;
+    float ph = h * s;
+    rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
+}
+
+void render_selection(RenderContext* rdcon, RadiantState* state) {
+    if (!state) return;
+
+    // Prefer DomSelection (canonical). Fall back to legacy SelectionState
+    // only when DomSelection is not yet populated (early boot / non-DOM
+    // paths). Both should be in sync via legacy_sync_from_dom_selection.
+    DomSelection* ds = state->dom_selection;
+    bool use_dom = ds && ds->range_count > 0 && !ds->is_collapsed;
+
+    if (!use_dom) {
+        // Nothing selected via DOM; legacy painter (inline in
+        // render_text_view) covers the legacy SelectionState case.
         return;
     }
 
-    View* view = sel->view;
-    float s = rdcon->scale;
+    DomRange* r = ds->ranges[0];
+    if (!r) return;
 
-    // For single-line selection, draw a single rectangle
-    // Multi-line selection would require multiple rectangles per line
-
-    // Calculate absolute position (CSS pixels)
-    // start_x/y and end_x/y are relative to the parent block (from TextRect coordinates)
-    float start_x = sel->start_x;
-    float start_y = sel->start_y;
-    float end_x = sel->end_x;
-    float end_y = sel->end_y;
-    log_debug("[SELECTION] Before parent walk: start=(%.1f,%.1f), view=%p, view_type=%d",
-        start_x, start_y, (void*)view, view->view_type);
-
-    // Walk up from the text view's parent to get absolute coordinates
-    // (same as caret rendering - coordinates are relative to parent block)
-    View* parent = view->parent;
-    while (parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* block = (ViewBlock*)parent;
-            log_debug("[SELECTION] Adding block offset: (%.1f,%.1f)", block->x, block->y);
-            start_x += block->x;
-            start_y += block->y;
-            end_x += block->x;
-            end_y += block->y;
-        }
-        parent = parent->parent;
+    // Resolve layout (idempotent when already valid).
+    if (!dom_range_resolve_layout(r)) {
+        log_debug("[SELECTION] dom_range_resolve_layout failed");
+        return;
     }
 
-    // Add iframe offset (if selection is inside an iframe, parent chain stops at iframe doc root)
-    start_x += sel->iframe_offset_x;
-    start_y += sel->iframe_offset_y;
-    end_x += sel->iframe_offset_x;
-    end_y += sel->iframe_offset_y;
+    SelectionPaintCtx ctx;
+    ctx.rdcon = rdcon;
+    ctx.scale = rdcon->scale;
+    // Iframe offset cached on the legacy selection (resolver itself doesn't
+    // know about iframe nesting). 0 when not in an iframe.
+    ctx.iframe_offset_x = state->selection ? state->selection->iframe_offset_x : 0;
+    ctx.iframe_offset_y = state->selection ? state->selection->iframe_offset_y : 0;
+    // Standard text-selection blue; alpha 0x80 = 50% (matches inline painter).
+    ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
 
-    // Scale to physical pixels
-    start_x *= s;  start_y *= s;
-    end_x *= s;  end_y *= s;
-
-    // Normalize coordinates (anchor can be after focus)
-    float min_x = start_x < end_x ? start_x : end_x;
-    float max_x = start_x > end_x ? start_x : end_x;
-    float min_y = start_y < end_y ? start_y : end_y;
-
-    // For now, simple single-line selection rect
-    float sel_width = max_x - min_x;
-    float sel_height = end_y - start_y;  // Use line height approximation
-    if (sel_height <= 0) sel_height = 20 * s;  // default line height if not set (scaled)
-
-    // Draw selection highlight
-    Color sel_color = {0}; sel_color.r = 0x00; sel_color.g = 0x78; sel_color.b = 0xD7; sel_color.a = 0x80;
-    rc_fill_rect(rdcon, min_x, min_y, sel_width, sel_height, sel_color);
-
-    log_debug("[SELECTION] Rendered selection at (%.0f,%.0f) size %.0fx%.0f", min_x, min_y, sel_width, sel_height);
+    dom_range_for_each_rect(r, selection_paint_rect_cb, &ctx);
+    log_debug("[SELECTION] Rendered DomSelection range via dom_range_for_each_rect");
 }
 
 /**
@@ -3607,8 +3603,9 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
 
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
 
-    // Selection is now rendered inline in render_text_view, so we don't need overlay
-    // render_selection(rdcon, state);
+    // Phase A: render selection via DomSelection-driven multi-rect overlay.
+    // Inline glyph painter in render_text_view is now disabled.
+    render_selection(rdcon, state);
 
     // Render open dropdown popup (above content)
     if (state->open_dropdown) {

@@ -85,6 +85,16 @@ void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void* userdata)
 void dom_selection_sync_from_legacy_selection(struct RadiantState* state);
 void dom_selection_sync_from_legacy_caret    (struct RadiantState* state);
 
+// Inverse direction (Phase 6 single-source-of-truth). Reads
+// `state->dom_selection` and writes the resulting (anchor/focus/caret)
+// boundaries, including resolved layout x/y/height, into the legacy
+// `SelectionState` and `CaretState` so the renderer (which still reads
+// the legacy structs) reflects DOM-side mutations made by JS or by the
+// spec algorithms (e.g. on DOM mutation). No-op when DomSelection is
+// empty (clears legacy selection in that case). Re-entry guarded via
+// `state->dom_selection_sync_depth`.
+void legacy_sync_from_dom_selection(struct RadiantState* state);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
