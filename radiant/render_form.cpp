@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "text_control.hpp"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -231,6 +232,58 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     if (state) {
         View* focused = focus_get(state);
         if (focused == (View*)block) {
+            // Phase 6E: render selection highlight from form->selection_*
+            // (UTF-16) when non-collapsed. We measure to two byte offsets
+            // using the same per-glyph advance loop the caret uses.
+            auto measure_to_byte_off = [&](int byte_off) -> float {
+                if (!text || !*text || !block->font || byte_off <= 0) return 0.0f;
+                int val_len = (int)strlen(text);
+                if (byte_off > val_len) byte_off = val_len;
+                FontBox fbox = {0};
+                setup_font(rdcon->ui_context, &fbox, block->font);
+                if (!fbox.font_handle) return 0.0f;
+                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                    ? rdcon->ui_context->pixel_ratio : 1.0f;
+                const unsigned char* p = (const unsigned char*)text;
+                const unsigned char* p_end = p + byte_off;
+                float tw = 0;
+                while (p < p_end) {
+                    uint32_t codepoint;
+                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                    if (bytes <= 0) { p++; continue; }
+                    p += bytes;
+                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                    if (glyph) tw += glyph->advance_x / pixel_ratio;
+                }
+                return tw * s;
+            };
+
+            DomElement* tc_elem = (DomElement*)block;
+            if (!is_placeholder && form->tc_initialized
+                && form->selection_start != form->selection_end
+                && text && *text) {
+                uint32_t a8 = tc_utf16_to_utf8_offset(form->current_value
+                                                          ? form->current_value : text,
+                                                      form->current_value
+                                                          ? form->current_value_len
+                                                          : (uint32_t)strlen(text),
+                                                      form->selection_start);
+                uint32_t b8 = tc_utf16_to_utf8_offset(form->current_value
+                                                          ? form->current_value : text,
+                                                      form->current_value
+                                                          ? form->current_value_len
+                                                          : (uint32_t)strlen(text),
+                                                      form->selection_end);
+                float ax = text_x + measure_to_byte_off((int)a8);
+                float bx = text_x + measure_to_byte_off((int)b8);
+                if (bx > ax) {
+                    Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
+                    fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
+                }
+            }
+            (void)tc_elem;
+
             // Position caret at char_offset within the value text
             float caret_x = text_x;  // default: start of text area
             if (!is_placeholder && text && *text && state->caret && block->font) {

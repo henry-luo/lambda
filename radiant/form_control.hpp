@@ -1,5 +1,7 @@
 #pragma once
 #include "../lambda/input/css/css_value.hpp"
+#include <string.h>      // strcmp used by inline get_input_control_type
+#include <stdlib.h>      // free used in destructor
 
 /**
  * Form Control Support for Radiant

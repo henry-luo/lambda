@@ -1,6 +1,7 @@
 #include "handler.hpp"
 #include "state_store.hpp"
 #include "form_control.hpp"
+#include "text_control.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -3519,6 +3520,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             to_repaint();
         }
+        // Phase 6E: sync legacy caret/selection into form->selection_*
+        // after mouse-driven focus / hit-test / drag operations.
+        {
+            RadiantState* tc_state = (RadiantState*)evcon.ui_context->document->state;
+            View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
+            if (tc_focused && tc_focused->is_element()) {
+                DomElement* tc_elem = (DomElement*)tc_focused;
+                if (tc_is_text_control(tc_elem)) {
+                    tc_sync_legacy_to_form(tc_elem, tc_state);
+                    tc_set_active_element(tc_elem);
+                    tc_set_last_focused_text_control(tc_elem);
+                }
+            }
+        }
         break;
     }
     case RDT_EVENT_SCROLL: {
@@ -4157,6 +4172,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 default:
                     break;
+            }
+        }
+        // Phase 6E: mirror legacy CaretState/SelectionState into the new
+        // form->selection_* fields so JS reads (selectionStart/End/value)
+        // observe user-typed/arrow-keyed changes immediately.
+        {
+            RadiantState* tc_state = (RadiantState*)evcon.ui_context->document->state;
+            View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
+            if (tc_focused && tc_focused->is_element()) {
+                DomElement* tc_elem = (DomElement*)tc_focused;
+                if (tc_is_text_control(tc_elem)) {
+                    tc_sync_legacy_to_form(tc_elem, tc_state);
+                }
             }
         }
         break;

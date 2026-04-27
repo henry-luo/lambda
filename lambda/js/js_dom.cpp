@@ -147,11 +147,13 @@ static inline void dom_text_replace_data(DomText* text, uint32_t off,
  * document pointer so next file starts fresh.
  */
 static void expando_reset(); // forward declaration
-static void tc_reset_focus_state(void); // forward declaration
-// Forward declarations of the text-control / activeElement state pointers
-// (defined later, near the JS DOM property-dispatch helpers).
-static DomElement* _js_active_element;
-static DomElement* _js_last_focused_text_control;
+// Phase 6E: text-control state + focus tracker live in radiant/text_control.{hpp,cpp}.
+// We re-expose the focus slots here as macros so existing `_js_active_element = elem`
+// assignments keep compiling.
+#include "../../radiant/text_control.hpp"
+#define _js_active_element              (*tc_active_element_slot())
+#define _js_last_focused_text_control   (*tc_last_focused_text_control_slot())
+#define tc_is_text_control_elem(e)      tc_is_text_control(e)
 extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -2502,213 +2504,21 @@ extern "C" Item js_document_get_property(Item prop_name) {
 //   .defaultValue
 // The state lives on `FormControlProp` (radiant/form_control.hpp).
 // `document.activeElement` and the "last focused text control" are tracked
-// via the two file-scoped pointers below.
-
-// Tracked across all text-control focus()/select() calls.
-// activeElement: most-recent .focus() target (any element).
-// last_focused_text_control: most-recent text control to gain focus or have
-//   .select() called. Used by getSelection().toString() — when the document
-//   selection is empty but a text control has a non-empty selection, the
-//   spec stringifier returns the control's selected substring.
-// (forward-declared at the top of this file)
-
-// Recognize text controls (HTML <input type="text|password|email|url|search|
-// tel|number" | (no type)> and <textarea>) without requiring Radiant layout
-// to have populated elem->form. JS can run on a parsed DOM with no layout
-// (e.g. ./lambda.exe js script.js --document page.html), so we infer control
-// kind from the tag name + type attribute and lazy-create FormControlProp on
-// first text-control state access.
-static inline bool tc_is_text_control_elem(DomElement* elem) {
-    if (!elem || !elem->tag_name) return false;
-    if (elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
-        return elem->form->control_type == FORM_CONTROL_TEXT
-            || elem->form->control_type == FORM_CONTROL_TEXTAREA;
-    }
-    if (strcasecmp(elem->tag_name, "textarea") == 0) return true;
-    if (strcasecmp(elem->tag_name, "input") == 0) {
-        const char* t = dom_element_get_attribute(elem, "type");
-        if (!t || !*t) return true; // default = text
-        // text-like input types per HTML §4.10.5.1
-        return strcasecmp(t, "text") == 0
-            || strcasecmp(t, "password") == 0
-            || strcasecmp(t, "email") == 0
-            || strcasecmp(t, "url") == 0
-            || strcasecmp(t, "search") == 0
-            || strcasecmp(t, "tel") == 0
-            || strcasecmp(t, "number") == 0;
-    }
-    return false;
-}
-
-// Lazy-allocate the FormControlProp slot if Radiant layout hasn't run yet.
-// Mirrors the minimal subset of resolve_htm_style.cpp that JS observes
-// (control_type only); other layout fields stay at FormControlProp defaults.
-static FormControlProp* tc_get_or_create_form(DomElement* elem) {
-    if (elem->form && elem->item_prop_type == DomElement::ITEM_PROP_FORM)
-        return elem->form;
-    FormControlProp* f = new FormControlProp();
-    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
-        f->control_type = FORM_CONTROL_TEXTAREA;
-    } else {
-        f->control_type = FORM_CONTROL_TEXT;
-    }
-    elem->form = f;
-    elem->item_prop_type = DomElement::ITEM_PROP_FORM;
-    return f;
-}
-
-// UTF-8 ↔ UTF-16 helpers operating on a (possibly null) C string.
-// Surrogate pair = 2 UTF-16 code units for codepoints >= U+10000.
-static uint32_t tc_utf8_to_utf16_length(const char* s, uint32_t byte_len) {
-    if (!s) return 0;
-    uint32_t n = 0;
-    const unsigned char* p = (const unsigned char*)s;
-    for (uint32_t i = 0; i < byte_len; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (b < 0x80)      n += 1;
-            else if (b < 0xF0) n += 1;
-            else               n += 2;
-        }
-    }
-    return n;
-}
-
-static uint32_t tc_utf16_to_utf8_offset(const char* s, uint32_t byte_len, uint32_t u16) {
-    if (!s) return 0;
-    if (u16 == 0) return 0;
-    uint32_t seen = 0;
-    const unsigned char* p = (const unsigned char*)s;
-    for (uint32_t i = 0; i < byte_len; i++) {
-        unsigned char b = p[i];
-        if ((b & 0xC0) != 0x80) {
-            if (seen >= u16) return i;
-            if (b < 0x80)      seen += 1;
-            else if (b < 0xF0) seen += 1;
-            else               seen += 2;
-        }
-    }
-    return byte_len;
-}
-
-// Initial value for a text control (HTML "default value"):
-//   <input>:    value attribute (or "")
-//   <textarea>: text content of children (preserved verbatim, no leading
-//               newline strip per HTML "the value sanitization algorithm")
-// Caller frees the returned malloc'd buffer.
-static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
-    *out_len = 0;
-    if (!elem) return nullptr;
-    if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
-        StrBuf* sb = strbuf_new_cap(64);
-        collect_text_content((DomNode*)elem, sb);
-        size_t len = sb->str ? strlen(sb->str) : 0;
-        char* out = (char*)malloc(len + 1);
-        if (sb->str) memcpy(out, sb->str, len);
-        out[len] = '\0';
-        strbuf_free(sb);
-        *out_len = (uint32_t)len;
-        return out;
-    }
-    // input — use value attribute
-    const char* v = dom_element_get_attribute(elem, "value");
-    if (!v) v = "";
-    size_t len = strlen(v);
-    char* out = (char*)malloc(len + 1);
-    memcpy(out, v, len);
-    out[len] = '\0';
-    *out_len = (uint32_t)len;
-    return out;
-}
-
-// Lazily initialize the text-control state from the static defaults.
-// On first access selection is set to (length, length) per HTML
-// "concept of the text control's selection".
-static void tc_ensure_init(DomElement* elem) {
-    if (!tc_is_text_control_elem(elem)) return;
-    FormControlProp* f = tc_get_or_create_form(elem);
-    if (f->tc_initialized) return;
-    if (!f->current_value) {
-        uint32_t len = 0;
-        f->current_value = tc_initial_value(elem, &len);
-        f->current_value_len = len;
-        f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
-    } else {
-        f->current_value_u16_len = tc_utf8_to_utf16_length(
-            f->current_value, f->current_value_len);
-    }
-    f->selection_start = f->current_value_u16_len;
-    f->selection_end = f->current_value_u16_len;
-    f->selection_direction = 0; // none
-    f->tc_initialized = 1;
-}
-
-// Set the live value. Per HTML, when set via the IDL `value` setter, the
-// selection collapses to the new end (start = end = new_length, none).
-static void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
-    if (!tc_is_text_control_elem(elem)) return;
-    FormControlProp* f = tc_get_or_create_form(elem);
-    if (f->current_value) free(f->current_value);
-    char* buf = (char*)malloc(new_len + 1);
-    if (new_val && new_len) memcpy(buf, new_val, new_len);
-    buf[new_len] = '\0';
-    f->current_value = buf;
-    f->current_value_len = (uint32_t)new_len;
-    f->current_value_u16_len = tc_utf8_to_utf16_length(buf, (uint32_t)new_len);
-    f->selection_start = f->current_value_u16_len;
-    f->selection_end = f->current_value_u16_len;
-    f->selection_direction = 0;
-    f->tc_initialized = 1;
-    // Reflect live value into legacy display field used by render_form.cpp.
-    f->value = buf;
-}
-
-// Clamp + write a (start, end, dir) triple. Reuses HTML "set the selection
-// range" steps from §4.10.6.
-static void tc_set_selection_range(DomElement* elem,
-                                   uint32_t start, uint32_t end,
-                                   uint8_t dir) {
-    tc_ensure_init(elem);
-    FormControlProp* f = tc_get_or_create_form(elem);
-    uint32_t n = f->current_value_u16_len;
-    if (start > n) start = n;
-    if (end > n) end = n;
-    if (start > end) start = end;
-    f->selection_start = start;
-    f->selection_end = end;
-    f->selection_direction = dir;
-}
+// via the focus tracker in radiant/text_control.{hpp,cpp}; the helpers
+// `tc_is_text_control`, `tc_get_or_create_form`, `tc_ensure_init`,
+// `tc_set_value`, `tc_set_selection_range`, and the UTF-8↔UTF-16 conversions
+// are all defined in radiant/text_control.cpp and re-used by event.cpp /
+// render_form.cpp.
 
 // Public entry — JS Selection.toString() consults this when the document
 // selection is empty (or to override the empty result with the focused
 // text control's selected substring per WPT stringifier_editable_element).
-// Returns nullptr if no text control should contribute, otherwise a
-// pool/heap-managed string of the selected text.
+// Returns nullptr if no text control should contribute.
 extern "C" String* js_dom_active_text_control_selected_text(void) {
-    DomElement* tc = _js_last_focused_text_control;
-    if (!tc || !tc_is_text_control_elem(tc)) return nullptr;
-    // If activeElement is a *different* text control, that one wins
-    // (its selection — which may be empty — replaces the previous one).
-    if (_js_active_element &&
-        tc_is_text_control_elem(_js_active_element) &&
-        _js_active_element != tc) {
-        tc = _js_active_element;
-    }
-    tc_ensure_init(tc);
-    FormControlProp* f = tc->form;
-    if (f->selection_start >= f->selection_end) return nullptr;
-    uint32_t a8 = tc_utf16_to_utf8_offset(f->current_value, f->current_value_len,
-                                          f->selection_start);
-    uint32_t b8 = tc_utf16_to_utf8_offset(f->current_value, f->current_value_len,
-                                          f->selection_end);
-    if (b8 < a8) return nullptr;
-    return heap_strcpy(f->current_value + a8, (int64_t)(b8 - a8));
-}
-
-// Reset both pointers (called by js_dom_reset on document change).
-static void tc_reset_focus_state(void) {
-    _js_active_element = nullptr;
-    _js_last_focused_text_control = nullptr;
+    uint32_t blen = 0;
+    const char* sel = tc_active_selected_text(&blen);
+    if (!sel || !blen) return nullptr;
+    return heap_strcpy((char*)sel, (int64_t)blen);
 }
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
@@ -3562,12 +3372,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     // expando/attribute fallback. Per HTML §4.10.6.
     // ------------------------------------------------------------------
     if (tc_is_text_control_elem(elem)) {
+        RadiantState* tc_st = js_dom_current_state();
         if (strcmp(prop, "value") == 0) {
             const char* s = fn_to_cstr(value);
             tc_set_value(elem, s ? s : "", s ? strlen(s) : 0);
-            // also reflect to the `value` attribute for non-input cases
-            // (matches Chromium for textarea: keeps default in attribute,
-            //  live value in IDL — we only update the IDL state).
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
         if (strcmp(prop, "selectionStart") == 0) {
@@ -3578,6 +3387,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             uint32_t end = elem->form->selection_end;
             if (start > end) end = start;
             tc_set_selection_range(elem, start, end, elem->form->selection_direction);
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
         if (strcmp(prop, "selectionEnd") == 0) {
@@ -3588,6 +3398,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             uint32_t start = elem->form->selection_start;
             if (start > end) start = end;
             tc_set_selection_range(elem, start, end, elem->form->selection_direction);
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
         if (strcmp(prop, "selectionDirection") == 0) {
@@ -3599,15 +3410,15 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 else if (strcmp(s, "backward") == 0) d = 2;
             }
             elem->form->selection_direction = d;
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
         if (strcmp(prop, "defaultValue") == 0) {
-            // Setting defaultValue updates the value attribute (input) or the
-            // textNode child (textarea); also resets the live value to it.
             const char* s = fn_to_cstr(value);
             if (!s) s = "";
             dom_element_set_attribute(elem, "value", s);
             tc_set_value(elem, s, strlen(s));
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
     }
@@ -4527,6 +4338,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             }
         }
         tc_set_selection_range(elem, (uint32_t)s, (uint32_t)e, dir);
+        // Phase 6E: mirror to legacy CaretState/SelectionState so a focused
+        // input visibly moves its caret + highlights its selection.
+        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 
@@ -4538,6 +4352,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         // Per HTML, select() implicitly focuses the control.
         _js_active_element = elem;
         _js_last_focused_text_control = elem;
+        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 
