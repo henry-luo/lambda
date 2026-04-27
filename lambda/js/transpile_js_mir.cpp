@@ -18435,11 +18435,17 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
+                // If a function-local var shadows the module-level binding,
+                // the local MIR_MOV above is the only update needed; do not
+                // forward the write to the module var or global object.
+                JsMirVarEntry* lv = jm_find_var(mt, wb_vname);
+                bool is_function_local = (lv && mt->current_func_index >= 0);
+                if (!is_function_local && mc && mc->const_type == MCONST_MODVAR) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
-                } else if (!mc) {
+                } else if (!mc && !is_function_local) {
+                    // Implicit global only when no function-local binding exists.
                     MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
                     jm_call_void_2(mt, "js_set_global_property",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
@@ -18611,12 +18617,14 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (mc && mc->const_type == MCONST_MODVAR) {
+            // Skip module var / global writeback if a function-local shadows.
+            JsMirVarEntry* lv = jm_find_var(mt, wb_vname);
+            bool is_function_local = (lv && mt->current_func_index >= 0);
+            if (!is_function_local && mc && mc->const_type == MCONST_MODVAR) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
-            } else if (!mc) {
-                // Implicit global: write back to global object
+            } else if (!mc && !is_function_local) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
                 jm_call_void_2(mt, "js_set_global_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
