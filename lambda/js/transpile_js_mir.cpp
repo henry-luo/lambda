@@ -24164,6 +24164,34 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
+    // Detect function declarations whose name collides with another function
+    // declaration in the same enclosing scope (e.g., AnnexB B.3.3.3 nested function
+    // var-hoisted into the same scope as a top-level function with the same name,
+    // or two top-level `function f` decls).  In such cases, the binding is mutable
+    // and direct-call dispatch must NOT be used (the runtime register holds the
+    // last-written value).
+    {
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn_a = mt->func_entries[fi].node;
+            if (!fn_a || !fn_a->name || !fn_a->name->chars) continue;
+            if (mt->func_entries[fi].is_reassigned) continue;
+            for (int fj = 0; fj < mt->func_count; fj++) {
+                if (fi == fj) continue;
+                JsFunctionNode* fn_b = mt->func_entries[fj].node;
+                if (!fn_b || !fn_b->name || !fn_b->name->chars) continue;
+                if (fn_b->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+                if (fn_a->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
+                if (mt->func_entries[fi].parent_index != mt->func_entries[fj].parent_index) continue;
+                if (fn_a->name->len != fn_b->name->len) continue;
+                if (memcmp(fn_a->name->chars, fn_b->name->chars, fn_a->name->len) != 0) continue;
+                mt->func_entries[fi].is_reassigned = true;
+                log_debug("js-mir: function '%.*s' has duplicate decl in same scope — skipping direct call optimization",
+                    (int)fn_a->name->len, fn_a->name->chars);
+                break;
+            }
+        }
+    }
+
     // Add top-level function declarations as module-level identifiers
     {
         JsAstNode* s = program->body;
