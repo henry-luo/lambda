@@ -9348,8 +9348,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     char ne_buf[256];
                     snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
                     bool ne_found = false;
-                    js_map_get_fast_ext(pm, ne_buf, (int)strlen(ne_buf), &ne_found);
-                    if (ne_found) return (Item){.item = ITEM_FALSE};
+                    Item ne_val = js_map_get_fast_ext(pm, ne_buf, (int)strlen(ne_buf), &ne_found);
+                    // marker may exist with value=false (meaning enumerable); only treat as
+                    // non-enumerable when both present and truthy. matches map/function branches.
+                    if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
                 }
             }
             return (Item){.item = ITEM_TRUE};

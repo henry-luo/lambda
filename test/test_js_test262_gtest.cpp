@@ -2631,13 +2631,15 @@ int main(int argc, char** argv) {
         std::string stripped_test_dir = std::string(TEST262_SOURCE_DIR) + "/test";
         if (stat(stripped_test_dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
             g_use_stripped = true;
-            // Also use stripped harness files if available
-            std::string stripped_harness = std::string(TEST262_SOURCE_DIR) + "/harness";
-            if (stat(stripped_harness.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-                g_harness_dir = stripped_harness;
-            }
-            fprintf(stderr, "[test262] Using comment-stripped files from %s\n",
-                    TEST262_SOURCE_DIR);
+            // NOTE: do NOT switch g_harness_dir to the stripped harness directory.
+            // The files in test/js262/harness/ are not just comment-stripped — they
+            // are an older, materially divergent version (e.g. propertyHelper.js
+            // is missing verifyCallableProperty and has different writable/
+            // configurable check semantics) that causes spurious regressions.
+            // Always load harness files from the canonical ref/test262/harness.
+            fprintf(stderr, "[test262] Using comment-stripped test files from %s "
+                    "(harness from %s)\n",
+                    TEST262_SOURCE_DIR, g_harness_dir.c_str());
         }
     }
 
