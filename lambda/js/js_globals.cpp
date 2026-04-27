@@ -9287,7 +9287,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
         // Mark as deleted in properties_map; also tombstone any descriptor markers
         // so the slot is no longer treated as own/non-configurable after delete.
-        js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        // Tombstone markers FIRST so __nw_<key> doesn't block the sentinel write
+        // for the data slot in js_property_set's non-writable guard.
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len > 0 && sk->len < 200) {
@@ -9300,6 +9301,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 }
             }
         }
+        js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
         return (Item){.item = b2it(true)};
     }
     // v25: Handle array element deletion — set element to sentinel to create "hole"
@@ -9379,13 +9381,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     }
                 }
             }
-            js_property_set((Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)}, k, (Item){.item = JS_DELETED_SENTINEL_VAL});
-            // Also tombstone any descriptor markers/accessors for this key so the
-            // companion map doesn't keep reporting the property as own/non-configurable.
+            // Tombstone descriptor markers FIRST. Clearing __nw_<key> in particular
+            // is required so the subsequent sentinel-write to the value slot is not
+            // rejected by the non-writable guard in js_property_set.
+            Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 if (ks && ks->len > 0 && ks->len < 200) {
-                    Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
                     const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
                     for (int pi = 0; pi < 5; pi++) {
                         char mk[256];
@@ -9395,6 +9397,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     }
                 }
             }
+            js_property_set(pm_item, k, (Item){.item = JS_DELETED_SENTINEL_VAL});
         }
         return (Item){.item = b2it(true)};
     }

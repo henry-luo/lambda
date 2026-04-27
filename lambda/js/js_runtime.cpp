@@ -7025,6 +7025,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
                 bool nw_found = false;
                 Item nw_val = js_map_get_fast(m, nw_key, (int)strlen(nw_key), &nw_found);
+                // Tombstoned marker (cleared by delete) is treated as absent.
+                if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
                 if (nw_found && js_is_truthy(nw_val)) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value; // silently reject write to non-writable property
