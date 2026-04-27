@@ -4147,6 +4147,11 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
     return js_instanceof_classname(left, right_name);
 }
 
+// Forward decls for DOM identity checks (host objects under MAP_KIND_DOM that
+// don't carry __class_name__ in their property map).
+extern "C" bool js_dom_item_is_range(Item item);
+extern "C" bool js_dom_item_is_selection(Item item);
+
 // instanceof check by class name string — walks prototype chain checking __class_name__
 extern "C" Item js_instanceof_classname(Item left, Item classname) {
     if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
@@ -4156,6 +4161,15 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 
     // Check built-in types that don't use __class_name__ prototype chain
     TypeId lt = get_type_id(left);
+
+    // DOM host-object identity checks (Selection/Range wrappers are
+    // MAP_KIND_DOM with no __class_name__ in their property map).
+    if (rn->len == 9 && strncmp(rn->chars, "Selection", 9) == 0) {
+        return (Item){.item = b2it(js_dom_item_is_selection(left))};
+    }
+    if (rn->len == 5 && strncmp(rn->chars, "Range", 5) == 0) {
+        return (Item){.item = b2it(js_dom_item_is_range(left))};
+    }
 
     // Array check
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
@@ -4296,6 +4310,21 @@ extern "C" Item js_in(Item key, Item object) {
     if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC
         && type != LMD_TYPE_ELEMENT) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
+    }
+    // Document proxy / foreign-document wrappers: properties are served by
+    // custom get_property handlers (not stored in the underlying map). Use
+    // js_property_get to detect existence — anything other than ItemNull /
+    // undefined counts as present.
+    if (type == LMD_TYPE_MAP &&
+        (object.map->map_kind == MAP_KIND_DOC_PROXY ||
+         object.map->map_kind == MAP_KIND_FOREIGN_DOC ||
+         object.map->map_kind == MAP_KIND_DOM)) {
+        Item v = js_property_get(object, key);
+        if (v.item != ItemNull.item && v.item != ITEM_JS_UNDEFINED) {
+            return (Item){.item = b2it(true)};
+        }
+        // Fall through so prototype-chain methods (Object.prototype.toString,
+        // hasOwnProperty, etc.) still resolve true.
     }
     // Proxy [[HasProperty]] trap
     if (js_is_proxy(object)) {

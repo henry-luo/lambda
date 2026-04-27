@@ -96,6 +96,20 @@ static Item js_document_title_value = {.item = ITEM_NULL};
 // ============================================================================
 
 static __thread DomDocument* _js_current_document = nullptr;
+// The "main" document — the one bound by js_dom_set_document at page load.
+// Foreign documents created via document.implementation.create*Document are
+// distinct: they have a null defaultView and getSelection() returns null per
+// HTML spec, even when the foreign-doc dispatcher temporarily swaps them in
+// as _js_current_document.
+static __thread DomDocument* _js_main_document = nullptr;
+
+extern "C" bool js_dom_current_is_main_document(void) {
+    return _js_current_document != nullptr && _js_current_document == _js_main_document;
+}
+
+// Forward decls (defined further down in the foreign-doc / iframe section).
+extern "C" bool js_doc_has_browsing_context(void* doc);
+extern "C" void js_doc_mark_has_browsing_context(void* doc);
 
 // Helper: increment DOM mutation counter on current document
 static inline void js_dom_mutation_notify() {
@@ -233,7 +247,9 @@ void js_dom_register_named_elements(DomElement* root) {
 
 extern "C" void js_dom_set_document(void* dom_doc) {
     _js_current_document = (DomDocument*)dom_doc;
+    _js_main_document = (DomDocument*)dom_doc;
     if (dom_doc) {
+        js_doc_mark_has_browsing_context(dom_doc);
         DomDocument* doc = (DomDocument*)dom_doc;
         if (doc->pool) {
             css_property_system_init(doc->pool);
@@ -470,6 +486,42 @@ struct ForeignDocCacheEntry { DomDocument* doc; uint64_t item; };
 static __thread ForeignDocCacheEntry s_foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
 static __thread int s_foreign_doc_cache_count = 0;
 
+// Side table: documents that have a non-null defaultView (browsing context).
+// Main doc and iframe content docs go here. Foreign docs from
+// document.implementation.create*Document do not.
+static const int DOC_WIN_TABLE_SIZE = 32;
+static __thread DomDocument* s_doc_with_window[DOC_WIN_TABLE_SIZE] = {};
+static __thread int s_doc_with_window_count = 0;
+extern "C" bool js_doc_has_browsing_context(void* doc) {
+    if (!doc) return false;
+    for (int i = 0; i < s_doc_with_window_count; i++) {
+        if (s_doc_with_window[i] == (DomDocument*)doc) return true;
+    }
+    return false;
+}
+extern "C" void js_doc_mark_has_browsing_context(void* doc) {
+    if (!doc) return;
+    if (js_doc_has_browsing_context(doc)) return;
+    if (s_doc_with_window_count < DOC_WIN_TABLE_SIZE) {
+        s_doc_with_window[s_doc_with_window_count++] = (DomDocument*)doc;
+    }
+}
+
+// iframe element -> foreign DomDocument* (lazy created on first access).
+struct IframeContentEntry {
+    DomElement* iframe;
+    DomDocument* doc;
+};
+static const int IFRAME_CACHE_SIZE = 32;
+static __thread IframeContentEntry s_iframe_cache[IFRAME_CACHE_SIZE] = {};
+static __thread int s_iframe_cache_count = 0;
+static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
+    for (int i = 0; i < s_iframe_cache_count; i++) {
+        if (s_iframe_cache[i].iframe == iframe) return &s_iframe_cache[i];
+    }
+    return NULL;
+}
+
 static Item wrap_foreign_doc(DomDocument* doc) {
     // Look up cache first.
     for (int i = 0; i < s_foreign_doc_cache_count; i++) {
@@ -560,6 +612,31 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
     DomDocument* fd = create_foreign_html_doc(title ? title : "");
     if (!fd) return ItemNull;
     return wrap_foreign_doc(fd);
+}
+
+// iframe.contentDocument / contentWindow accessors.
+// Both currently return the same wrapped foreign HTML document. The foreign
+// doc is marked as having a browsing context so its defaultView/getSelection
+// resolve normally. js_document_get_property maps "document" / "defaultView"
+// back to the same wrapper so identity comparisons hold.
+extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
+    if (!iframe) return ItemNull;
+    IframeContentEntry* e = lookup_iframe_entry(iframe);
+    if (!e) {
+        DomDocument* doc = create_foreign_html_doc("");
+        if (!doc) return ItemNull;
+        js_doc_mark_has_browsing_context(doc);
+        if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
+            s_iframe_cache[s_iframe_cache_count].iframe = iframe;
+            s_iframe_cache[s_iframe_cache_count].doc = doc;
+            s_iframe_cache_count++;
+        }
+        return wrap_foreign_doc(doc);
+    }
+    return wrap_foreign_doc(e->doc);
+}
+extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
+    return js_iframe_get_content_document(iframe);
 }
 
 // Public: create an empty foreign XML/generic document. qualified_name may be
@@ -2114,6 +2191,13 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return js_dom_create_range();
     }
     if (strcmp(method, "getSelection") == 0) {
+        // Per HTML spec: document.getSelection() returns null when defaultView
+        // is null (i.e., document has no associated browsing context).
+        // Main doc and iframe content docs have a browsing context; foreign
+        // docs from document.implementation.create*Document do not.
+        if (!js_doc_has_browsing_context(_js_current_document)) {
+            return ItemNull;
+        }
         return js_dom_get_selection();
     }
 
@@ -2142,7 +2226,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 // ============================================================================
 
 extern "C" Item js_document_get_property(Item prop_name) {
-    if (!_js_current_document || !_js_current_document->root) {
+    if (!_js_current_document) {
         log_debug("js_document_get_property: no document set");
         return ItemNull;
     }
@@ -2151,7 +2235,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     if (!prop) return ItemNull;
 
     DomDocument* doc = _js_current_document;
-    DomElement* root = doc->root;
+    DomElement* root = doc->root;  // may be NULL for foreign docs created via createDocument
 
     // documentElement — the root <html> element
     if (strcmp(prop, "documentElement") == 0) {
@@ -2291,13 +2375,50 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     // defaultView — returns window (the global object)
-    // Sizzle accesses document.defaultView for getComputedStyle
+    // Sizzle accesses document.defaultView for getComputedStyle.
+    // Foreign documents (created via document.implementation.create*Document)
+    // never have a browsing context, so defaultView must be null per HTML spec.
     if (strcmp(prop, "defaultView") == 0) {
+        if (!js_doc_has_browsing_context(_js_current_document)) {
+            return ItemNull;
+        }
+        // For iframe content docs (foreign with browsing context), the
+        // "window" is modeled as the same wrapper object — so identity
+        // checks like `iframe.contentDocument.defaultView === iframe.contentWindow`
+        // hold (both resolve to wrap_foreign_doc(doc)).
+        if (_js_current_document != _js_main_document) {
+            Item w = lookup_foreign_doc_wrapper(_js_current_document);
+            return w.item ? w : ItemNull;
+        }
         // Return stored window object if set by preamble (document.defaultView = window)
         if (js_document_default_view.item != ITEM_NULL) {
             return js_document_default_view;
         }
         return ItemNull;
+    }
+
+    // For iframe content docs, expose Window-like properties on the same
+    // wrapper so that contentWindow.X works (since contentWindow ===
+    // contentDocument here). Also handle on the main doc proxy so existing
+    // window-style access through `document` continues to function.
+    if (_js_current_document != _js_main_document &&
+        js_doc_has_browsing_context(_js_current_document)) {
+        if (strcmp(prop, "document") == 0) {
+            Item w = lookup_foreign_doc_wrapper(_js_current_document);
+            return w.item ? w : ItemNull;
+        }
+        if (strcmp(prop, "Selection") == 0 || strcmp(prop, "Range") == 0) {
+            // Class stub: a Map with __class_name__ so `instanceof` works.
+            // js_instanceof_classname fast-paths on the name to call our
+            // js_dom_item_is_selection / js_dom_item_is_range checks.
+            extern Item js_new_object();
+            extern Item js_property_set(Item obj, Item key, Item value);
+            Item ctor = js_new_object();
+            String* cn = heap_create_name(prop);
+            Item key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+            js_property_set(ctor, key, (Item){.item = s2it(cn)});
+            return ctor;
+        }
     }
 
     // implementation — DOMImplementation (createHTMLDocument, createDocument, ...)
@@ -2392,6 +2513,16 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             if (!sib) return ItemNull;
             return js_dom_wrap_element((void*)sib);
         }
+        // childNodes — text nodes have no children; return an empty NodeList
+        // (per WHATWG DOM Node.childNodes is non-null on every node).
+        if (strcmp(prop, "childNodes") == 0) {
+            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+            arr->type_id = LMD_TYPE_ARRAY;
+            return (Item){.array = arr};
+        }
+        if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
+            return ItemNull;
+        }
         if (strcmp(prop, "ownerDocument") == 0) {
             // Walk up to find an element parent and use its doc.
             DomNode* p = text_node->parent;
@@ -2435,6 +2566,15 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             }
             return ItemNull;
         }
+        // childNodes — comment nodes have no children; return empty NodeList
+        if (strcmp(prop, "childNodes") == 0) {
+            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+            arr->type_id = LMD_TYPE_ARRAY;
+            return (Item){.array = arr};
+        }
+        if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
+            return ItemNull;
+        }
         if (strcmp(prop, "ownerDocument") == 0) {
             DomNode* p = comment_node->parent;
             while (p && !p->is_element()) p = p->parent;
@@ -2461,6 +2601,18 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // tagName (uppercased per spec)
     if (strcmp(prop, "tagName") == 0) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
+    }
+
+    // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
+    // document that backs the iframe's browsing context. Cached per element
+    // so identity comparisons (===) work.
+    if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0 &&
+        (strcmp(prop, "contentDocument") == 0 || strcmp(prop, "contentWindow") == 0)) {
+        extern Item js_iframe_get_content_document(DomElement* iframe);
+        extern Item js_iframe_get_content_window  (DomElement* iframe);
+        if (strcmp(prop, "contentDocument") == 0)
+            return js_iframe_get_content_document(elem);
+        return js_iframe_get_content_window(elem);
     }
 
     // id
