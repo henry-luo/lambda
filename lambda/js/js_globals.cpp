@@ -6734,11 +6734,13 @@ extern "C" Item js_for_in_keys(Item object) {
                 const char* s = e->name->str;
                 int len = (int)e->name->length;
 
-                // skip engine-internal properties and constructor
+                // skip engine-internal properties (double-underscore prefix).
+                // 'constructor' is not unconditionally skipped here — its
+                // enumerability is determined by the __ne_ marker below
+                // (default-set non-enumerable on class/object prototypes;
+                //  user-defined static class fields override to enumerable).
                 bool skip = false;
                 if (len >= 2 && s[0] == '_' && s[1] == '_') {
-                    skip = true;
-                } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
                     skip = true;
                 }
 

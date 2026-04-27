@@ -476,6 +476,7 @@ struct JsModuleConstEntry {
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
+    bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -1774,6 +1775,121 @@ static void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) 
             }
         }
         stmt = stmt->next;
+    }
+}
+
+// AnnexB B.3.3.3 helper: recursively scan a subtree for any let/const declared
+// names (at any depth, in any nested block or for-init).  Used to suppress
+// AnnexB nested-function-decl propagation when the same name is bound by a
+// lexical declaration in the eval program.
+static void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* names) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
+        if (v->kind == JS_VAR_LET || v->kind == JS_VAR_CONST) {
+            JsAstNode* d = v->declarations;
+            while (d) {
+                if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                    if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+                        char nm[128];
+                        snprintf(nm, sizeof(nm), "_js_%.*s", (int)id->name->len, id->name->chars);
+                        jm_name_set_add(names, nm);
+                    }
+                }
+                d = d->next;
+            }
+        }
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_collect_all_let_const_names_recursive(s, names); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_collect_all_let_const_names_recursive(ifn->consequent, names);
+        jm_collect_all_let_const_names_recursive(ifn->alternate, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_collect_all_let_const_names_recursive(f->init, names);
+        jm_collect_all_let_const_names_recursive(f->body, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fi = (JsForInNode*)node;
+        // Tree-sitter sometimes builds `for (let x in ...)` as fi->left = identifier
+        // with fi->kind indicating let/const (instead of nesting a VariableDeclaration).
+        if (fi->left && (fi->kind == JS_VAR_LET || fi->kind == JS_VAR_CONST)) {
+            if (fi->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* id = (JsIdentifierNode*)fi->left;
+                char nm[128];
+                snprintf(nm, sizeof(nm), "_js_%.*s", (int)id->name->len, id->name->chars);
+                jm_name_set_add(names, nm);
+            }
+        }
+        jm_collect_all_let_const_names_recursive(fi->left, names);
+        jm_collect_all_let_const_names_recursive(fi->body, names);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_collect_all_let_const_names_recursive(w->body, names);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        jm_collect_all_let_const_names_recursive(dw->body, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        JsAstNode* c = sw->cases;
+        while (c) { jm_collect_all_let_const_names_recursive(c, names); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        JsAstNode* s = sc->consequent;
+        while (s) { jm_collect_all_let_const_names_recursive(s, names); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        jm_collect_all_let_const_names_recursive(t->block, names);
+        jm_collect_all_let_const_names_recursive(t->handler, names);
+        jm_collect_all_let_const_names_recursive(t->finalizer, names);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* c = (JsCatchNode*)node;
+        jm_collect_all_let_const_names_recursive(c->body, names);
+        break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+        jm_collect_all_let_const_names_recursive(ls->body, names);
+        break;
+    }
+    case JS_AST_NODE_CLASS_DECLARATION: {
+        // class X — class name is a lexical binding
+        JsClassNode* c = (JsClassNode*)node;
+        if (c->name && c->name->chars) {
+            char nm[128];
+            snprintf(nm, sizeof(nm), "_js_%.*s", (int)c->name->len, c->name->chars);
+            jm_name_set_add(names, nm);
+        }
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -24164,6 +24280,34 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
+    // Detect function declarations whose name collides with another function
+    // declaration in the same enclosing scope (e.g., AnnexB B.3.3.3 nested function
+    // var-hoisted into the same scope as a top-level function with the same name,
+    // or two top-level `function f` decls).  In such cases, the binding is mutable
+    // and direct-call dispatch must NOT be used (the runtime register holds the
+    // last-written value).
+    {
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn_a = mt->func_entries[fi].node;
+            if (!fn_a || !fn_a->name || !fn_a->name->chars) continue;
+            if (mt->func_entries[fi].is_reassigned) continue;
+            for (int fj = 0; fj < mt->func_count; fj++) {
+                if (fi == fj) continue;
+                JsFunctionNode* fn_b = mt->func_entries[fj].node;
+                if (!fn_b || !fn_b->name || !fn_b->name->chars) continue;
+                if (fn_b->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+                if (fn_a->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
+                if (mt->func_entries[fi].parent_index != mt->func_entries[fj].parent_index) continue;
+                if (fn_a->name->len != fn_b->name->len) continue;
+                if (memcmp(fn_a->name->chars, fn_b->name->chars, fn_a->name->len) != 0) continue;
+                mt->func_entries[fi].is_reassigned = true;
+                log_debug("js-mir: function '%.*s' has duplicate decl in same scope — skipping direct call optimization",
+                    (int)fn_a->name->len, fn_a->name->chars);
+                break;
+            }
+        }
+    }
+
     // Add top-level function declarations as module-level identifiers
     {
         JsAstNode* s = program->body;
@@ -25433,6 +25577,50 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     jm_call_void_1(mt, "js_set_strict_mode",
         MIR_T_I64, MIR_new_int_op(mt->ctx, (mt->is_global_strict || mt->is_module) ? 1 : 0));
 
+    // AnnexB B.3.3.3 step 1.a.ii.6.b: For sloppy-mode global eval, pre-initialize
+    // globalThis.<name> = undefined for nested function declarations (those that
+    // would be created via CreateGlobalFunctionBinding).  This ensures the binding
+    // is observable BEFORE the function declaration statement executes.
+    // Suppression: skip if any let/const declaration in the eval program has the
+    // same name (B.3.3.3 step 1.b — would be an early SyntaxError otherwise).
+    struct hashmap* annexb_lex_collisions = NULL;
+    if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && mt->module_consts) {
+        annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        JsAstNode* s = program->body;
+        while (s) { jm_collect_all_let_const_names_recursive(s, annexb_lex_collisions); s = s->next; }
+        MIR_reg_t global_reg = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
+        size_t aiter = 0; void* aitem;
+        while (hashmap_iter(mt->module_consts, &aiter, &aitem)) {
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)aitem;
+            if (mce->const_type != MCONST_MODVAR) continue;
+            if (!mce->is_nested_func_hoist) continue;
+            if ((int)mce->int_val < preamble_var_limit) continue;
+            // Suppress if a let/const in the program shadows this name
+            JsNameSetEntry lex_lookup;
+            memset(&lex_lookup, 0, sizeof(lex_lookup));
+            snprintf(lex_lookup.name, sizeof(lex_lookup.name), "%s", mce->name);
+            if (hashmap_get(annexb_lex_collisions, &lex_lookup)) {
+                log_debug("js-mir: AnnexB suppress globalThis pre-init for %s (let/const collision)", mce->name);
+                mce->annexb_suppressed = true;
+                continue;
+            }
+            const char* js_name = mce->name;
+            if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
+            MIR_reg_t undef_reg = jm_new_reg(mt, "annexb_undef", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, undef_reg),
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, global_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+            log_debug("js-mir: AnnexB pre-init globalThis.%s = undefined", js_name);
+        }
+        hashmap_free(annexb_lex_collisions);
+    }
+
     // Module mode: create namespace object to hold exports
     if (mt->is_module) {
         mt->namespace_reg = jm_call_0(mt, "js_new_object", MIR_T_I64);
@@ -26360,8 +26548,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 mce->name, mce->var_kind, mce->is_nested_func_hoist, preamble_limit, (int)mce->int_val);
             // Skip let/const (only var declarations leak from eval)
             if (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) continue;
-            // Skip nested function declaration names (Annex B candidates, not real vars)
-            if (mce->is_nested_func_hoist) continue;
+            // AnnexB B.3.3.3: nested function declarations DO propagate to globalThis
+            // (was previously skipped). The propagation writes the current module_var
+            // value (undefined if function decl never executed, or the function value
+            // otherwise) to globalThis with default EWC descriptor.
+            // Suppression: skip if AnnexB conditions disqualified this entry
+            // (let/const collision, catch param, existing fn).
+            if (mce->is_nested_func_hoist && mce->annexb_suppressed) continue;
             // Strip _js_ prefix to get the original JS name
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;

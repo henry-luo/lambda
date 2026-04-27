@@ -17244,15 +17244,15 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
         char gk[64];
         snprintf(gk, sizeof(gk), "__get_%d", idx);
         bool gk_found = false;
-        js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-        if (gk_found) {
+        Item gv = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+        if (gk_found && gv.item != JS_DELETED_SENTINEL_VAL) {
             *out = js_array_element(arr, idx);
             return true;
         }
         snprintf(gk, sizeof(gk), "__set_%d", idx);
         bool sk_found = false;
-        js_map_get_fast(props, gk, (int)strlen(gk), &sk_found);
-        if (sk_found) {
+        Item sv = js_map_get_fast(props, gk, (int)strlen(gk), &sk_found);
+        if (sk_found && sv.item != JS_DELETED_SENTINEL_VAL) {
             // setter-only accessor: shadows inherited, value is undefined
             *out = make_js_undefined();
             return true;
