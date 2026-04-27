@@ -5597,6 +5597,10 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 bool gk_found = false, sk_found = false;
                 Item getter = js_map_get_fast_ext(props, gk_buf, (int)strlen(gk_buf), &gk_found);
                 Item setter = js_map_get_fast_ext(props, sk_buf, (int)strlen(sk_buf), &sk_found);
+                // Treat sentinel-valued accessor markers (set by delete) as absent
+                // so a stale tombstone does not synthesise a phantom accessor descriptor.
+                if (gk_found && getter.item == JS_DELETED_SENTINEL_VAL) gk_found = false;
+                if (sk_found && setter.item == JS_DELETED_SENTINEL_VAL) sk_found = false;
                 if (gk_found || sk_found) {
                     Item desc = js_new_object();
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
@@ -5895,28 +5899,43 @@ static bool js_defprop_has_marker(Item obj, Item key) {
         String* ks = it2s(key);
         if (!ks) return false;
         bool found = false;
-        js_map_get_fast_ext(m, ks->chars, (int)ks->len, &found);
+        Item v = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &found);
+        // Tombstoned marker (cleared by delete) is treated as absent.
+        if (found && v.item == JS_DELETED_SENTINEL_VAL) return false;
         return found;
     }
-    return it2b(js_has_own_property(obj, key));
+    if (it2b(js_has_own_property(obj, key))) {
+        Item v = js_property_get(obj, key);
+        if (v.item == JS_DELETED_SENTINEL_VAL) return false;
+        return true;
+    }
+    return false;
 }
 
 // read a marker value from an object (for arrays, reads from companion map; for functions, from properties_map)
 static Item js_defprop_get_marker(Item obj, const char* key, int keylen, bool* found) {
+    Item v = ItemNull;
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Map* m = js_array_props_map(obj.array);
         if (!m) { *found = false; return ItemNull; }
-        return js_map_get_fast_ext(m, key, keylen, found);
-    }
-    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        v = js_map_get_fast_ext(m, key, keylen, found);
+    } else if (get_type_id(obj) == LMD_TYPE_FUNC) {
         JsFuncProps* fn = (JsFuncProps*)obj.function;
         if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            return js_map_get_fast_ext(fn->properties_map.map, key, keylen, found);
+            v = js_map_get_fast_ext(fn->properties_map.map, key, keylen, found);
+        } else {
+            *found = false;
+            return ItemNull;
         }
+    } else {
+        v = js_map_get_fast_ext(obj.map, key, keylen, found);
+    }
+    // Tombstoned marker (cleared by delete) is treated as absent.
+    if (*found && v.item == JS_DELETED_SENTINEL_VAL) {
         *found = false;
         return ItemNull;
     }
-    return js_map_get_fast_ext(obj.map, key, keylen, found);
+    return v;
 }
 
 // =============================================================================
@@ -9251,9 +9270,36 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     return (Item){.item = b2it(false)}; // prototype is non-configurable
                 return (Item){.item = b2it(true)}; // non-constructors don't have prototype
             }
+            // Honor __nc_<key> non-configurable marker on properties_map.
+            if (sk && sk->len > 0 && sk->len < 200 &&
+                fn->properties_map.item != 0 &&
+                get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                char nc_buf[256];
+                snprintf(nc_buf, sizeof(nc_buf), "__nc_%.*s", (int)sk->len, sk->chars);
+                bool nc_found = false;
+                Item nc_val = js_map_get_fast_ext(fn->properties_map.map,
+                                                  nc_buf, (int)strlen(nc_buf), &nc_found);
+                if (nc_found && nc_val.item == JS_DELETED_SENTINEL_VAL) nc_found = false;
+                if (nc_found && js_is_truthy(nc_val)) {
+                    return (Item){.item = b2it(false)};
+                }
+            }
         }
-        // Mark as deleted in properties_map
+        // Mark as deleted in properties_map; also tombstone any descriptor markers
+        // so the slot is no longer treated as own/non-configurable after delete.
         js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->len < 200) {
+                const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
+                for (int pi = 0; pi < 5; pi++) {
+                    char mk[256];
+                    snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)sk->len, sk->chars);
+                    Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
+                    js_property_set(fn->properties_map, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                }
+            }
+        }
         return (Item){.item = b2it(true)};
     }
     // v25: Handle array element deletion — set element to sentinel to create "hole"
@@ -9319,7 +9365,36 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
             Item k = js_to_string(key);
+            // Honor __nc_<key> non-configurable marker on companion map.
+            if (get_type_id(k) == LMD_TYPE_STRING) {
+                String* ks = it2s(k);
+                if (ks && ks->len > 0 && ks->len < 200) {
+                    char nc_buf[256];
+                    snprintf(nc_buf, sizeof(nc_buf), "__nc_%.*s", (int)ks->len, ks->chars);
+                    bool nc_found = false;
+                    Item nc_val = js_map_get_fast_ext(pm, nc_buf, (int)strlen(nc_buf), &nc_found);
+                    if (nc_found && nc_val.item == JS_DELETED_SENTINEL_VAL) nc_found = false;
+                    if (nc_found && js_is_truthy(nc_val)) {
+                        return (Item){.item = b2it(false)};
+                    }
+                }
+            }
             js_property_set((Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)}, k, (Item){.item = JS_DELETED_SENTINEL_VAL});
+            // Also tombstone any descriptor markers/accessors for this key so the
+            // companion map doesn't keep reporting the property as own/non-configurable.
+            if (get_type_id(k) == LMD_TYPE_STRING) {
+                String* ks = it2s(k);
+                if (ks && ks->len > 0 && ks->len < 200) {
+                    Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
+                    const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
+                    for (int pi = 0; pi < 5; pi++) {
+                        char mk[256];
+                        snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)ks->len, ks->chars);
+                        Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
+                        js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                    }
+                }
+            }
         }
         return (Item){.item = b2it(true)};
     }
@@ -9364,6 +9439,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str_key->len, str_key->chars);
             bool nc_found = false;
             Item nc_val = js_map_get_fast_ext(obj.map, nc_key, (int)strlen(nc_key), &nc_found);
+            if (nc_found && nc_val.item == JS_DELETED_SENTINEL_VAL) nc_found = false;
             if (nc_found && js_is_truthy(nc_val)) {
                 if (js_strict_mode) {
                     char msg[256];

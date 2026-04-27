@@ -6913,6 +6913,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", idx);
                 bool nw_found = false;
                 Item nw_val = js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
+                // Tombstoned marker (cleared by delete) is treated as absent.
+                if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
                 if (nw_found && js_is_truthy(nw_val)) {
                     return value; // silently ignore assignment to non-writable
                 }
@@ -8074,6 +8076,8 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)idx);
         bool nw_found = false;
         Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
+        // Tombstoned marker (cleared by delete) is treated as absent.
+        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
         if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
