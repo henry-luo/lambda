@@ -5458,7 +5458,14 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 bool own = false;
                 Item val = js_map_get_fast_ext(fn->properties_map.map, name_str->chars, name_str->len, &own);
                 if (own) {
-                    if (val.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();
+                    if (val.item == JS_DELETED_SENTINEL_VAL) {
+                        // v91 mirror: for "prototype" key, sentinel means "fall through to
+                        // fn->prototype field" (js_property_set stores a sentinel when
+                        // prototype is restored to a MAP, to clear any previous non-MAP entry).
+                        if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0)
+                            goto func_prototype_synth;
+                        return make_js_undefined();
+                    }
                     // Return descriptor with attributes from properties_map's attribute markers
                     Item desc = js_new_object();
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, val);
@@ -5501,6 +5508,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             return desc;
         }
         if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
+            func_prototype_synth:
             // Only constructor functions have prototype as own property
             if (!js_func_has_own_prototype(obj)) return make_js_undefined();
             Item desc = js_new_object();
@@ -8205,9 +8213,15 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             bool own = false;
             Item val = js_map_get_fast_ext(fn->properties_map.map, ks->chars, ks->len, &own);
             if (own) {
-                // If sentinel, property was deleted
-                if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
-                return (Item){.item = b2it(true)};
+                // If sentinel, property was deleted — except for "prototype" where the
+                // sentinel is used by js_property_set as a "cleared previous non-MAP entry"
+                // marker (see v91 in js_property_get). Fall through to the prototype check.
+                if (val.item == JS_DELETED_SENTINEL_VAL) {
+                    if (!(ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0))
+                        return (Item){.item = b2it(false)};
+                } else {
+                    return (Item){.item = b2it(true)};
+                }
             }
         }
         // built-in own properties (not overridden/deleted)
