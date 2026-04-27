@@ -160,6 +160,13 @@ bool dom_range_intersects_node(const DomRange* r, DomNode* node);
 
 DomRange* dom_range_clone(const DomRange* r);
 
+// Stringify the range per WHATWG Range.toString(): walks all text nodes
+// intersecting the range and concatenates the contained portions.
+// Returns a malloc'd, NUL-terminated UTF-8 string (caller must free).
+// Returns NULL only on allocation failure; for an empty result, returns a
+// valid empty string.
+char* dom_range_to_string(const DomRange* r);
+
 // ============================================================================
 // DomSelection — the document's editing selection (also the caret)
 // ============================================================================

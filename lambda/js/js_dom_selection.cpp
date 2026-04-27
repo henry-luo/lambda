@@ -363,8 +363,13 @@ extern "C" Item js_range_detach(void) {
 }
 
 extern "C" Item js_range_to_string(void) {
-    // Phase 2: stub — returns empty string. Real impl needs cross-node text walk.
-    return make_str("");
+    DomRange* r = range_from_this();
+    if (!r) return make_str("");
+    char* s = dom_range_to_string(r);
+    if (!s) return make_str("");
+    Item it = make_str(s);
+    free(s);
+    return it;
 }
 
 // Phase 4 — mutation methods
@@ -605,8 +610,26 @@ extern "C" Item js_selection_collapse(Item node_v, Item offset_v) {
         return make_undef();
     }
     if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
+    if (n->node_type == DOM_NODE_DOCTYPE) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "Selection.collapse: node must not be a DocumentType");
+        return make_undef();
+    }
+    // Per spec: offset bounds check happens BEFORE the document-root check.
+    uint32_t off = (uint32_t)item_to_int(offset_v);
+    if (off > dom_node_boundary_length(n)) {
+        throw_dom_exception("IndexSizeError",
+                            "Selection.collapse: offset is out of bounds");
+        return make_undef();
+    }
+    // Per spec: if node's root is not the document associated with this,
+    // abort (no-op — the selection is unchanged, no range is added).
+    if (!node_in_active_document(n)) {
+        return make_undef();
+    }
     const char* exc = nullptr;
-    if (!dom_selection_collapse(s, n, (uint32_t)item_to_int(offset_v), &exc)) {
+    if (!dom_selection_collapse(s, n, off, &exc)) {
         throw_from_dom_exc(exc, "Selection.collapse failed");
         return make_undef();
     }
@@ -640,6 +663,10 @@ extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomNode* n = node_arg(node_v);
     if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: if node's root is not the document, abort (no-op).
+    if (!node_in_active_document(n)) {
+        return make_undef();
+    }
     const char* exc = nullptr;
     if (!dom_selection_extend(s, n, (uint32_t)item_to_int(offset_v), &exc)) {
         throw_from_dom_exc(exc, "Selection.extend failed");
@@ -685,6 +712,17 @@ extern "C" Item js_selection_select_all_children(Item node_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomNode* n = node_arg(node_v);
     if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: throw InvalidNodeTypeError if node is a DocumentType.
+    if (n->node_type == DOM_NODE_DOCTYPE) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "Selection.selectAllChildren: node must not be a DocumentType");
+        return make_undef();
+    }
+    // Per spec: if node's root is not the document associated with this,
+    // abort (no-op).
+    if (!node_in_active_document(n)) {
+        return make_undef();
+    }
     const char* exc = nullptr;
     if (!dom_selection_select_all_children(s, n, &exc)) {
         throw_from_dom_exc(exc, "selectAllChildren failed");
@@ -712,7 +750,16 @@ extern "C" Item js_selection_delete_from_document(void) {
 }
 
 extern "C" Item js_selection_to_string(void) {
-    return make_str("");
+    DomSelection* s = selection_from_this();
+    if (!s) return make_str("");
+    if (dom_selection_range_count(s) == 0) return make_str("");
+    DomRange* r = dom_selection_get_range_at(s, 0, nullptr);
+    if (!r) return make_str("");
+    char* out = dom_range_to_string(r);
+    if (!out) return make_str("");
+    Item it = make_str(out);
+    free(out);
+    return it;
 }
 
 extern "C" Item js_selection_modify(Item alter_v, Item dir_v, Item gran_v) {
@@ -904,6 +951,69 @@ extern "C" void js_dom_selection_install_globals(void) {
     Item range_ctor = js_new_function((void*)js_dom_create_range, 0);
     js_property_set(global, make_key("Selection"), sel_ctor);
     js_property_set(global, make_key("Range"),     range_ctor);
+
+    // Install Selection.prototype and Range.prototype with method stubs so
+    // WPT idl checks like `Selection.prototype.deleteFromDocument.length`
+    // succeed. The methods themselves are never invoked through the
+    // prototype path (instances are MAP_KIND_DOM and dispatch through their
+    // own get_property hooks); these are pure idl shape.
+    init_selection_methods();
+    init_range_methods();
+    Item sel_proto = js_property_get(sel_ctor, make_key("prototype"));
+    if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
+        sel_proto = js_property_get(sel_ctor, make_key("prototype"));
+    }
+    // Above may still be undefined if the function has no auto-prototype.
+    // Force-create one via property_set fallback path.
+    if (get_type_id(sel_proto) != LMD_TYPE_MAP) {
+        extern Item js_new_object();
+        sel_proto = js_new_object();
+        js_property_set(sel_ctor, make_key("prototype"), sel_proto);
+    }
+    js_property_set(sel_proto, make_key("getRangeAt"),         _sel_methods.getRangeAt);
+    js_property_set(sel_proto, make_key("addRange"),           _sel_methods.addRange);
+    js_property_set(sel_proto, make_key("removeRange"),        _sel_methods.removeRange);
+    js_property_set(sel_proto, make_key("removeAllRanges"),    _sel_methods.removeAllRanges);
+    js_property_set(sel_proto, make_key("empty"),              _sel_methods.empty);
+    js_property_set(sel_proto, make_key("collapse"),           _sel_methods.collapse);
+    js_property_set(sel_proto, make_key("setPosition"),        _sel_methods.setPosition);
+    js_property_set(sel_proto, make_key("collapseToStart"),    _sel_methods.collapseToStart);
+    js_property_set(sel_proto, make_key("collapseToEnd"),      _sel_methods.collapseToEnd);
+    js_property_set(sel_proto, make_key("extend"),             _sel_methods.extend);
+    js_property_set(sel_proto, make_key("setBaseAndExtent"),   _sel_methods.setBaseAndExtent);
+    js_property_set(sel_proto, make_key("selectAllChildren"),  _sel_methods.selectAllChildren);
+    js_property_set(sel_proto, make_key("containsNode"),       _sel_methods.containsNode);
+    js_property_set(sel_proto, make_key("deleteFromDocument"), _sel_methods.deleteFromDocument);
+    js_property_set(sel_proto, make_key("toString"),           _sel_methods.toString);
+    js_property_set(sel_proto, make_key("modify"),             _sel_methods.modify);
+
+    Item range_proto = js_property_get(range_ctor, make_key("prototype"));
+    if (get_type_id(range_proto) != LMD_TYPE_MAP) {
+        extern Item js_new_object();
+        range_proto = js_new_object();
+        js_property_set(range_ctor, make_key("prototype"), range_proto);
+    }
+    js_property_set(range_proto, make_key("setStart"),              _range_methods.setStart);
+    js_property_set(range_proto, make_key("setEnd"),                _range_methods.setEnd);
+    js_property_set(range_proto, make_key("setStartBefore"),        _range_methods.setStartBefore);
+    js_property_set(range_proto, make_key("setStartAfter"),         _range_methods.setStartAfter);
+    js_property_set(range_proto, make_key("setEndBefore"),          _range_methods.setEndBefore);
+    js_property_set(range_proto, make_key("setEndAfter"),           _range_methods.setEndAfter);
+    js_property_set(range_proto, make_key("collapse"),              _range_methods.collapse);
+    js_property_set(range_proto, make_key("selectNode"),            _range_methods.selectNode);
+    js_property_set(range_proto, make_key("selectNodeContents"),    _range_methods.selectNodeContents);
+    js_property_set(range_proto, make_key("cloneRange"),            _range_methods.cloneRange);
+    js_property_set(range_proto, make_key("compareBoundaryPoints"), _range_methods.compareBoundaryPoints);
+    js_property_set(range_proto, make_key("comparePoint"),          _range_methods.comparePoint);
+    js_property_set(range_proto, make_key("isPointInRange"),        _range_methods.isPointInRange);
+    js_property_set(range_proto, make_key("intersectsNode"),        _range_methods.intersectsNode);
+    js_property_set(range_proto, make_key("detach"),                _range_methods.detach);
+    js_property_set(range_proto, make_key("toString"),              _range_methods.toString);
+    js_property_set(range_proto, make_key("deleteContents"),        _range_methods.deleteContents);
+    js_property_set(range_proto, make_key("extractContents"),       _range_methods.extractContents);
+    js_property_set(range_proto, make_key("cloneContents"),         _range_methods.cloneContents);
+    js_property_set(range_proto, make_key("insertNode"),            _range_methods.insertNode);
+    js_property_set(range_proto, make_key("surroundContents"),      _range_methods.surroundContents);
 
     // Set document.defaultView = window so DOM tests' sanity checks pass.
     Item doc = js_get_document_object_value();
