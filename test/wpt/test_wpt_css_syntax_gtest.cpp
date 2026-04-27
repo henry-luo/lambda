@@ -47,7 +47,7 @@ static const char* WPT_DIRS[] = {
     "ref/wpt/css/css-syntax/charset",
 };
 static const int WPT_DIR_COUNT = sizeof(WPT_DIRS) / sizeof(WPT_DIRS[0]);
-static const char* SHIM_PATH = "test/wpt/wpt_testharness_shim.js";
+static const char* SHIM_PATH = "test/wpt_testharness_shim.js";
 static const char* TEMP_DIR = "temp";
 
 // ---------------------------------------------------------------------------
