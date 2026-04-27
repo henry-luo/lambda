@@ -6375,9 +6375,12 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
         const char* fn = is_strict ? "js_get_global_property_strict" : "js_get_global_property";
         MIR_reg_t result = jm_call_1(mt, fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
-        // strict version throws ReferenceError for undeclared identifiers; propagate
-        // to nearest try/catch (or function exit) so callers do not consume bogus value.
-        if (is_strict) {
+        // strict version throws ReferenceError for undeclared identifiers; route
+        // to nearest try/catch so generator/try blocks observe the exception.
+        // outside a try block we leave propagation to subsequent ops (preserves
+        // legacy behavior where missing identifiers degrade to undefined and
+        // surface as TypeError from member access on the result).
+        if (is_strict && mt->try_ctx_depth > 0) {
             jm_emit_exc_propagate_check(mt);
         }
         return result;
