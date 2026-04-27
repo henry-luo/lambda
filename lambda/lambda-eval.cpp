@@ -4784,7 +4784,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     int field_count = 0;
     ShapeEntry* e = old_map_type->shape;
     while (e) { field_count++; e = e->next; }
-    if (field_count <= 0 || field_count > 64) {
+    // No artificial upper bound: rebuild only uses heap/pool allocation per field,
+    // no stack arrays or fixed-size buffers. globalThis legitimately has 100+ fields.
+    if (field_count <= 0) {
         log_error("map_rebuild: invalid field count %d", field_count);
         return;
     }

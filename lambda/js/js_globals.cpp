@@ -5382,6 +5382,41 @@ struct JsFuncProps {
     Item properties_map;
 };
 
+// ES spec: built-in constructor's `prototype` data property is non-writable,
+// non-enumerable, non-configurable. This helper is consulted by both
+// js_object_get_own_property_descriptor (descriptor synthesis) and
+// js_property_set (to silently reject writes to a non-writable prototype).
+extern "C" bool js_func_is_builtin_ctor(Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return false;
+    JsFuncProps* efn = (JsFuncProps*)fn.function;
+    if (!efn->name) return false;
+    const char* en = efn->name->chars;
+    int el = (int)efn->name->len;
+    return (el == 5 && strncmp(en, "Error", 5) == 0) ||
+        (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
+        (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
+        (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
+        (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
+        (el == 8 && strncmp(en, "URIError", 8) == 0) ||
+        (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+        (el == 3 && strncmp(en, "Map", 3) == 0) ||
+        (el == 3 && strncmp(en, "Set", 3) == 0) ||
+        (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
+        (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+        (el == 7 && strncmp(en, "Promise", 7) == 0) ||
+        (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+        (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+        (el == 5 && strncmp(en, "Array", 5) == 0) ||
+        (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
+        (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
+        (el == 4 && strncmp(en, "Date", 4) == 0) ||
+        (el == 8 && strncmp(en, "Function", 8) == 0) ||
+        (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
+        (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
+        (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
+        js_is_typed_array_ctor_name(en, el);
+}
+
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // Proxy [[GetOwnProperty]] trap
     if (js_is_proxy(obj)) {
@@ -5471,36 +5506,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
-            // ES spec: All built-in constructor .prototype are non-writable
-            JsFuncProps* efn = (JsFuncProps*)obj.function;
-            bool is_builtin_ctor = false;
-            if (efn->name) {
-                const char* en = efn->name->chars;
-                int el = (int)efn->name->len;
-                is_builtin_ctor = (el == 5 && strncmp(en, "Error", 5) == 0) ||
-                    (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
-                    (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
-                    (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
-                    (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
-                    (el == 8 && strncmp(en, "URIError", 8) == 0) ||
-                    (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
-                    (el == 3 && strncmp(en, "Map", 3) == 0) ||
-                    (el == 3 && strncmp(en, "Set", 3) == 0) ||
-                    (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
-                    (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
-                    (el == 7 && strncmp(en, "Promise", 7) == 0) ||
-                    (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
-                    (el == 8 && strncmp(en, "DataView", 8) == 0) ||
-                    (el == 5 && strncmp(en, "Array", 5) == 0) ||
-                    (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
-                    (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
-                    (el == 4 && strncmp(en, "Date", 4) == 0) ||
-                    (el == 8 && strncmp(en, "Function", 8) == 0) ||
-                    (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
-                    (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
-                    (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
-                    js_is_typed_array_ctor_name(en, el);
-            }
+            bool is_builtin_ctor = js_func_is_builtin_ctor(obj);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
@@ -6308,8 +6314,23 @@ extern "C" Item js_object_keys(Item object) {
         Item result = js_array_new(0);
         Map* pm = js_array_props_map(object.array);
         for (int i = 0; i < len; i++) {
-            // v25: skip deleted elements (holes)
-            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
+            // v25: skip deleted elements (holes)... unless an accessor descriptor
+            // is registered for this index in the companion map (Object.defineProperty
+            // on an array index installs the data slot as a hole and stores get/set in pm).
+            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) {
+                bool has_accessor = false;
+                if (pm) {
+                    char gk[32], sk[32];
+                    snprintf(gk, sizeof(gk), "__get_%d", i);
+                    snprintf(sk, sizeof(sk), "__set_%d", i);
+                    bool gf = false, sf = false;
+                    Item gv = js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gf);
+                    Item sv = js_map_get_fast_ext(pm, sk, (int)strlen(sk), &sf);
+                    has_accessor = (gf && gv.item != JS_DELETED_SENTINEL_VAL) ||
+                                   (sf && sv.item != JS_DELETED_SENTINEL_VAL);
+                }
+                if (!has_accessor) continue;
+            }
             // v27: skip non-enumerable elements (defineProperty with enumerable: false)
             if (pm) {
                 char ne_buf[32];
@@ -8128,11 +8149,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                         char gk[64];
                         snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
                         bool gk_found = false;
-                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
-                        if (gk_found) return (Item){.item = b2it(true)};
+                        Item gv = js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                        if (gk_found && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
                         snprintf(gk, sizeof(gk), "__set_%.*s", (int)ks->len, ks->chars);
-                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
-                        if (gk_found) return (Item){.item = b2it(true)};
+                        Item sv = js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                        if (gk_found && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
                     }
                     return (Item){.item = b2it(false)};
                 }
@@ -8144,11 +8165,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                 char gk[64];
                 snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
                 bool gk_found = false;
-                js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
-                if (gk_found) return (Item){.item = b2it(true)};
+                Item gv = js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                if (gk_found && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
                 snprintf(gk, sizeof(gk), "__set_%.*s", (int)ks->len, ks->chars);
-                js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
-                if (gk_found) return (Item){.item = b2it(true)};
+                Item sv = js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gk_found);
+                if (gk_found && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
             }
         }
         // check companion map for named (non-index) properties
@@ -8157,8 +8178,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             if (arr->extra != 0) {
                 Map* pm = (Map*)(uintptr_t)arr->extra;
                 bool found = false;
-                js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &found);
-                if (found) return (Item){.item = b2it(true)};
+                Item v = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &found);
+                if (found && v.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
             }
         }
         return (Item){.item = b2it(false)};
@@ -9252,14 +9273,32 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                         char nc_buf[256];
                         snprintf(nc_buf, sizeof(nc_buf), "__nc_%.*s", (int)ks->len, ks->chars);
                         bool nc_found = false;
-                        js_map_get_fast_ext(pm, nc_buf, (int)strlen(nc_buf), &nc_found);
-                        if (nc_found) {
+                        Item nc_val = js_map_get_fast_ext(pm, nc_buf, (int)strlen(nc_buf), &nc_found);
+                        if (nc_found && js_is_truthy(nc_val)) {
                             return (Item){.item = b2it(false)};
                         }
                     }
                 }
             }
             arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+            // also clear any descriptor markers/accessors in companion map so the
+            // index is no longer treated as an own property after delete.
+            if (arr->extra != 0) {
+                Item k_str = js_to_string(key);
+                if (get_type_id(k_str) == LMD_TYPE_STRING) {
+                    String* ks = it2s(k_str);
+                    if (ks && ks->len > 0 && ks->len < 200) {
+                        Item pm_item = (Item){.item = (uint64_t)(uintptr_t)arr->extra | ((uint64_t)LMD_TYPE_MAP << 56)};
+                        const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
+                        for (int pi = 0; pi < 5; pi++) {
+                            char mk[256];
+                            snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)ks->len, ks->chars);
+                            Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
+                            js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                        }
+                    }
+                }
+            }
             return (Item){.item = b2it(true)};
         }
         // Non-numeric or out-of-range key: check companion map
