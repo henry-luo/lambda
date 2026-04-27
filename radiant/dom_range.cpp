@@ -744,9 +744,18 @@ bool dom_selection_set_base_and_extent(DomSelection* s,
 
 bool dom_selection_select_all_children(DomSelection* s, DomNode* node, const char** out_exception) {
     if (!s || !node) { set_exception(out_exception, "InvalidNodeTypeError"); return false; }
+    // Per WHATWG selectAllChildren: end offset = newNode's number of children
+    // (not boundary length). For text/comment/cdata this is 0.
+    uint32_t child_count = 0;
+    if (node->is_element()) {
+        for (DomNode* c = node->as_element()->first_child; c; c = c->next_sibling) child_count++;
+    }
+    // Replace any existing range — the resulting range must be a fresh object.
+    dom_selection_remove_all_ranges(s);
     DomRange* r = ensure_primary_range(s);
     if (!r) return false;
-    if (!dom_range_select_node_contents(r, node, out_exception)) return false;
+    if (!dom_range_set_start(r, node, 0, out_exception)) return false;
+    if (!dom_range_set_end(r, node, child_count, out_exception)) return false;
     sync_anchor_focus(s, /*forward=*/true);
     return true;
 }
