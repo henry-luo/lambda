@@ -266,6 +266,8 @@ struct JsTryContext {
     bool has_catch;
     bool has_finally;
     bool inlining_finally;       // re-entrance guard for finally block inlining
+    bool yield_state_only;       // synthetic ctx solely for yield-resume re-init of state regs;
+                                 // invisible to throw/return routing (skip in stack walks)
     JsAstNode* finally_body;     // v18: AST of finally block for inlining before break/continue
 };
 
@@ -15211,16 +15213,20 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
 
-            // Re-initialize try-finally state registers after resume.
+            // Re-initialize try-block state registers after resume.
             // These are plain MIR registers (not env-backed), so they don't
-            // survive across yield. Without re-init, stale has_return_reg
-            // values cause premature return from the finally block.
+            // survive across yield. Without re-init, stale/undefined values in
+            // has_return_reg cause spurious early returns at the try end_label
+            // (returning the also-uninitialized return_val_reg, which surfaces
+            // as a `null`-valued done iteration result).
             for (int td = 0; td < mt->try_ctx_depth; td++) {
                 JsTryContext* tc = &mt->try_ctx_stack[td];
-                if (tc->has_finally) {
+                if (tc->has_return_reg) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->has_return_reg),
                         MIR_new_int_op(mt->ctx, 0)));
+                }
+                if (tc->return_val_reg) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                         MIR_new_int_op(mt->ctx, 0)));
@@ -15257,11 +15263,15 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
 
             // Check for exception (rejected promise sets exception flag, returns 0)
-            if (mt->try_ctx_depth > 0) {
-                MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[mt->try_ctx_depth - 1].catch_label),
-                    MIR_new_reg_op(mt->ctx, exc)));
+            {
+                int d = mt->try_ctx_depth - 1;
+                while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
+                if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
+                    MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
+                        MIR_new_reg_op(mt->ctx, exc)));
+                }
             }
 
             // If pending, jump to suspend path
@@ -15313,13 +15323,15 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     }
                 }
             }
-            // Re-initialize try-finally state registers after async resume
+            // Re-initialize try-block state registers after async resume
             for (int td = 0; td < mt->try_ctx_depth; td++) {
                 JsTryContext* tc = &mt->try_ctx_stack[td];
-                if (tc->has_finally) {
+                if (tc->has_return_reg) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->has_return_reg),
                         MIR_new_int_op(mt->ctx, 0)));
+                }
+                if (tc->return_val_reg) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                         MIR_new_int_op(mt->ctx, 0)));
@@ -15331,11 +15343,15 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_new_reg_op(mt->ctx, mt->gen_input_reg)));
 
             // Check for exception on resume (rejection case)
-            if (mt->try_ctx_depth > 0) {
-                MIR_reg_t resume_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[mt->try_ctx_depth - 1].catch_label),
-                    MIR_new_reg_op(mt->ctx, resume_exc)));
+            {
+                int d = mt->try_ctx_depth - 1;
+                while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
+                if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
+                    MIR_reg_t resume_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
+                        MIR_new_reg_op(mt->ctx, resume_exc)));
+                }
             }
 
             jm_emit_label(mt, after_await_label);
@@ -16685,9 +16701,12 @@ static void jm_env_reload_shared_captures(JsMirTranspiler* mt) {
 // This enables proper exception propagation through nested function calls, loops, and if/else
 // even outside of explicit try/catch blocks.
 static void jm_emit_exc_propagate_check(JsMirTranspiler* mt) {
-    if (mt->try_ctx_depth > 0) {
+    // Find topmost non-yield_state_only ctx for throw routing.
+    int d = mt->try_ctx_depth - 1;
+    while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
+    if (d >= 0) {
         // Inside a try block: jump to catch/finally on exception
-        JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+        JsTryContext* tc = &mt->try_ctx_stack[d];
         MIR_label_t target = tc->has_catch ? tc->catch_label :
                              (tc->has_finally ? tc->finally_label : (MIR_label_t)0);
         if (target) {
@@ -18416,11 +18435,17 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
+                // If a function-local var shadows the module-level binding,
+                // the local MIR_MOV above is the only update needed; do not
+                // forward the write to the module var or global object.
+                JsMirVarEntry* lv = jm_find_var(mt, wb_vname);
+                bool is_function_local = (lv && mt->current_func_index >= 0);
+                if (!is_function_local && mc && mc->const_type == MCONST_MODVAR) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
-                } else if (!mc) {
+                } else if (!mc && !is_function_local) {
+                    // Implicit global only when no function-local binding exists.
                     MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
                     jm_call_void_2(mt, "js_set_global_property",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
@@ -18563,6 +18588,7 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         tc->has_catch = true;
         tc->has_finally = false;
         tc->inlining_finally = false;
+        tc->yield_state_only = false;
         tc->finally_body = NULL;
         pushed_try = true;
     }
@@ -18591,12 +18617,14 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", wb_vname);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (mc && mc->const_type == MCONST_MODVAR) {
+            // Skip module var / global writeback if a function-local shadows.
+            JsMirVarEntry* lv = jm_find_var(mt, wb_vname);
+            bool is_function_local = (lv && mt->current_func_index >= 0);
+            if (!is_function_local && mc && mc->const_type == MCONST_MODVAR) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
-            } else if (!mc) {
-                // Implicit global: write back to global object
+            } else if (!mc && !is_function_local) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
                 jm_call_void_2(mt, "js_set_global_property",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
@@ -19544,6 +19572,8 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             tc->has_return_reg = has_return_reg;
             tc->has_catch = has_catch;
             tc->has_finally = has_finally;
+            tc->inlining_finally = false;
+            tc->yield_state_only = false;
             tc->finally_body = has_finally ? try_node->finalizer : NULL; // v18
         }
 
@@ -19599,6 +19629,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // If there's a finally block, push a context for return-in-catch
             // (so return in catch still goes through finally)
             // This context has no catch_label, so throws propagate outward
+            bool pushed_catch_ctx = false;
             if (has_finally && mt->try_ctx_depth < 16) {
                 JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
                 tc->catch_label = 0;
@@ -19608,7 +19639,25 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_return_reg = has_return_reg;
                 tc->has_catch = false;
                 tc->has_finally = true;
+                tc->yield_state_only = false;
                 tc->finally_body = try_node->finalizer; // v18
+                pushed_catch_ctx = true;
+            } else if (!has_finally && mt->in_generator && mt->try_ctx_depth < 16) {
+                // Generator yield inside catch body needs the inner try's state
+                // regs (return_val_reg/has_return_reg) re-initialized on resume.
+                // Push a synthetic ctx marked yield_state_only so the resume
+                // code finds these regs while throw/return routing skips it.
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = 0;
+                tc->finally_label = 0;
+                tc->end_label = 0;
+                tc->return_val_reg = return_val_reg;
+                tc->has_return_reg = has_return_reg;
+                tc->has_catch = false;
+                tc->has_finally = false;
+                tc->yield_state_only = true;
+                tc->finally_body = NULL;
+                pushed_catch_ctx = true;
             }
 
             // Bind the catch parameter
@@ -19634,7 +19683,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_pop_scope(mt);
 
             // Pop catch-finally context if we pushed one
-            if (has_finally && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+            if (pushed_catch_ctx && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
 
             // Jump to finally (or end)
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -19664,6 +19713,7 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 tc->has_return_reg = has_return_reg;
                 tc->has_catch = false;
                 tc->has_finally = true;
+                tc->yield_state_only = false;
                 tc->finally_body = NULL;
                 pushed_gen_finally_ctx = true;
             }
@@ -19779,9 +19829,12 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             thrown_val = jm_transpile_box_item(mt, throw_node->argument);
         }
 
-        // If inside a try block, set the flag and jump to catch/finally
-        if (mt->try_ctx_depth > 0) {
-            JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+        // If inside a try block, set the flag and jump to catch/finally.
+        // Skip yield_state_only synthetic ctxes (they're for yield-resume re-init only).
+        int throw_d = mt->try_ctx_depth - 1;
+        while (throw_d >= 0 && mt->try_ctx_stack[throw_d].yield_state_only) throw_d--;
+        if (throw_d >= 0) {
+            JsTryContext* tc = &mt->try_ctx_stack[throw_d];
             // Store the thrown value in the global exception state
             jm_call_void_1(mt, "js_throw_value",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, thrown_val));
@@ -21101,6 +21154,9 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
                 tc->has_catch = true;
                 tc->has_finally = false;
+                tc->inlining_finally = false;
+                tc->yield_state_only = false;
+                tc->finally_body = NULL;
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, tc->return_val_reg),
                     MIR_new_int_op(mt->ctx, 0)));
@@ -22126,6 +22182,9 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 tc->has_return_reg = jm_new_reg(mt, "_async_has_ret", MIR_T_I64);
                 tc->has_catch = true;
                 tc->has_finally = false;
+                tc->inlining_finally = false;
+                tc->yield_state_only = false;
+                tc->finally_body = NULL;
                 // Save register refs before try context could be popped
                 async_return_val_reg = tc->return_val_reg;
                 async_has_return_reg = tc->has_return_reg;
