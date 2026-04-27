@@ -8035,6 +8035,18 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                         rhs = jm_call_2(mt, fn, MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                    } else {
+                        // function name inference for simple module-var assignment:
+                        // cover = function(){} → cover.name === "cover"
+                        // Suppressed when LHS is parenthesized (IsIdentifierRef is false per spec)
+                        if (!asgn->lhs_is_parenthesized && asgn->right &&
+                            (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                             asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                            JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
+                            if (!fn_node->name && id->name && id->name->chars) {
+                                jm_emit_set_function_name(mt, rhs, id->name->chars);
+                            }
+                        }
                     }
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),

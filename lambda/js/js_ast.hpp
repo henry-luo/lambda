@@ -282,6 +282,7 @@ typedef struct JsAssignmentNode {
     JsOperator op;                  // Assignment operator
     JsAstNode* left;                // Left-hand side (lvalue)
     JsAstNode* right;               // Right-hand side (rvalue)
+    bool lhs_is_parenthesized;      // (x) = ... - suppresses fn-name inference per spec
 } JsAssignmentNode;
 
 // JavaScript function node (declaration or expression)

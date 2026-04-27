@@ -9987,6 +9987,30 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 strbuf_free(sb_ts);
                 return (Item){.item = s2it(result_ts)};
             }
+            // Proxy with non-callable target: throw TypeError
+            if (js_is_proxy(this_val)) {
+                Item proxy_target = js_proxy_get_target(this_val);
+                if (get_type_id(proxy_target) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("Function.prototype.toString called on non-callable");
+                    return ItemNull;
+                }
+                // proxy of function: use NativeFunction format (do not expose target source)
+                JsFunction* pfn = (JsFunction*)proxy_target.function;
+                StrBuf* psb = strbuf_new();
+                strbuf_append_str_n(psb, "function ", 9);
+                if (pfn->name && ((uintptr_t)pfn->name & 3) == 0 && (uintptr_t)pfn->name >= 0x1000 && pfn->name->len > 0) {
+                    int pn_len = pfn->name->len;
+                    for (int i = 0; i < pfn->name->len; i++) {
+                        if (pfn->name->chars[i] == ' ') { pn_len = i; break; }
+                    }
+                    strbuf_append_str_n(psb, pfn->name->chars, pn_len);
+                }
+                strbuf_append_str_n(psb, "() { [native code] }", 20);
+                String* presult = heap_create_name(psb->str, psb->length);
+                strbuf_free(psb);
+                return (Item){.item = s2it(presult)};
+            }
+            // Other MAPs (e.g. Function.prototype itself) fall through to default native format below
         }
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;

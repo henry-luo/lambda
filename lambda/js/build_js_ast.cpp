@@ -1563,6 +1563,10 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         TSNode left_node = ts_node_child_by_field_name(expr_node, "left", strlen("left"));
         TSNode right_node = ts_node_child_by_field_name(expr_node, "right", strlen("right"));
 
+        // Detect parenthesized LHS for spec-correct fn-name inference suppression
+        if (!ts_node_is_null(left_node) && strcmp(ts_node_type(left_node), "parenthesized_expression") == 0) {
+            assign->lhs_is_parenthesized = true;
+        }
         assign->left = build_js_expression(tp, left_node);
         assign->right = build_js_expression(tp, right_node);
 
