@@ -214,6 +214,14 @@ typedef struct DomSelection {
     struct CaretState*     caret;
     struct SelectionState* selection;
 
+    // Document root captured when the current range was added (or its
+    // boundaries first set). Used by Range mutators to detect the
+    // "selection range moved into a different root" condition required
+    // by selection-api/move-selection-range-into-different-root.tentative
+    // — when the active range's new root differs, drop it from the
+    // selection (rangeCount → 0) per Chromium-compatible behavior.
+    DomNode*      associated_doc_root;
+
     // Host-binding back-pointer (e.g. JS wrapper Item). Managed by the
     // binding layer.
     void*         host_wrapper;

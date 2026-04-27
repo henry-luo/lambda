@@ -307,6 +307,34 @@ void dom_range_invalidate_layout(DomRange* range) {
 // Range invariants & boundary setters
 // ============================================================================
 
+// Walk to the topmost ancestor (no parent). Used to detect cross-root
+// boundary moves (DocumentFragment, sub-document via iframe).
+static DomNode* range_root_of(DomNode* n) {
+    if (!n) return nullptr;
+    while (n->parent) n = n->parent;
+    return n;
+}
+
+// After a Range boundary mutation, if the Range is the active range of an
+// owning DomSelection AND its new root differs from the document root the
+// selection was associated with when the range was added, drop it from the
+// selection per the .tentative spec for cross-root selection movement.
+// (move-selection-range-into-different-root.tentative.html)
+static void range_check_cross_root_drop(DomRange* r) {
+    if (!r || !r->state || !r->start.node) return;
+    DomSelection* s = dom_range_state_selection(r->state);
+    if (!s || s->range_count == 0 || s->ranges[0] != r) return;
+    if (!s->associated_doc_root) return;
+    DomNode* now_root = range_root_of(r->start.node);
+    if (now_root != s->associated_doc_root) {
+        log_debug("dom_range: dropping range from selection (root changed)");
+        // Hold a temp ref so removal doesn't free the range mid-mutation.
+        dom_range_retain(r);
+        dom_selection_remove_range(s, r);
+        dom_range_release(r);
+    }
+}
+
 // After a boundary mutation, ensure start <= end. If not, collapse the
 // other end to match (per spec: "If range's start is after its end, set
 // the other boundary to the same point as the changed boundary.")
@@ -334,6 +362,7 @@ bool dom_range_set_start(DomRange* r, DomNode* node, uint32_t offset, const char
     r->start.offset = offset;
     enforce_range_invariant(r, /*start_was_set=*/true);
     dom_range_invalidate_layout(r);
+    range_check_cross_root_drop(r);
     return true;
 }
 
@@ -347,6 +376,7 @@ bool dom_range_set_end(DomRange* r, DomNode* node, uint32_t offset, const char**
     r->end.offset = offset;
     enforce_range_invariant(r, /*start_was_set=*/false);
     dom_range_invalidate_layout(r);
+    range_check_cross_root_drop(r);
     return true;
 }
 
@@ -581,6 +611,11 @@ void dom_selection_add_range(DomSelection* s, DomRange* range) {
     dom_range_retain(range);
     dom_range_link_into_state(s->state, range);
     s->ranges[s->range_count++] = range;
+    // Snapshot the document root for cross-root drop detection (§ Range
+    // mutators check this against any future boundary moves).
+    if (range->start.node) {
+        s->associated_doc_root = range_root_of(range->start.node);
+    }
     sync_anchor_focus(s, /*forward=*/true);
 }
 
@@ -594,6 +629,7 @@ void dom_selection_remove_range(DomSelection* s, DomRange* range) {
             s->range_count--;
             s->ranges[s->range_count] = NULL;
             dom_range_release(range);
+            if (s->range_count == 0) s->associated_doc_root = NULL;
             sync_anchor_focus(s, s->direction != DOM_SEL_DIR_BACKWARD);
             return;
         }
@@ -607,6 +643,7 @@ void dom_selection_remove_all_ranges(DomSelection* s) {
         s->ranges[s->range_count] = NULL;
         dom_range_release(r);
     }
+    s->associated_doc_root = NULL;
     sync_anchor_focus(s, /*forward=*/true);
 }
 

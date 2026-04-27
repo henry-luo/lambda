@@ -635,6 +635,58 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         DomDocument* doc = create_foreign_html_doc("");
         if (!doc) return ItemNull;
         js_doc_mark_has_browsing_context(doc);
+        // If the iframe carries a `srcdoc` attribute, parse its HTML and
+        // append the parsed children to the foreign doc's <body>. This is
+        // what move-selection-range-into-different-root.tentative.html
+        // (and any other iframe-srcdoc test) relies on so getElementById
+        // on the contentDocument can resolve nodes.
+        const char* srcdoc = dom_element_get_attribute(iframe, "srcdoc");
+        if (srcdoc && *srcdoc && doc->root) {
+            // Locate the foreign doc's <body> (children of html: head, body).
+            DomElement* body = nullptr;
+            DomNode* child = doc->root->first_child;
+            while (child) {
+                if (child->is_element()) {
+                    DomElement* el = child->as_element();
+                    if (el->tag_name && strcmp(el->tag_name, "body") == 0) {
+                        body = el; break;
+                    }
+                }
+                child = child->next_sibling;
+            }
+            if (body && doc->pool && doc->arena && doc->input) {
+                Html5Parser* parser = html5_fragment_parser_create(
+                    doc->pool, doc->arena, doc->input);
+                if (parser) {
+                    html5_fragment_parse(parser, srcdoc);
+                    Element* body_elem = html5_fragment_get_body(parser);
+                    if (body_elem) {
+                        for (size_t i = 0; i < body_elem->length; i++) {
+                            TypeId t = get_type_id(body_elem->items[i]);
+                            if (t == LMD_TYPE_ELEMENT) {
+                                build_dom_tree_from_element(
+                                    body_elem->items[i].element, doc, body);
+                            } else if (t == LMD_TYPE_STRING) {
+                                String* s = it2s(body_elem->items[i]);
+                                DomText* tn = dom_text_create(s, body);
+                                if (tn) {
+                                    tn->parent = body;
+                                    if (!body->first_child) {
+                                        body->first_child = tn;
+                                        body->last_child = tn;
+                                    } else {
+                                        DomNode* last = body->last_child;
+                                        last->next_sibling = tn;
+                                        tn->prev_sibling = last;
+                                        body->last_child = tn;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
             s_iframe_cache[s_iframe_cache_count].iframe = iframe;
             s_iframe_cache[s_iframe_cache_count].doc = doc;
@@ -4320,6 +4372,28 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             if (_js_active_element == elem) _js_active_element = nullptr;
         }
         return make_js_undefined();
+    }
+
+    // HTMLElement.click() — synthesise and dispatch a `click` event
+    // (bubbles, cancelable). WPT stringifier_editable_element.tentative
+    // and many other tests rely on this for `anchor.click()`-style
+    // programmatic dispatch.
+    if (strcmp(method, "click") == 0) {
+        Item ev = js_create_event("click", /*bubbles=*/true, /*cancelable=*/true);
+        return js_dom_dispatch_event(elem_item, ev);
+    }
+
+    // getElementById(id) — for DocumentFragment hosts. The DOM spec puts
+    // this on NonElementParentNode (Document + DocumentFragment). For
+    // every other element it is undefined; we still implement it as a
+    // tree-scoped lookup since several WPT tests use the synthetic
+    // `#document-fragment` element returned by `createDocumentFragment`.
+    if (strcmp(method, "getElementById") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* id = fn_to_cstr(args[0]);
+        if (!id) return ItemNull;
+        DomElement* found = dom_find_by_id(elem, id);
+        return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
     // setSelectionRange(start, end [, direction]) — text controls only.
