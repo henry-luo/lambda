@@ -5382,6 +5382,41 @@ struct JsFuncProps {
     Item properties_map;
 };
 
+// ES spec: built-in constructor's `prototype` data property is non-writable,
+// non-enumerable, non-configurable. This helper is consulted by both
+// js_object_get_own_property_descriptor (descriptor synthesis) and
+// js_property_set (to silently reject writes to a non-writable prototype).
+extern "C" bool js_func_is_builtin_ctor(Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return false;
+    JsFuncProps* efn = (JsFuncProps*)fn.function;
+    if (!efn->name) return false;
+    const char* en = efn->name->chars;
+    int el = (int)efn->name->len;
+    return (el == 5 && strncmp(en, "Error", 5) == 0) ||
+        (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
+        (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
+        (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
+        (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
+        (el == 8 && strncmp(en, "URIError", 8) == 0) ||
+        (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
+        (el == 3 && strncmp(en, "Map", 3) == 0) ||
+        (el == 3 && strncmp(en, "Set", 3) == 0) ||
+        (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
+        (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+        (el == 7 && strncmp(en, "Promise", 7) == 0) ||
+        (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
+        (el == 8 && strncmp(en, "DataView", 8) == 0) ||
+        (el == 5 && strncmp(en, "Array", 5) == 0) ||
+        (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
+        (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
+        (el == 4 && strncmp(en, "Date", 4) == 0) ||
+        (el == 8 && strncmp(en, "Function", 8) == 0) ||
+        (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
+        (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
+        (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
+        js_is_typed_array_ctor_name(en, el);
+}
+
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // Proxy [[GetOwnProperty]] trap
     if (js_is_proxy(obj)) {
@@ -5471,36 +5506,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             Item desc = js_new_object();
             Item proto = js_property_get(obj, name);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
-            // ES spec: All built-in constructor .prototype are non-writable
-            JsFuncProps* efn = (JsFuncProps*)obj.function;
-            bool is_builtin_ctor = false;
-            if (efn->name) {
-                const char* en = efn->name->chars;
-                int el = (int)efn->name->len;
-                is_builtin_ctor = (el == 5 && strncmp(en, "Error", 5) == 0) ||
-                    (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
-                    (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
-                    (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
-                    (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
-                    (el == 8 && strncmp(en, "URIError", 8) == 0) ||
-                    (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
-                    (el == 3 && strncmp(en, "Map", 3) == 0) ||
-                    (el == 3 && strncmp(en, "Set", 3) == 0) ||
-                    (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
-                    (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
-                    (el == 7 && strncmp(en, "Promise", 7) == 0) ||
-                    (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
-                    (el == 8 && strncmp(en, "DataView", 8) == 0) ||
-                    (el == 5 && strncmp(en, "Array", 5) == 0) ||
-                    (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
-                    (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0)) ||
-                    (el == 4 && strncmp(en, "Date", 4) == 0) ||
-                    (el == 8 && strncmp(en, "Function", 8) == 0) ||
-                    (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
-                    (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
-                    (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
-                    js_is_typed_array_ctor_name(en, el);
-            }
+            bool is_builtin_ctor = js_func_is_builtin_ctor(obj);
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
@@ -8172,8 +8178,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             if (arr->extra != 0) {
                 Map* pm = (Map*)(uintptr_t)arr->extra;
                 bool found = false;
-                js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &found);
-                if (found) return (Item){.item = b2it(true)};
+                Item v = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &found);
+                if (found && v.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
             }
         }
         return (Item){.item = b2it(false)};

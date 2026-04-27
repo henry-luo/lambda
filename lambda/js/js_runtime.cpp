@@ -107,6 +107,9 @@ static bool js_has_pending_new_target = false;
 static Item* js_pending_call_args = NULL;
 static int js_pending_call_argc = 0;
 
+// Forward declaration: defined in js_globals.cpp.
+extern "C" bool js_func_is_builtin_ctor(Item fn);
+
 // Module-level variable table for top-level bindings accessible from any function.
 // Populated during js_main execution, read by class method closures.
 #define JS_MAX_MODULE_VARS 2048
@@ -7217,6 +7220,16 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         TypeId key_type = get_type_id(key);
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
+            // check __nw_prototype marker — set on built-in constructors
+            // (TypedArray, Error subclasses, etc.) whose prototype is non-writable.
+            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                bool nw_found = false;
+                Item nw_val = js_map_get_fast_ext(fn->properties_map.map, "__nw_prototype", 14, &nw_found);
+                if (nw_found && js_is_truthy(nw_val)) return value; // non-writable, silently reject
+            }
+            // ES spec: built-in constructor .prototype is non-writable. Mirrors the
+            // descriptor synthesis in js_object_get_own_property_descriptor.
+            if (js_func_is_builtin_ctor(object)) return value;
             fn->prototype = value;
             // Register fn->prototype as a GC root so the prototype map survives GC.
             // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
@@ -7273,6 +7286,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             heap_register_gc_root(&fn->properties_map.item);
         }
         if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            // honor __nw_<name> non-writable marker for arbitrary properties
+            if (str_key && str_key->len > 0 && str_key->len < 200) {
+                char nw_buf[256];
+                snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)str_key->len, str_key->chars);
+                bool nw_found = false;
+                Item nw_val = js_map_get_fast_ext(fn->properties_map.map, nw_buf, (int)strlen(nw_buf), &nw_found);
+                if (nw_found && js_is_truthy(nw_val)) return value;
+            }
             js_property_set(fn->properties_map, key, value);
         }
     }
@@ -9121,6 +9142,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_object_define_properties(Item obj, Item props);
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_object_get_own_property_descriptors(Item obj);
+extern "C" bool js_func_is_builtin_ctor(Item fn);
 extern "C" Item js_object_get_own_property_names(Item object);
 extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_object_keys(Item object);
