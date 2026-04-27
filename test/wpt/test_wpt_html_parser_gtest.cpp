@@ -24,11 +24,11 @@
 #include <sstream>
 #include <algorithm>
 
-#include "../lambda/lambda-data.hpp"
-#include "../lambda/mark_reader.hpp"
+#include "../../lambda/lambda-data.hpp"
+#include "../../lambda/mark_reader.hpp"
 
 extern "C" {
-#include "../lib/log.h"
+#include "../../lib/log.h"
     Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor);
 }
 

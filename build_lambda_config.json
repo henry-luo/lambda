@@ -2182,7 +2182,7 @@
                         "icon": "📜"
                     },
                     {
-                        "source": "test_wpt_html_parser_gtest.cpp",
+                        "source": "wpt/test_wpt_html_parser_gtest.cpp",
                         "name": "WPT HTML Parser Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2272,6 +2272,28 @@
                         ],
                         "binary": "test_lambda_domnode_gtest.exe",
                         "icon": "🔗"
+                    },
+                    {
+                        "source": "test_dom_range_gtest.cpp",
+                        "name": "DOM Range / Selection Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/css/dom_node.cpp",
+                            "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp",
+                            "radiant/layout_counters.cpp",
+                            "radiant/dom_range.cpp"
+                        ],
+                        "binary": "test_dom_range_gtest.exe",
+                        "icon": "🎯"
                     },
                     {
                         "source": "test_dir_gtest.cpp",
@@ -3001,7 +3023,7 @@
                         "icon": "📦"
                     },
                     {
-                        "source": "test/test_wpt_css_syntax_gtest.cpp",
+                        "source": "test/wpt/test_wpt_css_syntax_gtest.cpp",
                         "name": "WPT CSS Syntax Tests",
                         "category": "extended",
                         "dependencies": [],
@@ -3010,6 +3032,18 @@
                             "gtest"
                         ],
                         "icon": "🎨"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_selection_gtest.cpp",
+                        "name": "WPT Selection API Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_selection_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🖱️"
                     },
                     {
                         "source": "test/test_lambda_std_gtest.cpp",

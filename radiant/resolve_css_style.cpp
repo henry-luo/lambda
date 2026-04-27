@@ -2790,6 +2790,23 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+    // Pre-resolve 'color' before the second pass so that currentColor references
+    // (e.g. border-color: currentColor on <a>.p-btn) see the cascaded color of
+    // the current element instead of falling back to a parent or UA default.
+    // Border properties (and others) come before 'color' in AVL property-id order,
+    // so without this they would resolve currentColor against a stale value.
+    {
+        AvlNode* color_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_COLOR);
+        if (color_node) {
+            StyleNode* style_node = (StyleNode*)color_node->declaration;
+            CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
+            if (decl) {
+                log_debug("[Lambda CSS] Pre-pass - resolving color property for currentColor");
+                resolve_css_property(CSS_PROPERTY_COLOR, decl, lycon);
+            }
+        }
+    }
+
     int other_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
     log_debug("[Lambda CSS] Second pass - processed %d other properties", other_processed);
 

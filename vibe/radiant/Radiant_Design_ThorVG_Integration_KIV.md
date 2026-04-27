@@ -1,4 +1,4 @@
-# Radiant Vector Rendering — Platform-Native Design
+# Radiant Vector Rendering — Platform-Native Design (KIV)
 
 **Date:** April 2026
 **Status:** Proposal

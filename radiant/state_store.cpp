@@ -175,6 +175,25 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     return state;
 }
 
+// ----------------------------------------------------------------------------
+// Bridge accessors for radiant/dom_range.cpp.
+// dom_range.cpp deliberately does NOT include state_store.hpp (which would
+// pull in GLFW + the full render stack into every unit test). It declares
+// these two functions extern "C" and we provide the production
+// implementation here. Unit tests can supply their own implementation
+// against a minimal RadiantState stub.
+// ----------------------------------------------------------------------------
+struct DomRange;
+extern "C" Arena* dom_range_state_arena(RadiantState* state) {
+    return state ? state->arena : NULL;
+}
+extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state) {
+    return state ? (DomRange**)&state->live_ranges : NULL;
+}
+extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
+    return state ? state->dom_selection : NULL;
+}
+
 void radiant_state_destroy(RadiantState* state) {
     if (!state) return;
 

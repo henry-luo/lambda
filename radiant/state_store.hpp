@@ -218,8 +218,18 @@ typedef struct RadiantState {
     struct RadiantState* prev_version;  // previous version (immutable mode only)
     
     // Global interaction states
-    CaretState* caret;             // text cursor state
-    SelectionState* selection;     // text selection state
+    CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)
+    SelectionState* selection;     // text selection state (legacy; migrating to dom_selection)
+
+    // ------------------------------------------------------------------
+    // DOM-spec Selection / Range (additive — new code path; legacy
+    // caret/selection kept until call sites are migrated). See
+    // radiant/dom_range.hpp and vibe/radiant/Radiant_Design_Selection.md.
+    // ------------------------------------------------------------------
+    struct DomSelection* dom_selection;     // lazy; created on first read/write
+    struct DomRange*     live_ranges;       // doubly-linked list head
+    uint32_t             next_range_id;     // monotonic id (debug)
+    bool                 selection_layout_dirty;
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element

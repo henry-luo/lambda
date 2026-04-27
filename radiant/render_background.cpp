@@ -735,6 +735,12 @@ void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Backgroun
 void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
     if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
 
+    // Sub-pixel blur radii (< 1px) produce no visible result in browsers — skip.
+    // Without this guard the box_r min-clamp below would force a ~3px-wide kernel
+    // applied 3 times (effective stddev ~1.4px), creating a visible halo for
+    // shadows like `box-shadow: 0 0 0.375px ...` that browsers render as no blur.
+    if (blur_radius < 1.0f) return;
+
     // Clamp region to surface bounds
     if (rx < 0) { rw += rx; rx = 0; }
     if (ry < 0) { rh += ry; ry = 0; }
@@ -742,10 +748,15 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
     if (ry + rh > surface->height) rh = surface->height - ry;
     if (rw <= 0 || rh <= 0) return;
 
-    // Calculate box sizes for 3-pass approximation of Gaussian
-    // Per CSS spec, blur radius maps to standard deviation σ
-    // Box blur radius: ideal_w = sqrt(12*σ²/3 + 1)
-    int box_r = (int)ceilf(blur_radius * 0.5f);
+    // Calculate box sizes for 3-pass approximation of Gaussian.
+    // Per CSS spec, the CSS blur-radius value `b` targets a Gaussian with
+    // standard deviation σ = b/2. Three passes of a box blur with half-width r
+    // give total variance r(r+1), so to match σ = b/2 we want
+    //   r(r+1) = b²/4   ⇒   r = (-1 + √(1 + b²)) / 2
+    // The previous formula `ceilf(b/2)` produced a kernel ~2× wider than the
+    // browser for small blur radii (e.g. b=3 → r=2 giving σ≈2.45 vs target 1.5),
+    // creating visible halos around shadows that should be tight to the element.
+    int box_r = (int)roundf(0.5f * (-1.0f + sqrtf(1.0f + blur_radius * blur_radius)));
     if (box_r < 1) box_r = 1;
     int box_w = box_r * 2 + 1;
 
