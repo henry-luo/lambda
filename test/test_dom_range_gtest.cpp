@@ -792,3 +792,248 @@ TEST_F(DomRangeTest, SurroundContentsRejectsPartialElement) {
     EXPECT_STREQ(exc, "InvalidStateError");
 }
 
+
+// ============================================================================
+// Phase 5 — Selection.modify & word breaking
+// ============================================================================
+
+TEST_F(DomRangeTest, BoundaryMoveCharacterWithinText) {
+    DomBoundary b{ hello, 1 };
+    b = dom_boundary_move(b, DOM_MOD_CHARACTER, +1);
+    EXPECT_EQ(b.node, (DomNode*)hello);
+    EXPECT_EQ(b.offset, 2u);
+    b = dom_boundary_move(b, DOM_MOD_CHARACTER, -1);
+    EXPECT_EQ(b.offset, 1u);
+}
+
+TEST_F(DomRangeTest, BoundaryMoveCharacterCrossesTextNodes) {
+    // append a second text node to span: "hello" + new "world"
+    DomText* w = make_text("world", 5);
+    span->append_child(w);
+    DomBoundary b{ hello, 5 };  // at end of hello
+    b = dom_boundary_move(b, DOM_MOD_CHARACTER, +1);
+    // should land at start of next text 'w' or step into it
+    EXPECT_TRUE(b.node == (DomNode*)w || (b.node == (DomNode*)hello && b.offset == 5));
+    delete w;
+    span->last_child = (DomNode*)hello;
+    hello->next_sibling = nullptr;
+}
+
+TEST_F(DomRangeTest, BoundaryMoveDocumentBoundary) {
+    DomBoundary b{ hello, 2 };
+    DomBoundary start = dom_boundary_move(b, DOM_MOD_DOCUMENT, -1);
+    EXPECT_EQ(start.offset, 0u);
+    DomBoundary end = dom_boundary_move(b, DOM_MOD_DOCUMENT, +1);
+    // should be at end of last text or end of root
+    EXPECT_NE(end.node, nullptr);
+}
+
+TEST_F(DomRangeTest, BoundaryMoveWordWithinText) {
+    // Replace hello content with literal that has a word boundary
+    hello->text = "abc def";
+    hello->length = 7;
+    DomBoundary b{ hello, 0 };
+    b = dom_boundary_move(b, DOM_MOD_WORD, +1);
+    // After "abc" -> offset 3
+    EXPECT_EQ(b.node, (DomNode*)hello);
+    EXPECT_EQ(b.offset, 3u);
+    b = dom_boundary_move(b, DOM_MOD_WORD, +1);
+    // After "def" -> offset 7
+    EXPECT_EQ(b.offset, 7u);
+    b = dom_boundary_move(b, DOM_MOD_WORD, -1);
+    // back to start of "def" -> offset 4
+    EXPECT_EQ(b.offset, 4u);
+    // restore
+    hello->text = "hello";
+    hello->length = 5;
+}
+
+TEST_F(DomRangeTest, SelectionModifyMoveCharacter) {
+    DomSelection sel{};
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 1, &exc));
+    dom_selection_add_range(&sel, r);
+    EXPECT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 2u);
+    EXPECT_EQ(dom_selection_anchor_offset(&sel), 2u);
+}
+
+TEST_F(DomRangeTest, SelectionModifyExtendCharacter) {
+    DomSelection sel{};
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 1, &exc));
+    dom_selection_add_range(&sel, r);
+    EXPECT_TRUE(dom_selection_modify(&sel, "extend", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_anchor_offset(&sel), 1u);
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 2u);
+}
+
+TEST_F(DomRangeTest, SelectionModifyEmptySelectionNoOp) {
+    DomSelection sel{};
+    const char* exc = nullptr;
+    EXPECT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
+    EXPECT_EQ(dom_selection_range_count(&sel), 0u);
+}
+
+TEST_F(DomRangeTest, SelectionModifyRejectsUnknown) {
+    DomSelection sel{};
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 0, &exc));
+    dom_selection_add_range(&sel, r);
+    exc = nullptr;
+    EXPECT_FALSE(dom_selection_modify(&sel, "wibble", "forward", "character", &exc));
+    EXPECT_STREQ(exc, "SyntaxError");
+    exc = nullptr;
+    EXPECT_FALSE(dom_selection_modify(&sel, "move", "sideways", "character", &exc));
+    EXPECT_STREQ(exc, "SyntaxError");
+    exc = nullptr;
+    EXPECT_FALSE(dom_selection_modify(&sel, "move", "forward", "atom", &exc));
+    EXPECT_STREQ(exc, "SyntaxError");
+}
+
+// ============================================================================
+// Phase 6 — layout resolver / hit-test
+// (Resolver only depends on `view.hpp`; we set up TextRect + view types
+// directly on our synthetic nodes.)
+// ============================================================================
+#include "../radiant/view.hpp"
+#include "../radiant/dom_range_resolver.hpp"
+
+class DomResolverTest : public DomRangeTest {
+protected:
+    TextRect rect_hello{};
+
+    void SetUp() override {
+        DomRangeTest::SetUp();
+        // Make the synthetic tree look layout-resolved:
+        //   div  : block @ (10, 20) size 200x100
+        //     span : inline @ (0, 0)        (text-bearing parent has no offset)
+        //       hello : text "hello", one TextRect @ (5, 30) size 60x16
+        div->view_type   = RDT_VIEW_BLOCK;
+        div->x = 10;  div->y = 20;
+        div->width = 200; div->height = 100;
+
+        span->view_type  = RDT_VIEW_INLINE;
+        span->x = 0; span->y = 0;
+        span->width = 60; span->height = 16;
+
+        hello->view_type = RDT_VIEW_TEXT;
+        rect_hello.x = 5;
+        rect_hello.y = 30;
+        rect_hello.width  = 60;
+        rect_hello.height = 16;
+        rect_hello.start_index = 0;
+        rect_hello.length      = 5;
+        rect_hello.next        = nullptr;
+        hello->rect = &rect_hello;
+    }
+};
+
+TEST_F(DomResolverTest, ResolveLayoutFillsCacheForCollapsedRange) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 0, &exc));
+
+    EXPECT_FALSE(r->layout_valid);
+    EXPECT_TRUE(dom_range_resolve_layout(r));
+    EXPECT_TRUE(r->layout_valid);
+    EXPECT_EQ(r->start_view, (void*)hello);
+    EXPECT_EQ(r->end_view,   (void*)hello);
+    EXPECT_FLOAT_EQ(r->start_x, 10.0f + 5.0f);   // div.x + rect.x
+    EXPECT_FLOAT_EQ(r->start_y, 20.0f + 30.0f);  // div.y + rect.y
+    EXPECT_FLOAT_EQ(r->start_height, 16.0f);
+}
+
+TEST_F(DomResolverTest, ResolveLayoutInterpolatesXAcrossText) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 5, &exc));  // full text
+    ASSERT_TRUE(dom_range_resolve_layout(r));
+    EXPECT_FLOAT_EQ(r->start_x, 15.0f);              // start of rect
+    EXPECT_FLOAT_EQ(r->end_x,   15.0f + 60.0f);      // end of rect
+}
+
+TEST_F(DomResolverTest, ResolveLayoutInvalidationReResolves) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
+    ASSERT_TRUE(dom_range_resolve_layout(r));
+    EXPECT_TRUE(r->layout_valid);
+    dom_range_invalidate_layout(r);
+    EXPECT_FALSE(r->layout_valid);
+    EXPECT_TRUE(dom_range_resolve_layout(r));
+    EXPECT_TRUE(r->layout_valid);
+}
+
+TEST_F(DomResolverTest, ResolveLayoutFailsWhenNoTextRect) {
+    // Strip the TextRect so resolver should report failure (no layout).
+    hello->rect = nullptr;
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 0, &exc));
+    EXPECT_FALSE(dom_range_resolve_layout(r));
+    EXPECT_FALSE(r->layout_valid);
+}
+
+TEST_F(DomResolverTest, HitTestFindsTextNode) {
+    // Click at (15+30, 20+30+8) — middle of the rect → byte offset ~half.
+    DomBoundary b = dom_hit_test_to_boundary((View*)div, 15.0f + 30.0f, 20.0f + 30.0f + 8.0f);
+    EXPECT_EQ(b.node, (DomNode*)hello);
+    EXPECT_GE(b.offset, 1u);
+    EXPECT_LE(b.offset, 4u);
+}
+
+TEST_F(DomResolverTest, HitTestOutsideAllRectsReturnsNull) {
+    DomBoundary b = dom_hit_test_to_boundary((View*)div, 1000.0f, 1000.0f);
+    EXPECT_EQ(b.node, nullptr);
+}
+
+TEST_F(DomResolverTest, HitTestAtLeftEdgeReturnsZero) {
+    // Click exactly at the left edge of the rect.
+    DomBoundary b = dom_hit_test_to_boundary((View*)div, 15.0f, 20.0f + 30.0f + 8.0f);
+    EXPECT_EQ(b.node, (DomNode*)hello);
+    EXPECT_EQ(b.offset, 0u);
+}
+
+namespace {
+struct RectCollector {
+    int count = 0;
+    float total_w = 0;
+    static void cb(float, float, float w, float, void* ud) {
+        auto* c = static_cast<RectCollector*>(ud);
+        c->count++;
+        c->total_w += w;
+    }
+};
+}
+
+TEST_F(DomResolverTest, ForEachRectEmitsSingleRectForSameNodeRange) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 5, &exc));
+    ASSERT_TRUE(dom_range_resolve_layout(r));
+    RectCollector c;
+    dom_range_for_each_rect(r, &RectCollector::cb, &c);
+    EXPECT_EQ(c.count, 1);
+    EXPECT_FLOAT_EQ(c.total_w, 60.0f);
+}
+

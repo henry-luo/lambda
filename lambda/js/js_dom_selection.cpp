@@ -663,6 +663,20 @@ extern "C" Item js_selection_to_string(void) {
     return make_str("");
 }
 
+extern "C" Item js_selection_modify(Item alter_v, Item dir_v, Item gran_v) {
+    DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    const char* alter = fn_to_cstr(alter_v);
+    const char* dir   = fn_to_cstr(dir_v);
+    const char* gran  = fn_to_cstr(gran_v);
+    const char* exc = nullptr;
+    if (!dom_selection_modify(s, alter, dir, gran, &exc)) {
+        throw_from_dom_exc(exc, "Selection.modify failed");
+        return make_undef();
+    }
+    selection_sync_props(js_get_this(), s);
+    return make_undef();
+}
+
 // ============================================================================
 // Selection construction / property sync
 // ============================================================================
@@ -687,7 +701,7 @@ struct SelectionMethods {
     Item getRangeAt, addRange, removeRange, removeAllRanges;
     Item empty, collapse, setPosition, collapseToStart, collapseToEnd;
     Item extend, setBaseAndExtent, selectAllChildren, containsNode;
-    Item deleteFromDocument, toString;
+    Item deleteFromDocument, toString, modify;
     bool inited;
 };
 static SelectionMethods _sel_methods = {};
@@ -709,6 +723,7 @@ static void init_selection_methods() {
     _sel_methods.containsNode       = js_new_function((void*)js_selection_contains_node, 2);
     _sel_methods.deleteFromDocument = js_new_function((void*)js_selection_delete_from_document, 0);
     _sel_methods.toString           = js_new_function((void*)js_selection_to_string, 0);
+    _sel_methods.modify             = js_new_function((void*)js_selection_modify, 3);
     _sel_methods.inited = true;
 }
 
@@ -754,6 +769,7 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
     if (strcmp(p, "containsNode") == 0)       return _sel_methods.containsNode;
     if (strcmp(p, "deleteFromDocument") == 0) return _sel_methods.deleteFromDocument;
     if (strcmp(p, "toString") == 0)           return _sel_methods.toString;
+    if (strcmp(p, "modify") == 0)             return _sel_methods.modify;
 
     return ItemNull;
 }

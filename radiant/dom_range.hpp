@@ -334,6 +334,40 @@ bool dom_range_surround_contents(DomRange* r, struct DomNode* node,
 // Selection.deleteFromDocument — delete the contents of every range.
 void dom_selection_delete_from_document(DomSelection* s);
 
+// ============================================================================
+// Phase 5 — Selection.modify & word breaking
+//
+// Move or extend the selection by one unit of `granularity` in `direction`.
+// `alter` ∈ {"move", "extend"} (case-insensitive).
+// `direction` ∈ {"forward", "backward", "left", "right"} — left/right map to
+//             backward/forward respectively (LTR-only assumption for now).
+// `granularity` ∈ {"character", "word", "line", "lineboundary",
+//                  "paragraph", "paragraphboundary",
+//                  "sentence", "sentenceboundary", "documentboundary"}.
+// Per spec, modify() does nothing if the selection is empty (no ranges).
+// Returns true on success, false on bad arguments. *out_exception is set
+// only on hard errors.
+bool dom_selection_modify(DomSelection* s, const char* alter,
+                          const char* direction, const char* granularity,
+                          const char** out_exception);
+
+// Move a (node, u16_offset) boundary by `count` units of granularity.
+// `count > 0` moves forward, `count < 0` backward. Returns the new boundary.
+// Used internally by dom_selection_modify and exposed for tests.
+//
+// Granularity supported:
+//  - DOM_MOD_CHARACTER : single grapheme-ish step (UTF-16 code units; surrogates skipped together)
+//  - DOM_MOD_WORD      : skip to next word boundary using a simple
+//                        alphanumeric-vs-other classifier
+//  - DOM_MOD_DOCUMENT  : jump to root start (count<0) or root end (count>0)
+enum DomModGranularity {
+    DOM_MOD_CHARACTER = 0,
+    DOM_MOD_WORD      = 1,
+    DOM_MOD_DOCUMENT  = 2,
+};
+struct DomBoundary dom_boundary_move(struct DomBoundary b,
+                                     DomModGranularity gran, int32_t count);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

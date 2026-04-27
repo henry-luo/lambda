@@ -1426,3 +1426,382 @@ void dom_selection_delete_from_document(DomSelection* s) {
         }
     }
 }
+
+// ============================================================================
+// Phase 5 — Selection.modify & word breaking (WHATWG / browser convention)
+// ============================================================================
+
+// Walk to the next text node in document order following `n` (skipping `n`).
+static DomText* next_text_after(DomNode* n) {
+    if (!n) return nullptr;
+    // descend into right-siblings/their subtrees, then ascend
+    DomNode* cur = n;
+    while (cur) {
+        if (cur->next_sibling) {
+            DomNode* w = cur->next_sibling;
+            // descend leftmost
+            while (true) {
+                if (w->is_text()) return w->as_text();
+                if (w->is_element()) {
+                    DomNode* fc = w->as_element()->first_child;
+                    if (fc) { w = fc; continue; }
+                }
+                // leaf non-text: try sibling
+                if (w->next_sibling) { w = w->next_sibling; continue; }
+                // back up
+                while (w && !w->next_sibling) w = w->parent;
+                if (!w) break;
+                w = w->next_sibling;
+            }
+        }
+        cur = cur->parent;
+    }
+    return nullptr;
+}
+
+// Walk to the previous text node in document order preceding `n` (skipping `n`).
+static DomText* prev_text_before(DomNode* n) {
+    if (!n) return nullptr;
+    DomNode* cur = n;
+    while (cur) {
+        if (cur->prev_sibling) {
+            DomNode* w = cur->prev_sibling;
+            // descend rightmost
+            while (true) {
+                if (w->is_text()) return w->as_text();
+                if (w->is_element()) {
+                    DomNode* lc = w->as_element()->last_child;
+                    if (lc) { w = lc; continue; }
+                }
+                if (w->prev_sibling) { w = w->prev_sibling; continue; }
+                while (w && !w->prev_sibling) w = w->parent;
+                if (!w) break;
+                w = w->prev_sibling;
+            }
+        }
+        cur = cur->parent;
+    }
+    return nullptr;
+}
+
+// Find the document root (top-most ancestor) for `n`.
+static DomNode* root_of(DomNode* n) {
+    if (!n) return nullptr;
+    while (n->parent) n = n->parent;
+    return n;
+}
+
+// Find the first text node in the subtree (or the subtree's leftmost leaf if no text exists).
+static DomNode* first_in_subtree(DomNode* n) {
+    if (!n) return nullptr;
+    while (n->is_element()) {
+        DomNode* fc = n->as_element()->first_child;
+        if (!fc) return n;
+        n = fc;
+    }
+    return n;
+}
+
+// Find the last position in subtree.
+static DomNode* last_in_subtree(DomNode* n) {
+    if (!n) return nullptr;
+    while (n->is_element()) {
+        DomNode* lc = n->as_element()->last_child;
+        if (!lc) return n;
+        n = lc;
+    }
+    return n;
+}
+
+// True if codepoint is "word-like": letter/digit/underscore. Simple ASCII +
+// non-ASCII-letter heuristic (any byte >= 0x80 treated as letter).
+static bool cp_is_wordlike(uint32_t cp) {
+    if (cp < 0x80) {
+        return (cp >= '0' && cp <= '9') ||
+               (cp >= 'A' && cp <= 'Z') ||
+               (cp >= 'a' && cp <= 'z') ||
+               cp == '_';
+    }
+    return true;  // treat all non-ASCII as word characters
+}
+
+// Decode a single UTF-8 codepoint at byte position `i` in `t`. Returns the
+// number of bytes consumed (1..4) and writes the codepoint to *out_cp.
+static uint32_t utf8_decode_at(const DomText* t, uint32_t i, uint32_t* out_cp) {
+    const unsigned char* p = (const unsigned char*)t->text;
+    if (i >= t->length) { *out_cp = 0; return 0; }
+    unsigned char b = p[i];
+    if (b < 0x80) { *out_cp = b; return 1; }
+    if ((b & 0xE0) == 0xC0 && i + 1 < t->length) {
+        *out_cp = ((b & 0x1F) << 6) | (p[i+1] & 0x3F);
+        return 2;
+    }
+    if ((b & 0xF0) == 0xE0 && i + 2 < t->length) {
+        *out_cp = ((b & 0x0F) << 12) | ((p[i+1] & 0x3F) << 6) | (p[i+2] & 0x3F);
+        return 3;
+    }
+    if ((b & 0xF8) == 0xF0 && i + 3 < t->length) {
+        *out_cp = ((b & 0x07) << 18) | ((p[i+1] & 0x3F) << 12)
+                | ((p[i+2] & 0x3F) << 6)  | (p[i+3] & 0x3F);
+        return 4;
+    }
+    *out_cp = b;
+    return 1;
+}
+
+// Get codepoint of character at UTF-16 offset `u16` in text node t.
+// Returns 0 if u16 is out of range. Output `u16_step` is 1 for BMP and 2 for
+// surrogate-pair characters; useful for stepping by a "character".
+static uint32_t cp_at_u16(const DomText* t, uint32_t u16, uint32_t* u16_step) {
+    *u16_step = 1;
+    if (!t || u16 >= dom_text_utf16_length(t)) return 0;
+    uint32_t u8 = dom_text_utf16_to_utf8(t, u16);
+    uint32_t cp = 0;
+    uint32_t bytes = utf8_decode_at(t, u8, &cp);
+    if (bytes == 4) *u16_step = 2;
+    return cp;
+}
+
+// Move boundary by ONE character (forward if delta > 0, backward if < 0).
+// Crosses text node boundaries. Element boundaries themselves are treated as
+// single navigable units. Returns the new boundary; if at the doc edge,
+// returns the input unchanged.
+static DomBoundary move_one_char(DomBoundary b, int dir) {
+    if (!b.node) return b;
+    if (b.node->is_text()) {
+        DomText* t = b.node->as_text();
+        uint32_t total = dom_text_utf16_length(t);
+        if (dir > 0) {
+            if (b.offset < total) {
+                uint32_t step = 1;
+                cp_at_u16(t, b.offset, &step);
+                b.offset += step;
+                return b;
+            }
+            // step into next text node
+            DomText* nx = next_text_after((DomNode*)t);
+            if (nx) return DomBoundary{ (DomNode*)nx, 0 };
+            return b;
+        } else {
+            if (b.offset > 0) {
+                // back up by one code unit, but if we land mid-surrogate, back one more
+                uint32_t newo = b.offset - 1;
+                if (newo > 0) {
+                    uint32_t step = 1;
+                    cp_at_u16(t, newo - 1, &step);
+                    if (step == 2) newo -= 1;
+                }
+                b.offset = newo;
+                return b;
+            }
+            DomText* pv = prev_text_before((DomNode*)t);
+            if (pv) return DomBoundary{ (DomNode*)pv, dom_text_utf16_length(pv) };
+            return b;
+        }
+    }
+    // element node
+    DomElement* e = b.node->as_element();
+    uint32_t childcount = (uint32_t)dom_node_boundary_length((DomNode*)e);
+    if (dir > 0) {
+        if (b.offset < childcount) {
+            // descend into child at offset
+            DomNode* c = e->first_child;
+            for (uint32_t i = 0; i < b.offset && c; i++) c = c->next_sibling;
+            if (c && c->is_text()) return DomBoundary{ c, 0 };
+            // skip past element child
+            return DomBoundary{ (DomNode*)e, b.offset + 1 };
+        }
+        // ascend
+        DomNode* p = e->parent;
+        if (p) {
+            uint32_t idx = dom_node_child_index((DomNode*)e);
+            if (idx != UINT32_MAX) return DomBoundary{ p, idx + 1 };
+        }
+        return b;
+    } else {
+        if (b.offset > 0) {
+            DomNode* c = e->first_child;
+            for (uint32_t i = 0; i + 1 < b.offset && c; i++) c = c->next_sibling;
+            if (c && c->is_text())
+                return DomBoundary{ c, dom_text_utf16_length(c->as_text()) };
+            return DomBoundary{ (DomNode*)e, b.offset - 1 };
+        }
+        DomNode* p = e->parent;
+        if (p) {
+            uint32_t idx = dom_node_child_index((DomNode*)e);
+            if (idx != UINT32_MAX) return DomBoundary{ p, idx };
+        }
+        return b;
+    }
+}
+
+// Probe codepoint immediately AFTER the boundary (looking forward).
+// Returns 0 if at document end.
+static uint32_t cp_after(DomBoundary b) {
+    if (!b.node) return 0;
+    if (b.node->is_text()) {
+        DomText* t = b.node->as_text();
+        uint32_t total = dom_text_utf16_length(t);
+        if (b.offset < total) {
+            uint32_t step = 1;
+            return cp_at_u16(t, b.offset, &step);
+        }
+        DomText* nx = next_text_after((DomNode*)t);
+        if (!nx) return 0;
+        uint32_t step = 1;
+        return cp_at_u16(nx, 0, &step);
+    }
+    // element: find first text in next position
+    DomBoundary nb = move_one_char(b, +1);
+    if (nb.node == b.node && nb.offset == b.offset) return 0;
+    if (nb.node && nb.node->is_text()) {
+        uint32_t step = 1;
+        return cp_at_u16(nb.node->as_text(), nb.offset, &step);
+    }
+    return ' ';  // treat element edges as non-word (boundary)
+}
+
+// Probe codepoint immediately BEFORE the boundary.
+static uint32_t cp_before(DomBoundary b) {
+    if (!b.node) return 0;
+    if (b.node->is_text()) {
+        DomText* t = b.node->as_text();
+        if (b.offset > 0) {
+            uint32_t step = 1;
+            return cp_at_u16(t, b.offset - 1, &step);
+        }
+        DomText* pv = prev_text_before((DomNode*)t);
+        if (!pv) return 0;
+        uint32_t total = dom_text_utf16_length(pv);
+        if (total == 0) return 0;
+        uint32_t step = 1;
+        return cp_at_u16(pv, total - 1, &step);
+    }
+    DomBoundary pb = move_one_char(b, -1);
+    if (pb.node == b.node && pb.offset == b.offset) return 0;
+    if (pb.node && pb.node->is_text()) {
+        DomText* t = pb.node->as_text();
+        uint32_t step = 1;
+        return cp_at_u16(t, pb.offset, &step);
+    }
+    return ' ';
+}
+
+// Move boundary by ONE word boundary in `dir` direction.
+// Algorithm (simple, browser-friendly):
+//   forward: skip non-word codepoints, then skip word codepoints; stop.
+//   backward: skip non-word codepoints, then skip word codepoints; stop.
+static DomBoundary move_one_word(DomBoundary b, int dir) {
+    DomBoundary cur = b;
+    // phase 1: skip non-word
+    while (true) {
+        uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
+        if (cp == 0) return cur;
+        if (cp_is_wordlike(cp)) break;
+        DomBoundary next = move_one_char(cur, dir);
+        if (next.node == cur.node && next.offset == cur.offset) return cur;
+        cur = next;
+    }
+    // phase 2: consume word characters
+    while (true) {
+        uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
+        if (cp == 0) return cur;
+        if (!cp_is_wordlike(cp)) return cur;
+        DomBoundary next = move_one_char(cur, dir);
+        if (next.node == cur.node && next.offset == cur.offset) return cur;
+        cur = next;
+    }
+}
+
+DomBoundary dom_boundary_move(DomBoundary b, DomModGranularity gran, int32_t count) {
+    if (!b.node || count == 0) return b;
+    int dir = (count > 0) ? +1 : -1;
+    int32_t n = (count > 0) ? count : -count;
+
+    if (gran == DOM_MOD_DOCUMENT) {
+        DomNode* r = root_of(b.node);
+        if (dir > 0) {
+            DomNode* tail = last_in_subtree(r);
+            if (tail && tail->is_text()) return DomBoundary{ tail, dom_text_utf16_length(tail->as_text()) };
+            if (tail && tail->is_element())
+                return DomBoundary{ tail, (uint32_t)dom_node_boundary_length(tail) };
+            return b;
+        } else {
+            DomNode* head = first_in_subtree(r);
+            if (head) return DomBoundary{ head, 0 };
+            return b;
+        }
+    }
+
+    for (int32_t i = 0; i < n; i++) {
+        DomBoundary nb = (gran == DOM_MOD_WORD) ? move_one_word(b, dir)
+                                                : move_one_char(b, dir);
+        if (nb.node == b.node && nb.offset == b.offset) break;
+        b = nb;
+    }
+    return b;
+}
+
+static int strieq(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+bool dom_selection_modify(DomSelection* s, const char* alter,
+                          const char* direction, const char* granularity,
+                          const char** out_exception) {
+    if (!s) return false;
+    if (out_exception) *out_exception = nullptr;
+    if (s->range_count == 0) return true;  // per spec: no-op when empty
+
+    // Parse alter
+    bool extend = false;
+    if (!alter || strieq(alter, "move")) extend = false;
+    else if (strieq(alter, "extend"))    extend = true;
+    else { if (out_exception) *out_exception = "SyntaxError"; return false; }
+
+    // Parse direction
+    int dir = 0;
+    if (!direction || strieq(direction, "forward") || strieq(direction, "right")) dir = +1;
+    else if (strieq(direction, "backward") || strieq(direction, "left"))           dir = -1;
+    else { if (out_exception) *out_exception = "SyntaxError"; return false; }
+
+    // Parse granularity
+    DomModGranularity gran;
+    if (!granularity || strieq(granularity, "character")) gran = DOM_MOD_CHARACTER;
+    else if (strieq(granularity, "word"))                  gran = DOM_MOD_WORD;
+    else if (strieq(granularity, "documentboundary"))      gran = DOM_MOD_DOCUMENT;
+    else if (strieq(granularity, "line") || strieq(granularity, "lineboundary") ||
+             strieq(granularity, "paragraph") || strieq(granularity, "paragraphboundary") ||
+             strieq(granularity, "sentence") || strieq(granularity, "sentenceboundary")) {
+        // Fallback: approximate line/paragraph/sentence as documentboundary
+        // (no layout-aware iterator yet). Word-walk would also be acceptable.
+        gran = DOM_MOD_DOCUMENT;
+    }
+    else { if (out_exception) *out_exception = "SyntaxError"; return false; }
+
+    DomRange* r = s->ranges[0];
+    if (!r) return true;
+    DomBoundary anchor{ s->anchor.node, s->anchor.offset };
+    DomBoundary focus { s->focus.node,  s->focus.offset  };
+    DomBoundary new_focus = dom_boundary_move(focus, gran, dir);
+
+    if (extend) {
+        const char* exc = nullptr;
+        dom_selection_set_base_and_extent(s, anchor.node, anchor.offset,
+                                              new_focus.node, new_focus.offset, &exc);
+        if (exc) { if (out_exception) *out_exception = exc; return false; }
+    } else {
+        const char* exc = nullptr;
+        dom_selection_collapse(s, new_focus.node, new_focus.offset, &exc);
+        if (exc) { if (out_exception) *out_exception = exc; return false; }
+    }
+    return true;
+}

@@ -2290,7 +2290,8 @@
                             "lambda/input/css/selector_matcher.cpp",
                             "radiant/symbol_resolver.cpp",
                             "radiant/layout_counters.cpp",
-                            "radiant/dom_range.cpp"
+                            "radiant/dom_range.cpp",
+                            "radiant/dom_range_resolver.cpp"
                         ],
                         "binary": "test_dom_range_gtest.exe",
                         "icon": "🎯"

@@ -1,5 +1,7 @@
 #include "state_store.hpp"
 #include "animation.h"
+#include "dom_range.hpp"
+#include "dom_range_resolver.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 // str.h included via view.hpp
@@ -192,6 +194,71 @@ extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state) {
 }
 extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state) {
     return state ? state->dom_selection : NULL;
+}
+
+// ----------------------------------------------------------------------------
+// Phase 6 — non-invasive legacy → DOM mirroring.
+// The legacy `caret_*` / `selection_*` API still drives the GUI directly.
+// After they update the legacy state we mirror the result into
+// `state->dom_selection` so JavaScript reads (`window.getSelection()`)
+// observe the same anchor / focus the user just produced.
+// ----------------------------------------------------------------------------
+static DomSelection* sync_ensure_selection(RadiantState* state) {
+    if (!state) return NULL;
+    if (state->dom_selection) return state->dom_selection;
+    state->dom_selection = dom_selection_create(state);
+    return state->dom_selection;
+}
+
+// View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
+// Convert (View*, byte_offset) → DomBoundary (UTF-16 offset for text nodes).
+static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
+    DomBoundary b = { NULL, 0 };
+    if (!view) return b;
+    DomNode* n = (DomNode*)view;
+    if (n->is_text()) {
+        DomText* t = (DomText*)n;
+        uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
+        b.node = n;
+        b.offset = dom_text_utf8_to_utf16(t, bo);
+    } else {
+        // Element view: legacy callers don't reach here for selection but
+        // be safe — clamp offset to child count.
+        b.node = n;
+        uint32_t lim = dom_node_boundary_length(n);
+        b.offset = byte_offset < 0 ? 0 :
+                   ((uint32_t)byte_offset > lim ? lim : (uint32_t)byte_offset);
+    }
+    return b;
+}
+
+extern "C" void dom_selection_sync_from_legacy_selection(RadiantState* state) {
+    if (!state || !state->selection) return;
+    DomSelection* ds = sync_ensure_selection(state);
+    if (!ds) return;
+    SelectionState* sel = state->selection;
+    DomBoundary anc = boundary_from_legacy(sel->anchor_view, sel->anchor_offset);
+    DomBoundary foc = boundary_from_legacy(sel->focus_view,  sel->focus_offset);
+    if (!anc.node || !foc.node) return;
+    const char* exc = NULL;
+    if (!dom_selection_set_base_and_extent(ds,
+            anc.node, anc.offset, foc.node, foc.offset, &exc)) {
+        log_debug("[DOM-SYNC] set_base_and_extent rejected: %s", exc ? exc : "?");
+    }
+    state->selection_layout_dirty = true;
+}
+
+extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
+    if (!state || !state->caret) return;
+    DomSelection* ds = sync_ensure_selection(state);
+    if (!ds) return;
+    DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
+    if (!b.node) return;
+    const char* exc = NULL;
+    if (!dom_selection_collapse(ds, b.node, b.offset, &exc)) {
+        log_debug("[DOM-SYNC] collapse rejected: %s", exc ? exc : "?");
+    }
+    state->selection_layout_dirty = true;
 }
 
 void radiant_state_destroy(RadiantState* state) {
@@ -853,6 +920,9 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
 
     // Update visual position (caller should call caret_update_visual)
     state->needs_repaint = true;
+
+    // Phase 6: mirror caret into DOM selection (collapsed range).
+    dom_selection_sync_from_legacy_caret(state);
 
     log_debug("caret_set: view=%p, offset=%d", view, char_offset);
 }
@@ -1862,8 +1932,11 @@ void selection_start(RadiantState* state, View* view, int char_offset) {
     sel->is_collapsed = true;
     sel->is_selecting = true;
 
-    // Also set caret to this position
+    // Also set caret to this position (this also mirrors into DomSelection).
     caret_set(state, view, char_offset);
+
+    // Phase 6: mirror legacy selection into DOM selection.
+    dom_selection_sync_from_legacy_selection(state);
 
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
@@ -1884,6 +1957,9 @@ void selection_extend(RadiantState* state, int char_offset) {
     }
 
     state->needs_repaint = true;
+
+    // Phase 6: mirror into DOM selection.
+    dom_selection_sync_from_legacy_selection(state);
 
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
 }
@@ -1907,6 +1983,9 @@ void selection_extend_to_view(RadiantState* state, View* view, int char_offset) 
     }
 
     state->needs_repaint = true;
+
+    // Phase 6: mirror into DOM selection.
+    dom_selection_sync_from_legacy_selection(state);
 
     log_debug("selection_extend_to_view: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
         view, char_offset, sel->anchor_view, sel->is_collapsed);
