@@ -890,3 +890,539 @@ void dom_mutation_text_merge(RadiantState* state, DomText* prev,
     }
     resync_selection_after_mutation(state);
 }
+
+// ============================================================================
+// Phase 4 — Range mutation methods (WHATWG DOM §5.5)
+// ============================================================================
+
+// Resolve a node's owning DomDocument (walks up to the nearest DomElement,
+// which carries `doc`).
+static DomDocument* node_doc(DomNode* n) {
+    while (n) {
+        if (n->is_element()) return n->as_element()->doc;
+        n = n->parent;
+    }
+    return nullptr;
+}
+
+// Compute UTF-16 length of an arbitrary UTF-8 byte buffer.
+static uint32_t utf16_length_of(const char* s, size_t len) {
+    DomText tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.text = s;
+    tmp.length = len;
+    return dom_text_utf16_length(&tmp);
+}
+
+// Allocate a String* from doc->arena. Independent of the lambda runtime heap
+// so the same code paths work in unit tests and production.
+static String* arena_make_string(DomDocument* doc, const char* chars, size_t byte_len) {
+    if (!doc || !doc->arena) return nullptr;
+    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + byte_len + 1);
+    if (!s) return nullptr;
+    s->len = (uint32_t)byte_len;
+    s->is_ascii = 0;  // conservative; callers don't depend on this
+    if (byte_len && chars) memcpy(s->chars, chars, byte_len);
+    s->chars[byte_len] = '\0';
+    return s;
+}
+
+// Build a DomText for a UTF-8 byte slice [chars, chars+byte_len).
+static DomText* dom_text_from_bytes(DomDocument* doc, const char* chars, size_t byte_len) {
+    if (!doc) return nullptr;
+    String* s = arena_make_string(doc, chars, byte_len);
+    if (!s) return nullptr;
+    return dom_text_create_detached(s, doc);
+}
+
+DomElement* dom_document_fragment_create(DomDocument* doc) {
+    if (!doc) return nullptr;
+    return dom_element_create(doc, "#document-fragment", nullptr);
+}
+
+DomNode* dom_node_clone(DomNode* node, bool deep) {
+    if (!node) return nullptr;
+    DomDocument* doc = node_doc(node);
+    if (!doc) return nullptr;
+    if (node->is_text()) {
+        DomText* t = node->as_text();
+        return (DomNode*)dom_text_from_bytes(doc, t->text, t->length);
+    }
+    if (node->is_element()) {
+        DomElement* e = node->as_element();
+        DomElement* clone = dom_element_create(doc, e->tag_name, e->native_element);
+        if (!clone) return nullptr;
+        clone->id          = e->id;
+        clone->class_names = e->class_names;
+        clone->class_count = e->class_count;
+        clone->tag_id      = e->tag_id;
+        if (deep) {
+            for (DomNode* c = e->first_child; c; c = c->next_sibling) {
+                DomNode* cc = dom_node_clone(c, true);
+                if (cc) ((DomNode*)clone)->append_child(cc);
+            }
+        }
+        return (DomNode*)clone;
+    }
+    return nullptr;
+}
+
+DomText* dom_text_split_at(RadiantState* state, DomText* original, uint32_t offset) {
+    if (!original || !original->parent) return nullptr;
+    uint32_t total = dom_text_utf16_length(original);
+    if (offset > total) return nullptr;
+    DomDocument* doc = node_doc((DomNode*)original);
+    if (!doc) return nullptr;
+
+    uint32_t u8_split = dom_text_utf16_to_utf8(original, offset);
+    size_t left_bytes  = u8_split;
+    size_t right_bytes = original->length - u8_split;
+
+    // Allocate new strings BEFORE mutating original (arena_make_string copies).
+    String* right_str = arena_make_string(doc, original->text + u8_split, right_bytes);
+    String* left_str  = arena_make_string(doc, original->text,            left_bytes);
+    if (!right_str || !left_str) return nullptr;
+
+    DomText* right = dom_text_create_detached(right_str, doc);
+    if (!right) return nullptr;
+
+    // Insert right after original.
+    DomNode* parent = original->parent;
+    DomNode* after  = original->next_sibling;
+    if (after) parent->insert_before((DomNode*)right, after);
+    else       parent->append_child((DomNode*)right);
+
+    // Truncate original.
+    original->native_string = left_str;
+    original->text   = left_str->chars;
+    original->length = left_bytes;
+
+    if (state) dom_mutation_text_split(state, original, right, offset);
+    return right;
+}
+
+// Replace [u16_offset, u16_offset+u16_count) in `t` with `repl_str` (or empty
+// if null), and fire the range envelope.
+static void text_replace_data_str(RadiantState* st, DomText* t,
+                                  uint32_t u16_offset, uint32_t u16_count,
+                                  const char* repl_chars, size_t repl_bytes,
+                                  uint32_t repl_u16_len) {
+    if (!t) return;
+    uint32_t u8_off = dom_text_utf16_to_utf8(t, u16_offset);
+    uint32_t u8_end = dom_text_utf16_to_utf8(t, u16_offset + u16_count);
+    if (u8_end < u8_off) u8_end = u8_off;
+
+    size_t prefix     = u8_off;
+    size_t suffix_len = (t->length > u8_end) ? (t->length - u8_end) : 0;
+    size_t new_len    = prefix + repl_bytes + suffix_len;
+
+    char* buf = (char*)malloc(new_len + 1);
+    if (!buf) return;
+    if (prefix)     memcpy(buf,                      t->text,         prefix);
+    if (repl_bytes) memcpy(buf + prefix,             repl_chars,      repl_bytes);
+    if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
+    buf[new_len] = '\0';
+
+    String* s = arena_make_string(node_doc((DomNode*)t), buf, new_len);
+    free(buf);
+    if (!s) return;
+
+    t->native_string = s;
+    t->text   = s->chars;
+    t->length = new_len;
+
+    if (st) dom_mutation_text_replace_data(st, t, u16_offset, u16_count, repl_u16_len);
+}
+
+// True iff `node` is fully contained in `r` (both endpoints encompass it).
+static bool node_fully_contained(DomNode* node, const DomRange* r) {
+    if (!node || !r) return false;
+    DomBoundary nstart{ node, 0 };
+    DomBoundary nend  { node, dom_node_boundary_length(node) };
+    DomBoundaryOrder so = dom_boundary_compare(&r->start, &nstart);
+    DomBoundaryOrder eo = dom_boundary_compare(&r->end,   &nend);
+    if (so == DOM_BOUNDARY_DISJOINT || eo == DOM_BOUNDARY_DISJOINT) return false;
+    bool start_le = (so == DOM_BOUNDARY_BEFORE || so == DOM_BOUNDARY_EQUAL);
+    bool end_ge   = (eo == DOM_BOUNDARY_AFTER  || eo == DOM_BOUNDARY_EQUAL);
+    return start_le && end_ge;
+}
+
+// Compute (newNode, newOffset) per spec for delete/extract.
+static void compute_post_mutation_boundary(const DomRange* r,
+                                           DomNode** out_node, uint32_t* out_off) {
+    DomNode* sn = r->start.node;
+    DomNode* en = r->end.node;
+    if (is_inclusive_ancestor(sn, en)) {
+        *out_node = sn;
+        *out_off  = r->start.offset;
+        return;
+    }
+    DomNode* ref = sn;
+    while (ref->parent && !is_inclusive_ancestor(ref->parent, en)) {
+        ref = ref->parent;
+    }
+    *out_node = ref->parent;
+    *out_off  = ref->parent ? (dom_node_child_index(ref) + 1) : 0;
+}
+
+// Mode tag for shared subrange algorithm.
+enum RangeOp { ROP_DELETE, ROP_EXTRACT, ROP_CLONE };
+
+static DomElement* range_process_contents(DomRange* r, RangeOp op,
+                                          const char** out_exception);
+
+// Process a partially-contained child whose ancestor chain leads to either
+// the start or the end endpoint. Handles split / clone / move uniformly.
+//
+// `is_left_side` true means this child contains the start endpoint;
+// false means it contains the end endpoint. `target_fragment` is the
+// extracted/cloned fragment we should append to (may be null for DELETE).
+static void process_partially_contained(DomRange* r, RangeOp op,
+                                        DomNode* partial, bool is_left_side,
+                                        DomElement* fragment) {
+    // Build a sub-range for this side.
+    DomRange sub{};
+    sub.state   = r->state;
+    sub.is_live = false;
+    if (is_left_side) {
+        sub.start = r->start;
+        sub.end   = { partial, dom_node_boundary_length(partial) };
+    } else {
+        sub.start = { partial, 0 };
+        sub.end   = r->end;
+    }
+    if (partial->is_text()) {
+        DomText* t = partial->as_text();
+        uint32_t s_off = sub.start.offset;
+        uint32_t e_off = sub.end.offset;
+        uint32_t take_count = (e_off > s_off) ? (e_off - s_off) : 0;
+        // For CLONE / EXTRACT, append a substring text node to fragment.
+        if ((op == ROP_CLONE || op == ROP_EXTRACT) && fragment && take_count > 0) {
+            uint32_t u8_s = dom_text_utf16_to_utf8(t, s_off);
+            uint32_t u8_e = dom_text_utf16_to_utf8(t, e_off);
+            DomDocument* doc = node_doc(partial);
+            if (doc) {
+                DomText* clone = dom_text_from_bytes(doc, t->text + u8_s, u8_e - u8_s);
+                if (clone) ((DomNode*)fragment)->append_child((DomNode*)clone);
+            }
+        }
+        // For DELETE / EXTRACT, mutate the original text.
+        if ((op == ROP_DELETE || op == ROP_EXTRACT) && take_count > 0) {
+            text_replace_data_str(r->state, t, s_off, take_count, "", 0, 0);
+        }
+        return;
+    }
+    // partial is an Element — clone (shallow) and recurse on a sub-range.
+    if (op == ROP_CLONE || op == ROP_EXTRACT) {
+        DomNode* shallow = dom_node_clone(partial, /*deep=*/false);
+        if (!shallow) return;
+        if (fragment) ((DomNode*)fragment)->append_child(shallow);
+        // Recursively build subfragment.
+        const char* sub_exc = nullptr;
+        DomElement* subfrag = range_process_contents(&sub, op, &sub_exc);
+        if (subfrag) {
+            DomNode* c = subfrag->first_child;
+            while (c) {
+                DomNode* next = c->next_sibling;
+                ((DomElement*)subfrag)->remove_child(c);
+                ((DomNode*)shallow)->append_child(c);
+                c = next;
+            }
+        }
+    } else {
+        // Pure DELETE: recurse without a fragment to do mutations only.
+        const char* sub_exc = nullptr;
+        range_process_contents(&sub, ROP_DELETE, &sub_exc);
+    }
+}
+
+// Shared core of delete/extract/clone. For ROP_DELETE returns nullptr.
+static DomElement* range_process_contents(DomRange* r, RangeOp op,
+                                          const char** out_exception) {
+    if (!r || !r->start.node || !r->end.node) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return nullptr;
+    }
+    DomDocument* doc = node_doc(r->start.node);
+    DomElement* fragment = nullptr;
+    if (op != ROP_DELETE) {
+        fragment = dom_document_fragment_create(doc);
+        if (!fragment) {
+            if (out_exception) *out_exception = "InvalidStateError";
+            return nullptr;
+        }
+    }
+    if (dom_range_collapsed(r)) return fragment;
+
+    DomNode*  sn = r->start.node;  uint32_t so = r->start.offset;
+    DomNode*  en = r->end.node;    uint32_t eo = r->end.offset;
+
+    // Single-text fast path.
+    if (sn == en && sn->is_text()) {
+        DomText* t = sn->as_text();
+        uint32_t take = (eo > so) ? (eo - so) : 0;
+        if ((op == ROP_CLONE || op == ROP_EXTRACT) && take > 0) {
+            uint32_t u8_s = dom_text_utf16_to_utf8(t, so);
+            uint32_t u8_e = dom_text_utf16_to_utf8(t, eo);
+            DomText* clone = dom_text_from_bytes(doc, t->text + u8_s, u8_e - u8_s);
+            if (clone) ((DomNode*)fragment)->append_child((DomNode*)clone);
+        }
+        if ((op == ROP_DELETE || op == ROP_EXTRACT) && take > 0) {
+            text_replace_data_str(r->state, t, so, take, "", 0, 0);
+        }
+        if (op != ROP_CLONE) {
+            // Range becomes collapsed at (sn, so).
+            r->start = { sn, so };
+            r->end   = r->start;
+            r->layout_valid = false;
+        }
+        return fragment;
+    }
+
+    DomNode* common = dom_range_common_ancestor(r);
+    if (!common) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return fragment;  // no-op
+    }
+
+    // Determine first/last partially-contained children of `common`.
+    DomNode* first_partial = nullptr;
+    DomNode* last_partial  = nullptr;
+    if (!is_inclusive_ancestor(sn, en)) {
+        DomNode* ref = sn;
+        while (ref && ref->parent != common) ref = ref->parent;
+        first_partial = ref;
+    }
+    if (!is_inclusive_ancestor(en, sn)) {
+        DomNode* ref = en;
+        while (ref && ref->parent != common) ref = ref->parent;
+        last_partial = ref;
+    }
+
+    // Compute new boundary BEFORE doing any mutation.
+    DomNode* new_node = nullptr;  uint32_t new_off = 0;
+    if (op != ROP_CLONE) compute_post_mutation_boundary(r, &new_node, &new_off);
+
+    // Collect fully-contained children (between first_partial and last_partial,
+    // exclusive of those, but also including any siblings if first/last is
+    // null — i.e. the corresponding endpoint is at common).
+    if (common->is_element()) {
+        DomElement* parent = common->as_element();
+        // Process first partial.
+        if (first_partial) {
+            process_partially_contained(r, op, first_partial, /*left=*/true, fragment);
+        }
+        // Walk siblings between first_partial (exclusive) and last_partial (exclusive).
+        DomNode* c = first_partial ? first_partial->next_sibling : parent->first_child;
+        while (c && c != last_partial) {
+            DomNode* next = c->next_sibling;
+            if (node_fully_contained(c, r)) {
+                if (op == ROP_CLONE) {
+                    DomNode* clone = dom_node_clone(c, /*deep=*/true);
+                    if (clone && fragment) ((DomNode*)fragment)->append_child(clone);
+                } else if (op == ROP_EXTRACT) {
+                    dom_mutation_pre_remove(r->state, c);
+                    parent->remove_child(c);
+                    if (fragment) ((DomNode*)fragment)->append_child(c);
+                } else {
+                    dom_mutation_pre_remove(r->state, c);
+                    parent->remove_child(c);
+                }
+            }
+            c = next;
+        }
+        // Process last partial.
+        if (last_partial) {
+            process_partially_contained(r, op, last_partial, /*left=*/false, fragment);
+        }
+    }
+
+    // Update range boundary for delete/extract.
+    if (op != ROP_CLONE) {
+        r->start = { new_node, new_off };
+        r->end   = r->start;
+        r->layout_valid = false;
+    }
+    return fragment;
+}
+
+bool dom_range_delete_contents(DomRange* r, const char** out_exception) {
+    range_process_contents(r, ROP_DELETE, out_exception);
+    return true;
+}
+
+DomElement* dom_range_extract_contents(DomRange* r, const char** out_exception) {
+    return range_process_contents(r, ROP_EXTRACT, out_exception);
+}
+
+DomElement* dom_range_clone_contents(DomRange* r, const char** out_exception) {
+    return range_process_contents(r, ROP_CLONE, out_exception);
+}
+
+bool dom_range_insert_node(DomRange* r, DomNode* node, const char** out_exception) {
+    if (!r || !node) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+    DomNode* sn = r->start.node;
+    if (!sn) { if (out_exception) *out_exception = "InvalidStateError"; return false; }
+    if (sn == node) { if (out_exception) *out_exception = "HierarchyRequestError"; return false; }
+    // Text starts must have a parent for insertion to make sense.
+    if (sn->is_text() && !sn->parent) {
+        if (out_exception) *out_exception = "HierarchyRequestError";
+        return false;
+    }
+
+    // Determine reference + parent.
+    DomNode* parent;
+    DomNode* reference;
+    uint32_t so = r->start.offset;
+    if (sn->is_text()) {
+        DomText* t = sn->as_text();
+        // Split if offset is interior; if at 0 use t itself, if at end use next.
+        uint32_t total = dom_text_utf16_length(t);
+        if (so > 0 && so < total) {
+            DomText* right = dom_text_split_at(r->state, t, so);
+            (void)right;
+        }
+        // After split (or no split), reference is sn->next_sibling if so==total, else sn.
+        reference = (so == 0) ? sn : sn->next_sibling;
+        parent    = sn->parent;
+    } else {
+        parent = sn;
+        // Reference = child at index so (or null = append).
+        reference = nullptr;
+        DomNode* c = sn->is_element() ? sn->as_element()->first_child : nullptr;
+        for (uint32_t i = 0; c && i < so; i++) c = c->next_sibling;
+        reference = c;
+    }
+    if (!parent) { if (out_exception) *out_exception = "HierarchyRequestError"; return false; }
+
+    // Detach node from its current parent.
+    if (node->parent) {
+        dom_mutation_pre_remove(r->state, node);
+        node->parent->remove_child(node);
+    }
+
+    // If node is a DocumentFragment, move its children before reference.
+    bool is_frag = node->is_element() &&
+                   node->as_element()->tag_name &&
+                   strcmp(node->as_element()->tag_name, "#document-fragment") == 0;
+    if (is_frag) {
+        DomElement* frag = node->as_element();
+        DomNode* c = frag->first_child;
+        while (c) {
+            DomNode* next = c->next_sibling;
+            frag->remove_child(c);
+            if (reference) parent->insert_before(c, reference);
+            else           parent->append_child(c);
+            dom_mutation_post_insert(r->state, parent, c);
+            c = next;
+        }
+    } else {
+        if (reference) parent->insert_before(node, reference);
+        else           parent->append_child(node);
+        dom_mutation_post_insert(r->state, parent, node);
+    }
+    return true;
+}
+
+bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_exception) {
+    if (!r || !node) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+    // Reject Document / DocumentType / DocumentFragment per spec.
+    if (node->is_element()) {
+        const char* tag = node->as_element()->tag_name;
+        if (tag && (strcmp(tag, "#document") == 0 ||
+                    strcmp(tag, "#document-fragment") == 0 ||
+                    strcmp(tag, "#doctype") == 0)) {
+            if (out_exception) *out_exception = "InvalidNodeTypeError";
+            return false;
+        }
+    } else if (!node->is_element()) {
+        if (out_exception) *out_exception = "InvalidNodeTypeError";
+        return false;
+    }
+    // Reject if range partially contains a non-Text node. We check each
+    // partially-contained child of common ancestor.
+    DomNode* sn = r->start.node;
+    DomNode* en = r->end.node;
+    DomNode* common = dom_range_common_ancestor(r);
+    if (common) {
+        if (!is_inclusive_ancestor(sn, en)) {
+            DomNode* ref = sn;
+            while (ref && ref->parent != common) ref = ref->parent;
+            if (ref && ref->is_element()) {
+                if (out_exception) *out_exception = "InvalidStateError";
+                return false;
+            }
+        }
+        if (!is_inclusive_ancestor(en, sn)) {
+            DomNode* ref = en;
+            while (ref && ref->parent != common) ref = ref->parent;
+            if (ref && ref->is_element()) {
+                if (out_exception) *out_exception = "InvalidStateError";
+                return false;
+            }
+        }
+    }
+
+    // Extract contents into a fragment.
+    const char* exc = nullptr;
+    DomElement* frag = dom_range_extract_contents(r, &exc);
+    if (exc) { if (out_exception) *out_exception = exc; return false; }
+
+    // Detach `node` and clear its children.
+    if (node->parent) {
+        dom_mutation_pre_remove(r->state, node);
+        node->parent->remove_child(node);
+    }
+    if (node->is_element()) {
+        DomElement* en_el = node->as_element();
+        DomNode* c = en_el->first_child;
+        while (c) {
+            DomNode* next = c->next_sibling;
+            dom_mutation_pre_remove(r->state, c);
+            en_el->remove_child(c);
+            c = next;
+        }
+    }
+
+    // Insert `node` at the range start.
+    if (!dom_range_insert_node(r, node, out_exception)) return false;
+
+    // Append fragment children to node.
+    if (frag && node->is_element()) {
+        DomElement* node_el = node->as_element();
+        DomNode* c = frag->first_child;
+        while (c) {
+            DomNode* next = c->next_sibling;
+            frag->remove_child(c);
+            ((DomNode*)node_el)->append_child(c);
+            dom_mutation_post_insert(r->state, (DomNode*)node_el, c);
+            c = next;
+        }
+    }
+
+    // Select node — set range to wrap it.
+    DomNode* parent = node->parent;
+    if (parent) {
+        uint32_t idx = dom_node_child_index(node);
+        r->start = { parent, idx };
+        r->end   = { parent, idx + 1 };
+        r->layout_valid = false;
+    }
+    return true;
+}
+
+void dom_selection_delete_from_document(DomSelection* s) {
+    if (!s) return;
+    for (uint32_t i = 0; i < s->range_count; i++) {
+        if (s->ranges[i]) {
+            const char* exc = nullptr;
+            dom_range_delete_contents(s->ranges[i], &exc);
+        }
+    }
+}

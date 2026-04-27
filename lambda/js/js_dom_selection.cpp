@@ -345,6 +345,54 @@ extern "C" Item js_range_to_string(void) {
     return make_str("");
 }
 
+// Phase 4 — mutation methods
+extern "C" Item js_range_delete_contents(void) {
+    DomRange* r = range_from_this(); if (!r) return make_undef();
+    const char* exc = nullptr;
+    if (!dom_range_delete_contents(r, &exc)) {
+        throw_from_dom_exc(exc, "deleteContents failed");
+    }
+    return make_undef();
+}
+
+extern "C" Item js_range_extract_contents(void) {
+    DomRange* r = range_from_this(); if (!r) return ItemNull;
+    const char* exc = nullptr;
+    DomElement* frag = dom_range_extract_contents(r, &exc);
+    if (exc && !frag) { throw_from_dom_exc(exc, "extractContents failed"); return ItemNull; }
+    return frag ? js_dom_wrap_element(frag) : ItemNull;
+}
+
+extern "C" Item js_range_clone_contents(void) {
+    DomRange* r = range_from_this(); if (!r) return ItemNull;
+    const char* exc = nullptr;
+    DomElement* frag = dom_range_clone_contents(r, &exc);
+    if (exc && !frag) { throw_from_dom_exc(exc, "cloneContents failed"); return ItemNull; }
+    return frag ? js_dom_wrap_element(frag) : ItemNull;
+}
+
+extern "C" Item js_range_insert_node(Item node_v) {
+    DomRange* r = range_from_this(); if (!r) return make_undef();
+    DomNode* n = node_arg(node_v);
+    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    const char* exc = nullptr;
+    if (!dom_range_insert_node(r, n, &exc)) {
+        throw_from_dom_exc(exc, "insertNode failed");
+    }
+    return make_undef();
+}
+
+extern "C" Item js_range_surround_contents(Item node_v) {
+    DomRange* r = range_from_this(); if (!r) return make_undef();
+    DomNode* n = node_arg(node_v);
+    if (!n) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    const char* exc = nullptr;
+    if (!dom_range_surround_contents(r, n, &exc)) {
+        throw_from_dom_exc(exc, "surroundContents failed");
+    }
+    return make_undef();
+}
+
 // ============================================================================
 // Range constructor / property dispatch
 // ============================================================================
@@ -376,6 +424,8 @@ struct RangeMethods {
     Item collapse, selectNode, selectNodeContents;
     Item cloneRange, compareBoundaryPoints, comparePoint;
     Item isPointInRange, intersectsNode, detach, toString;
+    Item deleteContents, extractContents, cloneContents;
+    Item insertNode, surroundContents;
     bool inited;
 };
 static RangeMethods _range_methods = {};
@@ -398,6 +448,11 @@ static void init_range_methods() {
     _range_methods.intersectsNode        = js_new_function((void*)js_range_intersects_node, 1);
     _range_methods.detach                = js_new_function((void*)js_range_detach, 0);
     _range_methods.toString              = js_new_function((void*)js_range_to_string, 0);
+    _range_methods.deleteContents        = js_new_function((void*)js_range_delete_contents, 0);
+    _range_methods.extractContents       = js_new_function((void*)js_range_extract_contents, 0);
+    _range_methods.cloneContents         = js_new_function((void*)js_range_clone_contents, 0);
+    _range_methods.insertNode            = js_new_function((void*)js_range_insert_node, 1);
+    _range_methods.surroundContents      = js_new_function((void*)js_range_surround_contents, 1);
     _range_methods.inited = true;
 }
 
@@ -446,6 +501,11 @@ extern "C" Item js_dom_range_get_property(Item obj, Item key) {
     if (strcmp(p, "intersectsNode") == 0)        return _range_methods.intersectsNode;
     if (strcmp(p, "detach") == 0)                return _range_methods.detach;
     if (strcmp(p, "toString") == 0)              return _range_methods.toString;
+    if (strcmp(p, "deleteContents") == 0)        return _range_methods.deleteContents;
+    if (strcmp(p, "extractContents") == 0)       return _range_methods.extractContents;
+    if (strcmp(p, "cloneContents") == 0)         return _range_methods.cloneContents;
+    if (strcmp(p, "insertNode") == 0)            return _range_methods.insertNode;
+    if (strcmp(p, "surroundContents") == 0)      return _range_methods.surroundContents;
 
     return ItemNull;
 }
@@ -593,7 +653,9 @@ extern "C" Item js_selection_contains_node(Item node_v, Item allow_partial_v) {
 }
 
 extern "C" Item js_selection_delete_from_document(void) {
-    // Phase 2: stub — full impl requires DOM mutation engine.
+    DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    dom_selection_delete_from_document(s);
+    selection_sync_props(js_get_this(), s);
     return make_undef();
 }
 

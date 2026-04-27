@@ -37,6 +37,9 @@ extern "C" Arena* dom_range_state_arena(RadiantState* s) {
 extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* s) {
     return &reinterpret_cast<FakeState*>(s)->live_ranges;
 }
+extern "C" struct DomSelection* dom_range_state_selection(RadiantState*) {
+    return nullptr;  // tests don't exercise selection-resync paths
+}
 
 // ============================================================================
 // Test fixture: pool + arena + a synthetic <div><span>"hello"</span><b/></div>
@@ -47,6 +50,7 @@ protected:
     Arena* arena = nullptr;
     FakeState fake_state{};
     RadiantState* state = nullptr;
+    DomDocument doc_storage{};
 
     DomElement* div = nullptr;
     DomElement* span = nullptr;
@@ -63,6 +67,8 @@ protected:
         fake_state.arena = arena;
         fake_state.live_ranges = nullptr;
         state = reinterpret_cast<RadiantState*>(&fake_state);
+        doc_storage.pool = pool;
+        doc_storage.arena = arena;
 
         div   = make_element();
         span  = make_element();
@@ -90,7 +96,9 @@ protected:
 
     // Create a minimally-initialized DomElement.
     DomElement* make_element() {
-        return new DomElement();  // default ctor zeros all fields we care about
+        DomElement* e = new DomElement();  // default ctor zeros all fields we care about
+        e->doc = &doc_storage;
+        return e;
     }
 
     // Create a minimally-initialized DomText with a literal C string. The
@@ -398,3 +406,389 @@ TEST_F(DomRangeTest, RemoveAllRangesEmptiesSelection) {
     EXPECT_TRUE(dom_selection_is_collapsed(s));
     EXPECT_STREQ(dom_selection_type(s), "None");
 }
+
+// ============================================================================
+// Phase 3: Mutation envelope live-range adjustments (WHATWG DOM §5.5/§5.3)
+// ============================================================================
+
+class DomMutationTest : public DomRangeTest {
+protected:
+    DomElement* p = nullptr;
+    DomElement* a = nullptr;
+    DomElement* c = nullptr;
+    DomText*    t1 = nullptr;
+    DomText*    t2 = nullptr;
+
+    void SetUp() override {
+        DomRangeTest::SetUp();
+        // build:  p [ a, "hello", c ]   (and reuse `world` etc as needed)
+        p  = make_element();
+        a  = make_element();
+        c  = make_element();
+        t1 = make_text("hello", 5);
+        t2 = make_text("XYZ",   3);
+        ASSERT_TRUE(p->append_child(a));
+        ASSERT_TRUE(p->append_child(t1));
+        ASSERT_TRUE(p->append_child(c));
+    }
+
+    void TearDown() override {
+        delete t2;
+        delete t1;
+        delete c;
+        delete a;
+        delete p;
+        DomRangeTest::TearDown();
+    }
+};
+
+// pre_remove: endpoint inside removed subtree collapses to (parent, index)
+TEST_F(DomMutationTest, PreRemoveCollapsesEndpointInsideRemovedSubtree) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t1, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, t1, 4, &exc));
+
+    dom_mutation_pre_remove(state, t1);
+    p->remove_child(t1);
+
+    // Both endpoints should now point at (p, 1) — index where t1 used to be.
+    EXPECT_EQ(r->start.node, (DomNode*)p);
+    EXPECT_EQ(r->start.offset, 1u);
+    EXPECT_EQ(r->end.node,   (DomNode*)p);
+    EXPECT_EQ(r->end.offset, 1u);
+    EXPECT_TRUE(dom_range_collapsed(r));
+}
+
+// pre_remove: endpoint at (parent, off>index) decrements
+TEST_F(DomMutationTest, PreRemoveDecrementsLaterSiblingOffsets) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, p, 2, &exc));   // between t1 and c
+    ASSERT_TRUE(dom_range_set_end  (r, p, 3, &exc));   // after c
+
+    dom_mutation_pre_remove(state, t1);                // remove index 1
+    p->remove_child(t1);
+
+    EXPECT_EQ(r->start.offset, 1u);
+    EXPECT_EQ(r->end.offset,   2u);
+}
+
+// pre_remove: endpoint at (parent, off<=index) is unchanged
+TEST_F(DomMutationTest, PreRemoveDoesNotChangeEarlierSiblingOffsets) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, p, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, p, 1, &exc));   // == index, untouched
+
+    dom_mutation_pre_remove(state, t1);                // index 1
+    p->remove_child(t1);
+
+    EXPECT_EQ(r->start.offset, 0u);
+    EXPECT_EQ(r->end.offset,   1u);
+}
+
+// post_insert: endpoint at (parent, off>index) increments (strict >)
+TEST_F(DomMutationTest, PostInsertIncrementsLaterSiblingOffsets) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, p, 2, &exc));   // after t1
+    ASSERT_TRUE(dom_range_set_end  (r, p, 3, &exc));   // after c
+
+    // Insert t2 at index 1 (between a and t1) by detaching first then linking.
+    ASSERT_TRUE(p->insert_before(t2, t1));
+    dom_mutation_post_insert(state, p, t2);
+
+    EXPECT_EQ(r->start.offset, 3u);
+    EXPECT_EQ(r->end.offset,   4u);
+}
+
+// post_insert: endpoint at (parent, off==index) is unchanged (strict >)
+TEST_F(DomMutationTest, PostInsertDoesNotMoveEqualOffset) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, p, 1, &exc));   // == insertion index
+    ASSERT_TRUE(dom_range_set_end  (r, p, 1, &exc));
+
+    ASSERT_TRUE(p->insert_before(t2, t1));
+    dom_mutation_post_insert(state, p, t2);
+
+    EXPECT_EQ(r->start.offset, 1u);
+    EXPECT_EQ(r->end.offset,   1u);
+}
+
+// text replaceData: endpoint before the edit window is unchanged
+TEST_F(DomMutationTest, TextReplaceDataLeavesEarlierEndpointAlone) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t1, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, t1, 1, &exc));
+
+    // Edit window: offset=2, count=2, replacement_len=5
+    dom_mutation_text_replace_data(state, t1, 2, 2, 5);
+    EXPECT_EQ(r->start.offset, 1u);
+    EXPECT_EQ(r->end.offset,   1u);
+}
+
+// text replaceData: endpoint within the deleted range clamps to offset+replLen
+TEST_F(DomMutationTest, TextReplaceDataClampsEndpointInsideEditWindow) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t1, 3, &exc));   // inside (2, 4]
+    ASSERT_TRUE(dom_range_set_end  (r, t1, 4, &exc));   // == offset+count
+
+    // Edit window: offset=2, count=2, replacement_len=5  → both clamp to 7
+    dom_mutation_text_replace_data(state, t1, 2, 2, 5);
+    EXPECT_EQ(r->start.offset, 7u);
+    EXPECT_EQ(r->end.offset,   7u);
+}
+
+// text replaceData: endpoint past the edit window shifts by (replLen - count)
+TEST_F(DomMutationTest, TextReplaceDataShiftsLaterEndpointByDelta) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t1, 5, &exc));   // > offset+count
+
+    dom_mutation_text_replace_data(state, t1, 2, 2, 5); // delta = +3
+    EXPECT_EQ(r->start.offset, 8u);
+}
+
+// text split: endpoints in original past offset move to new node, then sibling
+// insertion is accounted for.
+TEST_F(DomMutationTest, TextSplitMovesLaterEndpointsToNewNode) {
+    // Range spans across the split point: starts at t1[1], ends at t1[4]
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t1, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, t1, 4, &exc));
+
+    // Simulate a split at offset 2 into a new text node which is inserted as
+    // the next sibling of t1 (i.e. into p at index 2). t2 already exists.
+    ASSERT_TRUE(p->insert_before(t2, c));   // t2 placed at index 2
+
+    dom_mutation_text_split(state, t1, t2, /*offset=*/2);
+
+    // start (offset 1) unchanged
+    EXPECT_EQ(r->start.node,   (DomNode*)t1);
+    EXPECT_EQ(r->start.offset, 1u);
+    // end (offset 4) moves to (t2, 4-2 = 2)
+    EXPECT_EQ(r->end.node,   (DomNode*)t2);
+    EXPECT_EQ(r->end.offset, 2u);
+}
+
+// text merge (normalize): endpoints inside `next` retarget to `prev`.
+TEST_F(DomMutationTest, TextMergeRetargetsEndpointsToPrev) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, t2, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, t2, 3, &exc));
+
+    // t1 has utf16 length 5; merge t2 into t1 at offset 5.
+    dom_mutation_text_merge(state, t1, t2, /*prev_u16_len=*/5);
+
+    EXPECT_EQ(r->start.node,   (DomNode*)t1);
+    EXPECT_EQ(r->start.offset, 5u);
+    EXPECT_EQ(r->end.node,     (DomNode*)t1);
+    EXPECT_EQ(r->end.offset,   8u);
+}
+
+// ============================================================================
+// Phase 4: Range mutation methods
+// ============================================================================
+
+// Helper: count children of an element.
+static uint32_t child_count(DomElement* e) {
+    uint32_t n = 0;
+    for (DomNode* c = e->first_child; c; c = c->next_sibling) n++;
+    return n;
+}
+
+TEST_F(DomRangeTest, DocumentFragmentCreate) {
+    DomElement* frag = dom_document_fragment_create(&doc_storage);
+    ASSERT_NE(frag, nullptr);
+    EXPECT_TRUE(frag->is_element());
+    EXPECT_STREQ(frag->tag_name, "#document-fragment");
+    EXPECT_EQ(child_count(frag), 0u);
+}
+
+TEST_F(DomRangeTest, NodeCloneShallowText) {
+    DomNode* clone = dom_node_clone(hello, /*deep=*/false);
+    ASSERT_NE(clone, nullptr);
+    ASSERT_TRUE(clone->is_text());
+    DomText* ct = clone->as_text();
+    EXPECT_EQ(ct->length, 5u);
+    EXPECT_EQ(memcmp(ct->text, "hello", 5), 0);
+    EXPECT_EQ(ct->parent, nullptr);
+}
+
+TEST_F(DomRangeTest, NodeCloneDeepElement) {
+    span->tag_name = "span";
+    DomNode* clone = dom_node_clone(span, /*deep=*/true);
+    ASSERT_NE(clone, nullptr);
+    ASSERT_TRUE(clone->is_element());
+    DomElement* ce = clone->as_element();
+    EXPECT_EQ(child_count(ce), 1u);
+    ASSERT_NE(ce->first_child, nullptr);
+    EXPECT_TRUE(ce->first_child->is_text());
+}
+
+TEST_F(DomRangeTest, DeleteContentsCollapsedIsNoOp) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 2, &exc));
+    EXPECT_TRUE(dom_range_delete_contents(r, &exc));
+    EXPECT_EQ(hello->length, 5u);
+}
+
+TEST_F(DomRangeTest, DeleteContentsWithinSingleText) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
+    EXPECT_TRUE(dom_range_delete_contents(r, &exc));
+    // "hello" -> "ho"
+    EXPECT_EQ(hello->length, 2u);
+    EXPECT_EQ(memcmp(hello->text, "ho", 2), 0);
+    // range collapsed at (hello,1)
+    EXPECT_EQ(r->start.node, (DomNode*)hello);
+    EXPECT_EQ(r->start.offset, 1u);
+    EXPECT_EQ(r->end.node, (DomNode*)hello);
+    EXPECT_EQ(r->end.offset, 1u);
+}
+
+TEST_F(DomRangeTest, ExtractContentsFromSingleText) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
+    DomElement* frag = dom_range_extract_contents(r, &exc);
+    ASSERT_NE(frag, nullptr);
+    EXPECT_STREQ(frag->tag_name, "#document-fragment");
+    // fragment should contain a text node "ell"
+    ASSERT_NE(frag->first_child, nullptr);
+    ASSERT_TRUE(frag->first_child->is_text());
+    DomText* ft = frag->first_child->as_text();
+    EXPECT_EQ(ft->length, 3u);
+    EXPECT_EQ(memcmp(ft->text, "ell", 3), 0);
+    // source mutated to "ho"
+    EXPECT_EQ(hello->length, 2u);
+    EXPECT_EQ(memcmp(hello->text, "ho", 2), 0);
+}
+
+TEST_F(DomRangeTest, CloneContentsLeavesSourceIntact) {
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
+    DomElement* frag = dom_range_clone_contents(r, &exc);
+    ASSERT_NE(frag, nullptr);
+    ASSERT_NE(frag->first_child, nullptr);
+    DomText* ft = frag->first_child->as_text();
+    EXPECT_EQ(ft->length, 3u);
+    EXPECT_EQ(memcmp(ft->text, "ell", 3), 0);
+    // source untouched
+    EXPECT_EQ(hello->length, 5u);
+    EXPECT_EQ(memcmp(hello->text, "hello", 5), 0);
+}
+
+TEST_F(DomRangeTest, ExtractContentsAcrossElements) {
+    // range from div.[0] to div.[2] -> extracts everything (span+b)
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, div, 0, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, div, 2, &exc));
+    DomElement* frag = dom_range_extract_contents(r, &exc);
+    ASSERT_NE(frag, nullptr);
+    EXPECT_EQ(child_count(frag), 2u);
+    EXPECT_EQ(child_count(div), 0u);
+    // Detach: span/b moved into frag and our raw pointers no longer own them via div
+    div->first_child = nullptr;
+    div->last_child  = nullptr;
+}
+
+TEST_F(DomRangeTest, InsertNodeAtElementBoundary) {
+    DomElement* extra = make_element();
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, div, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, div, 1, &exc));
+    EXPECT_TRUE(dom_range_insert_node(r, extra, &exc));
+    // div now: [span, extra, b]
+    EXPECT_EQ(child_count(div), 3u);
+    EXPECT_EQ(div->first_child, (DomNode*)span);
+    EXPECT_EQ(span->next_sibling, (DomNode*)extra);
+    EXPECT_EQ(extra->next_sibling, (DomNode*)b);
+}
+
+TEST_F(DomRangeTest, InsertNodeSplitsTextAtMidOffset) {
+    // insert <b> at offset 2 inside hello: should split hello -> "he" + "llo"
+    // and place a new node between them inside span.
+    DomElement* mark = make_element();
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 2, &exc));
+    EXPECT_TRUE(dom_range_insert_node(r, mark, &exc));
+    // hello truncated to "he"
+    EXPECT_EQ(hello->length, 2u);
+    EXPECT_EQ(memcmp(hello->text, "he", 2), 0);
+    // span now has 3 children: hello, mark, new_text("llo")
+    EXPECT_EQ(child_count(span), 3u);
+    EXPECT_EQ(span->first_child, (DomNode*)hello);
+    EXPECT_EQ(hello->next_sibling, (DomNode*)mark);
+    DomNode* tail = mark->next_sibling;
+    ASSERT_NE(tail, nullptr);
+    ASSERT_TRUE(tail->is_text());
+    DomText* tt = tail->as_text();
+    EXPECT_EQ(tt->length, 3u);
+    EXPECT_EQ(memcmp(tt->text, "llo", 3), 0);
+}
+
+TEST_F(DomRangeTest, SurroundContentsWrapsTextSubrange) {
+    DomElement* wrap = make_element();
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 1, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, hello, 4, &exc));
+    EXPECT_TRUE(dom_range_surround_contents(r, wrap, &exc));
+    // span should now contain: hello"h", wrap[ "ell" ], hello-tail"o"
+    EXPECT_EQ(child_count(span), 3u);
+    // wrap got the "ell" text
+    EXPECT_EQ(child_count(wrap), 1u);
+    ASSERT_NE(wrap->first_child, nullptr);
+    EXPECT_TRUE(wrap->first_child->is_text());
+}
+
+TEST_F(DomRangeTest, SurroundContentsRejectsPartialElement) {
+    // range from hello-mid to outside span: partial non-text containment
+    DomElement* wrap = make_element();
+    DomRange* r = dom_range_create(state);
+    dom_range_link_into_state(state, r);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(r, hello, 2, &exc));
+    ASSERT_TRUE(dom_range_set_end  (r, div, 2, &exc));
+    exc = nullptr;
+    EXPECT_FALSE(dom_range_surround_contents(r, wrap, &exc));
+    ASSERT_NE(exc, nullptr);
+    EXPECT_STREQ(exc, "InvalidStateError");
+}
+

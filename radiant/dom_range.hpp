@@ -283,6 +283,57 @@ void dom_mutation_text_split(RadiantState* state, DomText* original,
 void dom_mutation_text_merge(RadiantState* state, DomText* prev,
                              DomText* next, uint32_t prev_u16_len);
 
+// ============================================================================
+// Phase 4 — Range mutation methods (WHATWG DOM §5.5)
+//
+// Each function returns true on success. On failure, *out_exception (if
+// non-null) is set to a stable DOMException name string ("InvalidStateError",
+// "HierarchyRequestError", "InvalidNodeTypeError", etc.).
+// ============================================================================
+
+// Build a new DocumentFragment — a `DomElement` whose tag_name is
+// "#document-fragment". Belongs to `doc`'s arena. Returns nullptr if doc
+// is null. Used as the return value of clone/extractContents.
+struct DomElement* dom_document_fragment_create(struct DomDocument* doc);
+
+// Clone a node. `deep`==true clones descendants too. Cloned subtree is
+// detached (no parent) and lives in `node`'s document arena.
+struct DomNode* dom_node_clone(struct DomNode* node, bool deep);
+
+// Split a DomText at UTF-16 `offset`. Returns the newly-created right-half
+// text node, which is inserted as `original`'s next sibling. Both nodes
+// share the parent of `original` afterwards. Internally:
+//   1. allocates a new DomText for the right half;
+//   2. inserts it as `original`'s next sibling;
+//   3. truncates `original`'s data to `offset`;
+//   4. fires `dom_mutation_text_split` envelope.
+// Returns nullptr if `original` has no parent or `offset` is out of bounds.
+struct DomText* dom_text_split_at(RadiantState* state, struct DomText* original,
+                                  uint32_t offset);
+
+// Range methods —---------------------------------------------------------
+bool dom_range_delete_contents(DomRange* r, const char** out_exception);
+
+// Returns the new DocumentFragment (or nullptr on failure).
+struct DomElement* dom_range_extract_contents(DomRange* r,
+                                              const char** out_exception);
+struct DomElement* dom_range_clone_contents (DomRange* r,
+                                              const char** out_exception);
+
+// Insert `node` at the start of `r`. `node` is detached from its current
+// parent first. After insertion, the range is updated per spec.
+bool dom_range_insert_node(DomRange* r, struct DomNode* node,
+                           const char** out_exception);
+
+// surroundContents(node): wrap range contents inside `node`. `node` must be
+// childless on entry. Throws InvalidStateError if range partially contains
+// non-Text nodes.
+bool dom_range_surround_contents(DomRange* r, struct DomNode* node,
+                                 const char** out_exception);
+
+// Selection.deleteFromDocument — delete the contents of every range.
+void dom_selection_delete_from_document(DomSelection* s);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
