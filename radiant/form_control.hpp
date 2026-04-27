@@ -1,5 +1,7 @@
 #pragma once
 #include "../lambda/input/css/css_value.hpp"
+#include <string.h>      // strcmp used by inline get_input_control_type
+#include <stdlib.h>      // free used in destructor
 
 /**
  * Form Control Support for Radiant
@@ -149,6 +151,26 @@ struct FormControlProp {
     float flex_basis;
     int flex_basis_is_percent : 1;
 
+    // ------------------------------------------------------------------
+    // Text-control selection state (input text-types and textarea only)
+    //   - current_value:  mutable user-edited value (UTF-8). When non-null
+    //     this is the live `.value` IDL attribute. nullptr ⇒ fall back to
+    //     `value` HTML attribute (for input) or text content (for textarea).
+    //     Heap-allocated via malloc/realloc; freed in destructor.
+    //   - selection_start/end:  UTF-16 code-unit offsets into the value.
+    //   - selection_direction:  0=none, 1=forward, 2=backward.
+    //   - tc_initialized: lazy-init flag (selection set to (len,len) on
+    //     first access per HTML spec default).
+    // See vibe/radiant/Radiant_Design_Selection.md §8.
+    // ------------------------------------------------------------------
+    char*    current_value;
+    uint32_t current_value_len;       // UTF-8 byte length
+    uint32_t current_value_u16_len;   // cached UTF-16 length
+    uint32_t selection_start;         // UTF-16 code units
+    uint32_t selection_end;           // UTF-16 code units
+    uint8_t  selection_direction;     // 0=none, 1=forward, 2=backward
+    uint8_t  tc_initialized : 1;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -158,7 +180,14 @@ struct FormControlProp {
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
         dropdown_open(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
         intrinsic_width(0), intrinsic_height(0),
-        flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0) {}
+        flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
+        current_value(nullptr), current_value_len(0), current_value_u16_len(0),
+        selection_start(0), selection_end(0), selection_direction(0),
+        tc_initialized(0) {}
+
+    ~FormControlProp() {
+        if (current_value) { free(current_value); current_value = nullptr; }
+    }
 };
 
 // Helper functions

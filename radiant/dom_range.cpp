@@ -1501,7 +1501,37 @@ void dom_selection_delete_from_document(DomSelection* s) {
 // ============================================================================
 
 // Walk to the next text node in document order following `n` (skipping `n`).
-static DomText* next_text_after(DomNode* n) {
+static DomText* next_text_after(DomNode* n);
+static DomText* prev_text_before(DomNode* n);
+
+// True if `t` lives inside an element whose contents are not user-selectable
+// (script, style, head, title, noscript, template, iframe). Selection.modify
+// must skip text in these — otherwise `move backward by word` from the body
+// can wander into <script> source.
+static bool is_in_non_selectable_subtree(const DomText* t) {
+    if (!t) return false;
+    for (DomNode* p = t->parent; p; p = p->parent) {
+        if (!p->is_element()) continue;
+        const char* tag = p->as_element()->tag_name;
+        if (!tag) continue;
+        if (strcasecmp(tag, "script") == 0 ||
+            strcasecmp(tag, "style") == 0 ||
+            strcasecmp(tag, "head") == 0 ||
+            strcasecmp(tag, "title") == 0 ||
+            strcasecmp(tag, "noscript") == 0 ||
+            strcasecmp(tag, "template") == 0 ||
+            strcasecmp(tag, "iframe") == 0 ||
+            strcasecmp(tag, "textarea") == 0 ||
+            strcasecmp(tag, "input") == 0 ||
+            strcasecmp(tag, "select") == 0 ||
+            strcasecmp(tag, "button") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static DomText* next_text_after_impl(DomNode* n) {
     if (!n) return nullptr;
     // descend into right-siblings/their subtrees, then ascend
     DomNode* cur = n;
@@ -1528,8 +1558,16 @@ static DomText* next_text_after(DomNode* n) {
     return nullptr;
 }
 
+static DomText* next_text_after(DomNode* n) {
+    DomText* t = next_text_after_impl(n);
+    while (t && is_in_non_selectable_subtree(t)) {
+        t = next_text_after_impl((DomNode*)t);
+    }
+    return t;
+}
+
 // Walk to the previous text node in document order preceding `n` (skipping `n`).
-static DomText* prev_text_before(DomNode* n) {
+static DomText* prev_text_before_impl(DomNode* n) {
     if (!n) return nullptr;
     DomNode* cur = n;
     while (cur) {
@@ -1551,6 +1589,14 @@ static DomText* prev_text_before(DomNode* n) {
         cur = cur->parent;
     }
     return nullptr;
+}
+
+static DomText* prev_text_before(DomNode* n) {
+    DomText* t = prev_text_before_impl(n);
+    while (t && is_in_non_selectable_subtree(t)) {
+        t = prev_text_before_impl((DomNode*)t);
+    }
+    return t;
 }
 
 // Find the leftmost text descendant inside `n` (or `n` itself if it is text),
@@ -1830,6 +1876,29 @@ static bool cp_is_wordlike(uint32_t cp) {
     return true;  // treat all non-ASCII as word characters
 }
 
+// Coarse Unicode "script class" used only to detect script transitions
+// inside a run of word-like codepoints. Per UAX #29, transitions between
+// scripts (e.g. Hangul -> Latin) constitute a word boundary.
+//   0 = ASCII letter/digit/underscore
+//   1 = Latin-1 supplement letters / Latin Extended (U+0080-U+024F)
+//   2 = CJK (Hiragana, Katakana, Hangul, Han) — large lumped class
+//   3 = anything else non-ASCII
+static int cp_script_class(uint32_t cp) {
+    if (cp < 0x80) return 0;
+    if (cp < 0x0250) return 1;
+    // Hiragana / Katakana
+    if (cp >= 0x3040 && cp <= 0x30FF) return 2;
+    // CJK Unified Ideographs (BMP) + Compat
+    if (cp >= 0x3400 && cp <= 0x9FFF) return 2;
+    if (cp >= 0xF900 && cp <= 0xFAFF) return 2;
+    // Hangul Jamo + Hangul Syllables
+    if (cp >= 0x1100 && cp <= 0x11FF) return 2;
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return 2;
+    // Halfwidth / Fullwidth (treat as CJK-context)
+    if (cp >= 0xFF00 && cp <= 0xFFEF) return 2;
+    return 3;
+}
+
 // Decode a single UTF-8 codepoint at byte position `i` in `t`. Returns the
 // number of bytes consumed (1..4) and writes the codepoint to *out_cp.
 static uint32_t utf8_decode_at(const DomText* t, uint32_t i, uint32_t* out_cp) {
@@ -2010,12 +2079,53 @@ static uint32_t cp_before(DomBoundary b) {
     return ' ';
 }
 
+// Find the editing host containing `node`: nearest ancestor element with
+// contenteditable="true" (or "" / "plaintext-only"). Returns nullptr if `node`
+// is not inside an editing host. Selection.modify movements are confined to
+// the editing host (so e.g. moving forward by word from inside a contenteditable
+// div won't escape into surrounding body whitespace or other elements).
+static DomElement* editing_host_of(DomNode* node) {
+    if (!node) return nullptr;
+    DomNode* p = node->is_text() ? node->parent : node;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* e = p->as_element();
+            const char* v = dom_element_get_attribute(e, "contenteditable");
+            if (v) {
+                if (*v == '\0' ||
+                    strcasecmp(v, "true") == 0 ||
+                    strcasecmp(v, "plaintext-only") == 0) {
+                    return e;
+                }
+            } else if (dom_element_has_attribute(e, "contenteditable")) {
+                // boolean-style: <div contenteditable> with no value
+                return e;
+            }
+        }
+        p = p->parent;
+    }
+    return nullptr;
+}
+
+static bool node_is_descendant_of(DomNode* node, DomElement* root) {
+    if (!root) return true; // no confinement
+    for (DomNode* p = node; p; p = p->parent) {
+        if (p->is_element() && p->as_element() == root) return true;
+    }
+    return false;
+}
+
 // Move boundary by ONE word boundary in `dir` direction.
 // Algorithm (simple, browser-friendly):
 //   forward: skip non-word codepoints, then skip word codepoints; stop.
 //   backward: skip non-word codepoints, then skip word codepoints; stop.
+// Per UAX #29, transitions between scripts (e.g. Hangul -> Latin) within a
+// run of word-like codepoints are also word boundaries — phase 2 stops on
+// a script-class change. If the original boundary is inside a contenteditable
+// editing host, movement is confined to that host.
 static DomBoundary move_one_word(DomBoundary b, int dir) {
     DomBoundary cur = b;
+    DomElement* host = editing_host_of(b.node);
     // phase 1: skip non-word
     while (true) {
         uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
@@ -2023,15 +2133,19 @@ static DomBoundary move_one_word(DomBoundary b, int dir) {
         if (cp_is_wordlike(cp)) break;
         DomBoundary next = move_one_char(cur, dir);
         if (next.node == cur.node && next.offset == cur.offset) return cur;
+        if (host && !node_is_descendant_of(next.node, host)) return cur;
         cur = next;
     }
-    // phase 2: consume word characters
+    // phase 2: consume word characters of the same script class.
+    int run_class = cp_script_class((dir > 0) ? cp_after(cur) : cp_before(cur));
     while (true) {
         uint32_t cp = (dir > 0) ? cp_after(cur) : cp_before(cur);
         if (cp == 0) return cur;
         if (!cp_is_wordlike(cp)) return cur;
+        if (cp_script_class(cp) != run_class) return cur;
         DomBoundary next = move_one_char(cur, dir);
         if (next.node == cur.node && next.offset == cur.offset) return cur;
+        if (host && !node_is_descendant_of(next.node, host)) return cur;
         cur = next;
     }
 }

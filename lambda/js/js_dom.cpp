@@ -30,6 +30,7 @@
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../../radiant/view.hpp"
+#include "../../radiant/form_control.hpp"
 #include "../../radiant/dom_range.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -146,6 +147,13 @@ static inline void dom_text_replace_data(DomText* text, uint32_t off,
  * document pointer so next file starts fresh.
  */
 static void expando_reset(); // forward declaration
+// Phase 6E: text-control state + focus tracker live in radiant/text_control.{hpp,cpp}.
+// We re-expose the focus slots here as macros so existing `_js_active_element = elem`
+// assignments keep compiling.
+#include "../../radiant/text_control.hpp"
+#define _js_active_element              (*tc_active_element_slot())
+#define _js_last_focused_text_control   (*tc_last_focused_text_control_slot())
+#define tc_is_text_control_elem(e)      tc_is_text_control(e)
 extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -154,6 +162,7 @@ extern "C" void js_dom_batch_reset() {
     js_dom_events_reset();
     js_xhr_reset();
     expando_reset();
+    tc_reset_focus_state();
 }
 
 // ============================================================================
@@ -2460,8 +2469,56 @@ extern "C" Item js_document_get_property(Item prop_name) {
         }
     }
 
+    // activeElement — currently focused element, or <body> as default per spec.
+    if (strcmp(prop, "activeElement") == 0) {
+        if (_js_active_element) return js_dom_wrap_element(_js_active_element);
+        // default to <body> if available
+        DomNode* child = root ? root->first_child : nullptr;
+        while (child) {
+            if (child->is_element()) {
+                DomElement* e = child->as_element();
+                if (e->tag_name && strcasecmp(e->tag_name, "body") == 0)
+                    return js_dom_wrap_element(e);
+            }
+            child = child->next_sibling;
+        }
+        return root ? js_dom_wrap_element(root) : ItemNull;
+    }
+
     log_debug("js_document_get_property: unknown property '%s'", prop);
     return ItemNull;
+}
+
+// ============================================================================
+// HTML form text-control selection model (§8 of Radiant_Design_Selection.md)
+// ============================================================================
+//
+// `<input type=text|password|email|url|search|tel|number>` and `<textarea>`
+// have their own "text control selection" (separate from the document's
+// DomSelection). HTML §4.10.6 exposes:
+//   .value (mutable)
+//   .selectionStart / .selectionEnd (UTF-16 offsets)
+//   .selectionDirection ("forward" / "backward" / "none")
+//   .setSelectionRange(start, end [, direction])
+//   .select()
+//   .defaultValue
+// The state lives on `FormControlProp` (radiant/form_control.hpp).
+// `document.activeElement` and the "last focused text control" are tracked
+// via the focus tracker in radiant/text_control.{hpp,cpp}; the helpers
+// `tc_is_text_control`, `tc_get_or_create_form`, `tc_ensure_init`,
+// `tc_set_value`, `tc_set_selection_range`, and the UTF-8↔UTF-16 conversions
+// are all defined in radiant/text_control.cpp and re-used by event.cpp /
+// render_form.cpp.
+
+// Public entry — JS Selection.toString() consults this when the document
+// selection is empty (or to override the empty result with the focused
+// text control's selected substring per WPT stringifier_editable_element).
+// Returns nullptr if no text control should contribute.
+extern "C" String* js_dom_active_text_control_selected_text(void) {
+    uint32_t blen = 0;
+    const char* sel = tc_active_selected_text(&blen);
+    if (!sel || !blen) return nullptr;
+    return heap_strcpy((char*)sel, (int64_t)blen);
 }
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
@@ -2970,6 +3027,59 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_cssom_get_style_element_sheet(elem_item);
     }
 
+    // ------------------------------------------------------------------
+    // HTML form text-control (HTMLInputElement / HTMLTextAreaElement)
+    // properties — must intercept BEFORE attribute fallback so .value
+    // returns the live IDL value, not the static `value` attribute.
+    // ------------------------------------------------------------------
+    if (tc_is_text_control_elem(elem)) {
+        if (strcmp(prop, "value") == 0) {
+            tc_ensure_init(elem);
+            FormControlProp* f = elem->form;
+            String* s = heap_strcpy(f->current_value ? f->current_value : (char*)"",
+                                    (int64_t)f->current_value_len);
+            return (Item){.item = s2it(s)};
+        }
+        if (strcmp(prop, "defaultValue") == 0) {
+            // <input>: getAttribute("value"); <textarea>: text content of children.
+            if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+                StrBuf* sb = strbuf_new_cap(64);
+                collect_text_content((DomNode*)elem, sb);
+                String* s = heap_create_name(sb->str ? sb->str : "");
+                strbuf_free(sb);
+                return (Item){.item = s2it(s)};
+            }
+            const char* v = dom_element_get_attribute(elem, "value");
+            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        }
+        if (strcmp(prop, "selectionStart") == 0) {
+            tc_ensure_init(elem);
+            return (Item){.item = i2it((int64_t)elem->form->selection_start)};
+        }
+        if (strcmp(prop, "selectionEnd") == 0) {
+            tc_ensure_init(elem);
+            return (Item){.item = i2it((int64_t)elem->form->selection_end)};
+        }
+        if (strcmp(prop, "selectionDirection") == 0) {
+            tc_ensure_init(elem);
+            const char* d = "none";
+            if (elem->form->selection_direction == 1) d = "forward";
+            else if (elem->form->selection_direction == 2) d = "backward";
+            return (Item){.item = s2it(heap_create_name(d))};
+        }
+        if (strcmp(prop, "textLength") == 0) {
+            tc_ensure_init(elem);
+            return (Item){.item = i2it((int64_t)elem->form->current_value_u16_len)};
+        }
+        // Methods: return ITEM_TRUE so feature-detection works and method
+        // dispatch routes through js_dom_element_method below.
+        if (strcmp(prop, "setSelectionRange") == 0 ||
+            strcmp(prop, "select") == 0 ||
+            strcmp(prop, "setRangeText") == 0) {
+            return (Item){.item = ITEM_TRUE};
+        }
+    }
+
     // fall back to native element attribute access
     if (elem->native_element) {
         const char* attr_val = dom_element_get_attribute(elem, prop);
@@ -2992,6 +3102,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "getElementsByClassName", "compareDocumentPosition",
         "append", "prepend", "getClientRects", "focus", "blur",
         "toString",
+        "setSelectionRange", "select",
         NULL
     };
     for (int i = 0; dom_methods[i]; i++) {
@@ -3254,6 +3365,62 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                   elem->tag_name ? elem->tag_name : "?");
         js_dom_mutation_notify();
         return value;
+    }
+
+    // ------------------------------------------------------------------
+    // Text-control IDL setters — must intercept before the generic
+    // expando/attribute fallback. Per HTML §4.10.6.
+    // ------------------------------------------------------------------
+    if (tc_is_text_control_elem(elem)) {
+        RadiantState* tc_st = js_dom_current_state();
+        if (strcmp(prop, "value") == 0) {
+            const char* s = fn_to_cstr(value);
+            tc_set_value(elem, s ? s : "", s ? strlen(s) : 0);
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
+        if (strcmp(prop, "selectionStart") == 0) {
+            tc_ensure_init(elem);
+            int64_t v = it2i(value);
+            if (v < 0) v = 0;
+            uint32_t start = (uint32_t)v;
+            uint32_t end = elem->form->selection_end;
+            if (start > end) end = start;
+            tc_set_selection_range(elem, start, end, elem->form->selection_direction);
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
+        if (strcmp(prop, "selectionEnd") == 0) {
+            tc_ensure_init(elem);
+            int64_t v = it2i(value);
+            if (v < 0) v = 0;
+            uint32_t end = (uint32_t)v;
+            uint32_t start = elem->form->selection_start;
+            if (start > end) start = end;
+            tc_set_selection_range(elem, start, end, elem->form->selection_direction);
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
+        if (strcmp(prop, "selectionDirection") == 0) {
+            tc_ensure_init(elem);
+            const char* s = fn_to_cstr(value);
+            uint8_t d = 0;
+            if (s) {
+                if (strcmp(s, "forward") == 0) d = 1;
+                else if (strcmp(s, "backward") == 0) d = 2;
+            }
+            elem->form->selection_direction = d;
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
+        if (strcmp(prop, "defaultValue") == 0) {
+            const char* s = fn_to_cstr(value);
+            if (!s) s = "";
+            dom_element_set_attribute(elem, "value", s);
+            tc_set_value(elem, s, strlen(s));
+            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
     }
 
     // generic property set — store as expando AND as HTML attribute when possible
@@ -4142,6 +4309,50 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
 
     // focus() / blur() — stubs for headless mode
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
+        if (strcmp(method, "focus") == 0) {
+            _js_active_element = elem;
+            if (tc_is_text_control_elem(elem)) {
+                tc_ensure_init(elem);
+                _js_last_focused_text_control = elem;
+            }
+        } else {
+            // blur: clear activeElement only if it points to us.
+            if (_js_active_element == elem) _js_active_element = nullptr;
+        }
+        return make_js_undefined();
+    }
+
+    // setSelectionRange(start, end [, direction]) — text controls only.
+    if (strcmp(method, "setSelectionRange") == 0 && tc_is_text_control_elem(elem)) {
+        if (argc < 2) return make_js_undefined();
+        int64_t s = it2i(args[0]);
+        int64_t e = it2i(args[1]);
+        if (s < 0) s = 0;
+        if (e < 0) e = 0;
+        uint8_t dir = 0;
+        if (argc >= 3) {
+            const char* d = fn_to_cstr(args[2]);
+            if (d) {
+                if (strcmp(d, "forward") == 0) dir = 1;
+                else if (strcmp(d, "backward") == 0) dir = 2;
+            }
+        }
+        tc_set_selection_range(elem, (uint32_t)s, (uint32_t)e, dir);
+        // Phase 6E: mirror to legacy CaretState/SelectionState so a focused
+        // input visibly moves its caret + highlights its selection.
+        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        return make_js_undefined();
+    }
+
+    // select() — text controls only. Selects the entire value and focuses.
+    if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
+        tc_ensure_init(elem);
+        FormControlProp* f = elem->form;
+        tc_set_selection_range(elem, 0, f->current_value_u16_len, 0);
+        // Per HTML, select() implicitly focuses the control.
+        _js_active_element = elem;
+        _js_last_focused_text_control = elem;
+        if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         return make_js_undefined();
     }
 

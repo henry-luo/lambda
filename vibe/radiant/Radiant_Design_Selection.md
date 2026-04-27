@@ -743,7 +743,358 @@ text mutation) keeps this O(1) amortized.
 
 ---
 
-## 8. Implementation Phases
+## 8. Form Input Integration (`<input>` / `<textarea>`)
+
+> **Status:** proposal — not yet implemented. Motivated by the four
+> remaining WPT selection failures (`stringifier_editable_element_tentative`,
+> `move_by_word_korean`, `move_by_word_with_symbol`, and the input/textarea
+> halves of several `move_by_*` tests) which all reduce to "Lambda has
+> no `HTMLInputElement` / `HTMLTextAreaElement` selection model".
+
+HTML form text controls are a special case the W3C selection design
+deliberately keeps off the main DOM tree: the user-visible glyphs of an
+`<input type=text>` or `<textarea>` are **not** child `Text` nodes. They
+live in an *anonymous, browser-managed text buffer* identified only by
+the control's `value` attribute. The DOM `Selection` (the topic of
+sections 1–7) cannot directly span into a control; instead each control
+exposes its own private selection through `selectionStart` /
+`selectionEnd` / `selectionDirection` / `setSelectionRange()` /
+`select()`. The HTML spec calls these the **"text control selection"**
+APIs (HTML §4.10.6).
+
+This section proposes how Radiant should layer that second selection
+model on top of the `DomSelection` infrastructure built in §3–§7.
+
+### 8.1 Two selections, one document
+
+Per the HTML spec there are *two* coexisting selection models inside one
+document:
+
+| Model | Anchored on | Owns | Scope |
+|-------|-------------|------|-------|
+| **DOM selection** (§3) | `(DomNode*, utf16-offset)` boundaries | `DomSelection` on `RadiantState` | Whole document tree, stops at the boundary of an `<input>`/`<textarea>` element |
+| **Text-control selection** (this §) | UTF-16 offsets into the control's `value` string | `TextControlSelection` on the form element's per-control state | One text control |
+
+When focus is in a text control, the document selection is **not** the
+authority for the user-visible caret inside the control. Instead the
+control's `TextControlSelection` is, and `window.getSelection()` returns
+a selection that is collapsed *outside* the control element (per spec
+the document selection's boundaries simply don't enter the control's
+anonymous tree). The one observable interaction:
+`Selection.toString()` *does* include the visible selected substring of
+the focused text control — this is exactly what the
+`stringifier-editable-element.tentative.html` WPT test asserts.
+
+### 8.2 Data model: `TextControlSelection`
+
+Stored on the existing per-control state structure attached to a form
+`DomElement` (the field already wired through Radiant's layout code as
+`item->form`):
+
+```cpp
+// radiant/dom_text_control.hpp  (NEW)
+
+typedef enum {
+    DOM_TC_DIR_NONE = 0,    // "none"
+    DOM_TC_DIR_FORWARD,     // "forward"
+    DOM_TC_DIR_BACKWARD,    // "backward"
+} DomTextControlDirection;
+
+typedef struct DomTextControlSelection {
+    DomElement* host;            // <input> or <textarea>
+    Str*        value;           // canonical UTF-8 storage of `.value`
+                                 // (normalized per type=text rules:
+                                 // <textarea> keeps newlines; <input>
+                                 // strips CR/LF before storage).
+    uint32_t    utf16_length;    // cached; invalidated on edit
+    Utf16OffsetCache* u16_cache; // shared codepath with DomText (§7.7)
+
+    // Selection inside the control. UTF-16 code unit offsets into `value`.
+    uint32_t    sel_start;       // == sel_end ⇒ caret
+    uint32_t    sel_end;
+    DomTextControlDirection direction;
+    bool        is_dirty_sel;    // true when modified since last 'select' event
+
+    // Layout cache mirroring DomRange's pattern (§3.2).
+    bool        layout_valid;
+    View*       inner_view;      // anonymous RDT_VIEW_TEXT for the value
+    int         start_byte_off;  // UTF-8 byte within inner_view
+    int         end_byte_off;
+    float       caret_x, caret_y, caret_h;  // for collapsed sel_start
+} DomTextControlSelection;
+```
+
+`DomElement::form` (already present) gains one pointer:
+
+```cpp
+struct FormElementState {            // existing
+    /* ... type, form-association, validity bits ... */
+    DomTextControlSelection* tc_sel; // NEW; allocated lazily on first
+                                     // focus or programmatic access.
+};
+```
+
+The selection lives next to the form-element state — *not* on
+`RadiantState->live_ranges`. It is **not** a `DomRange`; it does **not**
+participate in `dom_mutation_*` envelopes. (Mutations to the control's
+value go through a dedicated path, §8.5.)
+
+### 8.3 Authority over the user-visible caret
+
+Today (Phase 6) the visible caret is driven by the legacy
+`CaretState` / `SelectionState` pair on `RadiantState`, kept in sync
+with `DomSelection`. With text controls in the mix the rule becomes:
+
+```
+focused element type           ┃ caret authority
+───────────────────────────────╂──────────────────────────────────────
+none / non-control element     ┃ DomSelection  → CaretState (existing)
+<input> text-like / <textarea> ┃ TextControlSelection → CaretState
+                               ┃ (the document DomSelection is
+                               ┃  collapsed at the control's parent
+                               ┃  boundary and rendered as hidden)
+```
+
+`event.cpp`'s mouse / keyboard handlers gain a single dispatch at the
+top:
+
+```cpp
+DomElement* tc = focused_text_control(state);
+if (tc) {
+    text_control_handle_event(state, tc, event);   // updates tc_sel
+} else {
+    /* ...existing path that updates CaretState/DomSelection... */
+}
+```
+
+`text_control_handle_event` runs the same hit-test → `(view, byte)` →
+UTF-16 conversion the document path uses, but the result is written to
+`tc->form->tc_sel`, never to `state->dom_selection`. The legacy→DOM
+sync hook on `RadiantState` is bypassed for this branch.
+
+### 8.4 Selection authority and `Selection.toString()` interaction
+
+Per HTML §4.10.6 and the WPT `stringifier_editable_element_tentative`
+test, when the document selection's `range[0]` *contains* a focused
+text control, `Selection.toString()` must include the substring
+`tc_sel->value[tc_sel->sel_start .. tc_sel->sel_end]` at the position
+where the control element appears. The change to
+`dom_range_to_string` (currently in `radiant/dom_range.cpp`) is
+localised:
+
+```cpp
+static void emit_node_text(StrBuf* out, DomNode* n,
+                           uint32_t lo, uint32_t hi /* utf16 */) {
+    if (n->is_element() && elem_is_text_control(n->as_element())) {
+        DomTextControlSelection* tc = n->as_element()->form
+                                      ? n->as_element()->form->tc_sel : nullptr;
+        if (tc && tc->sel_start != tc->sel_end) {
+            // Emit the substring of the control's *value* that the
+            // user sees as selected, not the control's children.
+            tc_emit_substring(out, tc, tc->sel_start, tc->sel_end);
+        }
+        return;   // never recurse into control's anonymous text
+    }
+    /* ... existing recursive walk ... */
+}
+```
+
+Conversely, when the document selection's range is *outside* the
+control element entirely (the common case), `tc_sel` is irrelevant and
+the existing logic applies unchanged. The set-membership test
+"selection contains the control" is the standard
+`dom_boundary_compare` against `(parent, indexOf(control))` and
+`(parent, indexOf(control) + 1)`.
+
+### 8.5 Mutation path: `value` and DOM attribute
+
+The control's textual content has **two** observable surfaces and they
+must be kept consistent:
+
+1. **`element.value`** (IDL attribute) — UTF-16 string, the user-typed
+   content. Stored as `tc_sel->value` (UTF-8) plus the cached
+   `utf16_length`.
+2. **`element.getAttribute("value")`** — the *original* default. Per
+   HTML this never changes after parsing for `<input>`; for
+   `<textarea>` the default is `element.defaultValue` (the text-content
+   children of the element at parse time).
+
+A new mutation envelope, parallel to §6's `dom_mutation_text_replace_data`:
+
+```cpp
+void dom_text_control_set_value(DomElement* host,
+                                const char* utf8, uint32_t utf8_len);
+// Used by IDL setter `element.value = "..."` AND by user keystrokes.
+// Steps (per HTML §4.10.6):
+//   1. Normalise the new value (strip CR/LF for non-textarea).
+//   2. Replace tc_sel->value, invalidate utf16_length and u16_cache.
+//   3. Per spec: if the API is "value" setter, set sel_start = sel_end
+//      = new_length, direction = "none". If "user input", clamp
+//      sel_start/sel_end to new_length.
+//   4. Mark layout dirty (host->form_layout_dirty) and request reflow
+//      so the anonymous inner view repaints.
+//   5. Fire `input` event then `change` on blur per existing form code.
+```
+
+The DOM `Selection`'s live ranges are unaffected by this path because
+they cannot have endpoints inside the control's anonymous buffer; their
+endpoint structure (§5.5) only sees the control element itself, which
+is unchanged.
+
+### 8.6 JS bindings
+
+Add `lambda/js/js_dom_form_text.cpp` (or extend `js_dom.cpp` if the
+delta is small) and register the following on the host class table for
+`HTMLInputElement` and `HTMLTextAreaElement`:
+
+| WebIDL member | Implementation |
+|---------------|----------------|
+| `attribute DOMString value` getter | reads `tc_sel->value` (lazy-create on first access) |
+| `attribute DOMString value` setter | calls `dom_text_control_set_value` with `apiSource = "value"` |
+| `attribute unsigned long? selectionStart` | reads `tc_sel->sel_start`; null if control is non-text-like |
+| `attribute unsigned long? selectionEnd` | reads `tc_sel->sel_end` |
+| `attribute DOMString? selectionDirection` | reads `tc_sel->direction` mapped to `"forward"`/`"backward"`/`"none"` |
+| `void setSelectionRange(start, end, direction?)` | clamps + writes to `tc_sel`; fires `select` event if changed |
+| `void select()` | `setSelectionRange(0, utf16_length, "none")` |
+| `void setRangeText(repl, start?, end?, mode?)` | combines `dom_text_control_set_value` + caret rules |
+| `attribute DOMString defaultValue` | mirrors `getAttribute("value")` for input; element textContent for textarea |
+
+The WPT shim removals: once these bindings exist, the
+`EditorTestUtils` / proxy / `_wpt_word_*` helpers added during the
+2025-11 drill (see `test/wpt/wpt_testharness_shim.js`) become
+redundant and should be deleted along with the corresponding entries
+on the SKIP list.
+
+### 8.7 Word-break inside controls (`Selection.modify` analogue)
+
+The four WPT `move-by-word-*.html` tests register two halves: one for
+`<div contenteditable>` (already passing — uses
+`dom_selection_modify` + the script-class iterator from
+`radiant/dom_range.cpp`), one for `<textarea>`/`<input>` (failing,
+this section). The fix re-uses the same algorithm:
+
+```cpp
+// radiant/dom_text_control.cpp
+
+uint32_t tc_word_forward(const DomTextControlSelection* tc, uint32_t pos);
+uint32_t tc_word_backward(const DomTextControlSelection* tc, uint32_t pos);
+```
+
+Both run on the control's `value` string, applying the same
+`cp_script_class` rule used for the DOM tree path so that
+Korean/Latin/symbol transitions break consistently inside and outside
+text controls. Connected to the JS layer through a `keydown`
+handler in the form-control event path (Alt+Arrow on macOS,
+Ctrl+Arrow on others), or directly from the WPT-driver
+`sendMoveWordLeftKey/RightKey` helpers when those run.
+
+Crucially this **never** calls `dom_selection_modify` and never
+touches the document's `DomSelection` — the document selection is
+either outside the control (most common) or collapsed at the control
+boundary. Browsers behave the same way: `getSelection().focusNode` does
+not move while the user holds Alt+ArrowRight inside an `<input>`.
+
+### 8.8 Rendering integration
+
+`render.cpp` already has a code path for form controls
+(`item->item_prop_type == DomElement::ITEM_PROP_FORM`,
+~20 sites in `layout_flex.cpp`). Two small additions:
+
+1. **Inner caret/selection paint.** When `tc_sel != nullptr` and the
+   control has focus, call the same `render_selection()`/`render_caret()`
+   helpers but feed them the cached `inner_view` + byte offsets from
+   `tc_sel`, and clip to the control's content rect. Multi-line
+   `<textarea>` is handled by walking the line-fragment chain of the
+   inner view, the same way `dom_range_for_each_rect()` walks for
+   document selections (§4.4).
+2. **Suppress document selection inside the control.** If a document
+   `DomRange` happens to span across the control element, the
+   multi-fragment iteration in `dom_range_for_each_rect()` skips
+   anonymous descendants of text controls — the visible selection
+   inside the control is owned by `tc_sel`, not by the document range.
+
+The legacy `CaretState` repaint dirty-rect tracking
+(`caret_prev_abs_*`) is reused unchanged: when focus is in a control,
+the caret rendering pulls from `tc_sel`; when not, from
+`dom_selection->ranges[0]`.
+
+### 8.9 Focus / blur interaction
+
+The current focus tracking on `RadiantState` (`state->focus_target`
+or equivalent) gains one rule applied at every focus transition:
+
+| Transition | DomSelection effect | tc_sel effect |
+|------------|---------------------|---------------|
+| no focus → text control | collapse `DomSelection` at `(control.parent, indexOf(control))` and hide its caret | restore last-saved `(sel_start, sel_end, direction)` for the control; if first focus apply `<input autofocus>` rules |
+| text control → other text control | save outgoing `tc_sel`; restore incoming | swap which `tc_sel` is the visible authority |
+| text control → non-control DOM | drop the visible-caret override; the document `DomSelection` becomes authority again | leave outgoing `tc_sel` intact (it persists across blur per spec) |
+| any → no focus | hide both | leave intact |
+
+Per HTML, the text-control selection **persists** across blur — so we
+keep it stored on `host->form->tc_sel` indefinitely (cleared only when
+the host element is removed from the document, which the existing
+`dom_mutation_pre_remove` envelope can hook).
+
+### 8.10 Implementation phases
+
+Inserted between current Phase 6 (shipped) and Phase 7 (polish):
+
+**Phase 6C — `TextControlSelection` data model**
+1. `radiant/dom_text_control.{hpp,cpp}` with the struct above and
+   `dom_text_control_set_value`.
+2. Allocate `tc_sel` lazily from `host->form` in
+   `radiant/layout_flex.cpp`'s form-control init path.
+3. GTest unit coverage on UTF-16 conversion + word-break iterators
+   reusing the §11 harness.
+
+**Phase 6D — JS bindings**
+1. `lambda/js/js_dom_form_text.cpp` exposes the WebIDL surface from §8.6.
+2. Plumb `setSelectionRange` / `select` / `value` / `setRangeText`
+   through to `tc_sel`.
+3. Update `dom_range_to_string` (§8.4) to consult focused-control
+   `tc_sel` for the stringifier path.
+
+**Phase 6E — Input event wiring**
+1. `event.cpp` dispatch fork (§8.3).
+2. Reuse `cp_script_class` for word-jump key handling on `tc_sel`.
+3. Render caret/selection inside the control's inner view.
+
+Each phase has a clear WPT exit criterion:
+- 6C: GTest 100% on text-control unit tests.
+- 6D: `stringifier_editable_element_tentative` passes; the textarea/input
+  halves of `move_by_word_korean`/`move_by_word_with_symbol` pass via
+  the WPT `setSelectionRange` driver.
+- 6E: full `move_by_word_*` and `move_selection_range_into_different_root`
+  (the latter via the existing iframe support combined with
+  `tc_sel` on inputs inside the inner doc) pass.
+
+After Phase 6E lands, the SKIP list in `test_wpt_selection_gtest.cpp`
+can drop the `selection-direction-*`, `extend-selection-backward-on-input`,
+and `user-select-on-input` entries.
+
+### 8.11 Risks specific to text controls
+
+1. **Defaulting on parse.** `<textarea>foo bar</textarea>` must seed
+   `tc_sel->value = "foo bar"` and `defaultValue` from the children at
+   parse time, *and* strip those children from the layout tree (browsers
+   render the value, not the children). Existing form-init code in
+   `layout_flex.cpp` already handles the latter; we only need to
+   capture text content into `tc_sel->value`.
+2. **`<input type=number/email/...>`.** Per HTML some types ban
+   `selectionStart`/`End` (return null, throw on set). The
+   `tc_sel != nullptr` allocation policy must respect a per-type
+   table — gate the allocation in `host_type_supports_selection(host)`.
+3. **Composition events / IME.** Out of scope for this proposal;
+   composition leaves `tc_sel->value` and selection in their pre-IME
+   state until the composition commits.
+4. **Shadow DOM emulation.** A future Shadow DOM implementation may
+   want to expose the control's anonymous buffer as a real shadow tree.
+   The `TextControlSelection` design does not preclude that — it is
+   strictly a layer above the buffer storage.
+
+---
+
+## 9. Implementation Phases
 
 ### Phase 1 — DOM types & tests (no JS, no rendering changes)
 
@@ -845,7 +1196,7 @@ new regressions.
 
 ---
 
-## 9. File / Module Layout
+## 10. File / Module Layout
 
 ```
 radiant/
@@ -891,7 +1242,7 @@ test/
 
 ---
 
-## 10. Risks & Open Questions
+## 11. Risks & Open Questions
 
 1. **DocumentFragment** support is currently minimal in the JS DOM. Range
    methods that return a fragment (`cloneContents`, `extractContents`)
@@ -911,7 +1262,7 @@ test/
 
 ---
 
-## 11. Test Strategy
+## 12. Test Strategy
 
 ### Unit (GTest)
 
@@ -937,7 +1288,7 @@ selection to verify §4.4 multi-line rendering.
 
 ---
 
-## 12. Summary
+## 13. Summary
 
 The architectural pivot is small but decisive: **make the DOM the source
 of truth for caret and selection**, treat the existing `View*`-anchored
@@ -957,8 +1308,10 @@ contenteditable shims, future React) can rely on without surprise.
 ---
 
 **Last Updated:** 2026-04-27
-**Status:** Phases 1–6 implemented; Phase 7 polish pending. See the
-Implementation Status section at the top for shipped-vs-planned diffs.
+**Status:** Phases 1–6 implemented; Phase 7 polish pending; §8
+"Form Input Integration" (Phases 6C/6D/6E) proposed and not yet
+started. See the Implementation Status section at the top for
+shipped-vs-planned diffs.
 **Related:** [Radiant_Design_State.md](Radiant_Design_State.md) ·
 [test/wpt/test_wpt_selection_gtest.cpp](test/wpt/test_wpt_selection_gtest.cpp) ·
 [ref/wpt/selection/](ref/wpt/selection)

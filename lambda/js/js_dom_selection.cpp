@@ -751,6 +751,15 @@ extern "C" Item js_selection_delete_from_document(void) {
 
 extern "C" Item js_selection_to_string(void) {
     DomSelection* s = selection_from_this();
+    // Per WPT stringifier_editable_element.tentative.html: when a focused
+    // text control has a non-empty selection, getSelection().toString()
+    // returns the visible selected substring of the control — even when
+    // the document selection itself is empty.
+    extern String* js_dom_active_text_control_selected_text(void);
+    String* tc_str = js_dom_active_text_control_selected_text();
+    if (tc_str) {
+        return (Item){.item = s2it(tc_str)};
+    }
     if (!s) return make_str("");
     if (dom_selection_range_count(s) == 0) return make_str("");
     DomRange* r = dom_selection_get_range_at(s, 0, nullptr);
