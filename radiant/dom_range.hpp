@@ -22,6 +22,11 @@ struct DomText;
 struct DomElement;
 struct RadiantState;
 struct Pool;
+// Legacy interactive-state structs (defined in state_store.hpp). DomSelection
+// owns one of each as the canonical backing storage; `state->caret` and
+// `state->selection` on RadiantState are aliases pointing at these.
+struct CaretState;
+struct SelectionState;
 
 #ifdef __cplusplus
 extern "C" {
@@ -190,6 +195,17 @@ typedef struct DomSelection {
     float         caret_prev_abs_x;     // dirty-rect repaint tracking
     float         caret_prev_abs_y;
     float         caret_prev_abs_height;
+
+    // Iframe nesting offset (set when a click/drag begins inside an iframe).
+    // Renderer adds these to absolute CSS coords before painting.
+    float         iframe_offset_x;
+    float         iframe_offset_y;
+
+    // Legacy backing storage (Phase B consolidation). Allocated once in
+    // `dom_selection_create()` and aliased onto `state->caret` /
+    // `state->selection`. Single owner; lifetime = DomSelection's.
+    struct CaretState*     caret;
+    struct SelectionState* selection;
 
     // Host-binding back-pointer (e.g. JS wrapper Item). Managed by the
     // binding layer.

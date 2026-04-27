@@ -18,6 +18,20 @@
 #include <stdlib.h>
 #include <limits.h>
 
+// Phase 6 — single source of truth: after every selection-state mutation
+// inside this file, mirror the result back into the legacy
+// CaretState/SelectionState so the renderer (which still reads the legacy
+// structs) reflects spec-driven and JS-driven changes. Implemented in
+// state_store.cpp; declared here as a forward to avoid pulling in
+// state_store.hpp (which transitively includes GLFW). A weak default
+// no-op is provided so unit-test targets that don't link state_store.cpp
+// (e.g. test_dom_range_gtest) still link successfully — the strong
+// definition in state_store.cpp wins for the full binary.
+extern "C" void legacy_sync_from_dom_selection(struct RadiantState* state);
+extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct RadiantState* /*state*/) {
+    // weak fallback for test targets without state_store
+}
+
 // We do NOT include state_store.hpp here — it transitively pulls in GLFW
 // and the full Radiant render stack, which would force every unit test
 // linking dom_range.cpp to drag in the world. Instead we declare the two
@@ -25,6 +39,16 @@
 // state_store.cpp (production) or in a unit-test stub.
 struct Arena;
 extern "C" Arena*    dom_range_state_arena(RadiantState* state);
+// Implemented in state_store.cpp — allocates the embedded CaretState /
+// SelectionState into `state`'s arena and stores pointers on `s`. Also
+// aliases `state->caret` / `state->selection` to the same pointers so
+// the legacy field-access syntax keeps working.
+extern "C" void      dom_selection_attach_legacy_storage(struct DomSelection* s,
+                                                         RadiantState* state);
+extern "C" __attribute__((weak)) void dom_selection_attach_legacy_storage(
+        struct DomSelection* /*s*/, RadiantState* /*state*/) {
+    // weak fallback for test targets that don't link state_store.cpp.
+}
 extern "C" DomRange** dom_range_state_live_ranges_slot(RadiantState* state);
 extern "C" struct DomSelection* dom_range_state_selection(RadiantState* state);
 
@@ -66,6 +90,12 @@ uint32_t dom_node_boundary_length(const DomNode* node) {
     if (!node) return 0;
     if (node->is_text()) {
         return dom_text_utf16_length(node->as_text());
+    }
+    if (node->is_comment()) {
+        const char* s = dom_comment_get_content((DomComment*)node->as_comment());
+        if (!s) return 0;
+        // Phase 1: treat content as ASCII-equivalent (1 byte == 1 UTF-16 code unit).
+        return (uint32_t)strlen(s);
     }
     if (node->is_element()) {
         const DomElement* e = node->as_element();
@@ -472,6 +502,9 @@ DomSelection* dom_selection_create(RadiantState* state) {
     memset(s, 0, sizeof(*s));
     s->state = state;
     s->is_collapsed = true;
+    // Allocate the embedded legacy storage and alias state->caret/selection
+    // onto it. Strong def in state_store.cpp; weak no-op for unit tests.
+    dom_selection_attach_legacy_storage(s, state);
     return s;
 }
 
@@ -529,6 +562,11 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     s->is_collapsed = dom_range_collapsed(r);
     if (s->is_collapsed) s->direction = DOM_SEL_DIR_NONE;
     else s->direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
+
+    // Phase 6: mirror DOM selection into legacy state for the renderer.
+    // Re-entry guarded inside legacy_sync_from_dom_selection so it's a no-op
+    // when invoked transitively from a legacy→DOM sync.
+    if (s->state) legacy_sync_from_dom_selection(s->state);
 }
 
 void dom_selection_add_range(DomSelection* s, DomRange* range) {
@@ -594,6 +632,10 @@ bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, con
     if (offset > dom_node_boundary_length(node)) {
         set_exception(out_exception, "IndexSizeError"); return false;
     }
+    // Per WHATWG Selection.collapse: replace this's range with a *new* live
+    // range. Drop the existing primary range (if any) so getRangeAt(0)
+    // returns a freshly-allocated range object after collapse.
+    dom_selection_remove_all_ranges(s);
     DomRange* r = ensure_primary_range(s);
     if (!r) return false;
     r->start.node = r->end.node = node;
@@ -609,16 +651,24 @@ bool dom_selection_set_position(DomSelection* s, DomNode* node, uint32_t offset,
 
 void dom_selection_collapse_to_start(DomSelection* s, const char** out_exception) {
     if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    DomRange* r = s->ranges[0];
-    r->end = r->start;
+    // Per WHATWG: replace selection's range with a *new* range collapsed at
+    // the original range's start; do not mutate the user-visible old range.
+    DomBoundary start = s->ranges[0]->start;
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return;
+    r->start = r->end = start;
     dom_range_invalidate_layout(r);
     sync_anchor_focus(s, true);
 }
 
 void dom_selection_collapse_to_end(DomSelection* s, const char** out_exception) {
     if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    DomRange* r = s->ranges[0];
-    r->start = r->end;
+    DomBoundary end = s->ranges[0]->end;
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return;
+    r->start = r->end = end;
     dom_range_invalidate_layout(r);
     sync_anchor_focus(s, true);
 }

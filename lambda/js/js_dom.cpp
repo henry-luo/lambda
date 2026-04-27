@@ -69,6 +69,18 @@ static TypeMap js_computed_style_marker = {};
 // Map::data is unused (the document is accessed via _js_current_document).
 static TypeMap js_document_proxy_marker = {};
 
+// Sentinel used in Map::type to distinguish foreign-document wrappers
+// (created via document.implementation.createHTMLDocument / createDocument).
+// Map::data stores the owning DomDocument*. map_kind = MAP_KIND_FOREIGN_DOC.
+static TypeMap js_foreign_doc_marker = {};
+
+// Sentinel used in Map::type to distinguish the document.implementation singleton.
+// Map::data is unused.
+static TypeMap js_dom_implementation_marker = {};
+
+// Cached singleton for document.implementation.
+static Item js_dom_implementation_item = {.item = ITEM_NULL};
+
 // Cached singleton document proxy object
 static Item js_document_proxy_item = {.item = ITEM_NULL};
 
@@ -241,6 +253,68 @@ extern "C" void* js_dom_get_document(void) {
 }
 
 // ============================================================================
+// Document-as-Node stub
+// (Lazy DomElement with tag "#document" so JS Range/Selection APIs can
+// accept `document` (or a foreign-doc wrapper) as a container.)
+// ============================================================================
+
+static Item lookup_foreign_doc_wrapper(DomDocument* doc); // fwd decl
+
+extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
+    DomDocument* doc = (DomDocument*)doc_v;
+    if (!doc) return nullptr;
+    if (doc->js_doc_node) return doc->js_doc_node;
+    // build a DomElement with tag "#document". first_child is set to doc->root
+    // so dom_node_boundary_length(stub) returns child count of the document
+    // (e.g. 1 for HTML docs without doctype, 2 with doctype).
+    MarkBuilder builder(doc->input);
+    Item e_item = builder.element("#document").final();
+    Element* elmt = e_item.element;
+    DomElement* stub = dom_element_create(doc, "#document", elmt);
+    if (!stub) return nullptr;
+    // Synthesize a leading DOCTYPE child so that document.childNodes "length"
+    // (per dom_node_boundary_length) is 2 — matching how WPT tests assume HTML
+    // documents have <!DOCTYPE> + html as their two top-level children.
+    Item dt_item = builder.element("!DOCTYPE").final();
+    DomComment* dt = dom_comment_create_detached(dt_item.element, doc);
+    DomNode* head_node = nullptr;
+    DomNode* tail_node = nullptr;
+    if (dt) {
+        head_node = (DomNode*)dt;
+        tail_node = (DomNode*)dt;
+    }
+    if (doc->root) {
+        if (tail_node) {
+            // Forward link only — do NOT set root->prev_sibling, since other
+            // radiant code walks prev_sibling without checking parent and
+            // could be affected. Only forward traversals (used by
+            // dom_node_boundary_length and compareDocumentPosition for the
+            // stub) need the link.
+            tail_node->next_sibling = (DomNode*)doc->root;
+        } else {
+            head_node = (DomNode*)doc->root;
+        }
+        DomNode* c = (DomNode*)doc->root;
+        while (c->next_sibling) c = c->next_sibling;
+        tail_node = c;
+    }
+    ((DomElement*)stub)->first_child = head_node;
+    ((DomElement*)stub)->last_child  = tail_node;
+    doc->js_doc_node = stub;
+    return stub;
+}
+
+// Returns the document proxy / foreign-doc wrapper for the given DomDocument*,
+// or ItemNull if none is registered.
+static Item doc_to_proxy_item(DomDocument* doc) {
+    if (!doc) return ItemNull;
+    if (doc == _js_current_document) {
+        return js_get_document_object_value();
+    }
+    return lookup_foreign_doc_wrapper(doc);
+}
+
+// ============================================================================
 // DOM Wrapping / Unwrapping
 // ============================================================================
 
@@ -248,6 +322,16 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
+    // If this DomNode is a document stub, return the document proxy / foreign
+    // doc wrapper instead so identity comparisons in JS (e.g. `r.startContainer
+    // === document`) work.
+    if (node->is_element()) {
+        DomElement* e = node->as_element();
+        if (e->doc && e->doc->js_doc_node == (void*)e) {
+            Item proxy = doc_to_proxy_item(e->doc);
+            if (proxy.item != ITEM_NULL) return proxy;
+        }
+    }
     Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     wrapper->type_id = LMD_TYPE_MAP;
     wrapper->map_kind = MAP_KIND_DOM;
@@ -274,6 +358,14 @@ extern "C" void* js_dom_unwrap_element(Item item) {
     if (m->type == (void*)&js_dom_type_marker) {
         return m->data;
     }
+    // document proxy / foreign-doc wrapper → return the doc-stub DomElement
+    // (lazy-create) so JS Range/Selection APIs accept `document` as a container.
+    if (m->map_kind == MAP_KIND_DOC_PROXY && m->type == (void*)&js_document_proxy_marker) {
+        return js_dom_get_or_create_doc_node(_js_current_document);
+    }
+    if (m->map_kind == MAP_KIND_FOREIGN_DOC && m->type == (void*)&js_foreign_doc_marker) {
+        return js_dom_get_or_create_doc_node(m->data);
+    }
     return nullptr;
 }
 
@@ -292,7 +384,25 @@ extern "C" bool js_is_document_proxy(Item item) {
     TypeId tid = get_type_id(item);
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
-    return m->map_kind == MAP_KIND_DOC_PROXY;
+    return m->map_kind == MAP_KIND_DOC_PROXY || m->map_kind == MAP_KIND_FOREIGN_DOC;
+}
+
+// Returns the DomDocument* if `item` is a foreign-doc wrapper, else null.
+extern "C" void* js_get_foreign_doc(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_MAP) return nullptr;
+    Map* m = item.map;
+    if (m->map_kind != MAP_KIND_FOREIGN_DOC) return nullptr;
+    if (m->type != (void*)&js_foreign_doc_marker) return nullptr;
+    return m->data;
+}
+
+// Returns true if `item` is the document.implementation singleton.
+extern "C" bool js_is_dom_implementation(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_MAP) return false;
+    Map* m = item.map;
+    return m->type == (void*)&js_dom_implementation_marker;
 }
 
 extern "C" Item js_get_document_object_value() {
@@ -338,6 +448,214 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
         }
     }
     return ItemNull;
+}
+
+// ============================================================================
+// Foreign Document Wrappers
+// (document.implementation.createHTMLDocument / createDocument results)
+// ============================================================================
+
+// Wrap a DomDocument* as a foreign-doc Map for JS access.
+// Cached so repeated calls for the same DomDocument* return the same wrapper
+// (required for `===` identity comparisons).
+static const int FOREIGN_DOC_CACHE_SIZE = 16;
+struct ForeignDocCacheEntry { DomDocument* doc; uint64_t item; };
+static __thread ForeignDocCacheEntry s_foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
+static __thread int s_foreign_doc_cache_count = 0;
+
+static Item wrap_foreign_doc(DomDocument* doc) {
+    // Look up cache first.
+    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
+        if (s_foreign_doc_cache[i].doc == doc) {
+            return (Item){.item = s_foreign_doc_cache[i].item};
+        }
+    }
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_FOREIGN_DOC;
+    wrapper->type = (void*)&js_foreign_doc_marker;
+    wrapper->data = doc;
+    wrapper->data_cap = 0;
+    Item it = (Item){.map = wrapper};
+    if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
+        s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
+        s_foreign_doc_cache[s_foreign_doc_cache_count].item = it.item;
+        heap_register_gc_root(&s_foreign_doc_cache[s_foreign_doc_cache_count].item);
+        s_foreign_doc_cache_count++;
+    }
+    return it;
+}
+
+// Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
+static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
+    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
+        if (s_foreign_doc_cache[i].doc == doc) {
+            return (Item){.item = s_foreign_doc_cache[i].item};
+        }
+    }
+    return ItemNull;
+}
+
+// Build a minimal HTML document tree:
+//   <html>
+//     <head><title>$title</title></head>
+//     <body></body>
+//   </html>
+// The doc shares the current document's Input* so MarkBuilder can allocate
+// Lambda Element backing objects from the same pool.
+static DomDocument* create_foreign_html_doc(const char* title) {
+    Input* input = _js_current_document ? _js_current_document->input : nullptr;
+    if (!input) {
+        log_error("create_foreign_html_doc: no current document Input available");
+        return nullptr;
+    }
+    DomDocument* fd = dom_document_create(input);
+    if (!fd) return nullptr;
+
+    // Build the html/head/title/body tree using MarkBuilder for the Lambda
+    // Element backings, then wrap each in a DomElement bound to the foreign doc.
+    auto build_dom_elem = [&](const char* tag, Element*& out_elem) -> DomElement* {
+        MarkBuilder builder(input);
+        Item item = builder.element(tag).final();
+        out_elem = item.element;
+        return dom_element_create(fd, tag, out_elem);
+    };
+
+    Element* html_e = nullptr;
+    DomElement* html_dom = build_dom_elem("html", html_e);
+    if (!html_dom) return fd;
+
+    Element* head_e = nullptr;
+    DomElement* head_dom = build_dom_elem("head", head_e);
+
+    Element* body_e = nullptr;
+    DomElement* body_dom = build_dom_elem("body", body_e);
+
+    Element* title_e = nullptr;
+    DomElement* title_dom = build_dom_elem("title", title_e);
+
+    if (head_dom && title_dom) {
+        head_dom->append_child(title_dom);
+        if (title && *title) {
+            String* tstr = heap_create_name(title);
+            DomText* tnode = dom_text_create_detached(tstr, fd);
+            if (tnode) title_dom->append_child(tnode);
+        }
+    }
+    if (html_dom && head_dom) html_dom->append_child(head_dom);
+    if (html_dom && body_dom) html_dom->append_child(body_dom);
+    fd->root = html_dom;
+    return fd;
+}
+
+// Public: create a foreign HTML document, return wrapped Item.
+extern "C" Item js_create_foreign_html_doc(const char* title) {
+    DomDocument* fd = create_foreign_html_doc(title ? title : "");
+    if (!fd) return ItemNull;
+    return wrap_foreign_doc(fd);
+}
+
+// Public: create an empty foreign XML/generic document. qualified_name may be
+// null (no document element) or a tag to use as the root.
+extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
+    Input* input = _js_current_document ? _js_current_document->input : nullptr;
+    if (!input) return ItemNull;
+    DomDocument* fd = dom_document_create(input);
+    if (!fd) return ItemNull;
+    if (qualified_name && *qualified_name) {
+        MarkBuilder builder(input);
+        Item item = builder.element(qualified_name).final();
+        Element* e = item.element;
+        DomElement* root = dom_element_create(fd, qualified_name, e);
+        fd->root = root;
+    }
+    return wrap_foreign_doc(fd);
+}
+
+// Public: create a DocumentType stub. We model it as a plain DOM element with
+// tag "!DOCTYPE" so that node-style operations (parent/sibling) still work.
+extern "C" Item js_create_doctype_node(const char* name,
+                                        const char* public_id,
+                                        const char* system_id) {
+    DomDocument* doc = _js_current_document;
+    if (!doc) return ItemNull;
+    MarkBuilder builder(doc->input);
+    Item item = builder.element("!DOCTYPE").final();
+    Element* e = item.element;
+    DomElement* dt = dom_element_create(doc, "!DOCTYPE", e);
+    if (!dt) return ItemNull;
+    Item wrapped = js_dom_wrap_element(dt);
+    // Attach name/publicId/systemId as DOM attributes for property access.
+    if (name)      js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("name"))},      (Item){.item = s2it(heap_create_name(name))});
+    if (public_id) js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("publicId"))},  (Item){.item = s2it(heap_create_name(public_id))});
+    if (system_id) js_dom_set_property(wrapped, (Item){.item = s2it(heap_create_name("systemId"))},  (Item){.item = s2it(heap_create_name(system_id))});
+    return wrapped;
+}
+
+// Save the current document and switch to the supplied foreign doc.
+// Returns the previous document pointer (caller must restore via
+// js_dom_restore_active_document).
+extern "C" void* js_dom_swap_active_document(void* new_doc) {
+    void* prev = (void*)_js_current_document;
+    if (new_doc) {
+        _js_current_document = (DomDocument*)new_doc;
+    }
+    return prev;
+}
+
+extern "C" void js_dom_restore_active_document(void* prev_doc) {
+    _js_current_document = (DomDocument*)prev_doc;
+}
+
+// ============================================================================
+// document.implementation Singleton
+// ============================================================================
+
+extern "C" Item js_get_dom_implementation(void) {
+    if (js_dom_implementation_item.item != ITEM_NULL) {
+        return js_dom_implementation_item;
+    }
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_PLAIN;
+    wrapper->type = (void*)&js_dom_implementation_marker;
+    wrapper->data = nullptr;
+    wrapper->data_cap = 0;
+    js_dom_implementation_item = (Item){.map = wrapper};
+    heap_register_gc_root(&js_dom_implementation_item.item);
+    return js_dom_implementation_item;
+}
+
+// Dispatch a method call on the document.implementation singleton.
+// Returns true and sets *out if the method was handled.
+extern "C" bool js_dom_implementation_method(Item method_name, Item* args, int argc, Item* out) {
+    const char* m = fn_to_cstr(method_name);
+    if (!m) return false;
+    if (strcmp(m, "createHTMLDocument") == 0) {
+        const char* title = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (!title) title = "";
+        *out = js_create_foreign_html_doc(title);
+        return true;
+    }
+    if (strcmp(m, "createDocument") == 0) {
+        // (namespaceURI, qualifiedName, doctype)
+        const char* qname = (argc >= 2) ? fn_to_cstr(args[1]) : nullptr;
+        *out = js_create_foreign_xml_doc(qname);
+        return true;
+    }
+    if (strcmp(m, "createDocumentType") == 0) {
+        const char* name      = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        const char* public_id = (argc >= 2) ? fn_to_cstr(args[1]) : "";
+        const char* system_id = (argc >= 3) ? fn_to_cstr(args[2]) : "";
+        *out = js_create_doctype_node(name ? name : "", public_id ? public_id : "", system_id ? system_id : "");
+        return true;
+    }
+    if (strcmp(m, "hasFeature") == 0) {
+        // Per WHATWG: always returns true.
+        *out = (Item){.item = ITEM_TRUE};
+        return true;
+    }
+    return false;
 }
 
 // ============================================================================
@@ -1456,7 +1774,7 @@ static String* uppercase_tag_name(const char* tag_name) {
 // ============================================================================
 
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
-    if (!_js_current_document || !_js_current_document->root) {
+    if (!_js_current_document) {
         log_error("js_document_method: no document set");
         return ItemNull;
     }
@@ -1468,7 +1786,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
 
     DomDocument* doc = _js_current_document;
-    DomElement* root = doc->root;
+    DomElement* root = doc->root; // may be null for foreign docs without a root
 
     log_debug("js_document_method: '%s' with %d args", method, argc);
 
@@ -1685,6 +2003,21 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return js_dom_wrap_element(comment_node);
     }
 
+    // createProcessingInstruction(target, data) — model as a comment-like node
+    // tagged "?target" so node ops still work. Used heavily in WPT XML tests.
+    if (strcmp(method, "createProcessingInstruction") == 0) {
+        const char* target = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        const char* data   = (argc >= 2) ? fn_to_cstr(args[1]) : "";
+        if (!target) target = "";
+        if (!data) data = "";
+        MarkBuilder builder(doc->input);
+        Item pi_item = builder.element("?").text(data).final();
+        Element* pi_elem = pi_item.element;
+        DomElement* pi_node = dom_element_create(doc, target, pi_elem);
+        if (!pi_node) return ItemNull;
+        return js_dom_wrap_element(pi_node);
+    }
+
     // v12b: importNode(node [, deep]) — deep clone a node
     if (strcmp(method, "importNode") == 0) {
         if (argc < 1) return ItemNull;
@@ -1728,12 +2061,18 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
         return (Item){.item = ITEM_FALSE};
     }
-    // document.contains(node) — delegate to element contains on documentElement
+    // document.contains(node) — true iff node is document or a descendant.
     if (strcmp(method, "contains") == 0) {
         if (argc >= 1) {
+            Item arg = args[0];
+            // self → true (per DOM spec, node.contains(node) is true)
+            Item doc_self = js_get_document_object_value();
+            if (arg.item == doc_self.item) return (Item){.item = ITEM_TRUE};
             Item doc_elem = js_document_get_property((Item){.item = s2it(heap_create_name("documentElement"))});
             if (doc_elem.item != ITEM_NULL && doc_elem.item != ITEM_JS_UNDEFINED) {
-                return js_dom_contains(doc_elem, args[0]);
+                // also: documentElement itself is a descendant, contains(documentElement) → true
+                if (arg.item == doc_elem.item) return (Item){.item = ITEM_TRUE};
+                return js_dom_contains(doc_elem, arg);
             }
         }
         return (Item){.item = ITEM_TRUE};
@@ -1753,6 +2092,22 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
     if (strcmp(method, "getSelection") == 0) {
         return js_dom_get_selection();
+    }
+
+    // document.appendChild(node) — for documents without a root, set the
+    // node as the root; otherwise append to the existing root. (WPT
+    // setupRangeTests appends elements/comments to the foreign XML doc.)
+    if (strcmp(method, "appendChild") == 0) {
+        if (argc < 1) return ItemNull;
+        DomNode* child = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!child) return ItemNull;
+        if (!doc->root && child->is_element()) {
+            doc->root = child->as_element();
+        } else if (doc->root) {
+            ((DomNode*)doc->root)->append_child(child);
+            dom_post_insert((DomNode*)doc->root, child);
+        }
+        return args[0];
     }
 
     log_debug("js_document_method: unknown method '%s'", method);
@@ -1900,6 +2255,17 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return ItemNull;
     }
 
+    // implementation — DOMImplementation (createHTMLDocument, createDocument, ...)
+    if (strcmp(prop, "implementation") == 0) {
+        return js_get_dom_implementation();
+    }
+
+    // doctype — DocumentType node (or null if document has none).
+    // For the parsed main document we don't track a doctype node; return null.
+    if (strcmp(prop, "doctype") == 0) {
+        return ItemNull;
+    }
+
     // Document method names accessed as properties return ITEM_TRUE for feature detection
     static const char* doc_methods[] = {
         "getElementById", "getElementsByTagName", "getElementsByClassName",
@@ -1969,6 +2335,19 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             if (!sib) return ItemNull;
             return js_dom_wrap_element((void*)sib);
         }
+        if (strcmp(prop, "ownerDocument") == 0) {
+            // Walk up to find an element parent and use its doc.
+            DomNode* p = text_node->parent;
+            while (p && !p->is_element()) p = p->parent;
+            if (p) {
+                DomDocument* od = p->as_element()->doc;
+                if (od && od != _js_current_document) {
+                    Item w = lookup_foreign_doc_wrapper(od);
+                    if (w.item != ITEM_NULL) return w;
+                }
+            }
+            return js_get_document_object_value();
+        }
         log_debug("js_dom_get_property: unknown text node property '%s'", prop);
         return ItemNull;
     }
@@ -1995,6 +2374,18 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                 return js_dom_wrap_element(parent->as_element());
             }
             return ItemNull;
+        }
+        if (strcmp(prop, "ownerDocument") == 0) {
+            DomNode* p = comment_node->parent;
+            while (p && !p->is_element()) p = p->parent;
+            if (p) {
+                DomDocument* od = p->as_element()->doc;
+                if (od && od != _js_current_document) {
+                    Item w = lookup_foreign_doc_wrapper(od);
+                    if (w.item != ITEM_NULL) return w;
+                }
+            }
+            return js_get_document_object_value();
         }
         log_debug("js_dom_get_property: unknown comment node property '%s'", prop);
         return ItemNull;
@@ -2113,8 +2504,15 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return ItemNull;
     }
 
-    // ownerDocument — returns the document proxy for any element
+    // ownerDocument — returns the document proxy for any element.
+    // For elements owned by a foreign document, return that foreign-doc
+    // wrapper (so identity tests like `el.ownerDocument === foreignDoc` hold).
     if (strcmp(prop, "ownerDocument") == 0) {
+        DomDocument* od = elem->doc;
+        if (od && od != _js_current_document) {
+            Item w = lookup_foreign_doc_wrapper(od);
+            if (w.item != ITEM_NULL) return w;
+        }
         return js_get_document_object_value();
     }
 

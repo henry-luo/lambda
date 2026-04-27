@@ -2455,6 +2455,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     event_context_init(&evcon, uicon, event);
 
+    // ------------------------------------------------------------------
+    // Phase 6 (single source of truth): every selection_*/caret_* call
+    // below routes into DomSelection automatically via the bidirectional
+    // sync hooks in state_store.cpp:
+    //   - selection_start  -> dom_selection_sync_from_legacy_selection()
+    //                         -> dom_selection_set_base_and_extent(...)
+    //   - selection_extend / selection_extend_to_view -> same
+    //   - caret_set        -> dom_selection_sync_from_legacy_caret()
+    //                         -> dom_selection_collapse(...)
+    // The legacy CaretState/SelectionState writes here remain because
+    // event.cpp computes glyph-precise caret X/Y/height via
+    // calculate_position_from_char_offset (better than the resolver's
+    // linear interpolation). The DOM Selection model is thus the
+    // canonical state, while the legacy structs cache the precise
+    // visual coordinates needed by the renderer / inline glyph painter.
+    // ------------------------------------------------------------------
+
     // find target view based on mouse position
     int mouse_x, mouse_y;
     switch (event->type) {

@@ -540,6 +540,14 @@ extern "C" Item js_selection_remove_range(Item range_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
     if (!r) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
+    // Per WHATWG: throw NotFoundError if the range isn't in the selection.
+    bool in_sel = false;
+    uint32_t rc = dom_selection_range_count(s);
+    for (uint32_t i = 0; i < rc; i++) {
+        const char* exc = nullptr;
+        if (dom_selection_get_range_at(s, i, &exc) == r) { in_sel = true; break; }
+    }
+    if (!in_sel) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
     dom_selection_remove_range(s, r);
     selection_sync_props(js_get_this(), s);
     return make_undef();
@@ -616,6 +624,15 @@ extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
 extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor_off_v,
                                                   Item focus_node_v,  Item focus_off_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    // Per WebIDL, all four arguments are required: missing args (passed as
+    // undefined) → TypeError.
+    TypeId ta = get_type_id(anchor_off_v);
+    TypeId tf = get_type_id(focus_off_v);
+    if (ta == LMD_TYPE_UNDEFINED || tf == LMD_TYPE_UNDEFINED ||
+        get_type_id(focus_node_v) == LMD_TYPE_UNDEFINED) {
+        throw_dom_exception("TypeError", "setBaseAndExtent: 4 arguments required");
+        return make_undef();
+    }
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
     if (!an || !fn) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }

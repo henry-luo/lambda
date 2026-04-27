@@ -826,6 +826,15 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, proto);
         }
+    } else {
+        // No matching constructor (e.g. DOMException names like
+        // "IndexSizeError", "WrongDocumentError"): set .name as an own
+        // property so `e.name` returns the supplied name. Per WHATWG
+        // DOMException spec, .name is a per-instance own property.
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        js_property_set(obj, name_key, error_name);
+        Item ne_name = (Item){.item = s2it(heap_create_name("__ne_name", 9))};
+        js_property_set(obj, ne_name, (Item){.item = b2it(true)});
     }
     // Mark stack as non-enumerable (per ES spec)
     Item ne_stack = (Item){.item = s2it(heap_create_name("__ne_stack", 10))};
@@ -5457,6 +5466,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 return js_document_proxy_get_property(key);
             }
+            case MAP_KIND_FOREIGN_DOC: {
+                // Foreign document: temporarily swap the thread-local active
+                // document so that the proxy property dispatch resolves
+                // against the foreign doc's tree (body/head/title/etc.).
+                void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
+                Item r = js_document_proxy_get_property(key);
+                js_dom_restore_active_document(prev);
+                return r;
+            }
             case MAP_KIND_DOM:
                 if (js_is_computed_style_item(object)) return js_computed_style_get_property(object, key);
                 return js_dom_get_property(object, key);
@@ -7022,6 +7040,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     m->data_cap = 0;
                 }
                 break;  // fall through to regular property set
+            case MAP_KIND_FOREIGN_DOC:
+                // Foreign documents: data holds DomDocument*, must not be
+                // overwritten. Silently ignore property sets (rare in tests).
+                return value;
             case MAP_KIND_DOM:
                 return js_dom_set_property(object, key, value);
             case MAP_KIND_CSSOM:
@@ -8980,6 +9002,12 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             return js_encodeURIComponent(a0);
         if (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0)
             return js_decodeURIComponent(a0);
+        // indirect eval — called via reference (e.g. arr.map(eval), (0,eval)(src)).
+        // ES spec: indirect eval evaluates source in the global scope.
+        if (nl == 4 && strncmp(n, "eval", 4) == 0) {
+            extern Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+            return js_builtin_eval(a0, 1);
+        }
         if (nl == 5 && strncmp(n, "print", 5) == 0) {
             js_console_log(a0);
             return make_js_undefined();
@@ -14193,7 +14221,20 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
     // Document proxy methods (getElementById, querySelector, etc.)
     if (js_is_document_proxy(obj)) {
+        void* foreign = js_get_foreign_doc(obj);
+        if (foreign) {
+            void* prev = js_dom_swap_active_document(foreign);
+            Item r = js_document_proxy_method(method_name, args, argc);
+            js_dom_restore_active_document(prev);
+            return r;
+        }
         return js_document_proxy_method(method_name, args, argc);
+    }
+    // document.implementation singleton methods
+    if (js_is_dom_implementation(obj)) {
+        Item out;
+        if (js_dom_implementation_method(method_name, args, argc, &out)) return out;
+        return ItemNull;
     }
     // CSSOM wrapper methods
     if (js_is_css_namespace(obj)) {

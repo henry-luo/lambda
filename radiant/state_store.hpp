@@ -230,6 +230,11 @@ typedef struct RadiantState {
     struct DomRange*     live_ranges;       // doubly-linked list head
     uint32_t             next_range_id;     // monotonic id (debug)
     bool                 selection_layout_dirty;
+    // Phase 6 (single source of truth): re-entry guard counter to prevent
+    // legacy<->DOM sync ping-pong. Bumped while either direction of sync is
+    // running so the other direction skips itself. Counter (not bool) so
+    // nested mutations are safe.
+    int                  dom_selection_sync_depth;
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
