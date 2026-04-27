@@ -840,9 +840,11 @@ extern void js_assert_throws(Item expected_ctor, Item func, Item message);
 extern void js_assert_base(Item must_be_true, Item message);
 extern void js_donotevaluate(void);
 extern Item js_is_constructor(Item fn);
+#endif
+
+// always available: emitted unconditionally by JS class transpiler
 extern void js_private_field_init_begin(void);
 extern void js_private_field_init_end(void);
-#endif
 
 JitImport jit_runtime_imports[] = {
     // C library functions
@@ -1265,10 +1267,11 @@ JitImport jit_runtime_imports[] = {
     {"js_assert_throws", FPTR(js_assert_throws)},
     {"js_assert_base", FPTR(js_assert_base)},
     {"js_donotevaluate", FPTR(js_donotevaluate)},
-    {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},
-    {"js_private_field_init_end", FPTR(js_private_field_init_end)},
     {"js_is_constructor", FPTR(js_is_constructor)},
 #endif
+    // always available: emitted unconditionally by JS class transpiler
+    {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},
+    {"js_private_field_init_end", FPTR(js_private_field_init_end)},
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},
     {"js_array_length", FPTR(js_array_length)},
