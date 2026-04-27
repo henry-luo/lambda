@@ -6799,8 +6799,18 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 (rlen == 11 && strncmp(rname, "SyntaxError", 11) == 0) ||
                 (rlen == 14 && strncmp(rname, "ReferenceError", 14) == 0) ||
                 (rlen == 14 && strncmp(rname, "AggregateError", 14) == 0);
+            // Known non-constructor namespace objects must NOT use name-based instanceof
+            // — they are not callable constructors and must throw TypeError per ES spec
+            // 'this' also bypasses name-based check since its type is only known at runtime
+            bool is_known_non_constructor =
+                (rlen == 4 && strncmp(rname, "Math", 4) == 0) ||
+                (rlen == 4 && strncmp(rname, "JSON", 4) == 0) ||
+                (rlen == 4 && strncmp(rname, "this", 4) == 0) ||
+                (rlen == 7 && strncmp(rname, "Atomics", 7) == 0) ||
+                (rlen == 7 && strncmp(rname, "Reflect", 7) == 0) ||
+                (rlen == 7 && strncmp(rname, "console", 7) == 0);
             // Also check if the right side is an unresolved identifier
-            if (!is_builtin_class) {
+            if (!is_builtin_class && !is_known_non_constructor) {
                 char rv_name[128];
                 snprintf(rv_name, sizeof(rv_name), "_js_%.*s", rlen, rname);
                 JsMirVarEntry* rv = jm_find_var(mt, rv_name);
@@ -6824,9 +6834,14 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     }
 
     MIR_reg_t right = jm_transpile_box_item(mt, bin->right);
-    return jm_call_2(mt, fn_name, MIR_T_I64,
+    MIR_reg_t result = jm_call_2(mt, fn_name, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    // instanceof and in can throw TypeError — propagate exception to enclosing try/catch
+    if (bin->op == JS_OP_INSTANCEOF || bin->op == JS_OP_IN) {
+        jm_emit_exc_propagate_check(mt);
+    }
+    return result;
 }
 
 // Unary expression
@@ -7369,8 +7384,35 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
-            // delete identifier → evaluate for side effects, return false
-            // (can't delete declared variables in sloppy mode)
+            JsIdentifierNode* del_id = (JsIdentifierNode*)un->operand;
+            const char* del_name = del_id->name ? del_id->name->chars : NULL;
+            if (del_name) {
+                // vars are stored with _js_ prefix in var scopes and module_consts
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%s", del_name);
+                bool del_is_declared = (jm_find_var(mt, vname) != NULL);
+                if (!del_is_declared && mt->module_consts) {
+                    JsModuleConstEntry mclookup;
+                    snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
+                    if (hashmap_get(mt->module_consts, &mclookup)) del_is_declared = true;
+                }
+                if (del_is_declared) {
+                    // declared variable (local, arg, catch, closure, module-level) — can't delete; return false
+                    MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE_VAL)));
+                    return r;
+                }
+                // not in local scope — check global at runtime
+                // (e.g. NaN/Infinity are non-configurable globals → false; undeclared vars → true)
+                MIR_reg_t global_obj = jm_call_0(mt, "js_get_global_object", MIR_T_I64);
+                MIR_reg_t key = jm_box_string_literal(mt, del_name, (int)del_id->name->len);
+                return jm_call_2(mt, "js_delete_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, global_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            }
+            // fallthrough: evaluate and return false (shouldn't normally reach here)
             jm_transpile_box_item(mt, un->operand);
             MIR_reg_t r = jm_new_reg(mt, "dfalse", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -7993,6 +8035,18 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                         rhs = jm_call_2(mt, fn, MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+                    } else {
+                        // function name inference for simple module-var assignment:
+                        // cover = function(){} → cover.name === "cover"
+                        // Suppressed when LHS is parenthesized (IsIdentifierRef is false per spec)
+                        if (!asgn->lhs_is_parenthesized && asgn->right &&
+                            (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                             asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                            JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
+                            if (!fn_node->name && id->name && id->name->chars) {
+                                jm_emit_set_function_name(mt, rhs, id->name->chars);
+                            }
+                        }
                     }
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
@@ -9965,6 +10019,8 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         bool is_error_class =
                             (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
                             (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
+                            (slen == 9 && strncmp(sname, "EvalError", 9) == 0) ||
+                            (slen == 8 && strncmp(sname, "URIError", 8) == 0) ||
                             (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
                             (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
                             (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
@@ -10901,6 +10957,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
                 if (second_arg) {
                     MIR_reg_t mapFn = jm_transpile_box_item(mt, second_arg);
+                    JsAstNode* third_arg = second_arg->next;
+                    if (third_arg) {
+                        MIR_reg_t this_arg = jm_transpile_box_item(mt, third_arg);
+                        return jm_call_3(mt, "js_array_from_with_mapper_this", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mapFn),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_arg));
+                    }
                     return jm_call_2(mt, "js_array_from_with_mapper", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, mapFn));
@@ -14396,7 +14460,16 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     jm_emit_set_function_source(mt, fn_reg, fc->node);
     // v20: Mark generator functions so their prototype has no constructor
     if (fc->node && fc->node->is_generator) {
-        jm_call_void_1(mt, "js_mark_generator_func",
+        if (fc->node->is_async) {
+            jm_call_void_1(mt, "js_mark_async_generator_func",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+        } else {
+            jm_call_void_1(mt, "js_mark_generator_func",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+        }
+    } else if (fc->node && fc->node->is_async) {
+        // Async (non-generator): mark for [[Prototype]] = %AsyncFunction%.prototype
+        jm_call_void_1(mt, "js_mark_async_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     // Mark arrow functions as non-constructable
@@ -14639,7 +14712,16 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     jm_emit_set_function_source(mt, fn_reg, fn);
     // v20: Mark generator functions so their prototype has no constructor
     if (fn->is_generator) {
-        jm_call_void_1(mt, "js_mark_generator_func",
+        if (fn->is_async) {
+            jm_call_void_1(mt, "js_mark_async_generator_func",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+        } else {
+            jm_call_void_1(mt, "js_mark_generator_func",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+        }
+    } else if (fn->is_async) {
+        // Async (non-generator): mark for [[Prototype]] = %AsyncFunction%.prototype
+        jm_call_void_1(mt, "js_mark_async_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     // Mark arrow functions as non-constructable
@@ -15486,33 +15568,31 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             bool is_error_class =
                                 (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
                                 (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
+                                (slen == 9 && strncmp(sname, "EvalError", 9) == 0) ||
+                                (slen == 8 && strncmp(sname, "URIError", 8) == 0) ||
                                 (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
                                 (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
                                 (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
                             if (is_error_class) {
-                                MIR_reg_t err_proto = jm_call_0(mt, "js_new_object", MIR_T_I64);
-                                MIR_reg_t epcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                                MIR_reg_t epcn_val = jm_box_string_literal(mt, sname, slen);
-                                jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, epcn_key),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, epcn_val));
+                                // Use the actual NativeError.prototype singleton (not a synthetic copy).
+                                // This ensures identity checks like `Err.prototype.__proto__ === RangeError.prototype`
+                                // pass, and inherited properties like .name are found correctly.
+                                JsIdentifierNode tmp_sid;
+                                memset(&tmp_sid, 0, sizeof(tmp_sid));
+                                tmp_sid.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                tmp_sid.name = super_id->name;
+                                MIR_reg_t super_ctor = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid);
+                                MIR_reg_t sp_key2 = jm_box_string_literal(mt, "prototype", 9);
+                                MIR_reg_t err_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key2));
                                 jm_call_void_2(mt, "js_set_prototype",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto));
-                                // add root Error proto if specific error type
-                                if (slen != 5) {
-                                    MIR_reg_t root_proto = jm_call_0(mt, "js_new_object", MIR_T_I64);
-                                    MIR_reg_t rcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                                    MIR_reg_t rcn_val = jm_box_string_literal(mt, "Error", 5);
-                                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto),
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_key),
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_val));
-                                    jm_call_void_2(mt, "js_set_prototype",
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto),
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto));
-                                }
+                                // Also set constructor chain: Child.__proto__ = Parent (NativeError ctor)
+                                jm_call_void_2(mt, "js_set_prototype",
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor));
                             } else {
                                 // Non-builtin superclass: link to runtime constructor's prototype
                                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
@@ -17157,6 +17237,9 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // v11: Map/Set
     else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) is_builtin = true;
     else if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) is_builtin = true;
+    // WeakMap/WeakSet
+    else if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) is_builtin = true;
+    else if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) is_builtin = true;
     // v14: Promise
     else if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) is_builtin = true;
     // RegExp constructor
@@ -17453,9 +17536,17 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // Phase 3: new WeakMap() / new WeakSet()
     if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) {
+        if (first_arg) {
+            return jm_call_1(mt, "js_weakmap_new_with_iter", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
+        }
         return jm_call_0(mt, "js_weakmap_new", MIR_T_I64);
     }
     if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) {
+        if (first_arg) {
+            return jm_call_1(mt, "js_weakset_new_with_iter", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
+        }
         return jm_call_0(mt, "js_weakset_new", MIR_T_I64);
     }
 
@@ -18481,11 +18572,20 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Destructure element into individual variables if array pattern
     if (destr_pattern) {
         jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
+        // Check for exception from destructuring (e.g. non-iterable value for empty array pattern).
+        // If exception is pending, close the for-of iterator and rethrow (l_iter_exc handler).
+        MIR_reg_t arr_destr_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, arr_destr_exc)));
     }
 
     // Destructure element into individual variables if object pattern
     if (obj_destr_pattern) {
         jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
+        // Check for exception from destructuring
+        MIR_reg_t obj_destr_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, obj_destr_exc)));
     }
 
     // P4b-of: Infer class type for for-of loop variable from field accesses in body.
@@ -25270,7 +25370,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_emit_set_function_source(mt, fn_item, fn);
                     // v20: Mark generator functions
                     if (fn->is_generator) {
-                        jm_call_void_1(mt, "js_mark_generator_func",
+                        if (fn->is_async) {
+                            jm_call_void_1(mt, "js_mark_async_generator_func",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                        } else {
+                            jm_call_void_1(mt, "js_mark_generator_func",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                        }
+                    } else if (fn->is_async) {
+                        jm_call_void_1(mt, "js_mark_async_func",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
                     }
                     // v30: Mark strict mode functions
@@ -25784,32 +25892,29 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     bool is_error_class =
                                         (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
                                         (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
+                                        (slen == 9 && strncmp(sname, "EvalError", 9) == 0) ||
+                                        (slen == 8 && strncmp(sname, "URIError", 8) == 0) ||
                                         (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
                                         (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
                                         (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
                                     if (is_error_class) {
-                                        MIR_reg_t err_proto = jm_call_0(mt, "js_new_object", MIR_T_I64);
-                                        MIR_reg_t epcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                                        MIR_reg_t epcn_val = jm_box_string_literal(mt, sname, slen);
-                                        jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto),
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, epcn_key),
-                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, epcn_val));
+                                        // Use the actual NativeError.prototype singleton
+                                        JsIdentifierNode tmp_sid2;
+                                        memset(&tmp_sid2, 0, sizeof(tmp_sid2));
+                                        tmp_sid2.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                        tmp_sid2.name = super_id->name;
+                                        MIR_reg_t super_ctor2 = jm_transpile_box_item(mt, (JsAstNode*)&tmp_sid2);
+                                        MIR_reg_t sp_key2 = jm_box_string_literal(mt, "prototype", 9);
+                                        MIR_reg_t err_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor2),
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key2));
                                         jm_call_void_2(mt, "js_set_prototype",
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
                                             MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto));
-                                        if (slen != 5) {
-                                            MIR_reg_t root_proto = jm_call_0(mt, "js_new_object", MIR_T_I64);
-                                            MIR_reg_t rcn_key = jm_box_string_literal(mt, "__class_name__", 14);
-                                            MIR_reg_t rcn_val = jm_box_string_literal(mt, "Error", 5);
-                                            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                                MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto),
-                                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_key),
-                                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_val));
-                                            jm_call_void_2(mt, "js_set_prototype",
-                                                MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto),
-                                                MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto));
-                                        }
+                                        // Also set constructor chain: Child.__proto__ = Parent
+                                        jm_call_void_2(mt, "js_set_prototype",
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor2));
                                     } else {
                                         MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
                                         MIR_reg_t sp_key = jm_box_string_literal(mt, "prototype", 9);

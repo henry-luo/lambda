@@ -1328,6 +1328,12 @@ extern "C" {
     // Mark generator functions
     void js_mark_generator_func(Item fn_item);
 
+    // Mark async generator functions (sets GENERATOR + ASYNC_GEN flags)
+    void js_mark_async_generator_func(Item fn_item);
+
+    // Mark async (non-generator) functions
+    void js_mark_async_func(Item fn_item);
+
     // Mark functions as strict mode
     void js_mark_strict_func(Item fn_item);
 

@@ -132,6 +132,8 @@ Item* js_alloc_env(int count);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);
+void js_mark_async_generator_func(Item fn_item);
+void js_mark_async_func(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
@@ -354,6 +356,7 @@ Item js_number_is_safe_integer(Item value);
 
 Item js_array_from(Item iterable);
 Item js_array_from_with_mapper(Item iterable, Item mapFn);
+Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 Item js_json_parse(Item str_item);
 Item js_json_parse_full(Item str_item, Item reviver);
 Item js_json_stringify(Item value);
@@ -640,6 +643,8 @@ Item js_text_decoder_decode(Item decoder, Item input);
 
 Item js_weakmap_new(void);
 Item js_weakset_new(void);
+Item js_weakmap_new_with_iter(Item iterable);
+Item js_weakset_new_with_iter(Item iterable);
 
 // Public collection type checks (for instanceof)
 bool js_is_map_instance(Item obj);

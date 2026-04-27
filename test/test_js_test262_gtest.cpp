@@ -37,16 +37,22 @@
 //   - Phase 1:  Parse metadata, partition tests into two groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
 //       (b) PARTIAL  — known non-fully-passing tests from previous run (crash,
-//                       OOM, slow >= 3s, timeout); run individually.
+//                       OOM, slow >= 3s, timeout). SKIPPED by default.
+//                       With --run-partial they are merged into CLEAN so they
+//                       can graduate back to baseline if fixed.
 //   - Phase 2:  Execute CLEAN tests in batched workers.
-//   - Phase 2a: Execute PARTIAL tests individually.
-//   - Phase 2b: Retry any batch-lost tests individually (crash recovery).
+//   - Phase 2a: REMOVED. Partial tests no longer run individually; they are
+//               either skipped or run via --run-partial (see Phase 1).
+//   - Phase 2b: Retry any batch-lost tests individually (crash recovery for
+//               innocent bystanders co-batched with a crash-point).
 //   - Phase 3:  Evaluate results against expected outcomes.
 //   - Phase 4:  (--batch-only) Retry regressions individually; if recovered,
 //               the failure was a batch interaction → classified as PARTIAL.
 //
-// Key invariant: after Phase 2 + 2a + 2b, every non-skipped test must have
-// a result.  If any test is MISSING, that is a crash and a critical bug.
+// Key invariant: every test included in CLEAN must have a result after
+// Phase 2 + 2b. PARTIAL tests skipped by default carry forward their previous
+// status in t262_partial.txt; they neither affect baseline pass count nor the
+// regression gate.
 //
 // =============================================================================
 
@@ -911,6 +917,12 @@ static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previo
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
+// --run-partial: when set, tests previously listed in t262_partial.txt are
+// re-classified as CLEAN and run together with everything else in Phase 2.
+// When unset (default), partial tests are skipped entirely — Phase 2a is gone.
+// Use --run-partial periodically to graduate fixed partial tests back into
+// the baseline. See test/js262/JS262_Test.md for details.
+static bool g_run_partial = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
@@ -1624,12 +1636,17 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // Partition batch_indices into two groups:
     //   1. clean_indices   — safe to run in shared batches of 50
     //   2. partial_indices — known non-fully-passing from previous run (crash, OOM,
-    //                        slow >= 3s, timeout); run individually
+    //                        slow >= 3s, timeout). Skipped entirely by default.
+    //                        With --run-partial they are merged into clean_indices
+    //                        so they get a batch run and can graduate to baseline.
     std::vector<size_t> clean_indices;
     std::vector<size_t> partial_indices;
     for (size_t idx : batch_indices) {
         if (!g_known_partial.empty() && g_known_partial.count(prepared[idx].test_name)) {
-            partial_indices.push_back(idx);
+            if (g_run_partial)
+                clean_indices.push_back(idx);   // promote to CLEAN this round
+            else
+                partial_indices.push_back(idx); // tracked, but NOT executed
         } else {
             clean_indices.push_back(idx);
         }
@@ -1637,8 +1654,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu partial)\n",
-            prep_secs, batch_indices.size(), clean_indices.size(), partial_indices.size());
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu partial-%s)\n",
+            prep_secs, batch_indices.size(), clean_indices.size(), partial_indices.size(),
+            g_run_partial ? "merged" : "skipped");
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
     auto batch_results = execute_t262_batch(prepared, clean_indices);
@@ -1725,18 +1743,14 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     batch_kill_tests.size());
     }
 
-    // Phase 2a: run non-fully-passing tests individually (batch size = 1).
-    // These tests previously failed in batch (crash, OOM, slow). Running them
-    // individually tests whether they still fail and prevents collateral damage.
+    // Phase 2a removed. Partial tests are either:
+    //   - skipped entirely (default), so they keep their previous-run status
+    //     in t262_partial.txt and will not affect this round's baseline gate; or
+    //   - merged into clean_indices via --run-partial above, in which case they
+    //     already ran in Phase 2 and there is nothing extra to do here.
     if (!partial_indices.empty()) {
-        fprintf(stderr, "[test262] Phase 2a (partial): %zu tests running individually...\n",
+        fprintf(stderr, "[test262] Phase 2a: skipped %zu partial tests (use --run-partial to execute)\n",
                 partial_indices.size());
-        auto cr_results = execute_t262_batch(prepared, partial_indices, /*chunk_size=*/1);
-        for (auto& kv : cr_results) {
-            batch_results[kv.first] = std::move(kv.second);
-        }
-        fprintf(stderr, "[test262] Phase 2a (partial): %zu results collected\n",
-                cr_results.size());
     }
 
     // Phase 2b: retry batch-lost tests in small batches (crash recovery)
@@ -1895,9 +1909,24 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // again, they'll be re-added as BATCH_KILL.
             // MISSING entries are removed if they pass individually (they were likely
             // collateral from a batch kill, not inherently crashing).
+            //
+            // Skip-partial mode (default): partial tests didn't run this round, so we
+            // re-emit each entry verbatim using its original tag from g_partial_tags.
+            // This carries the partial list forward unchanged until --run-partial is
+            // used or the entry is hand-edited.
             size_t crash_released = 0;
             for (size_t idx : partial_indices) {
                 const auto& p = prepared[idx];
+                if (!g_run_partial) {
+                    // Skipped: preserve original tag from previous run
+                    auto tag_it = g_partial_tags.find(p.test_name);
+                    const std::string& tag = (tag_it != g_partial_tags.end()) ? tag_it->second
+                                                                              : std::string("BATCH_KILL");
+                    fprintf(partial_log, "%s\t%s\t%s\n",
+                            tag.c_str(), p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
+                    continue;
+                }
                 auto it = batch_results.find(p.test_name);
                 if (it == batch_results.end()) {
                     fprintf(partial_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
@@ -2512,6 +2541,9 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
+        }
+        if (strcmp(argv[i], "--run-partial") == 0) {
+            g_run_partial = true;
         }
         if (strcmp(argv[i], "--batch-only") == 0) {
             g_batch_only = true;

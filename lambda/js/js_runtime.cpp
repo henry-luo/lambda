@@ -1252,6 +1252,12 @@ extern "C" Item js_to_numeric(Item value) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
         if (_dec && _dec->unlimited == DECIMAL_BIGINT) return value;
     }
+    // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
+    // Symbols are encoded as LMD_TYPE_INT with value <= -(int64_t)JS_SYMBOL_BASE
+    if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     // ToPrimitive for objects (hint: number) — ES spec §7.1.3
     if (type == LMD_TYPE_MAP) {
         bool own_pv = false;
@@ -1264,6 +1270,7 @@ extern "C" Item js_to_numeric(Item value) {
             Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
             Item args[1] = { hint };
             Item result = js_call_function(to_prim, value, args, 1);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY) {
                 js_throw_type_error("Cannot convert object to primitive value");
@@ -1277,12 +1284,14 @@ extern "C" Item js_to_numeric(Item value) {
         if (!found_vo) vo_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
         if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(vo_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) return js_to_numeric(result);
         }
         Item ts_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("toString", 8))});
         if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(ts_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) return js_to_numeric(result);
         }
@@ -1294,12 +1303,14 @@ extern "C" Item js_to_numeric(Item value) {
         Item vo_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
         if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(vo_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_numeric(result);
         }
         Item ts_fn = js_property_get(value, (Item){.item = s2it(heap_create_name("toString", 8))});
         if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(ts_fn, value, NULL, 0);
+            if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
             if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_numeric(result);
         }
@@ -1517,7 +1528,14 @@ extern "C" Item js_to_string(Item value) {
                 Item hint = (Item){.item = s2it(heap_create_name("string", 6))};
                 Item args[1] = { hint };
                 Item result = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
                 if (get_type_id(result) == LMD_TYPE_STRING) return result;
+                // Per ES spec: if Symbol.toPrimitive returns an Object, throw TypeError
+                TypeId rtid = get_type_id(result);
+                if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY || rtid == LMD_TYPE_FUNC || rtid == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
                 return js_to_string(result);
             }
         }
@@ -1804,7 +1822,7 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
 // v23b: Comparison facades returning raw int64_t 0/1 for direct use in MIR_BF/BT.
 // Eliminates box→unbox→branch cycle when comparison is used in if/for/while condition.
 // These inline the fast int-vs-int path and fall back to the full boxed comparison.
-static Item js_abstract_relational_lt(Item left, Item right); // forward declaration
+static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
 extern "C" int64_t js_lt_raw(Item left, Item right) {
     TypeId lt = get_type_id(left), rt = get_type_id(right);
     bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
@@ -1821,21 +1839,51 @@ extern "C" int64_t js_lt_raw(Item left, Item right) {
 }
 
 extern "C" int64_t js_gt_raw(Item left, Item right) {
-    return js_lt_raw(right, left);
+    // a > b: spec evaluates left first; use ARC(right, left, leftFirst=false) to match
+    TypeId lt = get_type_id(left), rt = get_type_id(right);
+    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    if (l_num && r_num) {
+        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
+        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
+        if (isnan(l) || isnan(r)) return 0;
+        return l > r ? 1 : 0;
+    }
+    Item result = js_abstract_relational_lt(right, left, false);
+    if (js_exception_pending || result.item == ITEM_JS_UNDEFINED) return 0;
+    return (int64_t)it2b(result);
 }
 
 extern "C" int64_t js_le_raw(Item left, Item right) {
-    // a <= b is !(b < a), but NaN must return false
-    Item gt = js_abstract_relational_lt(right, left);
-    if (gt.item == ITEM_JS_UNDEFINED) return 0;
+    // a <= b is !(b < a), but NaN must return false; leftFirst=false since args are swapped
+    TypeId lt = get_type_id(left), rt = get_type_id(right);
+    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    if (l_num && r_num) {
+        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
+        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
+        if (isnan(l) || isnan(r)) return 0;
+        return l <= r ? 1 : 0;
+    }
+    Item gt = js_abstract_relational_lt(right, left, false);
+    if (js_exception_pending || gt.item == ITEM_JS_UNDEFINED) return 0;
     return it2b(gt) ? 0 : 1;
 }
 
 extern "C" int64_t js_ge_raw(Item left, Item right) {
-    // a >= b is !(a < b), but NaN must return false
-    Item lt = js_abstract_relational_lt(left, right);
-    if (lt.item == ITEM_JS_UNDEFINED) return 0;
-    return it2b(lt) ? 0 : 1;
+    // a >= b is !(a < b), but NaN must return false; leftFirst=true since args are in source order
+    TypeId lt = get_type_id(left), rt = get_type_id(right);
+    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    if (l_num && r_num) {
+        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
+        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
+        if (isnan(l) || isnan(r)) return 0;
+        return l >= r ? 1 : 0;
+    }
+    Item lt_result = js_abstract_relational_lt(left, right, true);
+    if (js_exception_pending || lt_result.item == ITEM_JS_UNDEFINED) return 0;
+    return it2b(lt_result) ? 0 : 1;
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
@@ -2075,6 +2123,7 @@ extern "C" Item js_number_function(Item value) {
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
+    TypeId orig_left_type = left_type; // remember if left was an object requiring ToPrimitive
 
     // ToPrimitive for objects before type checking (ES spec §12.8.3)
     // The + operator uses hint "default", which prefers valueOf then toString
@@ -2128,6 +2177,8 @@ extern "C" Item js_add(Item left, Item right) {
             }
         }
     }
+    // ES spec: if left ToPrimitive threw (and left was a MAP object), stop before evaluating right operand
+    if (orig_left_type == LMD_TYPE_MAP && js_exception_pending) return make_js_undefined();
     if (right_type == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_get_fast(right.map, "__primitiveValue__", 18, &own_pv);
@@ -2200,6 +2251,8 @@ extern "C" Item js_add(Item left, Item right) {
     };
     if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC) {
         toprimitive_non_map(left, left_type);
+        // ES spec: if left ToPrimitive threw (and left was ARRAY/FUNC), stop before right
+        if (js_exception_pending) return make_js_undefined();
     }
     if (right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC) {
         toprimitive_non_map(right, right_type);
@@ -2225,7 +2278,8 @@ extern "C" Item js_add(Item left, Item right) {
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2237,7 +2291,8 @@ extern "C" Item js_subtract(Item left, Item right) {
 }
 
 extern "C" Item js_multiply(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2249,7 +2304,8 @@ extern "C" Item js_multiply(Item left, Item right) {
 }
 
 extern "C" Item js_divide(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2262,7 +2318,8 @@ extern "C" Item js_divide(Item left, Item right) {
 }
 
 extern "C" Item js_modulo(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2275,7 +2332,8 @@ extern "C" Item js_modulo(Item left, Item right) {
 }
 
 extern "C" Item js_power(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2526,7 +2584,9 @@ extern "C" Item js_strict_not_equal(Item left, Item right) {
 
 // Internal: Abstract Relational Comparison (ES spec §7.2.14)
 // Returns true, false, or undefined (for NaN)
-static Item js_abstract_relational_lt(Item left, Item right) {
+// leftFirst=true: left arg is the source-left operand (used for < and >=), check exception after it
+// leftFirst=false: args are swapped by caller (used for > and <=), no early check after left arg
+static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
@@ -2573,6 +2633,8 @@ static Item js_abstract_relational_lt(Item left, Item right) {
         left_type = get_type_id(left);
     }
     if (left_type == LMD_TYPE_ARRAY) { left = js_to_string(left); left_type = LMD_TYPE_STRING; }
+    // ES spec: if left (first source operand for < and >=) threw during ToPrimitive, stop before right
+    if (leftFirst && js_exception_pending) return ItemNull;
     if (right_type == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_get_fast(right.map, "__primitiveValue__", 18, &own_pv);
@@ -2609,6 +2671,8 @@ static Item js_abstract_relational_lt(Item left, Item right) {
         right_type = get_type_id(right);
     }
     if (right_type == LMD_TYPE_ARRAY) { right = js_to_string(right); right_type = LMD_TYPE_STRING; }
+    // Propagate any pending exception before performing comparison
+    if (js_exception_pending) return ItemNull;
 
     // String comparison
     if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
@@ -2673,19 +2737,24 @@ static Item js_abstract_relational_lt(Item left, Item right) {
 // ES spec §13.10.1: < operator — undefined from ARC becomes false
 extern "C" Item js_less_than(Item left, Item right) {
     Item result = js_abstract_relational_lt(left, right);
+    if (js_exception_pending) return make_js_undefined();
     if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return result;
 }
 
 extern "C" Item js_less_equal(Item left, Item right) {
     // a <= b is !(b < a); if ARC returns undefined (NaN), result is false
-    Item gt = js_abstract_relational_lt(right, left);
+    // leftFirst=false: args are swapped, right arg is the left source operand
+    Item gt = js_abstract_relational_lt(right, left, false);
+    if (js_exception_pending) return make_js_undefined();
     if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(gt))};
 }
 
 extern "C" Item js_greater_than(Item left, Item right) {
-    Item result = js_abstract_relational_lt(right, left);
+    // leftFirst=false: args are swapped (right, left), right arg is the left source operand
+    Item result = js_abstract_relational_lt(right, left, false);
+    if (js_exception_pending) return make_js_undefined();
     // ES spec §13.10.1: if Abstract Relational Comparison returns undefined (NaN), > returns false
     if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return result;
@@ -2693,6 +2762,7 @@ extern "C" Item js_greater_than(Item left, Item right) {
 
 extern "C" Item js_greater_equal(Item left, Item right) {
     Item lt = js_abstract_relational_lt(left, right);
+    if (js_exception_pending) return make_js_undefined();
     if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(!it2b(lt))};
 }
@@ -2740,7 +2810,8 @@ extern "C" int64_t js_double_to_int32(double d) {
 }
 
 extern "C" Item js_bitwise_and(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2752,7 +2823,8 @@ extern "C" Item js_bitwise_and(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_or(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2764,7 +2836,8 @@ extern "C" Item js_bitwise_or(Item left, Item right) {
 }
 
 extern "C" Item js_bitwise_xor(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2786,7 +2859,8 @@ extern "C" Item js_bitwise_not(Item operand) {
 }
 
 extern "C" Item js_left_shift(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -2798,7 +2872,8 @@ extern "C" Item js_left_shift(Item left, Item right) {
 }
 
 extern "C" Item js_right_shift(Item left, Item right) {
-    left = js_numeric_operand(left); right = js_numeric_operand(right);
+    left = js_numeric_operand(left); if (js_exception_pending) return ItemNull;
+    right = js_numeric_operand(right);
     if (js_is_symbol(left) || js_is_symbol(right)) { js_throw_type_error("Cannot convert a Symbol value to a number"); return ItemNull; }
     if (js_is_bigint(left) || js_is_bigint(right)) {
         if (js_check_bigint_arithmetic(left, right)) return ItemNull;
@@ -3088,6 +3163,15 @@ struct JsFunction {
 #define JS_FUNC_FLAG_STRICT    8
 #define JS_FUNC_FLAG_HAS_BOUND_THIS 16
 #define JS_FUNC_FLAG_METHOD    32
+#define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
+#define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
+
+// forward declaration — defined near js_generator_create below
+extern "C" Item js_get_generator_shared_proto(bool is_async);
+
+// Tracks the .prototype of the generator function being called.
+// Set by js_call_function before invoking a generator function, read by js_generator_create.
+static Item js_generator_callee_proto = {0};
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
 // thisArg_item is the explicit thisArg (or ITEM_JS_UNDEFINED if not provided).
@@ -4530,7 +4614,13 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item tn = (Item){.item = s2it(heap_create_name(n, nl))};
                 Item msg = (eff_argc > 0 && eff_args) ? eff_args[0] : make_js_undefined();
-                return js_new_error_with_name(tn, msg);
+                Item err_obj = js_new_error_with_name(tn, msg);
+                // ES2022: pass options (second arg) for error cause installation
+                if (eff_argc >= 2 && eff_args) {
+                    extern Item js_error_set_cause(Item error, Item options);
+                    js_error_set_cause(err_obj, eff_args[1]);
+                }
+                return err_obj;
             }
             // AggregateError(errors, message)
             if (nl == 14 && strncmp(n, "AggregateError", 14) == 0) {
@@ -5705,6 +5795,24 @@ extern "C" Item js_property_get(Item object, Item key) {
                     bool pm_found = false;
                     Item pm_val = js_map_get_fast_ext(pm, str_key->chars, (int)str_key->len, &pm_found);
                     if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+                    // check for accessor getter (__get_<propname>) in companion map
+                    if (str_key->len < 200) {
+                        char getter_key[256];
+                        snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+                        bool gk_found = false;
+                        Item getter = js_map_get_fast(pm, getter_key, (int)strlen(getter_key), &gk_found);
+                        if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                            return js_call_function(getter, object, NULL, 0);
+                        }
+                        // setter-only accessor: return undefined without falling through
+                        if (!gk_found) {
+                            char setter_key[256];
+                            snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
+                            bool sk_found = false;
+                            js_map_get_fast(pm, setter_key, (int)strlen(setter_key), &sk_found);
+                            if (sk_found) return make_js_undefined();
+                        }
+                    }
                     // v29: strict arguments — throw TypeError on callee/caller access
                     if (object.array->is_content == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
@@ -5845,6 +5953,11 @@ extern "C" Item js_property_get(Item object, Item key) {
 
     // Function: reading .prototype, .length, .name, .call, .apply, .bind properties
     if (type == LMD_TYPE_FUNC) {
+        // Convert integer/float keys to string for properties_map lookup (e.g. f[1] → f["1"])
+        TypeId key_tid = get_type_id(key);
+        if (key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_FLOAT) {
+            key = js_to_string(key);
+        }
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -5981,6 +6094,26 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, ne_k, (Item){.item = b2it(true)});
                             Item nc_k = (Item){.item = s2it(heap_create_name("__nc_length", 11))};
                             js_property_set(fn->prototype, nc_k, (Item){.item = b2it(true)});
+                            // ES spec 23.1.3.34: Array.prototype[@@unscopables]
+                            // {writable:false, enumerable:false, configurable:true}
+                            // Value: object with boolean true for each scoped-out method
+                            Item unscopal_val = js_new_object();
+                            static const char* unscopal_keys[] = {
+                                "at", "copyWithin", "entries", "fill", "find", "findIndex",
+                                "findLast", "findLastIndex", "flat", "flatMap", "includes",
+                                "keys", "toReversed", "toSorted", "toSpliced", "values", NULL
+                            };
+                            for (int ui = 0; unscopal_keys[ui]; ui++) {
+                                Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
+                                js_property_set(unscopal_val, uk, (Item){.item = b2it(true)});
+                            }
+                            // store as __sym_11 (Symbol.unscopables)
+                            Item us_k = (Item){.item = s2it(heap_create_name("__sym_11", 8))};
+                            js_property_set(fn->prototype, us_k, unscopal_val);
+                            js_mark_non_enumerable(fn->prototype, us_k);
+                            // mark as non-writable: __nw___sym_11
+                            Item nw_k = (Item){.item = s2it(heap_create_name("__nw___sym_11", 13))};
+                            js_property_set(fn->prototype, nw_k, (Item){.item = b2it(true)});
                         }
                         // Boolean.prototype.[[BooleanData]] = false (ES spec 20.3.4)
                         if (nl == 7 && strncmp(nm, "Boolean", 7) == 0) {
@@ -6525,6 +6658,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
                     js_property_set(fn->prototype, ctor_key, object);
                     js_mark_non_enumerable(fn->prototype, ctor_key);
+                } else {
+                    // Generator function's .prototype inherits from %AsyncGeneratorPrototype%
+                    // or %GeneratorPrototype% (depth-2) per ES spec §27.6.3 / §27.3.3
+                    bool is_async_gen = (fn->flags & JS_FUNC_FLAG_ASYNC_GEN) != 0;
+                    Item depth2 = js_get_generator_shared_proto(is_async_gen);
+                    js_set_prototype(fn->prototype, depth2);
                 }
                 return fn->prototype;
             }
@@ -7695,6 +7834,19 @@ extern "C" Item js_array_get(Item array, Item index) {
         return make_js_undefined();
     }
 
+    // ES spec: boolean keys are coerced to "true"/"false" string property names,
+    // not numeric indices. Route to companion map lookup.
+    if (get_type_id(index) == LMD_TYPE_BOOL) {
+        Array* arr = array.array;
+        if (arr->extra == 0) return make_js_undefined();
+        Map* pm = (Map*)(uintptr_t)arr->extra;
+        const char* s = it2b(index) ? "true" : "false";
+        int sl = it2b(index) ? 4 : 5;
+        bool found = false;
+        Item v = js_map_get_fast(pm, s, sl, &found);
+        return found ? v : make_js_undefined();
+    }
+
     int idx = (int)js_get_number(index);
     Array* arr = array.array;
 
@@ -7842,6 +7994,24 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
 
 extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        return value;
+    }
+
+    // ES spec: boolean keys are converted to "true"/"false" strings, not numeric indices.
+    // Route to companion map.
+    TypeId itid = get_type_id(index);
+    if (itid == LMD_TYPE_BOOL) {
+        Array* arr = array.array;
+        if (arr->extra == 0) {
+            Item obj = js_new_object();
+            arr->extra = (int64_t)(uintptr_t)obj.map;
+        }
+        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Item map_item = (Item){.map = pm};
+        const char* s = it2b(index) ? "true" : "false";
+        int sl = it2b(index) ? 4 : 5;
+        Item key = (Item){.item = s2it(heap_create_name(s, sl))};
+        js_property_set(map_item, key, value);
         return value;
     }
 
@@ -8270,18 +8440,14 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
         js_mark_non_enumerable(proto, mk);
     }
 
-    // Symbol.iterator = values (TypedArray-flagged)
-    Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
-    JsFunction* si_fn_obj = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    si_fn_obj->type_id = LMD_TYPE_FUNC;
-    si_fn_obj->param_count = 0;
-    si_fn_obj->formal_length = -1;
-    si_fn_obj->builtin_id = JS_BUILTIN_ARR_VALUES;
-    si_fn_obj->name = heap_create_name("[Symbol.iterator]", 17);
-    si_fn_obj->flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
-    Item si_fn = {.function = (Function*)si_fn_obj};
-    js_property_set(proto, si_key, si_fn);
-    js_mark_non_enumerable(proto, si_key);
+    // Symbol.iterator = values (same function object as TypedArray.prototype.values per spec)
+    {
+        Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+        Item values_key = (Item){.item = s2it(heap_create_name("values", 6))};
+        Item values_fn = js_property_get(proto, values_key);
+        js_property_set(proto, si_key, values_fn);
+        js_mark_non_enumerable(proto, si_key);
+    }
 
     // Accessor getter stubs for buffer, byteLength, byteOffset
     // These throw TypeError when accessed on non-TypedArray (ES spec §23.2.3.1/2/3)
@@ -8693,6 +8859,20 @@ extern "C" void js_mark_generator_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_GENERATOR;
 }
 
+// Mark a function as an async generator function (sets both GENERATOR and ASYNC_GEN flags)
+extern "C" void js_mark_async_generator_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
+}
+
+// Mark a function as an async (non-generator) function — affects [[Prototype]]/.constructor
+extern "C" void js_mark_async_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_ASYNC;
+}
+
 // Mark a function as an arrow function (non-constructable)
 extern "C" void js_mark_arrow_func(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
@@ -8962,6 +9142,7 @@ extern "C" Item js_get_prototype_of(Item object);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_array_is_array(Item value);
 extern "C" Item js_array_from(Item iterable);
+extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg);
 extern "C" Item js_number_is_integer(Item value);
 extern "C" Item js_number_is_finite(Item value);
 extern "C" Item js_number_is_nan(Item value);
@@ -9040,36 +9221,43 @@ static Item js_array_like_to_array(Item obj) {
         // ES spec: check HasProperty (includes prototype chain) to preserve holes
         bool has = js_has_property(obj, idx_key);
         Item val = hole;
+        // v37: For plain MAPs without __proto__, js_has_property/js_property_get
+        // skip Object.prototype. If property is missing or undefined here, check
+        // Object.prototype manually (unless it's an own setter-only accessor).
+        bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN);
+        bool is_own_setter_only = false;
+        if (plain_map && blen < 200) {
+            char sk[256];
+            int sklen = snprintf(sk, sizeof(sk), "__set_%.*s", blen, buf);
+            bool sk_found = false;
+            js_map_get_fast(obj.map, sk, sklen, &sk_found);
+            if (sk_found) {
+                bool gk_found = false;
+                char gk[256];
+                int gklen = snprintf(gk, sizeof(gk), "__get_%.*s", blen, buf);
+                js_map_get_fast(obj.map, gk, gklen, &gk_found);
+                if (!gk_found) is_own_setter_only = true;
+            }
+        }
         if (has) {
             val = js_property_get(obj, idx_key);
-            // v37: For plain MAPs without __proto__, js_property_get can't walk to
-            // Object.prototype. If result is undefined, check if the property is
-            // actually on Object.prototype (not a setter-only shadow).
-            if (get_type_id(val) == LMD_TYPE_UNDEFINED &&
-                get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN) {
-                // Check if this is a setter-only accessor (should NOT fall through)
-                bool is_own_setter_only = false;
-                if (blen < 200) {
-                    char sk[256];
-                    int sklen = snprintf(sk, sizeof(sk), "__set_%.*s", blen, buf);
-                    bool sk_found = false;
-                    js_map_get_fast(obj.map, sk, sklen, &sk_found);
-                    if (sk_found) {
-                        bool gk_found = false;
-                        char gk[256];
-                        int gklen = snprintf(gk, sizeof(gk), "__get_%.*s", blen, buf);
-                        js_map_get_fast(obj.map, gk, gklen, &gk_found);
-                        if (!gk_found) is_own_setter_only = true;
+            if (get_type_id(val) == LMD_TYPE_UNDEFINED && plain_map && !is_own_setter_only) {
+                Map* obj_proto = js_resolve_object_prototype();
+                if (obj_proto && obj.map != obj_proto) {
+                    Item proto_val = js_property_get((Item){.map = obj_proto}, idx_key);
+                    if (get_type_id(proto_val) != LMD_TYPE_UNDEFINED) {
+                        val = proto_val;
                     }
                 }
-                if (!is_own_setter_only) {
-                    Map* obj_proto = js_resolve_object_prototype();
-                    if (obj_proto && obj.map != obj_proto) {
-                        Item proto_val = js_property_get((Item){.map = obj_proto}, idx_key);
-                        if (get_type_id(proto_val) != LMD_TYPE_UNDEFINED) {
-                            val = proto_val;
-                        }
-                    }
+            }
+        } else if (plain_map && !is_own_setter_only) {
+            // js_has_property returned false because plain MAPs skip Object.prototype.
+            // Check Object.prototype explicitly: if property is present there, treat as inherited.
+            Map* obj_proto = js_resolve_object_prototype();
+            if (obj_proto && obj.map != obj_proto) {
+                Item op_item = (Item){.map = obj_proto};
+                if (it2b(js_has_own_property(op_item, idx_key))) {
+                    val = js_property_get(op_item, idx_key);
                 }
             }
         }
@@ -9168,7 +9356,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         // v20: Virtual builtin methods are non-enumerable — check map shape directly
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
-            Item k = js_to_string(arg0);
+            // Symbol keys: use __sym_N key for property lookup (not js_to_string which throws)
+            Item k = js_to_property_key(arg0);
+            if (js_exception_pending) return (Item){.item = ITEM_FALSE};
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 Map* m = this_val.map;
@@ -9215,7 +9405,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         // Function objects: name, length, prototype, arguments, caller are non-enumerable
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
-            Item k = js_to_string(arg0);
+            Item k = js_to_property_key(arg0);
+            if (js_exception_pending) return (Item){.item = ITEM_FALSE};
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 if (ks && ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
@@ -9360,6 +9551,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // v41: Generator functions → [object GeneratorFunction]
             if (fn->flags & JS_FUNC_FLAG_GENERATOR)
                 return (Item){.item = s2it(heap_create_name("[object GeneratorFunction]", 26))};
+            // Async (non-generator) functions → [object AsyncFunction]
+            if (fn->flags & JS_FUNC_FLAG_ASYNC)
+                return (Item){.item = s2it(heap_create_name("[object AsyncFunction]", 22))};
             return (Item){.item = s2it(heap_create_name("[object Function]", 17))};
         }        if (tt == LMD_TYPE_BOOL)
             return (Item){.item = s2it(heap_create_name("[object Boolean]", 16))};
@@ -9688,7 +9882,88 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 return result;
             }
             // Plain Map: treat as array-like object (has length + numeric indices)
+            // For indexOf/lastIndexOf: iterate directly to respect getter side-effects
+            // (ES spec accesses each element directly during the search loop)
+            if (builtin_id == JS_BUILTIN_ARR_INDEX_OF || builtin_id == JS_BUILTIN_ARR_LAST_INDEX_OF) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(this_val, len_key);
+                if (js_check_exception()) return ItemNull;
+                int64_t len = (int64_t)js_get_number(len_val);
+                if (len <= 0) return (Item){.item = i2it(-1)};
+                Item search_val = arg_count >= 1 ? args[0] : make_js_undefined();
+                // for plain MAP objects, js_has_property skips Object.prototype (v37 intentional).
+                // we must check Object.prototype manually to implement HasProperty correctly.
+                bool is_plain_map = (get_type_id(this_val) == LMD_TYPE_MAP &&
+                                     this_val.map->map_kind == MAP_KIND_PLAIN);
+                Map* op_for_idx = is_plain_map ? js_resolve_object_prototype() : NULL;
+                // HasProperty + Get helper: returns {present, value}
+                // for plain MAPs, explicitly walks to Object.prototype
+                auto idx_has_get = [&](Item obj, Item ikey) -> std::pair<bool, Item> {
+                    bool own = it2b(js_has_own_property(obj, ikey));
+                    if (own) return {true, js_property_get(obj, ikey)};
+                    if (is_plain_map && op_for_idx) {
+                        Item op_item = (Item){.map = op_for_idx};
+                        if (it2b(js_has_own_property(op_item, ikey)))
+                            return {true, js_property_get(op_item, ikey)};
+                    } else if (!is_plain_map && js_has_property(obj, ikey)) {
+                        return {true, js_property_get(obj, ikey)};
+                    }
+                    return {false, ItemNull};
+                };
+                if (builtin_id == JS_BUILTIN_ARR_INDEX_OF) {
+                    // ES spec: evaluate fromIndex (step 4) before loop — triggers side-effects
+                    double n = arg_count >= 2 ? js_get_number(args[1]) : 0;
+                    if (js_check_exception()) return ItemNull;
+                    int64_t k = isnan(n) ? 0 : (int64_t)n;
+                    if (k < 0) { k = len + k; if (k < 0) k = 0; }
+                    for (; k < len; k++) {
+                        char buf[32];
+                        int blen = snprintf(buf, sizeof(buf), "%lld", (long long)k);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                        auto [kPresent, elem] = idx_has_get(this_val, idx_key);
+                        if (!kPresent) continue;
+                        if (js_check_exception()) return ItemNull;
+                        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(k)};
+                    }
+                } else {
+                    // lastIndexOf: evaluate fromIndex first, then search backward
+                    double n = arg_count >= 2 ? js_get_number(args[1]) : (double)(len - 1);
+                    if (js_check_exception()) return ItemNull;
+                    int64_t k = isnan(n) ? len - 1 : (int64_t)n;
+                    if (k < 0) k = len + k;
+                    if (k >= len) k = len - 1;
+                    for (; k >= 0; k--) {
+                        char buf[32];
+                        int blen = snprintf(buf, sizeof(buf), "%lld", (long long)k);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                        auto [kPresent, elem] = idx_has_get(this_val, idx_key);
+                        if (!kPresent) continue;
+                        if (js_check_exception()) return ItemNull;
+                        if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(k)};
+                    }
+                }
+                return (Item){.item = i2it(-1)};
+            }
             js_array_method_real_this = this_val;
+            // ES §23.1.3 ArraySpeciesCreate(O, count) → ArrayCreate validates count ≤ 2^32-1.
+            // For slice/map/filter on array-like, validate length up-front to throw RangeError
+            // before js_array_like_to_array silently truncates at 100000.
+            if (builtin_id == JS_BUILTIN_ARR_SLICE || builtin_id == JS_BUILTIN_ARR_MAP ||
+                builtin_id == JS_BUILTIN_ARR_FILTER) {
+                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item len_val = js_property_get(this_val, len_key);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                Item len_num = js_to_number(len_val);
+                if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
+                double dlen = 0;
+                TypeId ltid = get_type_id(len_num);
+                if (ltid == LMD_TYPE_INT || ltid == LMD_TYPE_INT64) dlen = (double)it2i(len_num);
+                else if (ltid == LMD_TYPE_FLOAT) dlen = len_num.get_double();
+                if (dlen > 4294967295.0) {  // > 2^32 - 1
+                    js_array_method_real_this = (Item){0};
+                    return js_throw_range_error("Invalid array length");
+                }
+            }
             Item temp_arr = js_array_like_to_array(this_val);
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
@@ -9742,6 +10017,30 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 strbuf_free(sb_ts);
                 return (Item){.item = s2it(result_ts)};
             }
+            // Proxy with non-callable target: throw TypeError
+            if (js_is_proxy(this_val)) {
+                Item proxy_target = js_proxy_get_target(this_val);
+                if (get_type_id(proxy_target) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("Function.prototype.toString called on non-callable");
+                    return ItemNull;
+                }
+                // proxy of function: use NativeFunction format (do not expose target source)
+                JsFunction* pfn = (JsFunction*)proxy_target.function;
+                StrBuf* psb = strbuf_new();
+                strbuf_append_str_n(psb, "function ", 9);
+                if (pfn->name && ((uintptr_t)pfn->name & 3) == 0 && (uintptr_t)pfn->name >= 0x1000 && pfn->name->len > 0) {
+                    int pn_len = pfn->name->len;
+                    for (int i = 0; i < pfn->name->len; i++) {
+                        if (pfn->name->chars[i] == ' ') { pn_len = i; break; }
+                    }
+                    strbuf_append_str_n(psb, pfn->name->chars, pn_len);
+                }
+                strbuf_append_str_n(psb, "() { [native code] }", 20);
+                String* presult = heap_create_name(psb->str, psb->length);
+                strbuf_free(psb);
+                return (Item){.item = s2it(presult)};
+            }
+            // Other MAPs (e.g. Function.prototype itself) fall through to default native format below
         }
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;
@@ -10139,8 +10438,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     // Array static methods
     case JS_BUILTIN_ARRAY_IS_ARRAY:
         return js_array_is_array(arg0);
-    case JS_BUILTIN_ARRAY_FROM:
+    case JS_BUILTIN_ARRAY_FROM: {
+        // Array.from(arrayLike [, mapFn [, thisArg]])
+        if (arg_count >= 2 && get_type_id(arg1) == LMD_TYPE_FUNC) {
+            Item this_arg = (arg_count >= 3) ? arg2 : make_js_undefined();
+            return js_array_from_with_mapper_this(arg0, arg1, this_arg);
+        }
         return js_array_from(arg0);
+    }
     case JS_BUILTIN_ARRAY_OF: {
         // Array.of(...args) — creates array from arguments
         Item result = js_array_new(arg_count);
@@ -10991,9 +11296,19 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         bool is_global_found = false;
         Item global_val = js_map_get_fast(this_val.map, "__global__", 10, &is_global_found);
         bool is_global = is_global_found && it2b(global_val);
-        // Call RegExpExec(regex, string)
-        Item match = js_regex_exec(regex, str_item);
-        if (js_exception_pending) return make_js_undefined();
+        // Call RegExpExec(regex, string) — per ES spec, check for custom exec first
+        Item exec_key = (Item){.item = s2it(heap_create_name("exec", 4))};
+        Item exec_fn = js_property_get(regex, exec_key);
+        Item match;
+        if (get_type_id(exec_fn) == LMD_TYPE_FUNC) {
+            // Custom exec defined on regex or RegExp.prototype — call it
+            Item exec_args[1] = {str_item};
+            match = js_call_function(exec_fn, regex, exec_args, 1);
+            if (js_exception_pending) return make_js_undefined();
+        } else {
+            match = js_regex_exec(regex, str_item);
+            if (js_exception_pending) return make_js_undefined();
+        }
         if (match.item == ItemNull.item || get_type_id(match) == LMD_TYPE_NULL) {
             // No more matches — mark done
             js_property_set(this_val, (Item){.item = s2it(heap_create_name("__done__", 8))}, (Item){.item = b2it(true)});
@@ -11619,19 +11934,50 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name && fn->builtin_id == 0 && fn->env == NULL && fn->env_size == 0) {
         bool is_gen_ctor = (fn->name->len == 17 && strncmp(fn->name->chars, "GeneratorFunction", 17) == 0);
         bool is_async_gen_ctor = (fn->name->len == 22 && strncmp(fn->name->chars, "AsyncGeneratorFunction", 22) == 0);
+        bool is_async_ctor = (fn->name->len == 13 && strncmp(fn->name->chars, "AsyncFunction", 13) == 0);
+        if (is_async_ctor) {
+            Item result = js_new_function_from_string(args, arg_count);
+            if (get_type_id(result) == LMD_TYPE_FUNC) {
+                JsFunction* rfn = (JsFunction*)result.function;
+                rfn->flags |= JS_FUNC_FLAG_ASYNC;
+                // Update source text: "function anonymous(...)" → "async function anonymous(...)"
+                if (rfn->source_text && rfn->source_text->len > 8) {
+                    StrBuf* asb = strbuf_new_cap((int)rfn->source_text->len + 8);
+                    const char* src_c = rfn->source_text->chars;
+                    const char* paren = (const char*)memchr(src_c, '(', rfn->source_text->len);
+                    if (paren) {
+                        strbuf_append_str(asb, "async function anonymous(");
+                        size_t rest = rfn->source_text->len - (size_t)(paren - src_c + 1);
+                        strbuf_append_str_n(asb, paren + 1, (int)rest);
+                        String* new_src = heap_create_name(asb->str, asb->length);
+                        strbuf_free(asb);
+                        rfn->source_text = new_src;
+                    } else {
+                        strbuf_free(asb);
+                    }
+                }
+            }
+            return result;
+        }
         if (is_gen_ctor || is_async_gen_ctor) {
             Item result = js_new_function_from_string(args, arg_count);
             if (get_type_id(result) == LMD_TYPE_FUNC) {
                 JsFunction* rfn = (JsFunction*)result.function;
                 rfn->flags |= JS_FUNC_FLAG_GENERATOR;
-                // Update source text to use function* instead of function
+                if (is_async_gen_ctor) {
+                    rfn->flags |= JS_FUNC_FLAG_ASYNC_GEN;
+                }
+                // Update source text to use function* / async function* instead of function
                 if (rfn->source_text && rfn->source_text->len > 8) {
-                    StrBuf* gensb = strbuf_new_cap((int)rfn->source_text->len + 2);
+                    StrBuf* gensb = strbuf_new_cap((int)rfn->source_text->len + 8);
                     const char* src_c = rfn->source_text->chars;
                     // Find the '(' after "function anonymous" — replace prefix
                     const char* paren = (const char*)memchr(src_c, '(', rfn->source_text->len);
                     if (paren) {
-                        strbuf_append_str(gensb, "function* anonymous(");
+                        if (is_async_gen_ctor)
+                            strbuf_append_str(gensb, "async function* anonymous(");
+                        else
+                            strbuf_append_str(gensb, "function* anonymous(");
                         size_t rest = rfn->source_text->len - (size_t)(paren - src_c + 1);
                         strbuf_append_str_n(gensb, paren + 1, (int)rest);
                         String* new_src = heap_create_name(gensb->str, gensb->length);
@@ -11731,7 +12077,14 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         extern int js_with_save_depth(void);
         extern void js_with_restore_depth(int);
         int saved_with_depth = js_with_save_depth();
+        // For generator functions: set up callee proto
+        Item saved_gen_callee_proto_b = js_generator_callee_proto;
+        if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            js_generator_callee_proto = js_property_get(func_item, proto_key);
+        }
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        js_generator_callee_proto = saved_gen_callee_proto_b;
         js_with_restore_depth(saved_with_depth);
         js_active_module_vars = prev_modvars;
         js_current_this = prev_this;
@@ -11767,7 +12120,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     extern int js_with_save_depth(void);
     extern void js_with_restore_depth(int);
     int saved_with_depth = js_with_save_depth();
+    // For generator functions: set up callee proto so js_generator_create uses fn.prototype
+    // If fn.prototype is not an object, js_generator_create falls back to depth-2.
+    Item saved_gen_callee_proto = js_generator_callee_proto;
+    if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        js_generator_callee_proto = js_property_get(func_item, proto_key);
+    }
     Item result = js_invoke_fn(fn, args, arg_count);
+    js_generator_callee_proto = saved_gen_callee_proto;
     js_with_restore_depth(saved_with_depth);
     js_active_module_vars = prev_modvars;
     js_current_this = prev_this;
@@ -11847,14 +12208,21 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
     bound->bound_this = bound_this;
     // Set name to "bound <original_name>" per ES spec
-    if (orig->name && orig->name->len > 0) {
-        int new_len = 6 + orig->name->len; // "bound " + name
-        char* buf = (char*)pool_calloc(js_input->pool, new_len + 1);
-        memcpy(buf, "bound ", 6);
-        memcpy(buf + 6, orig->name->chars, orig->name->len);
-        bound->name = heap_create_name(buf, new_len);
-    } else {
-        bound->name = heap_create_name("bound ", 6);
+    // ES spec §20.2.3.2 step 12-13: Get(Target, "name") — must go through getter, may throw
+    {
+        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
+        Item target_name = js_property_get(func_item, name_key);
+        if (js_exception_pending) return make_js_undefined();
+        String* name_str = (get_type_id(target_name) == LMD_TYPE_STRING) ? it2s(target_name) : NULL;
+        if (name_str && name_str->len > 0) {
+            int new_len = 6 + (int)name_str->len; // "bound " + name
+            char* buf = (char*)pool_calloc(js_input->pool, new_len + 1);
+            memcpy(buf, "bound ", 6);
+            memcpy(buf + 6, name_str->chars, name_str->len);
+            bound->name = heap_create_name(buf, new_len);
+        } else {
+            bound->name = heap_create_name("bound ", 6);
+        }
     }
     if (bound_argc > 0 && bound_args) {
         bound->bound_args = (Item*)pool_calloc(js_input->pool, bound_argc * sizeof(Item));
@@ -12726,6 +13094,24 @@ extern "C" Item js_regex_test(Item regex, Item str) {
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
+// Spec-internal Set(rx, "lastIndex", v, Throw=true): always throws TypeError on non-writable.
+// Returns true on success, false if exception was thrown (caller should propagate).
+static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
+    if (get_type_id(regex) == LMD_TYPE_MAP) {
+        Map* m = regex.map;
+        bool nw_found = false;
+        Item nw_val = js_map_get_fast(m, "__nw_lastIndex", 14, &nw_found);
+        if (nw_found && js_is_truthy(nw_val)) {
+            Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return false;
+        }
+    }
+    js_property_set(regex, li_key, (Item){.item = i2it(value)});
+    return !js_exception_pending;
+}
+
 extern "C" Item js_regex_exec(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.exec called on incompatible receiver");
@@ -12757,7 +13143,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             else start_pos = (int)d;
         }
         if (start_pos < 0 || start_pos > len) {
-            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
             return ItemNull;
         }
     }
@@ -12771,7 +13157,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     bool matched = js_regex_match_internal(rd, chars, len, start_pos, anchor, matches, num_groups);
     if (!matched) {
         if (uses_last_index) {
-            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+            if (!js_regex_set_lastindex_strict(regex, li_key, 0)) return ItemNull;
         }
         return ItemNull;
     }
@@ -12781,7 +13167,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
         // advance at least 1 to avoid infinite loop on zero-length matches
         if (match_end == start_pos) match_end++;
-        js_property_set(regex, li_key, (Item){.item = i2it(match_end)});
+        if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
     // update legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
@@ -12966,10 +13352,9 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
     bool global = it2b(js_to_boolean(global_val));
     // Step 6: If global is false, return RegExpExec(rx, S)
     if (!global) return js_regexp_exec_dispatch(this_val, str);
-    // Step 7: Set rx.lastIndex = 0
+    // Step 7: Set rx.lastIndex = 0 (Throw=true)
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-    js_property_set(this_val, li_key, (Item){.item = i2it(0)});
-    if (js_exception_pending) return ItemNull;
+    if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     // Step 8: Loop collecting matches
     Item results = js_array_new(0);
     int match_count = 0;
@@ -13002,8 +13387,7 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
                 if (!isnan(d) && d >= 0)
                     idx = d > 9007199254740991.0 ? (int64_t)9007199254740991LL : (int64_t)d;
             }
-            js_property_set(this_val, li_key, (Item){.item = i2it(idx + 1)});
-            if (js_exception_pending) return ItemNull;
+            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
         }
     }
     return match_count == 0 ? ItemNull : results;
@@ -13051,9 +13435,8 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     bool global = it2b(js_to_boolean(global_val));
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
     if (global) {
-        // Step 8: Set rx.lastIndex = 0
-        js_property_set(this_val, li_key, (Item){.item = i2it(0)});
-        if (js_exception_pending) return ItemNull;
+        // Step 8: Set rx.lastIndex = 0 (Throw=true)
+        if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return ItemNull;
     }
     // Steps 9-11: collect all RegExpExec results
     Item results_array = js_array_new(0);
@@ -13089,8 +13472,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
                 else idx = (int64_t)d;
             }
             // AdvanceStringIndex: +1 (simplified; for full Unicode surrogates use +2)
-            js_property_set(this_val, li_key, (Item){.item = i2it(idx + 1)});
-            if (js_exception_pending) return ItemNull;
+            if (!js_regex_set_lastindex_strict(this_val, li_key, idx + 1)) return ItemNull;
         }
     }
     // Steps 12-15: build result string
@@ -13576,10 +13958,18 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
     Item map = js_collection_create(JS_COLLECTION_MAP);
     js_collection_link_prototype(map, "Map", 3);
     TypeId tid = get_type_id(iterable);
+    // helper: check each iterable entry is an Object per spec (Map ( [ iterable ] ) step 9.f)
+    #define MAP_ENTRY_CHECK_OBJECT(entry) do { \
+        TypeId _eid = get_type_id(entry); \
+        bool _is_obj = (_eid == LMD_TYPE_MAP || _eid == LMD_TYPE_ARRAY || \
+                        _eid == LMD_TYPE_FUNC || _eid == LMD_TYPE_ELEMENT); \
+        if (!_is_obj) return js_throw_type_error("Iterator value is not an Object"); \
+    } while(0)
     if (tid == LMD_TYPE_ARRAY) {
         Array* a = iterable.array;
         for (int i = 0; i < a->length; i++) {
             Item entry = a->items[i];
+            MAP_ENTRY_CHECK_OBJECT(entry);
             if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
                 js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
             }
@@ -13595,6 +13985,7 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
             // new Map(set) — iterate set entries
             for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                 Item entry = node->key;
+                MAP_ENTRY_CHECK_OBJECT(entry);
                 if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
                     js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
                 }
@@ -13606,6 +13997,7 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
                 Array* a = arr.array;
                 for (int i = 0; i < a->length; i++) {
                     Item entry = a->items[i];
+                    MAP_ENTRY_CHECK_OBJECT(entry);
                     if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
                         js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
                     }
@@ -13619,12 +14011,14 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
             Array* a = arr.array;
             for (int i = 0; i < a->length; i++) {
                 Item entry = a->items[i];
+                MAP_ENTRY_CHECK_OBJECT(entry);
                 if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
                     js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
                 }
             }
         }
     }
+    #undef MAP_ENTRY_CHECK_OBJECT
     return map;
 }
 
@@ -14361,6 +14755,19 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 else if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) method_id = 7;
                 else if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) method_id = 8;
                 // ES2025 Set methods
+                // Helper: GetSetRecord validation per ES2025 spec:
+                // Check that `other` has a callable `size`, callable `has`, and callable `keys`.
+                // Returns false and throws TypeError if `keys` is not callable.
+                auto validate_set_record = [](Item other) -> bool {
+                    if (get_type_id(other) != LMD_TYPE_MAP) return true; // Set objects pass via other_cd
+                    // Check `keys` is callable (spec step 10)
+                    Item keys_fn = js_property_get(other, (Item){.item = s2it(heap_create_name("keys", 4))});
+                    if (get_type_id(keys_fn) != LMD_TYPE_FUNC) {
+                        js_throw_type_error("keys is not a function");
+                        return false;
+                    }
+                    return true;
+                };
                 // Helper: check if a Set-like "other" contains key
                 // If other is a Set collection, use fast hashmap lookup
                 // Otherwise, call other.has(key) method
@@ -14406,6 +14813,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.intersection(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -14418,6 +14826,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.union(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next)
@@ -14434,6 +14843,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.difference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -14446,6 +14856,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.symmetricDifference(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     Item result = js_collection_create(JS_COLLECTION_SET);
                     js_collection_link_prototype(result, "Set", 3);
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
@@ -14466,6 +14877,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.isSubsetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                         if (!set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
                     }
@@ -14475,6 +14887,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.isSupersetOf(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     Item other_keys = set_like_keys(other, other_cd);
                     int64_t ok_len = js_array_length(other_keys);
                     for (int64_t i = 0; i < ok_len; i++) {
@@ -14488,6 +14901,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     // Set.prototype.isDisjointFrom(other)
                     Item other = argc > 0 ? args[0] : ItemNull;
                     JsCollectionData* other_cd = js_get_collection_data(other);
+                    if (!other_cd && !validate_set_record(other)) return ItemNull;
                     for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                         if (set_like_has(other, other_cd, node->key)) return (Item){.item = ITEM_FALSE};
                     }
@@ -16595,8 +17009,10 @@ static Item js_array_species_create(Item original_array, int length) {
     Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
     Item C = js_property_get(original_array, ctor_key);
     if (js_exception_pending) return ItemNull;
-    // step 5: if C is undefined, return ArrayCreate(length)
-    if (C.item == ItemNull.item || get_type_id(C) == LMD_TYPE_UNDEFINED) {
+    // step 5/6/8: if C is undefined (or truly missing — property_get returned
+    // LMD_TYPE_UNDEFINED), return ArrayCreate(length). Null is NOT undefined:
+    // when constructor is explicitly null, proceed to step 9 (TypeError).
+    if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
         return js_array_new(length);
     }
     // step 7: if Type(C) is Object, get C[@@species]
@@ -16809,6 +17225,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 7  && strncmp(c, "reverse", 7) == 0) ||
             (len == 4  && strncmp(c, "fill", 4) == 0);
         if (is_generic) {
+            // Note: slice/map/filter length validation per ArraySpeciesCreate is done
+            // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
             arr = js_array_like_to_array(arr);
             if (js_exception_pending) return ItemNull;
             arr_type = get_type_id(arr);
@@ -16858,8 +17276,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             snprintf(buf, sizeof(buf), "%lld", (long long)(length - 1));
             Item idx_key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
             Item result = js_property_get(cb_this, idx_key);
-            // Delete the property (set to undefined sentinel) and decrement length
-            js_property_set(cb_this, idx_key, make_js_undefined());
+            // Delete the property and decrement length
+            js_delete_property(cb_this, idx_key);
             js_property_set(cb_this, len_key, (Item){.item = i2it((int)(length - 1))});
             return result;
         }
@@ -16970,10 +17388,30 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item result = js_array_species_create(arr, count);
         if (js_exception_pending) return make_js_undefined();
         bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && result.array->extra == 0);
+        bool src_has_proto = js_proto_chain_has_numeric_keys(arr);
         if (result_is_plain_array) {
             Array* dst = result.array;
             for (int i = 0; i < count; i++) {
-                dst->items[i] = src->items[start + i];
+                Item elem = src->items[start + i];
+                if (elem.item == JS_DELETED_SENTINEL_VAL) {
+                    // hole: check prototype chain to find value (Array.prototype or Object.prototype)
+                    if (src_has_proto) {
+                        Item proto_elem = ItemNull;
+                        bool found = js_array_has_element(arr, src, start + i, &proto_elem, true);
+                        if (found && proto_elem.item != ItemNull.item) elem = proto_elem;
+                    } else {
+                        // still check Array.prototype directly (may have numeric properties
+                        // stored as array items, not shape entries, so js_proto_chain_has_numeric_keys
+                        // may miss them)
+                        char idx_buf[32];
+                        int blen = snprintf(idx_buf, sizeof(idx_buf), "%d", start + i);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, blen))};
+                        Item p = js_property_get(arr, idx_key);
+                        if (p.item != ItemNull.item && get_type_id(p) != LMD_TYPE_UNDEFINED)
+                            elem = p;
+                    }
+                }
+                dst->items[i] = elem;
             }
             dst->length = count;
         } else {
@@ -17548,6 +17986,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* a = arr.array;
         int len = a->length;
+        // ES spec: ToInteger(start) and ToInteger(end) — throw TypeError for Symbol
+        if (argc > 1 && js_key_is_symbol(args[1]))
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        if (argc > 2 && js_key_is_symbol(args[2]))
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
         int start = argc > 1 ? (int)js_get_number(args[1]) : 0;
         int end   = argc > 2 ? (int)js_get_number(args[2]) : len;
         if (start < 0) start = len + start;
@@ -18342,7 +18785,8 @@ void js_reset_atomics_object() { js_atomics_object = (Item){.item = ITEM_NULL}; 
 
 extern "C" Item js_get_atomics_object_value() {
     if (js_atomics_object.item == ITEM_NULL) {
-        js_atomics_object = js_object_create(ItemNull);
+        // spec: Atomics [[Prototype]] = %ObjectPrototype%
+        js_atomics_object = js_new_object();
         heap_register_gc_root(&js_atomics_object.item);
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_atomics_object, tag_k, (Item){.item = s2it(heap_create_name("Atomics", 7))});
@@ -19108,6 +19552,17 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
             result = map_get(proto.map, property);
         }
         if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
+        // also check getter (__get_<key>) on this prototype level
+        if (key_str && key_len < 200 &&
+            !(key_len > 6 && (strncmp(key_str, "__get_", 6) == 0 || strncmp(key_str, "__set_", 6) == 0))) {
+            char getter_key[256];
+            int gklen = snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
+            Item getter_result = js_map_get_fast(proto.map, getter_key, gklen);
+            if (getter_result.item != ItemNull.item && !js_is_deleted_sentinel(getter_result) &&
+                get_type_id(getter_result) == LMD_TYPE_FUNC) {
+                return js_call_function(getter_result, object, NULL, 0);
+            }
+        }
         proto = js_get_prototype(proto);
         depth++;
     }
@@ -19261,6 +19716,45 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
     return arr;
 }
 
+// Static prototype caches for Generator and AsyncGenerator instances.
+// Per ES spec, the prototype chain for generator instances is:
+//   gen → %GeneratorFunction%.prototype.prototype → %GeneratorPrototype% → %IteratorPrototype% → Object.prototype
+// The test262 test does Object.getPrototypeOf(Object.getPrototypeOf(gen)) to get %GeneratorPrototype%.
+// We implement two shared levels: a direct proto (depth 1) and the shared prototype (depth 2, has toStringTag).
+static Item js_generator_proto_depth1_cache = {0};      // depth-1 from instance (empty)
+static Item js_async_generator_proto_depth1_cache = {0};
+static Item js_generator_proto_depth2_cache = {0};      // depth-2: has Symbol.toStringTag
+static Item js_async_generator_proto_depth2_cache = {0};
+
+// Returns the shared depth-2 prototype (%AsyncGeneratorPrototype%) with Symbol.toStringTag.
+extern "C" Item js_get_generator_shared_proto(bool is_async) {
+    Item* cache = is_async ? &js_async_generator_proto_depth2_cache : &js_generator_proto_depth2_cache;
+    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
+    Item proto = js_new_object();
+    // Symbol.toStringTag = "AsyncGenerator" | "Generator" (non-writable, non-enum, configurable)
+    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+    Item tag_val = (Item){.item = s2it(heap_create_name(
+        is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
+    js_property_set(proto, tag_key, tag_val);
+    js_mark_non_writable(proto, tag_key);
+    js_mark_non_enumerable(proto, tag_key);
+    // configurable: true is the default (don't set __nc_)
+    *cache = proto;
+    return proto;
+}
+
+// Returns the direct prototype of generator instances (depth-1). Its __proto__ is the shared depth-2 proto.
+static Item js_get_generator_instance_proto(bool is_async) {
+    Item* cache = is_async ? &js_async_generator_proto_depth1_cache : &js_generator_proto_depth1_cache;
+    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
+    Item proto = js_new_object();
+    // Set __proto__ to the shared %AsyncGeneratorPrototype% (depth-2)
+    Item shared = js_get_generator_shared_proto(is_async);
+    js_set_prototype(proto, shared);
+    *cache = proto;
+    return proto;
+}
+
 extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async) {
     // Allocate a new generator slot (no recycling — old generator objects may still
     // hold __gen_idx references to completed slots, causing index collisions)
@@ -19297,11 +19791,20 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     Item obj = js_new_object();
     String* gen_key = heap_create_name("__gen_idx", 9);
     js_property_set(obj, (Item){.item = s2it(gen_key)}, (Item){.item = i2it(idx)});
-    // v41: Set Symbol.toStringTag for Object.prototype.toString
-    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
-    Item tag_val = (Item){.item = s2it(heap_create_name(
-        is_async ? "AsyncGenerator" : "Generator", is_async ? 14 : 9))};
-    js_property_set(obj, tag_key, tag_val);
+    // Set prototype: use the generator function's .prototype if it's an object (OrdinaryCreateFromConstructor).
+    // When .prototype is not an object, fall back to %AsyncGeneratorPrototype% / %GeneratorPrototype% (depth-2).
+    // js_generator_callee_proto was set by js_call_function before invoking this generator function.
+    {
+        Item callee_proto = js_generator_callee_proto;
+        js_generator_callee_proto = (Item){0}; // reset
+        if (callee_proto.item != 0 && get_type_id(callee_proto) == LMD_TYPE_MAP) {
+            js_set_prototype(obj, callee_proto);
+        } else {
+            // Fallback: use %AsyncGeneratorPrototype% / %GeneratorPrototype% (depth-2)
+            Item gen_proto = js_get_generator_shared_proto((bool)(is_async != 0));
+            js_set_prototype(obj, gen_proto);
+        }
+    }
     // Set [Symbol.iterator]() to return this (generators are their own iterable)
     Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
     Item si_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "[Symbol.iterator]", 0);
@@ -20010,9 +20513,23 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         // Symbol.iterator has well-known ID=1, stored as property key "__sym_1"
         Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
         Item iter_factory = js_property_get(iterable, iter_factory_key);
+        if (js_exception_pending) return ItemNull;
+        // Per ES GetIterator/GetMethod: if method exists but is not callable, throw TypeError
+        TypeId ift = get_type_id(iter_factory);
+        if (ift != LMD_TYPE_FUNC && ift != LMD_TYPE_UNDEFINED && ift != LMD_TYPE_NULL) {
+            js_throw_type_error("Symbol.iterator is not a function");
+            return ItemNull;
+        }
         if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
             Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
             if (js_exception_pending) return ItemNull;
+            // Per ES GetIterator: if iterator is not an Object, throw TypeError
+            TypeId itt = get_type_id(iterator);
+            if (itt != LMD_TYPE_ARRAY && itt != LMD_TYPE_MAP && itt != LMD_TYPE_ELEMENT &&
+                itt != LMD_TYPE_FUNC && !js_is_generator(iterator)) {
+                js_throw_type_error("iterator result is not an object");
+                return ItemNull;
+            }
             // if [Symbol.iterator]() returned an array directly, use it as-is
             if (get_type_id(iterator) == LMD_TYPE_ARRAY) return iterator;
             // drain the iterator (generator or object with next())
@@ -20034,11 +20551,22 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 // plain iterator: call .next() in a loop
                 String* next_key2 = heap_create_name("next", 4);
                 Item next_fn2 = js_property_get(iterator, (Item){.item = s2it(next_key2)});
-                if (get_type_id(next_fn2) == LMD_TYPE_FUNC) {
+                if (js_exception_pending) return ItemNull;
+                // Per ES spec: if next is not callable, throw TypeError
+                if (get_type_id(next_fn2) != LMD_TYPE_FUNC) {
+                    js_throw_type_error("iterator next is not a function");
+                    return ItemNull;
+                }
+                {
                     Item arr = js_array_new(0);
                     for (int safety = 0; safety < 100000; safety++) {
                         Item result = js_call_function(next_fn2, iterator, NULL, 0);
                         if (js_exception_pending) return ItemNull;
+                        TypeId rtid = get_type_id(result);
+                        if (rtid != LMD_TYPE_MAP && rtid != LMD_TYPE_ELEMENT && rtid != LMD_TYPE_ARRAY) {
+                            js_throw_type_error("iterator result is not an object");
+                            return ItemNull;
+                        }
                         String* done_key = heap_create_name("done", 4);
                         Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
                         if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
@@ -22628,6 +23156,81 @@ extern "C" Item js_weakset_new(void) {
     return obj;
 }
 
+// new WeakMap(iterable) / new WeakSet(iterable) — validate adder is callable
+// and iterate, calling adder for each entry. If iterable is undefined or null,
+// behave like the no-arg constructor.
+extern "C" Item js_weakmap_new_with_iter(Item iterable) {
+    Item obj = js_weakmap_new();
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
+    // Get adder = obj.set
+    Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+    Item adder = js_property_get(obj, set_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("WeakMap.prototype.set is not callable");
+    }
+    // Convert iterable to array via iterator protocol (handles TypeError for bad iterators)
+    Item arr;
+    if (tid == LMD_TYPE_ARRAY) {
+        arr = iterable;
+    } else {
+        arr = js_iterable_to_array(iterable);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+            return js_throw_type_error("object is not iterable");
+        }
+    }
+    Array* a = arr.array;
+    for (int i = 0; i < a->length; i++) {
+        Item entry = a->items[i];
+        TypeId eid = get_type_id(entry);
+        if (eid != LMD_TYPE_MAP && eid != LMD_TYPE_ARRAY &&
+            eid != LMD_TYPE_FUNC && eid != LMD_TYPE_ELEMENT) {
+            return js_throw_type_error("Iterator value is not an entry object");
+        }
+        Item k, v;
+        if (eid == LMD_TYPE_ARRAY) {
+            k = (entry.array->length > 0) ? entry.array->items[0] : (Item){.item = ITEM_JS_UNDEFINED};
+            v = (entry.array->length > 1) ? entry.array->items[1] : (Item){.item = ITEM_JS_UNDEFINED};
+        } else {
+            k = js_property_get(entry, (Item){.item = s2it(heap_create_name("0", 1))});
+            v = js_property_get(entry, (Item){.item = s2it(heap_create_name("1", 1))});
+        }
+        Item args[2] = { k, v };
+        js_call_function(adder, obj, args, 2);
+        if (js_check_exception()) return ItemNull;
+    }
+    return obj;
+}
+
+extern "C" Item js_weakset_new_with_iter(Item iterable) {
+    Item obj = js_weakset_new();
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return obj;
+    Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
+    Item adder = js_property_get(obj, add_key);
+    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("WeakSet.prototype.add is not callable");
+    }
+    Item arr;
+    if (tid == LMD_TYPE_ARRAY) {
+        arr = iterable;
+    } else {
+        arr = js_iterable_to_array(iterable);
+        if (js_check_exception()) return ItemNull;
+        if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+            return js_throw_type_error("object is not iterable");
+        }
+    }
+    Array* a = arr.array;
+    for (int i = 0; i < a->length; i++) {
+        Item args[1] = { a->items[i] };
+        js_call_function(adder, obj, args, 1);
+        if (js_check_exception()) return ItemNull;
+    }
+    return obj;
+}
+
 // Public collection type checks (for instanceof)
 extern "C" bool js_is_map_instance(Item obj) {
     JsCollectionData* cd = js_get_collection_data(obj);
@@ -22655,4 +23258,10 @@ void js_deep_batch_reset() {
     // pending call args
     js_pending_call_args = NULL;
     js_pending_call_argc = 0;
+    // generator proto caches point into old heap — must reset
+    js_generator_proto_depth1_cache = (Item){0};
+    js_async_generator_proto_depth1_cache = (Item){0};
+    js_generator_proto_depth2_cache = (Item){0};
+    js_async_generator_proto_depth2_cache = (Item){0};
+    js_generator_callee_proto = (Item){0};
 }

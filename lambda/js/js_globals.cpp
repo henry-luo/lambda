@@ -79,6 +79,41 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     if (name_type != LMD_TYPE_STRING) {
         name = js_to_property_key(name);
     }
+
+    // ES §9.4.2.1: Array exotic objects — special [[DefineOwnProperty]] for "length"
+    // If obj is an array and name is "length", validate the value as a valid array length.
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && get_type_id(name) == LMD_TYPE_STRING) {
+        String* ns = it2s(name);
+        if (ns && ns->len == 6 && strncmp(ns->chars, "length", 6) == 0) {
+            Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
+            if (it2b(js_in(val_k, descriptor))) {
+                Item len_val = js_property_get(descriptor, val_k);
+                // ToUint32(Desc.[[Value]]) must equal ToNumber(Desc.[[Value]]) per ES §15.4.5.1
+                Item num_item = js_to_number(len_val);
+                // If js_to_number threw (e.g. ToPrimitive fails) let that exception propagate
+                extern int js_check_exception(void);
+                if (js_check_exception()) return obj;
+                TypeId nt = get_type_id(num_item);
+                double d = (nt == LMD_TYPE_FLOAT) ? it2d(num_item) :
+                           (nt == LMD_TYPE_INT) ? (double)it2i(num_item) : NAN;
+                // NaN means ToPrimitive returned a non-numeric non-convertible value → TypeError
+                if (isnan(d)) {
+                    Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+                uint32_t u32 = (uint32_t)d;
+                if ((double)u32 != d) {
+                    Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+            }
+        }
+    }
+
     // v18l: TypeError if descriptor is not an object (ES5 8.10.5 ToPropertyDescriptor step 1)
     // Any object type is valid (Map, Function, Array, Element, etc.); reject primitives.
     TypeId desc_type = get_type_id(descriptor);
@@ -536,6 +571,7 @@ extern "C" Item js_object_get_own_property_symbols(Item object);
 extern "C" Item js_array_push(Item array, Item value);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_object_prevent_extensions(Item obj);
+extern "C" Item js_get_generator_shared_proto(bool is_async);
 
 // forward declaration for builtin method check helper
 static bool js_map_has_builtin_method(Map* m, const char* name, int len);
@@ -1212,8 +1248,13 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
         // ES spec: setFullYear/setUTCFullYear — if date is NaN, use +0
         if ((method_id == 21 || method_id == 30) && isnan(ms)) ms = 0.0;
-        // all other setters: if date is NaN, result is NaN
-        if (isnan(ms)) return store_ms(NAN);
+        // all other setters: if t (original [[DateValue]]) is NaN, return NaN without writing
+        // (ToNumber args may have side effects that change the date, per spec step 8 check uses t)
+        if (isnan(ms)) {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = NAN;
+            return (Item){.item = d2it(fp)};
+        }
 
         // local setters (21-27)
         if (method_id >= 21 && method_id <= 27) {
@@ -4386,6 +4427,11 @@ extern "C" Item js_in(Item key, Item object) {
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
         }
+        // ES spec: ToPropertyKey converts non-symbol primitives to string
+        // Handle bool, null, undefined (and any other non-string type)
+        if (get_type_id(key) != LMD_TYPE_STRING && !(get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE)) {
+            key = js_to_string(key);
+        }
 
         if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
@@ -4607,11 +4653,27 @@ extern "C" Item js_array_get_custom_proto(Item arr);
 // Its .constructor creates generator-flagged functions (non-constructable via 'new').
 static Item js_generator_function_proto_cache = {0};
 static Item js_async_generator_function_proto_cache = {0};
+// AsyncFunction.prototype singleton — returned by Object.getPrototypeOf for async (non-generator) functions.
+static Item js_async_function_proto_cache = {0};
 
 extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" void js_mark_generator_func(Item fn_item);
 
 static Item js_gen_func_ctor_placeholder(Item* args, int argc) {
+    (void)args; (void)argc;
+    return ItemNull;
+}
+
+// Separate placeholder for async generator function constructor.
+// Must be a DIFFERENT function pointer so js_new_function returns a separate
+// cached JsFunction* for async vs sync generator constructors.
+static Item js_async_gen_func_ctor_placeholder(Item* args, int argc) {
+    (void)args; (void)argc;
+    return ItemNull;
+}
+
+// AsyncFunction constructor placeholder (distinct func_ptr for caching).
+static Item js_async_func_ctor_placeholder(Item* args, int argc) {
     (void)args; (void)argc;
     return ItemNull;
 }
@@ -4642,9 +4704,12 @@ static Item js_get_generator_function_prototype(bool is_async) {
     Item proto = js_object_create(ItemNull);
     if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
 
-    // Create the constructor function
+    // Create the constructor function — use DIFFERENT func_ptr for sync vs async so that
+    // js_new_function() caches them separately. Sharing the same func_ptr would cause
+    // the second call to overwrite ctor_fn->prototype of the first.
     const char* ctor_name = is_async ? "AsyncGeneratorFunction" : "GeneratorFunction";
-    Item ctor_fn = js_new_function((void*)js_gen_func_ctor_placeholder, 1);
+    void* ctor_fptr = is_async ? (void*)js_async_gen_func_ctor_placeholder : (void*)js_gen_func_ctor_placeholder;
+    Item ctor_fn = js_new_function(ctor_fptr, 1);
     if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
         JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
         fn->name = heap_create_name(ctor_name, strlen(ctor_name));
@@ -4661,7 +4726,39 @@ static Item js_get_generator_function_prototype(bool is_async) {
         cfn->prototype = proto;
     }
 
+    // Per ES spec §27.6.3.1 / §27.3.3.1:
+    // GeneratorFunction.prototype.prototype === %AsyncGeneratorPrototype% / %GeneratorPrototype%
+    // This means: Object.getPrototypeOf(genFunc).prototype === depth-2
+    {
+        Item depth2 = js_get_generator_shared_proto(is_async);
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        js_property_set(proto, proto_key, depth2);
+        js_mark_non_writable(proto, proto_key);
+        js_mark_non_enumerable(proto, proto_key);
+    }
+
     *cache = proto;
+    return proto;
+}
+
+// AsyncFunction.prototype singleton — analog of generator-function prototype but for
+// non-generator async functions. Object.getPrototypeOf(asyncFn) === this.
+static Item js_get_async_function_prototype() {
+    if (js_async_function_proto_cache.item != 0) return js_async_function_proto_cache;
+    Item proto = js_object_create(ItemNull);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    Item ctor_fn = js_new_function((void*)js_async_func_ctor_placeholder, 1);
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)ctor_fn.function;
+        fn->name = heap_create_name("AsyncFunction", 13);
+    }
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    js_property_set(proto, ctor_key, ctor_fn);
+    if (get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
+        JsFuncFlagsAccess* cfn = (JsFuncFlagsAccess*)ctor_fn.function;
+        cfn->prototype = proto;
+    }
+    js_async_function_proto_cache = proto;
     return proto;
 }
 
@@ -4727,7 +4824,13 @@ extern "C" Item js_get_prototype_of(Item object) {
         {
             JsFuncFlagsAccess* fn = (JsFuncFlagsAccess*)object.function;
             if (fn->flags & JS_FUNC_FLAG_GENERATOR_EARLY) {
-                return js_get_generator_function_prototype(false);
+                // Check if it's an async generator (ASYNC_GEN flag = 64)
+                bool is_async_gen = (fn->flags & 64) != 0;
+                return js_get_generator_function_prototype(is_async_gen);
+            }
+            // Async (non-generator) functions → AsyncFunction.prototype (flag 128)
+            if (fn->flags & 128) {
+                return js_get_async_function_prototype();
             }
         }
         Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
@@ -4961,6 +5064,27 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                     if (is_sym) {
                         extern Item js_throw_type_error(const char* msg);
                         return js_throw_type_error("Cannot convert a Symbol value to a number");
+                    }
+                }
+            }
+            // DataView: spec steps 3 (ToIndex byteOffset) and 6 (offset > bufferLength check) happen
+            // BEFORE step 10 (OrdinaryCreateFromConstructor which accesses NewTarget.prototype).
+            // Perform the bounds check here so the RangeError fires before the prototype getter.
+            if (nl == 8 && strncmp(n, "DataView", 8) == 0) {
+                Item buf_arg = (argc > 0) ? args[0] : ItemNull;
+                if (js_is_arraybuffer(buf_arg)) {
+                    int ab_len = js_arraybuffer_byte_length(buf_arg);
+                    Item off_arg = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                    TypeId ot2 = get_type_id(off_arg);
+                    int dv_off = 0;
+                    if (ot2 != LMD_TYPE_UNDEFINED && ot2 != LMD_TYPE_NULL) {
+                        if (ot2 == LMD_TYPE_INT) dv_off = (int)it2i(off_arg);
+                        else if (ot2 == LMD_TYPE_FLOAT) { double dv_d = it2d(off_arg); dv_off = (dv_d != dv_d) ? 0 : (int)dv_d; }
+                        // For objects: ToIndex will be called in js_dataview_new; skip pre-check here
+                        else { dv_off = -1; } // sentinel: don't pre-check (let constructor handle it)
+                    }
+                    if (dv_off >= 0 && dv_off > ab_len) {
+                        return js_throw_range_error("Start offset is outside the bounds of the buffer");
                     }
                 }
             }
@@ -5374,6 +5498,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     (el == 8 && strncmp(en, "Function", 8) == 0) ||
                     (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
                     (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
+                    (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
                     js_is_typed_array_ctor_name(en, el);
             }
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(!is_builtin_ctor)});
@@ -6879,6 +7004,11 @@ extern "C" Item js_object_from_entries(Item iterable) {
 extern "C" Item js_iterable_to_array(Item iterable);
 
 extern "C" Item js_object_group_by(Item items, Item callback) {
+    extern Item js_throw_type_error(const char* msg);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        js_throw_type_error("groupBy callback is not a function");
+        return ItemNull;
+    }
     // Convert iterable to array first
     Item arr = js_iterable_to_array(items);
     // Create null-prototype object per spec
@@ -6911,6 +7041,11 @@ extern "C" Item js_map_collection_new(void);
 
 extern "C" Item js_map_group_by(Item items, Item callback) {
     extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    extern Item js_throw_type_error(const char* msg);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        js_throw_type_error("Map.groupBy callback is not a function");
+        return ItemNull;
+    }
     Item result = js_map_collection_new();
     // Convert iterable to array first
     Item arr = js_iterable_to_array(items);
@@ -7745,7 +7880,22 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
                 Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
                 Item val = _map_read_field(e, m->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) {
+                    // Per ES spec: Set with Throw=true; throw TypeError if target
+                    // has a non-writable property of the same name
+                    if (get_type_id(target) == LMD_TYPE_MAP) {
+                        char nw_buf[256];
+                        snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", nlen, n);
+                        bool nw_found = false;
+                        Item nw_val = js_map_get_fast_ext(target.map, nw_buf, (int)strlen(nw_buf), &nw_found);
+                        if (nw_found && js_is_truthy(nw_val)) {
+                            char emsg[256];
+                            snprintf(emsg, sizeof(emsg), "Cannot assign to read only property '%.*s' of object", nlen > 200 ? 200 : nlen, n);
+                            js_throw_type_error(emsg);
+                            return ItemNull;
+                        }
+                    }
                     js_property_set(target, key, val);
+                    if (js_check_exception()) return ItemNull;
                 }
             }
             e = e->next;
@@ -8521,9 +8671,27 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
             Item elem = js_array_get(arr, (Item){.item = i2it(i)});
             Item idx_item = (Item){.item = i2it(i)};
             Item args[2] = {elem, idx_item};
-            Item mapped = js_call_function(mapFn, ItemNull, args, 2);
+            Item mapped = js_call_function(mapFn, make_js_undefined(), args, 2);
             js_array_set(arr, (Item){.item = i2it(i)}, mapped);
         }
+    }
+    return arr;
+}
+
+// Array.from(iterable, mapFn, thisArg) — with mapper and explicit this value
+extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg) {
+    extern Item js_throw_type_error(const char* msg);
+    extern int js_check_exception(void);
+    Item arr = js_array_from(iterable);
+    if (js_check_exception()) return js_array_new(0);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = (Item){.item = i2it(i)};
+        Item args[2] = {elem, idx_item};
+        Item mapped = js_call_function(mapFn, this_arg, args, 2);
+        if (js_check_exception()) return js_array_new(0);
+        js_array_set(arr, (Item){.item = i2it(i)}, mapped);
     }
     return arr;
 }
@@ -9680,6 +9848,10 @@ extern "C" void js_globals_batch_reset() {
     // reset with-statement scope stack — stale Items become dangling after heap reset
     extern void js_with_batch_reset(void);
     js_with_batch_reset();
+    // reset GeneratorFunction.prototype caches — objects live in old heap after reset
+    js_generator_function_proto_cache = (Item){0};
+    js_async_generator_function_proto_cache = (Item){0};
+    js_async_function_proto_cache = (Item){0};
 }
 
 // =============================================================================
@@ -10525,6 +10697,33 @@ static Item js_ctor_string_fn(Item arg) {
 // RegExp(pattern, flags) without 'new' should behave like new RegExp(pattern, flags)
 extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item);
 static Item js_ctor_regexp_fn(Item pattern, Item flags) {
+    // ES spec 21.2.3.1: when called without 'new', if IsRegExp(pattern) is true,
+    // flags is undefined, AND SameValue(NewTarget, pattern.constructor) is true,
+    // then return pattern unchanged. Here NewTarget is the RegExp constructor itself.
+    if (get_type_id(pattern) == LMD_TYPE_MAP) {
+        TypeId fid = get_type_id(flags);
+        if (fid == LMD_TYPE_NULL || fid == LMD_TYPE_UNDEFINED) {
+            bool has_rd = false;
+            js_map_get_fast_ext(pattern.map, "__rd", 4, &has_rd);
+            if (has_rd) {
+                // IsRegExp: check pattern[@@match] — if defined, use ToBoolean of it.
+                bool ok = true;
+                Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+                Item sym_match = js_property_get(pattern, sym_match_key);
+                if (sym_match.item != ItemNull.item && get_type_id(sym_match) != LMD_TYPE_UNDEFINED) {
+                    if (!js_is_truthy(sym_match)) ok = false;
+                }
+                // Check pattern.constructor === RegExp
+                if (ok) {
+                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                    Item pat_ctor = js_property_get(pattern, ctor_key);
+                    Item regexp_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+                    if (pat_ctor.item != regexp_ctor.item) ok = false;
+                }
+                if (ok) return pattern;
+            }
+        }
+    }
     return js_regexp_construct(pattern, flags);
 }
 
