@@ -170,6 +170,28 @@ static DomNode* node_arg(Item v) {
     return (DomNode*)p;
 }
 
+// Returns true iff `n` is reachable from the active document — i.e. either
+// it is/contains the document stub itself or it has the document.root as an
+// ancestor. Used by setBaseAndExtent to mirror the spec's "must be in the
+// same tree" abort behaviour (rangeCount stays 0 instead of throwing).
+static bool node_in_active_document(DomNode* n) {
+    // A NULL node means the boundary hasn't been positioned yet (freshly-created
+    // Range defaults to (NULL, 0)). Treat as in-document so that addRange of a
+    // brand-new Range still adds it (per spec, the Range belongs to the doc).
+    if (!n) return true;
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    if (!doc) return false;
+    DomNode* doc_stub = (DomNode*)doc->js_doc_node;
+    DomNode* root = (DomNode*)doc->root;
+    DomNode* cur = n;
+    while (cur) {
+        if (cur == doc_stub) return true;
+        if (root && cur == root) return true;
+        cur = cur->parent;
+    }
+    return false;
+}
+
 // ============================================================================
 // Range methods
 // ============================================================================
@@ -531,6 +553,12 @@ extern "C" Item js_selection_add_range(Item range_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
     if (!r) { throw_dom_exception("TypeError", "argument is not a Range"); return make_undef(); }
+    // Per spec: if range's root is not the document associated with this,
+    // return (do nothing). The WPT tests assert rangeCount is unchanged.
+    if (!node_in_active_document(r->start.node) ||
+        !node_in_active_document(r->end.node)) {
+        return make_undef();
+    }
     dom_selection_add_range(s, r);
     selection_sync_props(js_get_this(), s);
     return make_undef();
@@ -636,6 +664,13 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
     if (!an || !fn) { throw_dom_exception("TypeError", "node is not a Node"); return make_undef(); }
+    // Per spec: if either node isn't a descendant of the document, abort
+    // (selection is left empty — do not add a range).
+    if (!node_in_active_document(an) || !node_in_active_document(fn)) {
+        dom_selection_remove_all_ranges(s);
+        selection_sync_props(js_get_this(), s);
+        return make_undef();
+    }
     const char* exc = nullptr;
     if (!dom_selection_set_base_and_extent(s, an, (uint32_t)item_to_int(anchor_off_v),
                                               fn, (uint32_t)item_to_int(focus_off_v), &exc)) {
