@@ -101,6 +101,10 @@ struct DomDocument {
     int cached_inline_sheet_count;                // Number of cached inline stylesheets
     void* cached_css_engine;                      // CssEngine* (void* to avoid header dep)
 
+    // JS document-as-Node stub (lazy DomElement with tag "#document").
+    // Used so JS Range/Selection APIs can accept `document` as a container.
+    void* js_doc_node;
+
     // Reactive UI: Element* → DomElement* map for incremental DOM rebuild
     struct hashmap* element_dom_map;              // maps Lambda Element* to its DomElement wrapper
 
@@ -141,6 +145,7 @@ struct DomDocument {
                     lambda_runtime(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
                     cached_css_engine(nullptr),
+                    js_doc_node(nullptr),
                     element_dom_map(nullptr),
                     skip_style_reset(false),
                     incremental_layout(false),

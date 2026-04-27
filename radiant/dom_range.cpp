@@ -91,6 +91,12 @@ uint32_t dom_node_boundary_length(const DomNode* node) {
     if (node->is_text()) {
         return dom_text_utf16_length(node->as_text());
     }
+    if (node->is_comment()) {
+        const char* s = dom_comment_get_content((DomComment*)node->as_comment());
+        if (!s) return 0;
+        // Phase 1: treat content as ASCII-equivalent (1 byte == 1 UTF-16 code unit).
+        return (uint32_t)strlen(s);
+    }
     if (node->is_element()) {
         const DomElement* e = node->as_element();
         uint32_t n = 0;
@@ -645,16 +651,24 @@ bool dom_selection_set_position(DomSelection* s, DomNode* node, uint32_t offset,
 
 void dom_selection_collapse_to_start(DomSelection* s, const char** out_exception) {
     if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    DomRange* r = s->ranges[0];
-    r->end = r->start;
+    // Per WHATWG: replace selection's range with a *new* range collapsed at
+    // the original range's start; do not mutate the user-visible old range.
+    DomBoundary start = s->ranges[0]->start;
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return;
+    r->start = r->end = start;
     dom_range_invalidate_layout(r);
     sync_anchor_focus(s, true);
 }
 
 void dom_selection_collapse_to_end(DomSelection* s, const char** out_exception) {
     if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    DomRange* r = s->ranges[0];
-    r->start = r->end;
+    DomBoundary end = s->ranges[0]->end;
+    dom_selection_remove_all_ranges(s);
+    DomRange* r = ensure_primary_range(s);
+    if (!r) return;
+    r->start = r->end = end;
     dom_range_invalidate_layout(r);
     sync_anchor_focus(s, true);
 }

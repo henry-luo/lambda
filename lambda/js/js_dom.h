@@ -35,6 +35,9 @@ void js_dom_set_document(void* dom_doc);
  * @return DomDocument* cast to void*, or NULL if no document is set
  */
 void* js_dom_get_document(void);
+// Lazy DomElement* with tag "#document" used so JS Range/Selection APIs can
+// accept `document` (or a foreign-doc wrapper) as a node container.
+void* js_dom_get_or_create_doc_node(void* dom_doc);
 
 // =============================================================================
 // Named Element Access on Window

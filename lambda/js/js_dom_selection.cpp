@@ -540,6 +540,14 @@ extern "C" Item js_selection_remove_range(Item range_v) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
     if (!r) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
+    // Per WHATWG: throw NotFoundError if the range isn't in the selection.
+    bool in_sel = false;
+    uint32_t rc = dom_selection_range_count(s);
+    for (uint32_t i = 0; i < rc; i++) {
+        const char* exc = nullptr;
+        if (dom_selection_get_range_at(s, i, &exc) == r) { in_sel = true; break; }
+    }
+    if (!in_sel) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
     dom_selection_remove_range(s, r);
     selection_sync_props(js_get_this(), s);
     return make_undef();
