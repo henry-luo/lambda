@@ -3551,6 +3551,17 @@ float calculate_item_baseline(ViewElement* item) {
     while (child_view) {
         ViewElement* child = (ViewElement*)child_view->as_element();
         if (child && child->height > 0) {
+            // Skip inline-level children: they participate in this block's line
+            // boxes and their baseline is already captured by first_line_baseline
+            // (set during inline layout from the line's max_ascender). Treating an
+            // inline child like a block child would double-count its position
+            // (first_line offset + child->y), producing a baseline larger than the
+            // item's own height. Seen with `<a>text<span class=after>...</span></a>`
+            // patterns where ::after generated content follows inline text.
+            if (child_view->view_type == RDT_VIEW_INLINE) {
+                child_view = (View*)child_view->next_sibling;
+                continue;
+            }
             // Skip positioned children (absolute/fixed)
             // CRITICAL: Check position->position (PositionProp), NOT in_line->position
             ViewBlock* child_block = (ViewBlock*)child;

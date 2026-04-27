@@ -11,6 +11,7 @@
 
 #include "js_dom.h"
 #include "js_dom_events.h"
+#include "js_dom_selection.h"
 #include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
@@ -29,6 +30,7 @@
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../../radiant/view.hpp"
+#include "../../radiant/dom_range.hpp"
 #include "../input/html5/html5_parser.h"
 
 #include <cstring>
@@ -88,6 +90,29 @@ static inline void js_dom_mutation_notify() {
     if (_js_current_document) {
         _js_current_document->js_mutation_count++;
     }
+}
+
+// ----------------------------------------------------------------------------
+// Phase 3: live-range mutation envelopes — thin wrappers that bail when no
+// per-document RadiantState (and thus no live ranges) is attached. All DOM
+// mutation paths in this file route through these to keep boundary points
+// in sync per WHATWG DOM §5.3.
+// ----------------------------------------------------------------------------
+static inline RadiantState* js_dom_current_state() {
+    return _js_current_document ? _js_current_document->state : nullptr;
+}
+static inline void dom_pre_remove(DomNode* child) {
+    RadiantState* st = js_dom_current_state();
+    if (st && child) dom_mutation_pre_remove(st, child);
+}
+static inline void dom_post_insert(DomNode* parent, DomNode* node) {
+    RadiantState* st = js_dom_current_state();
+    if (st && parent && node) dom_mutation_post_insert(st, parent, node);
+}
+static inline void dom_text_replace_data(DomText* text, uint32_t off,
+                                         uint32_t cnt, uint32_t repl_len) {
+    RadiantState* st = js_dom_current_state();
+    if (st && text) dom_mutation_text_replace_data(st, text, off, cnt, repl_len);
 }
 
 /**
@@ -205,6 +230,8 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         if (doc->root) {
             js_dom_register_named_elements(doc->root);
         }
+        // install window.getSelection() global
+        js_dom_selection_install_globals();
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -1626,6 +1653,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         DomText* text_node = dom_text_create_detached(str, doc);
         if (text_node) {
             ((DomNode*)body)->append_child((DomNode*)text_node);
+            dom_post_insert((DomNode*)body, (DomNode*)text_node);
             log_debug("js_document_method: write '%s' appended to body", text);
         }
 
@@ -1675,6 +1703,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         DomNode* node = (DomNode*)js_dom_unwrap_element(args[0]);
         if (!node) return ItemNull;
         if (node->parent) {
+            dom_pre_remove(node);
             node->parent->remove_child(node);
         }
         return args[0];
@@ -1716,6 +1745,14 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // document.createDocumentFragment() — return a dummy element
     if (strcmp(method, "createDocumentFragment") == 0) {
         return ItemNull;
+    }
+
+    // Selection / Range API
+    if (strcmp(method, "createRange") == 0) {
+        return js_dom_create_range();
+    }
+    if (strcmp(method, "getSelection") == 0) {
+        return js_dom_get_selection();
     }
 
     log_debug("js_document_method: unknown method '%s'", method);
@@ -1870,6 +1907,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "createElement", "createElementNS", "createTextNode", "createComment",
         "createDocumentFragment", "importNode", "adoptNode",
         "addEventListener", "removeEventListener",
+        "createRange", "getSelection",
         NULL
     };
     for (int i = 0; doc_methods[i]; i++) {
@@ -1883,6 +1921,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
 }
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
+    // Range / Selection wrappers also live under MAP_KIND_DOM and route here.
+    if (js_dom_item_is_range(elem_item))
+        return js_dom_range_get_property(elem_item, prop_name);
+    if (js_dom_item_is_selection(elem_item))
+        return js_dom_selection_get_property(elem_item, prop_name);
+
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     const char* prop = fn_to_cstr(prop_name);
     if (!node) {
@@ -2434,6 +2478,11 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
 }
 
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
+    // Range / Selection wrappers expose only read-only attributes; silently
+    // ignore writes (matches W3C: setters are no-ops, not TypeError).
+    if (js_dom_item_is_range(elem_item) || js_dom_item_is_selection(elem_item))
+        return value;
+
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
         log_debug("js_dom_set_property: not a DOM node");
@@ -2448,11 +2497,14 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         DomText* text_node = node->as_text();
         const char* new_text = fn_to_cstr(value);
         if (new_text) {
+            uint32_t old_u16_len = dom_text_utf16_length(text_node);
             size_t len = strlen(new_text);
             String* s = heap_strcpy((char*)new_text, len);
             text_node->native_string = s;
             text_node->text = s->chars;
             text_node->length = len;
+            uint32_t new_u16_len = dom_text_utf16_length(text_node);
+            dom_text_replace_data(text_node, 0, old_u16_len, new_u16_len);
             log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
@@ -2501,10 +2553,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         const char* text_str = fn_to_cstr(value);
         if (text_str) {
             // remove all children and add a single text node
-            // first, detach all children
+            // first, detach all children (firing pre_remove for live ranges)
             DomNode* child = elem->first_child;
             while (child) {
                 DomNode* next = child->next_sibling;
+                dom_pre_remove(child);
                 child->parent = nullptr;
                 child->next_sibling = nullptr;
                 child->prev_sibling = nullptr;
@@ -2519,6 +2572,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 ((DomNode*)text_node)->parent = (DomNode*)elem;
                 elem->first_child = (DomNode*)text_node;
                 elem->last_child = (DomNode*)text_node;
+                dom_post_insert((DomNode*)elem, (DomNode*)text_node);
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
@@ -2536,6 +2590,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         DomNode* child = elem->first_child;
         while (child) {
             DomNode* next = child->next_sibling;
+            dom_pre_remove(child);
             child->parent = nullptr;
             child->next_sibling = nullptr;
             child->prev_sibling = nullptr;
@@ -3005,8 +3060,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 DomNode* frag_child = child_elem->first_child;
                 while (frag_child) {
                     DomNode* next = frag_child->next_sibling;
+                    dom_pre_remove(frag_child);
                     child_elem->remove_child(frag_child);
                     ((DomNode*)elem)->append_child(frag_child);
+                    dom_post_insert((DomNode*)elem, frag_child);
                     frag_child = next;
                 }
                 js_dom_mutation_notify();
@@ -3017,11 +3074,13 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (child_node->parent) {
             DomNode* old_parent = child_node->parent;
             if (old_parent->is_element()) {
+                dom_pre_remove(child_node);
                 old_parent->remove_child(child_node);
             }
         }
         // use DomNode::append_child which handles all node types
         ((DomNode*)elem)->append_child(child_node);
+        dom_post_insert((DomNode*)elem, child_node);
         js_dom_mutation_notify();
         return args[0];  // return the appended child
     }
@@ -3034,6 +3093,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             log_error("js_dom_element_method removeChild: argument is not a DOM node");
             return ItemNull;
         }
+        dom_pre_remove(child_node);
         ((DomNode*)elem)->remove_child(child_node);
         js_dom_mutation_notify();
         return args[0];  // return the removed child
@@ -3052,8 +3112,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 DomNode* frag_child = new_elem->first_child;
                 while (frag_child) {
                     DomNode* next = frag_child->next_sibling;
+                    dom_pre_remove(frag_child);
                     new_elem->remove_child(frag_child);
                     ((DomNode*)elem)->insert_before(frag_child, ref_child);
+                    dom_post_insert((DomNode*)elem, frag_child);
                     frag_child = next;
                 }
                 js_dom_mutation_notify();
@@ -3062,9 +3124,11 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         }
         // detach from old parent
         if (new_child->parent) {
+            dom_pre_remove(new_child);
             new_child->parent->remove_child(new_child);
         }
         ((DomNode*)elem)->insert_before(new_child, ref_child);
+        dom_post_insert((DomNode*)elem, new_child);
         js_dom_mutation_notify();
         return args[0];
     }
@@ -3084,6 +3148,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 // merge consecutive text nodes
                 while (child->next_sibling && child->next_sibling->is_text()) {
                     DomText* next_text = child->next_sibling->as_text();
+                    uint32_t head_u16  = dom_text_utf16_length(text);
+                    uint32_t tail_u16  = dom_text_utf16_length(next_text);
                     // concatenate text content
                     size_t new_len = text->length + next_text->length;
                     char* combined = (char*)pool_alloc(elem->doc->pool, new_len + 1);
@@ -3097,8 +3163,20 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                     text->native_string = s;
                     text->text = s->chars;
                     text->length = new_len;
+                    // Spec: ranges with (next_text, k) move to (text, head_u16 + k);
+                    // appended-data shift handled separately.
+                    {
+                        RadiantState* st = js_dom_current_state();
+                        if (st) {
+                            // (a) shift any existing endpoints in `text` past head_u16 by tail_u16
+                            dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
+                            // (b) retarget endpoints inside `next_text` into the merged `text`
+                            dom_mutation_text_merge(st, text, next_text, head_u16);
+                        }
+                    }
                     // remove the next text node
                     DomNode* remove_node = child->next_sibling;
+                    dom_pre_remove(remove_node);
                     ((DomNode*)elem)->remove_child(remove_node);
                 }
             }
@@ -3154,10 +3232,13 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (!new_child || !old_child) return ItemNull;
         // detach new_child from its current parent
         if (new_child->parent) {
+            dom_pre_remove(new_child);
             new_child->parent->remove_child(new_child);
         }
         // insert new before old, then remove old
         ((DomNode*)elem)->insert_before(new_child, old_child);
+        dom_post_insert((DomNode*)elem, new_child);
+        dom_pre_remove(old_child);
         ((DomNode*)elem)->remove_child(old_child);
         return args[1]; // return removed old child
     }

@@ -293,6 +293,16 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                 func = func->next;
             }
 
+            // Premultiply RGB by alpha so downstream source-over composite
+            // (premul formula in render.cpp / DL_COMPOSITE_OPACITY) produces
+            // correct results. The filter pipeline above operates on
+            // straight-alpha values, but our compositors expect premul.
+            if (a < 255) {
+                r = (uint8_t)((r * a + 127) / 255);
+                g = (uint8_t)((g * a + 127) / 255);
+                b = (uint8_t)((b * a + 127) / 255);
+            }
+
             // Repack ABGR
             *pixel = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
         }

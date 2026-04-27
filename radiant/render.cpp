@@ -2534,9 +2534,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     // Save backdrop for filter: drop-shadow() (element must render on transparent so we get true alpha)
     bool has_drop_shadow = false;
+    bool has_filter_backdrop = false;
     uint32_t* ds_backdrop = nullptr;
     int dsx0 = 0, dsy0 = 0, dsw = 0, dsh = 0;
     float ds_offset_x = 0, ds_offset_y = 0, ds_blur = 0;
+    float filter_blur_max = 0;
     if (block->filter && block->filter->functions) {
         FilterFunction* ff = block->filter->functions;
         while (ff) {
@@ -2545,19 +2547,28 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 ds_offset_x = ff->params.drop_shadow.offset_x;
                 ds_offset_y = ff->params.drop_shadow.offset_y;
                 ds_blur = ff->params.drop_shadow.blur_radius;
-                break;
+            } else if (ff->type == FILTER_BLUR) {
+                if (ff->params.blur_radius > filter_blur_max)
+                    filter_blur_max = ff->params.blur_radius;
             }
             ff = ff->next;
         }
+        // Any filter chain creates a stacking context: render element to a
+        // transparent backdrop so filters (esp. opacity()) composite correctly
+        // onto the underlying surface instead of punching alpha holes.
+        has_filter_backdrop = true;
     }
-    if (has_drop_shadow) {
+    if (has_filter_backdrop) {
         float ds = rdcon->scale;
         ImageSurface* surface = rdcon->ui_context->surface;
         if (surface && surface->pixels) {
-            // Expand region to cover element + shadow offset + blur
-            float expand = ceilf(fabs(ds_offset_x > 0 ? ds_offset_x : -ds_offset_x)) +
-                           ceilf(fabs(ds_offset_y > 0 ? ds_offset_y : -ds_offset_y)) +
-                           ceilf(ds_blur) + 2;
+            // Expand region to cover element + drop-shadow offset/blur + filter blur
+            float ds_expand = has_drop_shadow ?
+                (ceilf(fabs(ds_offset_x > 0 ? ds_offset_x : -ds_offset_x)) +
+                 ceilf(fabs(ds_offset_y > 0 ? ds_offset_y : -ds_offset_y)) +
+                 ceilf(ds_blur) + 2) : 0;
+            float blur_expand = ceilf(filter_blur_max);
+            float expand = ds_expand > blur_expand ? ds_expand : blur_expand;
             dsx0 = (int)(pa_block.x + block->x * ds - expand);
             dsy0 = (int)(pa_block.y + block->y * ds - expand);
             int dx1 = (int)(pa_block.x + block->x * ds + block->width * ds + expand);
@@ -2796,13 +2807,14 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         g_render_filter_count++;
     }
 
-    // Composite drop-shadow: element + shadow rendered on transparent, now composite over saved backdrop
-    if (has_drop_shadow && dsw > 0 && dsh > 0) {
+    // Composite filter result: element rendered on transparent, now composite over saved backdrop.
+    // apply_css_filters() premultiplies its output, so we use the premul source-over formula
+    // for both drop-shadow and other filters.
+    if (has_filter_backdrop && dsw > 0 && dsh > 0) {
         if (rdcon->dl) {
-            // DL path: composite element+shadow group over saved backdrop at full opacity
+            // DL path: composite element+filter group over saved backdrop at full opacity
             dl_composite_opacity(rdcon->dl, dsx0, dsy0, dsw, dsh, 1.0f);
         } else if (ds_backdrop) {
-            // Direct path: source-over composite element+shadow onto saved backdrop
             ImageSurface* surface = rdcon->ui_context->surface;
             uint32_t* px = (uint32_t*)surface->pixels;
             int pitch = surface->pitch / 4;
@@ -2816,7 +2828,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                     }
                     uint32_t sa = (src >> 24) & 0xFF;
                     if (sa == 255) continue;  // fully opaque element pixel, keep as is
-                    // Porter-Duff source-over: result = src + dst * (1 - src_a)
+                    // Porter-Duff source-over (premul): result = src + dst * (1 - src_a)
                     uint32_t da = (dst >> 24) & 0xFF;
                     uint32_t inv_sa = 255 - sa;
                     uint32_t ra = sa + (da * inv_sa + 127) / 255;
@@ -2828,7 +2840,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                         (std::min(rg, 255u) << 8) | std::min(rr, 255u);
                 }
             }
-            log_debug("[DROP-SHADOW] Composited element+shadow over backdrop %dx%d", dsw, dsh);
+            log_debug("[FILTER] Composited filtered element over backdrop %dx%d", dsw, dsh);
         }
     }
 
