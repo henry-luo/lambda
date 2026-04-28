@@ -11008,7 +11008,15 @@ enum JsConstructorId {
 static Item js_constructor_cache[JS_CTOR_MAX];
 static bool js_ctor_cache_init = false;
 
+// Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
+extern "C" bool js_proto_snapshot_is_valid();
+
 void js_ctor_cache_reset() {
+    // If snapshot is valid, the harness preamble has already cached references to
+    // the constructor Items in its module-vars. Zeroing the cache would force
+    // re-creation of NEW JsCtor objects on next access, breaking identity with
+    // the harness-cached references. Skip the reset; snapshot/restore handles state.
+    if (js_proto_snapshot_is_valid()) return;
     memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
     js_ctor_cache_init = false;
 }
@@ -11159,39 +11167,161 @@ struct JsCtor {
 };
 
 // Reset constructor prototype objects between batch tests.
-// Tests may mutate built-in prototypes (e.g., Object.prototype.__proto__,
-// Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
-// Clearing the prototype field forces lazy re-creation of a fresh prototype
-// on next access, while keeping the constructor struct itself alive (pool-allocated).
+//
+// Strategy: snapshot+restore (preserves Map* identity across batch tests).
+//
+// The harness preamble caches references like `var TypedArray = Object.getPrototypeOf(Int8Array)`.
+// If we destroy these prototypes between tests and lazily recreate them, the harness's
+// cached references diverge from fresh `Int8Array.prototype` lookups → identity asserts fail
+// downstream (~1400 typed-array test failures).
+//
+// Instead, on the first reset (post-preamble), we take a deep snapshot of each ctor's
+// prototype Map contents (raw bytes of data buffer + type/data/cap pointers).  On subsequent
+// resets we restore that snapshot in-place, preserving the Map* address.  Tests that mutate
+// built-in prototypes are isolated from each other.
 static void js_typed_array_base_reset(); // forward declaration
-extern "C" void js_reset_constructor_prototypes() {
-    if (!js_ctor_cache_init) return;
-    for (int i = 0; i < JS_CTOR_MAX; i++) {
-        if (js_constructor_cache[i].item == 0 || js_constructor_cache[i].item == ItemNull.item)
-            continue;
-        JsCtor* ctor = (JsCtor*)js_constructor_cache[i].function;
-        if (ctor) {
-            ctor->prototype = ItemNull;
-        }
-    }
-    // Clear globalThis so constructor .prototype references are refreshed on next access.
-    // The old globalThis holds constructors whose .prototype fields now point to stale
-    // (freed or mutated) prototype objects.
-    js_global_this_obj = (Item){0};
-    // Reset %TypedArray% intrinsic so it's re-created fresh
-    js_typed_array_base_reset();
-}
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
-// Object.getPrototypeOf(Int8Array) === %TypedArray%
-// Object.getPrototypeOf(Int8Array.prototype) === %TypedArray%.prototype
+// (Forward declarations moved up so the snapshot code below can reference them.)
 static Item js_typed_array_base = {0};
 static Item js_typed_array_base_proto = {0};
-
-// Per-type prototypes: Int8Array.prototype, Uint8Array.prototype, etc.
-// Indexed by JsTypedArrayType enum values (0-8).
 #define JS_TYPED_ARRAY_TYPE_COUNT 11
 static Item js_typed_array_per_type_proto[JS_TYPED_ARRAY_TYPE_COUNT] = {{0}};
+
+// Map snapshot: captures all mutable Map fields plus a copy of its packed data buffer.
+// On restore, the Map's address is preserved; only its contents are reset.
+struct MapSnapshot {
+    Map*     m;          // identity (NULL = no snapshot)
+    void*    type;       // TypeMap* at preamble
+    void*    data;       // data buffer pointer at preamble (still pool-allocated)
+    int      data_cap;   // data buffer capacity at preamble
+    uint8_t  flags;      // map_kind etc.
+    int      byte_size;  // TypeMap->byte_size at preamble
+    void*    bytes;      // copy of *data (size = byte_size); NULL if byte_size==0
+};
+
+struct CtorSnapshot {
+    JsCtor* ctor;
+    Item    prototype;        // Item value (preserved)
+    Item    properties_map;   // Item value (preserved)
+    MapSnapshot proto_map;    // contents snapshot of prototype Map (if it is a Map)
+    MapSnapshot props_map;    // contents snapshot of properties_map Map (if it is a Map)
+    bool    valid;
+};
+
+static CtorSnapshot js_ctor_snapshots[JS_CTOR_MAX];
+static MapSnapshot  js_typed_array_base_proto_snap;
+static Item         js_typed_array_base_snap = {0};
+static Item         js_typed_array_base_proto_item_snap = {0};
+static Item         js_typed_array_per_type_proto_snap[JS_TYPED_ARRAY_TYPE_COUNT];
+static MapSnapshot  js_typed_array_per_type_proto_map_snap[JS_TYPED_ARRAY_TYPE_COUNT];
+static bool         js_proto_snapshot_valid = false;
+
+static void js_proto_snapshot_map(MapSnapshot* snap, Map* m) {
+    if (!m) { snap->m = NULL; return; }
+    TypeMap* tm = (TypeMap*)m->type;
+    int byte_size = tm ? (int)tm->byte_size : 0;
+    snap->m = m;
+    snap->type = m->type;
+    snap->data = m->data;
+    snap->data_cap = m->data_cap;
+    snap->flags = m->flags;
+    snap->byte_size = byte_size;
+    snap->bytes = NULL;
+    if (byte_size > 0 && m->data) {
+        snap->bytes = mem_alloc(byte_size, MEM_CAT_JS_RUNTIME);
+        memcpy(snap->bytes, m->data, byte_size);
+    }
+}
+
+static void js_proto_restore_map(const MapSnapshot* snap) {
+    if (!snap->m) return;
+    Map* m = snap->m;
+    m->type = snap->type;
+    m->data = snap->data;
+    m->data_cap = snap->data_cap;
+    m->flags = snap->flags;
+    if (snap->byte_size > 0 && snap->data && snap->bytes) {
+        memcpy(snap->data, snap->bytes, snap->byte_size);
+    }
+}
+
+static void js_proto_snapshot_take_locked() {
+    js_proto_snapshot_valid = true;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        CtorSnapshot* s = &js_ctor_snapshots[i];
+        s->valid = false;
+        s->proto_map.m = NULL;
+        s->props_map.m = NULL;
+        Item ci = js_constructor_cache[i];
+        if (ci.item == 0 || ci.item == ItemNull.item) continue;
+        JsCtor* ctor = (JsCtor*)ci.function;
+        if (!ctor) continue;
+        s->ctor = ctor;
+        s->prototype = ctor->prototype;
+        s->properties_map = ctor->properties_map;
+        s->valid = true;
+        if (ctor->prototype.item != 0 && get_type_id(ctor->prototype) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&s->proto_map, ctor->prototype.map);
+        }
+        if (ctor->properties_map.item != 0 && get_type_id(ctor->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&s->props_map, ctor->properties_map.map);
+        }
+    }
+    // %TypedArray% intrinsic + its prototype + per-type prototypes
+    js_typed_array_base_snap = js_typed_array_base;
+    js_typed_array_base_proto_item_snap = js_typed_array_base_proto;
+    js_typed_array_base_proto_snap.m = NULL;
+    if (js_typed_array_base_proto.item != 0 && get_type_id(js_typed_array_base_proto) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&js_typed_array_base_proto_snap, js_typed_array_base_proto.map);
+    }
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        Item p = js_typed_array_per_type_proto[i];
+        js_typed_array_per_type_proto_snap[i] = p;
+        js_typed_array_per_type_proto_map_snap[i].m = NULL;
+        if (p.item != 0 && get_type_id(p) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&js_typed_array_per_type_proto_map_snap[i], p.map);
+        }
+    }
+}
+
+static void js_proto_snapshot_restore_locked() {
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        CtorSnapshot* s = &js_ctor_snapshots[i];
+        if (!s->valid) continue;
+        JsCtor* ctor = s->ctor;
+        ctor->prototype = s->prototype;
+        ctor->properties_map = s->properties_map;
+        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
+        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+    }
+    js_typed_array_base = js_typed_array_base_snap;
+    js_typed_array_base_proto = js_typed_array_base_proto_item_snap;
+    if (js_typed_array_base_proto_snap.m) js_proto_restore_map(&js_typed_array_base_proto_snap);
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        js_typed_array_per_type_proto[i] = js_typed_array_per_type_proto_snap[i];
+        if (js_typed_array_per_type_proto_map_snap[i].m)
+            js_proto_restore_map(&js_typed_array_per_type_proto_map_snap[i]);
+    }
+}
+
+extern "C" void js_reset_constructor_prototypes() {
+    if (!js_ctor_cache_init) return;
+    if (!js_proto_snapshot_valid) {
+        // First call after preamble: capture snapshot. State is already correct.
+        js_proto_snapshot_take_locked();
+        // Still clear globalThis so it's regenerated against the snapshotted prototypes.
+        js_global_this_obj = (Item){0};
+        return;
+    }
+    // Subsequent calls: restore snapshot (preserves Map* identity).
+    js_proto_snapshot_restore_locked();
+    js_global_this_obj = (Item){0};
+}
+
+extern "C" bool js_proto_snapshot_is_valid() {
+    return js_proto_snapshot_valid;
+}
 
 // Get the per-type prototype for a given typed array element type.
 // Creates it lazily if needed.
