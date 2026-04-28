@@ -1278,13 +1278,20 @@ extern "C" Item js_to_numeric(Item value) {
         // Symbol.toPrimitive
         Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
         Item to_prim = js_property_get(value, sym_key);
-        if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+        if (js_exception_pending) return ItemNull;
+        TypeId tp_type = get_type_id(to_prim);
+        bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED);
+        if (tp_present && tp_type != LMD_TYPE_FUNC) {
+            js_throw_type_error("@@toPrimitive is not a function");
+            return ItemNull;
+        }
+        if (tp_present) {
             Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
             Item args[1] = { hint };
             Item result = js_call_function(to_prim, value, args, 1);
             if (js_exception_pending) return ItemNull;
             TypeId rt = get_type_id(result);
-            if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY) {
+            if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT || rt == LMD_TYPE_FUNC) {
                 js_throw_type_error("Cannot convert object to primitive value");
                 return ItemNull;
             }
@@ -1536,7 +1543,15 @@ extern "C" Item js_to_string(Item value) {
         {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
             Item to_prim = js_property_get(value, sym_key);
-            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+            if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
+            TypeId tp_type = get_type_id(to_prim);
+            bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED);
+            // ES spec §7.1.1 step 2.b.i: If exoticToPrim is not undefined AND not callable, throw TypeError.
+            if (tp_present && tp_type != LMD_TYPE_FUNC) {
+                js_throw_type_error("@@toPrimitive is not a function");
+                return (Item){.item = s2it(heap_create_name(""))};
+            }
+            if (tp_present) {
                 Item hint = (Item){.item = s2it(heap_create_name("string", 6))};
                 Item args[1] = { hint };
                 Item result = js_call_function(to_prim, value, args, 1);
@@ -1546,7 +1561,7 @@ extern "C" Item js_to_string(Item value) {
                 TypeId rtid = get_type_id(result);
                 if (rtid == LMD_TYPE_MAP || rtid == LMD_TYPE_ARRAY || rtid == LMD_TYPE_FUNC || rtid == LMD_TYPE_ELEMENT) {
                     js_throw_type_error("Cannot convert object to primitive value");
-                    return ItemNull;
+                    return (Item){.item = s2it(heap_create_name(""))};
                 }
                 return js_to_string(result);
             }
@@ -2132,6 +2147,86 @@ extern "C" Item js_number_function(Item value) {
     return num;
 }
 
+// ES §7.1.1 ToPrimitive(value, hint) — internal helper used by abstract operations
+// (==, <, >, <=, >=, +) for object/array/function operands. Returns the primitive
+// value or ItemNull if an exception was thrown. For non-object inputs, returns value
+// unchanged. Hint encoding: 0=default, 1=number, 2=string.
+//
+// Steps (per spec):
+//   1. If value is not an object → return value.
+//   2. Look up @@toPrimitive (Symbol.toPrimitive). If present and not callable → TypeError.
+//      If callable, invoke with hint string. Result must be primitive (else TypeError).
+//   3. Otherwise OrdinaryToPrimitive: try valueOf then toString (or reverse for hint=string).
+//      Each method must be callable; first one returning a primitive wins. If neither
+//      returns a primitive, throw TypeError.
+//   4. Wrapper objects (boxed primitives via __primitiveValue__) short-circuit when no
+//      custom valueOf/toString/@@toPrimitive shadows them — we keep that fast-path.
+static Item js_op_to_primitive(Item value, int hint) {
+    TypeId vt = get_type_id(value);
+    if (vt != LMD_TYPE_MAP && vt != LMD_TYPE_ARRAY && vt != LMD_TYPE_FUNC && vt != LMD_TYPE_ELEMENT) {
+        return value;
+    }
+    const char* hint_str = (hint == 1 ? "number" : (hint == 2 ? "string" : "default"));
+
+    // Wrapper fast-path (only for plain MAP, only when no custom override exists)
+    if (vt == LMD_TYPE_MAP) {
+        bool own_pv = false;
+        Item pv = js_map_get_fast(value.map, "__primitiveValue__", 18, &own_pv);
+        if (own_pv) {
+            bool has_vo = false, has_ts = false, has_tp = false;
+            js_map_get_fast(value.map, "valueOf", 7, &has_vo);
+            js_map_get_fast(value.map, "toString", 8, &has_ts);
+            js_map_get_fast(value.map, "__sym_2", 7, &has_tp);
+            if (!has_vo && !has_ts && !has_tp) return pv;
+        }
+    }
+
+    // @@toPrimitive (Symbol.toPrimitive stored as __sym_2)
+    Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+    Item to_prim = js_property_get(value, sym_key);
+    if (js_exception_pending) return ItemNull;
+    TypeId tp_type = get_type_id(to_prim);
+    bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED && tp_type != LMD_TYPE_NULL);
+    if (tp_present && tp_type != LMD_TYPE_FUNC) {
+        js_throw_type_error("@@toPrimitive is not a function");
+        return ItemNull;
+    }
+    if (tp_present) {
+        Item hint_item = (Item){.item = s2it(heap_create_name(hint_str))};
+        Item args[1] = { hint_item };
+        Item result = js_call_function(to_prim, value, args, 1);
+        if (js_exception_pending) return ItemNull;
+        TypeId rt = get_type_id(result);
+        if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT || rt == LMD_TYPE_FUNC) {
+            js_throw_type_error("Cannot convert object to primitive value");
+            return ItemNull;
+        }
+        return result;
+    }
+
+    // OrdinaryToPrimitive: method order depends on hint
+    const char* methods[2];
+    if (hint == 2) { methods[0] = "toString"; methods[1] = "valueOf"; }
+    else           { methods[0] = "valueOf";  methods[1] = "toString"; }
+    bool any_callable = false;
+    for (int i = 0; i < 2; i++) {
+        Item key = (Item){.item = s2it(heap_create_name(methods[i]))};
+        Item fn = js_property_get(value, key);
+        if (js_exception_pending) return ItemNull;
+        if (fn.item == ItemNull.item || get_type_id(fn) != LMD_TYPE_FUNC) continue;
+        any_callable = true;
+        Item result = js_call_function(fn, value, NULL, 0);
+        if (js_exception_pending) return ItemNull;
+        TypeId rt = get_type_id(result);
+        if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_ELEMENT && rt != LMD_TYPE_FUNC) {
+            return result;
+        }
+    }
+    // No method yielded a primitive
+    js_throw_type_error("Cannot convert object to primitive value");
+    return ItemNull;
+}
+
 extern "C" Item js_add(Item left, Item right) {
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
@@ -2147,11 +2242,28 @@ extern "C" Item js_add(Item left, Item right) {
             // Check Symbol.toPrimitive (prototype chain)
             Item sym_key_l = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
             Item to_prim = js_property_get(left, sym_key_l);
-            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+            if (js_exception_pending) return make_js_undefined();
+            // ES spec §7.1.1 step 2.b.i: If exoticToPrim is not undefined AND not callable, throw TypeError.
+            // Treat undefined/null as "not present" (skip @@toPrimitive); other non-callable values throw.
+            TypeId tp_type = get_type_id(to_prim);
+            bool tp_present = (to_prim.item != ItemNull.item && tp_type != LMD_TYPE_UNDEFINED);
+            if (tp_present && tp_type != LMD_TYPE_FUNC) {
+                js_throw_type_error("@@toPrimitive is not a function");
+                return make_js_undefined();
+            }
+            if (tp_present) {
                 Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
                 Item args[1] = { hint };
-                left = js_call_function(to_prim, left, args, 1);
-                left_type = get_type_id(left);
+                Item tp_result = js_call_function(to_prim, left, args, 1);
+                if (js_exception_pending) return make_js_undefined();
+                // ES spec §7.1.1 step 2.b.iii: If result is Object, throw TypeError.
+                TypeId rt = get_type_id(tp_result);
+                if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT || rt == LMD_TYPE_FUNC) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return make_js_undefined();
+                }
+                left = tp_result;
+                left_type = rt;
             } else {
                 // Try valueOf first (ES spec: OrdinaryToPrimitive with hint "default")
                 bool found_vo = false;
@@ -2198,11 +2310,25 @@ extern "C" Item js_add(Item left, Item right) {
         else {
             Item sym_key_r = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
             Item to_prim = js_property_get(right, sym_key_r);
-            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+            if (js_exception_pending) return make_js_undefined();
+            TypeId tp_type_r = get_type_id(to_prim);
+            bool tp_present_r = (to_prim.item != ItemNull.item && tp_type_r != LMD_TYPE_UNDEFINED);
+            if (tp_present_r && tp_type_r != LMD_TYPE_FUNC) {
+                js_throw_type_error("@@toPrimitive is not a function");
+                return make_js_undefined();
+            }
+            if (tp_present_r) {
                 Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
                 Item args[1] = { hint };
-                right = js_call_function(to_prim, right, args, 1);
-                right_type = get_type_id(right);
+                Item tp_result = js_call_function(to_prim, right, args, 1);
+                if (js_exception_pending) return make_js_undefined();
+                TypeId rt = get_type_id(tp_result);
+                if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT || rt == LMD_TYPE_FUNC) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return make_js_undefined();
+                }
+                right = tp_result;
+                right_type = rt;
             } else {
                 bool found_vo = false;
                 Item vo_fn = js_map_get_fast(right.map, "valueOf", 7, &found_vo);
@@ -2436,81 +2562,29 @@ extern "C" Item js_equal(Item left, Item right) {
     }
 
     // Object ToPrimitive: if one side is object/map, convert via ToPrimitive then recurse
-    if (left_type == LMD_TYPE_MAP && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_STRING)) {
-        // Try __primitiveValue__ first (wrapper objects)
-        bool own_pv = false;
-        Item pv = js_map_get_fast(left.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) return js_equal(pv, right);
-        // ToPrimitive: try valueOf, then toString (ES spec §7.1.1)
-        bool resolved = false;
-        Item prim = ItemNull;
-        // valueOf
-        bool found_vo = false;
-        Item vo_fn = js_map_get_fast(left.map, "valueOf", 7, &found_vo);
-        if (!found_vo) vo_fn = js_prototype_lookup(left, (Item){.item = s2it(heap_create_name("valueOf", 7))});
-        bool vo_callable = (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC);
-        if (vo_callable) {
-            Item result = js_call_function(vo_fn, left, NULL, 0);
-            TypeId rt = get_type_id(result);
-            if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { prim = result; resolved = true; }
-        }
-        // toString
-        bool ts_callable = false;
-        if (!resolved) {
-            Item ts_fn = js_property_get(left, (Item){.item = s2it(heap_create_name("toString", 8))});
-            ts_callable = (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC);
-            if (ts_callable) {
-                Item result = js_call_function(ts_fn, left, NULL, 0);
-                TypeId rt = get_type_id(result);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { prim = result; resolved = true; }
-            }
-        }
-        if (resolved) return js_equal(prim, right);
-        if (vo_callable || ts_callable) {
-            js_throw_type_error("Cannot convert object to primitive value");
-            return (Item){.item = b2it(false)};
-        }
-        return js_equal(js_to_string(left), right);
+    // ES §7.2.13 Abstract Equality steps 10-11: x is Object & y is primitive (or vice versa)
+    // → ToPrimitive(object, "default") then re-compare. Hint default for ==.
+    if (left_type == LMD_TYPE_MAP && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_STRING || js_is_bigint(right) || js_is_symbol(right))) {
+        Item prim = js_op_to_primitive(left, 0);
+        if (js_exception_pending) return (Item){.item = b2it(false)};
+        return js_equal(prim, right);
     }
-    if (right_type == LMD_TYPE_MAP && (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT || left_type == LMD_TYPE_STRING)) {
-        bool own_pv = false;
-        Item pv = js_map_get_fast(right.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) return js_equal(left, pv);
-        bool resolved = false;
-        Item prim = ItemNull;
-        bool found_vo = false;
-        Item vo_fn = js_map_get_fast(right.map, "valueOf", 7, &found_vo);
-        if (!found_vo) vo_fn = js_prototype_lookup(right, (Item){.item = s2it(heap_create_name("valueOf", 7))});
-        bool vo_callable_r = (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC);
-        if (vo_callable_r) {
-            Item result = js_call_function(vo_fn, right, NULL, 0);
-            TypeId rt = get_type_id(result);
-            if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { prim = result; resolved = true; }
-        }
-        bool ts_callable_r = false;
-        if (!resolved) {
-            Item ts_fn = js_property_get(right, (Item){.item = s2it(heap_create_name("toString", 8))});
-            ts_callable_r = (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC);
-            if (ts_callable_r) {
-                Item result = js_call_function(ts_fn, right, NULL, 0);
-                TypeId rt = get_type_id(result);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { prim = result; resolved = true; }
-            }
-        }
-        if (resolved) return js_equal(left, prim);
-        if (vo_callable_r || ts_callable_r) {
-            js_throw_type_error("Cannot convert object to primitive value");
-            return (Item){.item = b2it(false)};
-        }
-        return js_equal(left, js_to_string(right));
+    if (right_type == LMD_TYPE_MAP && (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT || left_type == LMD_TYPE_STRING || js_is_bigint(left) || js_is_symbol(left))) {
+        Item prim = js_op_to_primitive(right, 0);
+        if (js_exception_pending) return (Item){.item = b2it(false)};
+        return js_equal(left, prim);
     }
 
     // Array ToPrimitive: convert to string then compare
     if (left_type == LMD_TYPE_ARRAY) {
-        return js_equal(js_to_string(left), right);
+        Item prim = js_op_to_primitive(left, 0);
+        if (js_exception_pending) return (Item){.item = b2it(false)};
+        return js_equal(prim, right);
     }
     if (right_type == LMD_TYPE_ARRAY) {
-        return js_equal(left, js_to_string(right));
+        Item prim = js_op_to_primitive(right, 0);
+        if (js_exception_pending) return (Item){.item = b2it(false)};
+        return js_equal(left, prim);
     }
 
     return (Item){.item = b2it(false)};
@@ -2608,81 +2682,17 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
         return (Item){.item = b2it(false)};
     }
 
-    // ToPrimitive for objects/arrays (ES spec §7.2.14 Abstract Relational Comparison)
-    if (left_type == LMD_TYPE_MAP) {
-        bool own_pv = false;
-        Item pv = js_map_get_fast(left.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) { left = pv; }
-        else {
-            bool resolved = false;
-            bool found_vo = false;
-            Item vo_fn = js_map_get_fast(left.map, "valueOf", 7, &found_vo);
-            if (!found_vo) vo_fn = js_prototype_lookup(left, (Item){.item = s2it(heap_create_name("valueOf", 7))});
-            bool vo_callable = (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC);
-            if (vo_callable) {
-                Item result = js_call_function(vo_fn, left, NULL, 0);
-                TypeId rt = get_type_id(result);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { left = result; resolved = true; }
-            }
-            bool ts_callable = false;
-            if (!resolved) {
-                Item ts_fn = js_property_get(left, (Item){.item = s2it(heap_create_name("toString", 8))});
-                ts_callable = (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC);
-                if (ts_callable) {
-                    Item result = js_call_function(ts_fn, left, NULL, 0);
-                    TypeId rt = get_type_id(result);
-                    if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { left = result; resolved = true; }
-                }
-            }
-            if (!resolved) {
-                if (vo_callable || ts_callable) {
-                    js_throw_type_error("Cannot convert object to primitive value");
-                    return (Item){.item = b2it(false)};
-                }
-                left = js_to_string(left);
-            }
-        }
+    // ToPrimitive for objects/arrays/functions (ES spec §7.2.14 Abstract Relational Comparison, hint "number")
+    if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
+        left = js_op_to_primitive(left, 1);
+        // ES spec: if left (first source operand for < and >=) threw during ToPrimitive, stop before right
+        if (leftFirst && js_exception_pending) return ItemNull;
         left_type = get_type_id(left);
     }
-    if (left_type == LMD_TYPE_ARRAY) { left = js_to_string(left); left_type = LMD_TYPE_STRING; }
-    // ES spec: if left (first source operand for < and >=) threw during ToPrimitive, stop before right
-    if (leftFirst && js_exception_pending) return ItemNull;
-    if (right_type == LMD_TYPE_MAP) {
-        bool own_pv = false;
-        Item pv = js_map_get_fast(right.map, "__primitiveValue__", 18, &own_pv);
-        if (own_pv) { right = pv; }
-        else {
-            bool resolved = false;
-            bool found_vo = false;
-            Item vo_fn = js_map_get_fast(right.map, "valueOf", 7, &found_vo);
-            if (!found_vo) vo_fn = js_prototype_lookup(right, (Item){.item = s2it(heap_create_name("valueOf", 7))});
-            bool vo_callable_r = (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC);
-            if (vo_callable_r) {
-                Item result = js_call_function(vo_fn, right, NULL, 0);
-                TypeId rt = get_type_id(result);
-                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { right = result; resolved = true; }
-            }
-            bool ts_callable_r = false;
-            if (!resolved) {
-                Item ts_fn = js_property_get(right, (Item){.item = s2it(heap_create_name("toString", 8))});
-                ts_callable_r = (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC);
-                if (ts_callable_r) {
-                    Item result = js_call_function(ts_fn, right, NULL, 0);
-                    TypeId rt = get_type_id(result);
-                    if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) { right = result; resolved = true; }
-                }
-            }
-            if (!resolved) {
-                if (vo_callable_r || ts_callable_r) {
-                    js_throw_type_error("Cannot convert object to primitive value");
-                    return (Item){.item = b2it(false)};
-                }
-                right = js_to_string(right);
-            }
-        }
+    if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
+        right = js_op_to_primitive(right, 1);
         right_type = get_type_id(right);
     }
-    if (right_type == LMD_TYPE_ARRAY) { right = js_to_string(right); right_type = LMD_TYPE_STRING; }
     // Propagate any pending exception before performing comparison
     if (js_exception_pending) return ItemNull;
 

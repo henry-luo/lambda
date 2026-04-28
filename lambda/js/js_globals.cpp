@@ -1352,45 +1352,72 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 }
 
 // v20: new Date(year, month [, day, hours, minutes, seconds, ms]) — multi-arg constructor
+// ES §21.4.2.1 step 3: Call ToNumber on each present argument in left-to-right order
+// (for side effects), THEN check NaN, THEN compute final time. Exceptions from any
+// ToNumber must propagate immediately and halt remaining coercions.
 extern "C" Item js_date_new_multi(Item args_array) {
     int len = (int)js_array_length(args_array);
-    auto get_arg_int = [&](int idx) -> int {
+
+    auto coerce = [&](int idx, bool* present_out) -> double {
+        if (idx >= len) { *present_out = false; return 0.0; }
         Item val = js_array_get_int(args_array, idx);
-        TypeId t = get_type_id(val);
-        if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return (int)it2i(val);
-        if (t == LMD_TYPE_FLOAT) return (int)it2d(val);
-        return 0;
+        // ES treats only "missing" as not-present. Explicit `undefined` is present (and ToNumber→NaN).
+        // js_array_get_int returns ItemNull (== {item=0}) for out-of-bounds; here idx<len so it's
+        // a real element. But Lambda's array storage may give back undefined for holes — accept that.
+        *present_out = true;
+        Item num = js_to_number(val);
+        if (js_check_exception()) return 0.0;
+        TypeId t = get_type_id(num);
+        if (t == LMD_TYPE_FLOAT) return it2d(num);
+        if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return (double)it2i(num);
+        return NAN;
     };
 
-    int year = len > 0 ? get_arg_int(0) : 0;
-    int month = len > 1 ? get_arg_int(1) : 0;
-    int day = len > 2 ? get_arg_int(2) : 1;
-    int hour = len > 3 ? get_arg_int(3) : 0;
-    int min = len > 4 ? get_arg_int(4) : 0;
-    int sec = len > 5 ? get_arg_int(5) : 0;
-    int millis = len > 6 ? get_arg_int(6) : 0;
+    bool p_year=false, p_month=false, p_day=false, p_hour=false, p_min=false, p_sec=false, p_ms=false;
+    double y = coerce(0, &p_year);  if (js_check_exception()) return ItemNull;
+    double m = coerce(1, &p_month); if (js_check_exception()) return ItemNull;
+    double d = coerce(2, &p_day);   if (js_check_exception()) return ItemNull;
+    double h = coerce(3, &p_hour);  if (js_check_exception()) return ItemNull;
+    double mi = coerce(4, &p_min);  if (js_check_exception()) return ItemNull;
+    double s = coerce(5, &p_sec);   if (js_check_exception()) return ItemNull;
+    double ms = coerce(6, &p_ms);   if (js_check_exception()) return ItemNull;
 
-    struct tm tm = {};
-    // ES spec: if 0 <= year <= 99, treat as 1900 + year
-    if (year >= 0 && year <= 99) year += 1900;
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month;
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = min;
-    tm.tm_sec = sec;
-    tm.tm_isdst = -1;
+    // ES spec: defaults for unsupplied args
+    if (!p_day) d = 1;
+    if (!p_hour) h = 0;
+    if (!p_min) mi = 0;
+    if (!p_sec) s = 0;
+    if (!p_ms) ms = 0;
 
-    time_t t = mktime(&tm);  // local time constructor
-    double ms_val = (double)t * 1000.0 + (double)millis;
-
+    // Build the Date object now (so we always return a Date even when time value is NaN)
     Item obj = js_new_object();
     Item time_key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
+
+    // ES spec: if any of y, m, d, h, mi, s, ms is NaN → final time value is NaN
+    double ms_val;
+    if (isnan(y) || isnan(m) || isnan(d) || isnan(h) || isnan(mi) || isnan(s) || isnan(ms)) {
+        ms_val = NAN;
+    } else {
+        // ES spec: if 0 <= ToInteger(y) <= 99, year = 1900 + ToInteger(y)
+        int iy = (int)y;
+        if (iy >= 0 && iy <= 99) iy += 1900;
+
+        struct tm tm = {};
+        tm.tm_year = iy - 1900;
+        tm.tm_mon = (int)m;
+        tm.tm_mday = (int)d;
+        tm.tm_hour = (int)h;
+        tm.tm_min = (int)mi;
+        tm.tm_sec = (int)s;
+        tm.tm_isdst = -1;
+        time_t t = mktime(&tm);  // local time constructor
+        ms_val = (double)t * 1000.0 + ms;
+    }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = ms_val;
     js_property_set(obj, time_key, (Item){.item = d2it(fp)});
-    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
     return obj;
 }
 
