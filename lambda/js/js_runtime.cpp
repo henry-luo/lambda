@@ -18572,7 +18572,8 @@ void js_reset_math_object() {
 
 static Item js_get_math_object() {
     if (js_math_object.item == ITEM_NULL) {
-        js_math_object = js_object_create(ItemNull);
+        // Math inherits from Object.prototype per ES spec (not null prototype)
+        js_math_object = js_new_object();
         heap_register_gc_root(&js_math_object.item);
         // Mark as Math for Object.prototype.toString
         Item mk = (Item){.item = s2it(heap_create_name("__is_math__", 11))};
@@ -18643,7 +18644,8 @@ void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
     if (js_json_object.item == ITEM_NULL) {
-        js_json_object = js_object_create(ItemNull);
+        // JSON inherits from Object.prototype per ES spec
+        js_json_object = js_new_object();
         heap_register_gc_root(&js_json_object.item);
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_json_object, tag_k, (Item){.item = s2it(heap_create_name("JSON", 4))});
@@ -18804,7 +18806,8 @@ void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; 
 
 extern "C" Item js_get_reflect_object_value() {
     if (js_reflect_object.item == ITEM_NULL) {
-        js_reflect_object = js_object_create(ItemNull);
+        // Reflect inherits from Object.prototype per ES spec
+        js_reflect_object = js_new_object();
         heap_register_gc_root(&js_reflect_object.item);
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_reflect_object, tag_k, (Item){.item = s2it(heap_create_name("Reflect", 7))});
@@ -19622,6 +19625,37 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
         }
         proto = js_get_prototype(proto);
         depth++;
+    }
+    // Implicit Object.prototype fallback for plain MAPs that don't store
+    // explicit __proto__ (e.g. Math, JSON, plain object literals): if the
+    // chain walk above terminated without finding the property, also probe
+    // Object.prototype directly. Guarded against recursion by static flag
+    // and by skipping Object.prototype itself.
+    static __thread int proto_lookup_fallback_depth = 0;
+    if (key_str && proto_lookup_fallback_depth == 0 &&
+        get_type_id(object) == LMD_TYPE_MAP) {
+        proto_lookup_fallback_depth++;
+        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+        proto_lookup_fallback_depth--;
+        if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+            JsFunction* fn = (JsFunction*)obj_ctor.function;
+            if (fn->prototype.item != 0 && get_type_id(fn->prototype) == LMD_TYPE_MAP &&
+                fn->prototype.map != object.map) {
+                Item op = fn->prototype;
+                Item r = js_map_get_fast(op.map, key_str, key_len);
+                if (r.item != ItemNull.item && !js_is_deleted_sentinel(r)) return r;
+                if (key_len < 200 &&
+                    !(key_len > 6 && (strncmp(key_str, "__get_", 6) == 0 || strncmp(key_str, "__set_", 6) == 0))) {
+                    char getter_key[256];
+                    int gklen = snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
+                    Item gr = js_map_get_fast(op.map, getter_key, gklen);
+                    if (gr.item != ItemNull.item && !js_is_deleted_sentinel(gr) &&
+                        get_type_id(gr) == LMD_TYPE_FUNC) {
+                        return js_call_function(gr, object, NULL, 0);
+                    }
+                }
+            }
+        }
     }
     return ItemNull;
 }

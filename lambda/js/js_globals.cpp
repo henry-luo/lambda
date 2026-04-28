@@ -4530,8 +4530,10 @@ extern "C" Item js_in(Item key, Item object) {
                 js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
                 if (setter_found) return (Item){.item = b2it(true)};
             }
-            // 3. walk prototype chain (data properties + accessors)
-            Item proto = js_get_prototype(object);
+            // 3. walk prototype chain (data properties + accessors).
+            // Use js_get_prototype_of so plain MAPs without explicit __proto__
+            // still walk the implicit Object.prototype chain.
+            Item proto = js_get_prototype_of(object);
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                 // if prototype is a proxy, delegate to its [[HasProperty]] trap
@@ -4555,7 +4557,7 @@ extern "C" Item js_in(Item key, Item object) {
                     js_map_get_fast_ext(proto.map, setter_key, sk_len, &setter_found);
                     if (setter_found) return (Item){.item = b2it(true)};
                 }
-                proto = js_get_prototype(proto);
+                proto = js_get_prototype_of(proto);
                 depth++;
             }
         } else {
