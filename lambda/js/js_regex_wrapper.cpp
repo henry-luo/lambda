@@ -191,7 +191,87 @@ struct RewriteResult {
     int group_remap_count;
 };
 
-static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
+static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, bool dot_all = false) {
+    // Prepass: rewrite empty character classes that RE2 doesn't accept,
+    // and rewrite \b inside character classes to backspace (JS treats \b inside
+    // a character class as the backspace character, while RE2 treats it as an
+    // invalid escape — outside classes \b is a word boundary in both).
+    //   [^]  → [\s\S]   (matches any character; JS allows, RE2 errors "missing ]")
+    //   []   → (?!)     (never matches; ES spec — empty class never matches)
+    //   [\b] → [\x08]   (backspace inside character class)
+    // Walk character by character, respecting backslash escapes outside classes
+    // and tracking when we're inside a character class.
+    std::string original;
+    original.reserve(original_in.size());
+    {
+        size_t i = 0;
+        size_t n = original_in.size();
+        bool in_class = false;
+        while (i < n) {
+            char c = original_in[i];
+            if (!in_class) {
+                if (c == '\\' && i + 1 < n) {
+                    original.push_back(c);
+                    original.push_back(original_in[i+1]);
+                    i += 2;
+                    continue;
+                }
+                if (c == '[') {
+                    if (i + 1 < n && original_in[i+1] == ']') {
+                        // empty class []
+                        original.append("(?!)");
+                        i += 2;
+                        continue;
+                    }
+                    if (i + 2 < n && original_in[i+1] == '^' && original_in[i+2] == ']') {
+                        // negated empty class [^] → match any char
+                        original.append("[\\s\\S]");
+                        i += 3;
+                        continue;
+                    }
+                    in_class = true;
+                    original.push_back(c);
+                    i++;
+                    continue;
+                }
+                if (c == '.') {
+                    // JS `.` matches any character except \n, \r, \u2028, \u2029.
+                    // RE2 `.` excludes only \n by default. Rewrite to a class for full ES semantics.
+                    // With dotAll, `.` matches everything including line terminators.
+                    if (dot_all) {
+                        original.append("[\\s\\S]");
+                    } else {
+                        original.append("[^\\n\\r\\x{2028}\\x{2029}]");
+                    }
+                    i++;
+                    continue;
+                }
+                original.push_back(c);
+                i++;
+            } else {
+                // inside [...]
+                if (c == '\\' && i + 1 < n) {
+                    char nx = original_in[i+1];
+                    if (nx == 'b') {
+                        // backspace inside class
+                        original.append("\\x08");
+                        i += 2;
+                        continue;
+                    }
+                    original.push_back(c);
+                    original.push_back(nx);
+                    i += 2;
+                    continue;
+                }
+                if (c == ']') {
+                    in_class = false;
+                }
+                original.push_back(c);
+                i++;
+            }
+        }
+    }
+
     out->filter_count = 0;
     out->group_remap = nullptr;
     out->group_remap_count = 0;
@@ -450,16 +530,266 @@ static bool rewrite_pattern(const std::string& original, RewriteResult* out) {
 }
 
 // ============================================================================
+// Annex B strict validator for `u` flag
+// ============================================================================
+// When the `u` flag is set, the Annex B compatibility extensions in B.1.4
+// are NOT applied. This means many patterns that parse leniently without `u`
+// must throw SyntaxError with `u`. Returns true if valid, false if invalid.
+static bool validate_unicode_strict(const std::string& pat) {
+    int group_count = count_capture_groups(pat);
+    size_t n = pat.size();
+    bool in_class = false;
+    bool class_after_first = false; // for detecting char class shorthand in range
+    char class_prev_was_shorthand = 0; // 'd','D','s','S','w','W','p','P'
+
+    for (size_t i = 0; i < n; i++) {
+        char c = pat[i];
+        if (!in_class) {
+            if (c == '\\') {
+                if (i + 1 >= n) return false; // trailing backslash
+                char nx = pat[i + 1];
+                // backreferences \1-\9
+                if (nx >= '1' && nx <= '9') {
+                    // collect full number (could be multi-digit)
+                    size_t j = i + 1;
+                    int num = 0;
+                    while (j < n && pat[j] >= '0' && pat[j] <= '9') {
+                        num = num * 10 + (pat[j] - '0');
+                        j++;
+                    }
+                    if (num > group_count) return false; // backref to nonexistent group
+                    i = j - 1;
+                    continue;
+                }
+                // \0 — only valid as null char (not followed by digit)
+                if (nx == '0') {
+                    if (i + 2 < n && pat[i + 2] >= '0' && pat[i + 2] <= '9') return false;
+                    i++; continue;
+                }
+                // \u must be followed by 4 hex digits or {hex}
+                if (nx == 'u') {
+                    if (i + 2 >= n) return false;
+                    if (pat[i + 2] == '{') {
+                        // \u{HHHH...}
+                        size_t j = i + 3;
+                        size_t start = j;
+                        while (j < n && pat[j] != '}') {
+                            char h = pat[j];
+                            if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                            j++;
+                        }
+                        if (j >= n || j == start) return false;
+                        i = j; continue;
+                    }
+                    // need 4 hex digits
+                    if (i + 5 >= n) return false;
+                    for (int k = 2; k <= 5; k++) {
+                        char h = pat[i + k];
+                        if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                    }
+                    i += 5; continue;
+                }
+                // \x must be followed by 2 hex digits
+                if (nx == 'x') {
+                    if (i + 3 >= n) return false;
+                    for (int k = 2; k <= 3; k++) {
+                        char h = pat[i + k];
+                        if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                    }
+                    i += 3; continue;
+                }
+                // \c must be followed by [A-Za-z]
+                if (nx == 'c') {
+                    if (i + 2 >= n) return false;
+                    char cc = pat[i + 2];
+                    if (!((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z'))) return false;
+                    i += 2; continue;
+                }
+                // \k<name> — named backref
+                if (nx == 'k') {
+                    if (i + 2 >= n || pat[i + 2] != '<') return false;
+                    size_t j = i + 3;
+                    while (j < n && pat[j] != '>') j++;
+                    if (j >= n) return false;
+                    i = j; continue;
+                }
+                // \p{...} or \P{...} — unicode property escape
+                if (nx == 'p' || nx == 'P') {
+                    if (i + 2 >= n || pat[i + 2] != '{') return false;
+                    size_t j = i + 3;
+                    while (j < n && pat[j] != '}') j++;
+                    if (j >= n) return false;
+                    i = j; continue;
+                }
+                // valid single-char escapes
+                if (nx == 'b' || nx == 'B' || nx == 'd' || nx == 'D' ||
+                    nx == 's' || nx == 'S' || nx == 'w' || nx == 'W' ||
+                    nx == 'f' || nx == 'n' || nx == 'r' || nx == 't' || nx == 'v') {
+                    i++; continue;
+                }
+                // syntax characters that can be escaped (outside class: no `-`)
+                if (nx == '^' || nx == '$' || nx == '\\' || nx == '.' || nx == '*' ||
+                    nx == '+' || nx == '?' || nx == '(' || nx == ')' || nx == '[' ||
+                    nx == ']' || nx == '{' || nx == '}' || nx == '|' || nx == '/') {
+                    i++; continue;
+                }
+                // any other identity escape (alpha, etc.) is invalid under `u`
+                return false;
+            }
+            if (c == '[') {
+                in_class = true;
+                class_after_first = false;
+                class_prev_was_shorthand = 0;
+                continue;
+            }
+            // standalone `]`, `{`, `}` outside a class is illegal under `u`
+            if (c == ']' || c == '}') return false;
+            // quantifier on assertion: previous construct was (?=...) (?!...) (?<=...) (?<!...)
+            if ((c == '*' || c == '+' || c == '?' || c == '{') && i > 0) {
+                if (pat[i - 1] == ')') {
+                    // find matching open paren
+                    int depth = 1;
+                    size_t k = i - 1;
+                    while (k > 0 && depth > 0) {
+                        k--;
+                        if (k > 0 && pat[k - 1] == '\\') continue;
+                        if (pat[k] == ')') depth++;
+                        else if (pat[k] == '(') depth--;
+                    }
+                    if (depth == 0 && k + 2 < n && pat[k + 1] == '?') {
+                        char p2 = pat[k + 2];
+                        if (p2 == '=' || p2 == '!') return false; // lookahead quantified
+                        if (p2 == '<' && k + 3 < n && (pat[k + 3] == '=' || pat[k + 3] == '!')) return false;
+                    }
+                }
+            }
+            if (c == '{') {
+                // must be valid quantifier {n}, {n,}, or {n,m}
+                size_t j = i + 1;
+                if (j >= n || pat[j] < '0' || pat[j] > '9') return false;
+                while (j < n && pat[j] >= '0' && pat[j] <= '9') j++;
+                if (j < n && pat[j] == ',') {
+                    j++;
+                    while (j < n && pat[j] >= '0' && pat[j] <= '9') j++;
+                }
+                if (j >= n || pat[j] != '}') return false;
+                i = j; continue;
+            }
+        } else {
+            // inside char class
+            if (c == '\\') {
+                if (i + 1 >= n) return false;
+                char nx = pat[i + 1];
+                bool is_shorthand = (nx == 'd' || nx == 'D' || nx == 's' || nx == 'S' ||
+                                     nx == 'w' || nx == 'W' || nx == 'p' || nx == 'P');
+                // check for character class shorthand in range: e.g., [\d-a] or [a-\d]
+                if (i + 2 < n && pat[i + 2] == '-' && i + 3 < n && pat[i + 3] != ']') {
+                    if (is_shorthand) return false; // [\d-X]
+                }
+                if (class_prev_was_shorthand && (i > 0 && pat[i - 1] == '-')) {
+                    return false; // [X-\d]
+                }
+                // similar escape validation as outside class (subset)
+                if (nx == 'u') {
+                    if (i + 2 >= n) return false;
+                    if (pat[i + 2] == '{') {
+                        size_t j = i + 3;
+                        while (j < n && pat[j] != '}') {
+                            char h = pat[j];
+                            if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                            j++;
+                        }
+                        if (j >= n) return false;
+                        i = j; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                    }
+                    if (i + 5 >= n) return false;
+                    for (int kk = 2; kk <= 5; kk++) {
+                        char h = pat[i + kk];
+                        if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                    }
+                    i += 5; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                }
+                if (nx == 'x') {
+                    if (i + 3 >= n) return false;
+                    for (int kk = 2; kk <= 3; kk++) {
+                        char h = pat[i + kk];
+                        if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
+                    }
+                    i += 3; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                }
+                if (nx == 'c') {
+                    if (i + 2 >= n) return false;
+                    char cc = pat[i + 2];
+                    if (!((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z'))) return false;
+                    i += 2; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                }
+                // valid escapes inside class
+                if (nx == 'b' || nx == 'B' || nx == 'd' || nx == 'D' ||
+                    nx == 's' || nx == 'S' || nx == 'w' || nx == 'W' ||
+                    nx == 'f' || nx == 'n' || nx == 'r' || nx == 't' || nx == 'v') {
+                    class_prev_was_shorthand = is_shorthand ? nx : 0;
+                    i++; class_after_first = true; continue;
+                }
+                if (nx == '0') {
+                    // \0 only valid if not followed by another digit
+                    if (i + 2 < n && pat[i + 2] >= '0' && pat[i + 2] <= '9') return false;
+                    class_prev_was_shorthand = 0;
+                    i++; class_after_first = true; continue;
+                }
+                if (nx == '^' || nx == '$' || nx == '\\' || nx == '.' || nx == '*' ||
+                    nx == '+' || nx == '?' || nx == '(' || nx == ')' || nx == '[' ||
+                    nx == ']' || nx == '{' || nx == '}' || nx == '|' || nx == '/' ||
+                    nx == '-') {
+                    class_prev_was_shorthand = 0;
+                    i++; class_after_first = true; continue;
+                }
+                if (nx >= '1' && nx <= '9') return false; // octal escape in class under u
+                return false; // identity escape
+            }
+            if (c == ']') {
+                in_class = false;
+                class_prev_was_shorthand = 0;
+                continue;
+            }
+            class_prev_was_shorthand = 0;
+            class_after_first = true;
+        }
+    }
+    if (in_class) return false; // unterminated class
+    return true;
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
+
+bool js_regex_wrapper_validate_unicode(const char* pattern, int pattern_len) {
+    std::string pat(pattern, pattern_len);
+    return validate_unicode_strict(pat);
+}
 
 JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
                                    const char* flags, int flags_len,
                                    re2::RE2::Options* opts) {
     std::string pat(pattern, pattern_len);
 
+    bool has_s = false;
+    bool has_u = false;
+    for (int i = 0; i < flags_len; i++) {
+        if (flags[i] == 's') has_s = true;
+        else if (flags[i] == 'u' || flags[i] == 'v') has_u = true;
+    }
+
+    // Annex B B.1.4 strict validation under `u`/`v` flag
+    if (has_u) {
+        if (!validate_unicode_strict(pat)) {
+            log_debug("js regex wrapper: pattern '%s' invalid under `u` flag", pat.c_str());
+            return nullptr;
+        }
+    }
+
     RewriteResult rw;
-    if (!rewrite_pattern(pat, &rw)) {
+    if (!rewrite_pattern(pat, &rw, has_s)) {
         return nullptr;
     }
 

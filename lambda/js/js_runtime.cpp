@@ -4461,8 +4461,8 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 6 && strncmp(n, "RegExp", 6) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                Item pattern = (argc > 0 && args) ? args[0] : (Item){.item = s2it(heap_create_name("", 0))};
-                Item flags = (argc > 1 && args) ? args[1] : (Item){.item = s2it(heap_create_name("", 0))};
+                Item pattern = (argc > 0 && args) ? args[0] : make_js_undefined();
+                Item flags = (argc > 1 && args) ? args[1] : make_js_undefined();
                 return js_regexp_construct(pattern, flags);
             }
 
@@ -8526,8 +8526,7 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
     else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) table = map_methods;
     else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) table = arraybuffer_methods;
     else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) table = proxy_methods;
-    if (!table) return;
-
+    if (table) {
     JsFunction* fn = (JsFunction*)ctor_item.function;
     for (int i = 0; table[i].name; i++) {
         Item key = (Item){.item = s2it(heap_create_name(table[i].name, table[i].len))};
@@ -8543,13 +8542,16 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
             js_mark_non_enumerable(ctor_item, key);
         }
     }
+    } // end if(table)
 
     // ES spec: install get [Symbol.species]() { return this; } on constructors
     // that support @@species (Array, RegExp, Promise, Map, Set, ArrayBuffer, TypedArray constructors)
     bool needs_species = false;
     if ((ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) ||
+        (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) ||
         (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) ||
         (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) ||
+        (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) ||
         (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0)) {
         needs_species = true;
     }
@@ -8558,6 +8560,9 @@ extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor
         Item getter_key = (Item){.item = s2it(heap_create_name("__get___sym_6", 13))};
         Item getter_fn = js_get_or_create_builtin(JS_BUILTIN_ITER_IDENTITY, "get [Symbol.species]", 0);
         js_func_init_property(ctor_item, getter_key, getter_fn);
+        // Per spec, [[Enumerable]]: false, [[Configurable]]: true (default for accessors)
+        Item ne_sp_key = (Item){.item = s2it(heap_create_name("__ne___sym_6", 12))};
+        js_func_init_property(ctor_item, ne_sp_key, (Item){.item = b2it(BOOL_TRUE)});
     }
 }
 
@@ -12468,6 +12473,11 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
+    // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
+    Item ne_li_key = (Item){.item = s2it(heap_create_name("__ne_lastIndex", 14))};
+    js_property_set(regex_obj, ne_li_key, (Item){.item = b2it(BOOL_TRUE)});
+    Item nc_li_key = (Item){.item = s2it(heap_create_name("__nc_lastIndex", 14))};
+    js_property_set(regex_obj, nc_li_key, (Item){.item = b2it(BOOL_TRUE)});
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_property_set(regex_obj, cn_key, cn_val);
@@ -12937,12 +12947,66 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     bool global = false;
     bool multiline = false;
     bool sticky = false;
+    // ES §22.2.3.2.2 step 1: validate flags — must each be one of d/g/i/m/s/u/v/y
+    // and no duplicates allowed.
+    {
+        unsigned int seen = 0;
+        for (int i = 0; i < flags_len; i++) {
+            char fc = flags[i];
+            int bit;
+            switch (fc) {
+                case 'd': bit = 1<<0; break;
+                case 'g': bit = 1<<1; break;
+                case 'i': bit = 1<<2; break;
+                case 'm': bit = 1<<3; break;
+                case 's': bit = 1<<4; break;
+                case 'u': bit = 1<<5; break;
+                case 'v': bit = 1<<6; break;
+                case 'y': bit = 1<<7; break;
+                default: bit = 0; break;
+            }
+            if (bit == 0 || (seen & bit)) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Invalid flags supplied to RegExp constructor '%.*s'",
+                         flags_len, flags);
+                Item m = (Item){.item = s2it(heap_create_name(msg))};
+                js_throw_syntax_error(m);
+                return ItemNull;
+            }
+            seen |= bit;
+        }
+        // u and v are mutually exclusive (ES2024)
+        if ((seen & (1<<5)) && (seen & (1<<6))) {
+            Item m = (Item){.item = s2it(heap_create_name("Invalid flags: u and v are mutually exclusive"))};
+            js_throw_syntax_error(m);
+            return ItemNull;
+        }
+    }
     for (int i = 0; i < flags_len; i++) {
         if (flags[i] == 'i') opts.set_case_sensitive(false);
         else if (flags[i] == 'm') { opts.set_one_line(false); multiline = true; }
         else if (flags[i] == 'g') global = true;
         else if (flags[i] == 's') opts.set_dot_nl(true);
         else if (flags[i] == 'y') sticky = true;
+    }
+    // Annex B B.1.4 strict validation under `u`/`v` flag — validate the
+    // ORIGINAL source pattern (before any rewrites which may sanitize bad escapes)
+    {
+        bool has_u_or_v = false;
+        for (int i = 0; i < flags_len; i++) {
+            if (flags[i] == 'u' || flags[i] == 'v') { has_u_or_v = true; break; }
+        }
+        if (has_u_or_v) {
+            if (!js_regex_wrapper_validate_unicode(pattern, pattern_len)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                    "Invalid regular expression: /%.*s/%.*s: Annex B legacy syntax not allowed under `u` flag",
+                    pattern_len, pattern, flags_len, flags);
+                Item m = (Item){.item = s2it(heap_create_name(msg))};
+                js_throw_syntax_error(m);
+                return ItemNull;
+            }
+        }
     }
     // RE2: set_one_line(false) doesn't reliably enable multiline ^ and $,
     // so prepend (?m) inline flag when multiline mode is requested
@@ -13041,6 +13105,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
     Item li_key = (Item){.item = s2it(heap_create_name("lastIndex"))};
     js_property_set(regex_obj, li_key, (Item){.item = i2it(0)});
+    // Per ES §22.2.3.1: lastIndex is {writable:true, enumerable:false, configurable:false}
+    Item ne_li_key2 = (Item){.item = s2it(heap_create_name("__ne_lastIndex", 14))};
+    js_property_set(regex_obj, ne_li_key2, (Item){.item = b2it(BOOL_TRUE)});
+    Item nc_li_key2 = (Item){.item = s2it(heap_create_name("__nc_lastIndex", 14))};
+    js_property_set(regex_obj, nc_li_key2, (Item){.item = b2it(BOOL_TRUE)});
     // v46: set __class_name__ for RegExp prototype method resolution
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
@@ -13095,6 +13164,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
     int pattern_len = 0;
     const char* flags = "";
     int flags_len = 0;
+    bool flags_provided = (get_type_id(flags_item) != LMD_TYPE_UNDEFINED);
     // If pattern is a RegExp object, extract source (and flags if not overridden)
     if (get_type_id(pattern_item) == LMD_TYPE_MAP) {
         bool has_rd = false;
@@ -13107,7 +13177,7 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
                 if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
             }
             // If flags not explicitly provided, inherit from source regex
-            if (get_type_id(flags_item) != LMD_TYPE_STRING) {
+            if (!flags_provided) {
                 bool own_fl = false;
                 Item fl_val = js_map_get_fast(pattern_item.map, "flags", 5, &own_fl);
                 if (own_fl && get_type_id(fl_val) == LMD_TYPE_STRING) {
@@ -13116,20 +13186,71 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
                 }
             }
         } else {
-            // Non-regex object — convert to string
-            Item s = js_to_string(pattern_item);
-            if (get_type_id(s) == LMD_TYPE_STRING) {
-                String* ps = it2s(s);
-                if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+            // ES §22.2.3.1: IsRegExp(pattern) — check for Symbol.match override.
+            // If true, treat as regexp-like: read .source and (if flags not provided) .flags
+            // via the property getter chain.
+            Item sym_match_key = (Item){.item = s2it(heap_create_name("__sym_7", 7))};
+            Item sym_match_val = js_property_get(pattern_item, sym_match_key);
+            if (js_exception_pending) return ItemNull;
+            bool is_regexp_like = (sym_match_val.item != ItemNull.item
+                && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED
+                && get_type_id(sym_match_val) != LMD_TYPE_NULL
+                && it2b(js_to_boolean(sym_match_val)));
+            if (is_regexp_like) {
+                Item src_key = (Item){.item = s2it(heap_create_name("source", 6))};
+                Item src_val = js_property_get(pattern_item, src_key);
+                if (js_exception_pending) return ItemNull;
+                Item src_str = (get_type_id(src_val) == LMD_TYPE_STRING) ? src_val : js_to_string(src_val);
+                if (js_exception_pending) return ItemNull;
+                if (get_type_id(src_str) == LMD_TYPE_STRING) {
+                    String* ps = it2s(src_str);
+                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                }
+                if (!flags_provided) {
+                    Item fl_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+                    Item fl_val = js_property_get(pattern_item, fl_key);
+                    if (js_exception_pending) return ItemNull;
+                    if (get_type_id(fl_val) != LMD_TYPE_UNDEFINED && get_type_id(fl_val) != LMD_TYPE_NULL) {
+                        Item fl_str = (get_type_id(fl_val) == LMD_TYPE_STRING) ? fl_val : js_to_string(fl_val);
+                        if (js_exception_pending) return ItemNull;
+                        if (get_type_id(fl_str) == LMD_TYPE_STRING) {
+                            String* fs = it2s(fl_str);
+                            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+                        }
+                    }
+                }
+            } else {
+                // Non-regexp object — convert to string
+                Item s = js_to_string(pattern_item);
+                if (js_exception_pending) return ItemNull;
+                if (get_type_id(s) == LMD_TYPE_STRING) {
+                    String* ps = it2s(s);
+                    if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+                }
             }
         }
     } else if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
         String* ps = it2s(pattern_item);
         if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+    } else if (get_type_id(pattern_item) != LMD_TYPE_UNDEFINED) {
+        // ToString other primitives
+        Item s = js_to_string(pattern_item);
+        if (js_exception_pending) return ItemNull;
+        if (get_type_id(s) == LMD_TYPE_STRING) {
+            String* ps = it2s(s);
+            if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+        }
     }
-    if (get_type_id(flags_item) == LMD_TYPE_STRING) {
+    if (flags_provided && get_type_id(flags_item) == LMD_TYPE_STRING) {
         String* fs = it2s(flags_item);
         if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+    } else if (flags_provided && get_type_id(flags_item) != LMD_TYPE_UNDEFINED) {
+        Item s = js_to_string(flags_item);
+        if (js_exception_pending) return ItemNull;
+        if (get_type_id(s) == LMD_TYPE_STRING) {
+            String* fs = it2s(s);
+            if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+        }
     }
     return js_create_regex(pattern, pattern_len, flags, flags_len);
 }
@@ -13148,23 +13269,12 @@ static JsRegexData* js_get_regex_data(Item obj) {
 extern "C" Item js_regex_test(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.test called on incompatible receiver");
-    // v46: convert argument to string
-    TypeId tid = get_type_id(str);
-    if (tid != LMD_TYPE_STRING) {
-        str = js_to_string(str);
-        tid = get_type_id(str);
-        if (tid != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
-    }
-    const char* chars = str.get_chars();
-    int len = str.get_len();
-    // perform match with captures to update legacy static properties
-    int num_groups = js_regex_num_groups(rd);
-    if (num_groups > 16) num_groups = 16;
-    re2::StringPiece matches[16];
-    bool matched = js_regex_match_internal(rd, chars, len, 0, re2::RE2::UNANCHORED, matches, num_groups);
-    if (matched) {
-        js_regexp_update_last_match(chars, len, matches, num_groups);
-    }
+    // ES §22.2.5.13 RegExp.prototype.test: Let match be ? RegExpExec(R, string).
+    // Return true if match is not null. This ensures sticky/global/lastIndex
+    // semantics match exec() exactly.
+    Item m = js_regex_exec(regex, str);
+    if (js_exception_pending) return ItemNull;
+    bool matched = (get_type_id(m) != LMD_TYPE_NULL && m.item != ItemNull.item);
     return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
 }
 
@@ -13236,11 +13346,11 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         return ItemNull;
     }
 
-    // update lastIndex for global/sticky regexes
+    // update lastIndex for global/sticky regexes (per ES spec §22.2.5.2 step 16:
+    // Set R.lastIndex = e). Do NOT auto-advance on zero-length matches — that's
+    // the responsibility of callers (e.g. @@split, @@match) which use AdvanceStringIndex.
     if (uses_last_index) {
         int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
-        // advance at least 1 to avoid infinite loop on zero-length matches
-        if (match_end == start_pos) match_end++;
         if (!js_regex_set_lastindex_strict(regex, li_key, match_end)) return ItemNull;
     }
 
@@ -13678,117 +13788,269 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
 
 // RegExp.prototype[@@search](string)
 static Item js_regexp_symbol_search(Item this_val, Item arg0) {
-    // ES spec: Type(this) must be Object
+    // ES spec §22.2.5.9: Type(this) must be Object
     if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@search] called on incompatible receiver"))};
         js_throw_value(js_new_error_with_name(tn, msg));
         return (Item){.item = i2it(-1)};
     }
-    JsRegexData* rd = js_get_regex_data(this_val);
-    if (!rd) return (Item){.item = i2it(-1)};
-    // ES spec step 3: Let S be ToString(string). Step 4: ReturnIfAbrupt(S).
+    // ES spec step 3: Let S be ToString(string).
     Item str = (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0);
     if (js_exception_pending) return (Item){.item = i2it(-1)};
-    const char* chars = str.get_chars();
-    int len = str.get_len();
-    re2::StringPiece match;
-    if (js_regex_match_internal(rd, chars, len, 0, re2::RE2::UNANCHORED, &match, 1)) {
-        return (Item){.item = i2it((int)(match.data() - chars))};
+
+    // ES spec step 5-6: previousLastIndex = ? Get(rx, "lastIndex");
+    //                   if SameValue(previousLastIndex, 0) is false, Set(rx, "lastIndex", 0, true).
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    Item prev_li = js_property_get(this_val, li_key);
+    if (js_exception_pending) return (Item){.item = i2it(-1)};
+    bool prev_is_zero = false;
+    {
+        TypeId pt = get_type_id(prev_li);
+        if (pt == LMD_TYPE_INT && it2i(prev_li) == 0) prev_is_zero = true;
+        else if (pt == LMD_TYPE_FLOAT && it2d(prev_li) == 0.0) prev_is_zero = true;
     }
-    return (Item){.item = i2it(-1)};
+    if (!prev_is_zero) {
+        if (!js_regex_set_lastindex_strict(this_val, li_key, 0)) return (Item){.item = i2it(-1)};
+    }
+
+    // ES spec step 7: Let result be ? RegExpExec(rx, S).
+    Item result = js_regexp_exec_dispatch(this_val, str);
+    if (js_exception_pending) return (Item){.item = i2it(-1)};
+
+    // ES spec step 8-9: currentLastIndex = ? Get(rx, "lastIndex");
+    //                   if SameValue(currentLastIndex, previousLastIndex) is false,
+    //                   Set(rx, "lastIndex", previousLastIndex, true).
+    Item cur_li = js_property_get(this_val, li_key);
+    if (js_exception_pending) return (Item){.item = i2it(-1)};
+    bool same;
+    {
+        TypeId pt = get_type_id(prev_li), ct = get_type_id(cur_li);
+        if (pt == ct) {
+            if (pt == LMD_TYPE_INT) same = (it2i(prev_li) == it2i(cur_li));
+            else if (pt == LMD_TYPE_FLOAT) same = (it2d(prev_li) == it2d(cur_li));
+            else same = (prev_li.item == cur_li.item);
+        } else { same = false; }
+    }
+    if (!same) {
+        js_property_set(this_val, li_key, prev_li);
+        if (js_exception_pending) return (Item){.item = i2it(-1)};
+    }
+
+    // ES spec step 10-11: If result is null, return -1; else return ? Get(result, "index").
+    if (get_type_id(result) == LMD_TYPE_NULL || result.item == ItemNull.item) {
+        return (Item){.item = i2it(-1)};
+    }
+    Item idx_key = (Item){.item = s2it(heap_create_name("index", 5))};
+    Item idx_val = js_property_get(result, idx_key);
+    if (js_exception_pending) return (Item){.item = i2it(-1)};
+    // ToInteger(index)
+    if (get_type_id(idx_val) == LMD_TYPE_INT) return idx_val;
+    double d = js_get_number(idx_val);
+    if (d != d) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int64_t)d)};
 }
 
 // RegExp.prototype[@@split](string, limit)
+// RegExp.prototype[@@split](string, limit) — ES spec §22.2.5.13
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
-    // ES spec: Type(this) must be Object
-    if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
+    // Step 2: Type(rx) must be Object
+    TypeId rx_tid = get_type_id(this_val);
+    if (rx_tid != LMD_TYPE_MAP && rx_tid != LMD_TYPE_ARRAY) {
         Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
         Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@split] called on incompatible receiver"))};
         js_throw_value(js_new_error_with_name(tn, msg));
         return js_array_new(0);
     }
-    // ES spec step 10: capture regex data BEFORE evaluating limit (step 13).
-    // This simulates the spec's "Construct(C, rx, newFlags)" copy — the splitter
-    // is based on the original regex, unaffected by side-effects in ToUint32(limit).
-    JsRegexData* rd = js_get_regex_data(this_val);
-    if (!rd) return js_array_new(0);
-    // ES spec step 3: Let S be ToString(string). Step 4: ReturnIfAbrupt(S).
+    // Step 3: S = ToString(string)
     if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
     if (js_exception_pending) return js_array_new(0);
-    const char* chars = str.get_chars();
-    int len = str.get_len();
+    String* s_str = it2s(str);
+    int size = s_str ? (int)s_str->len : 0;
 
-    // ES spec §22.2.5.13 step 13: lim = ToUint32(limit)
-    int max_parts = 0x7FFFFFFF;
-    if (get_type_id(limit) != LMD_TYPE_UNDEFINED) {
-        double dlim = js_get_number(js_to_number(limit));
+    // Step 4: C = SpeciesConstructor(rx, %RegExp%)
+    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+    Item C = js_property_get(this_val, ctor_key);
+    if (js_exception_pending) return js_array_new(0);
+    extern Item js_get_constructor(Item name_item);
+    Item default_regexp = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
+    if (get_type_id(C) == LMD_TYPE_UNDEFINED || C.item == ItemNull.item) {
+        C = default_regexp;
+    } else {
+        TypeId ct = get_type_id(C);
+        if (ct != LMD_TYPE_FUNC && ct != LMD_TYPE_MAP) {
+            return js_throw_type_error("Constructor is not an object");
+        }
+        // Get C[@@species]
+        Item species_key = (Item){.item = s2it(heap_create_name("__sym_6", 7))};
+        Item S = js_property_get(C, species_key);
         if (js_exception_pending) return js_array_new(0);
-        if (isnan(dlim) || dlim == 0.0) {
-            max_parts = 0;
-        } else if (isinf(dlim) && dlim > 0) {
-            max_parts = 0x7FFFFFFF;
-        } else {
-            double rem = fmod(trunc(dlim), 4294967296.0);
-            if (rem < 0) rem += 4294967296.0;
-            max_parts = (rem > 0x7FFFFFFF) ? 0x7FFFFFFF : (int)rem;
-        }
-    }
-    if (max_parts == 0) return js_array_new(0);
-
-    Item result = js_array_new(0);
-    int num_groups = js_regex_num_groups(rd);
-    if (num_groups > 16) num_groups = 16;
-    re2::StringPiece matches[16];
-    int p = 0; // last split position
-    int q = 0; // search start position
-    int part_count = 0;
-
-    while (q <= len && part_count < max_parts) {
-        bool found = js_regex_match_internal(rd, chars, len, q, re2::RE2::UNANCHORED, matches, num_groups);
-        if (!found || (int)(matches[0].data() - chars) >= len) break;
-
-        int match_start = (int)(matches[0].data() - chars);
-        int match_end = match_start + (int)matches[0].size();
-
-        // ES spec @@split: if e == p, advance q and retry
-        if (match_end == p) {
-            q++;
-            continue;
-        }
-
-        // push segment from p to match_start
-        int seg_len = match_start - p;
-        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), seg_len))}
-                                 : (Item){.item = s2it(heap_create_name("", 0))};
-        js_array_push(result, seg);
-        part_count++;
-        if (part_count >= max_parts) break;
-
-        // push capturing groups
-        for (int g = 1; g < num_groups && part_count < max_parts; g++) {
-            if (matches[g].data()) {
-                Item gs = (Item){.item = s2it(heap_strcpy((char*)matches[g].data(), (int)matches[g].size()))};
-                js_array_push(result, gs);
-            } else {
-                js_array_push(result, make_js_undefined());
+        // Check for getter on properties_map (FUNC has accessors there)
+        if ((S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED)
+            && ct == LMD_TYPE_FUNC) {
+            JsFunction* fn = (JsFunction*)C.function;
+            if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                bool gk_found = false;
+                Item getter = js_map_get_fast(fn->properties_map.map, "__get___sym_6", 13, &gk_found);
+                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                    S = js_call_function(getter, C, NULL, 0);
+                    if (js_exception_pending) return js_array_new(0);
+                }
             }
-            part_count++;
         }
-
-        p = match_end;
-        q = match_end;
+        if (S.item == ItemNull.item || get_type_id(S) == LMD_TYPE_UNDEFINED || get_type_id(S) == LMD_TYPE_NULL) {
+            C = default_regexp;
+        } else {
+            if (get_type_id(S) != LMD_TYPE_FUNC) {
+                return js_throw_type_error("@@species is not a constructor");
+            }
+            C = S;
+        }
     }
 
-    // push trailing segment
-    if (part_count < max_parts) {
-        int seg_len = len - p;
-        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), seg_len))}
-                                 : (Item){.item = s2it(heap_create_name("", 0))};
-        js_array_push(result, seg);
+    // Step 5-6: flags = ToString(Get(rx, "flags")); unicodeMatching = (flags includes 'u')
+    Item flags_key = (Item){.item = s2it(heap_create_name("flags", 5))};
+    Item flags_val = js_property_get(this_val, flags_key);
+    if (js_exception_pending) return js_array_new(0);
+    Item flags_str_item = (get_type_id(flags_val) == LMD_TYPE_STRING) ? flags_val : js_to_string(flags_val);
+    if (js_exception_pending) return js_array_new(0);
+    String* flags_str = (get_type_id(flags_str_item) == LMD_TYPE_STRING) ? it2s(flags_str_item) : NULL;
+    const char* fl = flags_str ? flags_str->chars : "";
+    int fl_len = flags_str ? (int)flags_str->len : 0;
+    bool unicode_matching = false;
+    bool has_y = false;
+    for (int i = 0; i < fl_len; i++) {
+        if (fl[i] == 'u') unicode_matching = true;
+        if (fl[i] == 'y') has_y = true;
+    }
+    // Step 7: newFlags = has_y ? flags : flags + "y"
+    Item new_flags_item;
+    if (has_y) {
+        new_flags_item = flags_str_item;
+    } else {
+        char* nf = (char*)pool_calloc(js_input->pool, fl_len + 2);
+        memcpy(nf, fl, fl_len);
+        nf[fl_len] = 'y';
+        nf[fl_len + 1] = '\0';
+        new_flags_item = (Item){.item = s2it(heap_create_name(nf, fl_len + 1))};
     }
 
-    return result;
+    // Step 8: splitter = Construct(C, « rx, newFlags »)
+    Item ctor_args[2] = { this_val, new_flags_item };
+    Item splitter = js_new_from_class_object(C, ctor_args, 2);
+    if (js_exception_pending) return js_array_new(0);
+
+    // Step 9-10: A = ArrayCreate(0); lengthA = 0
+    Item A = js_array_new(0);
+    int lengthA = 0;
+
+    // Step 11: lim = (limit undefined) ? 2^32-1 : ToUint32(limit)
+    uint32_t lim;
+    if (get_type_id(limit) == LMD_TYPE_UNDEFINED) {
+        lim = 0xFFFFFFFFu;
+    } else {
+        Item ln = js_to_number(limit);
+        if (js_exception_pending) return js_array_new(0);
+        double dl = js_get_number(ln);
+        if (isnan(dl) || dl == 0.0) lim = 0;
+        else if (isinf(dl)) lim = 0xFFFFFFFFu;
+        else {
+            double r = fmod(trunc(dl), 4294967296.0);
+            if (r < 0) r += 4294967296.0;
+            lim = (uint32_t)r;
+        }
+    }
+    // Step 12: If lim == 0, return A.
+    if (lim == 0) return A;
+
+    const char* chars = s_str ? s_str->chars : "";
+
+    // Step 13: If size == 0:
+    if (size == 0) {
+        // a. z = ? RegExpExec(splitter, S)
+        Item z = js_regexp_exec_dispatch(splitter, str);
+        if (js_exception_pending) return js_array_new(0);
+        // b. If z is not null, return A
+        if (get_type_id(z) != LMD_TYPE_NULL && z.item != ItemNull.item) return A;
+        // c. Append S to A; return A
+        js_array_push(A, str);
+        return A;
+    }
+
+    // Step 14-onwards: q = p = 0; loop
+    int p = 0, q = 0;
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    while (q < size) {
+        // a. ? Set(splitter, "lastIndex", q, true)
+        if (!js_regex_set_lastindex_strict(splitter, li_key, q)) return js_array_new(0);
+        // b. z = ? RegExpExec(splitter, S)
+        Item z = js_regexp_exec_dispatch(splitter, str);
+        if (js_exception_pending) return js_array_new(0);
+        // c. If z is null, q = AdvanceStringIndex(S, q, unicode)
+        if (get_type_id(z) == LMD_TYPE_NULL || z.item == ItemNull.item) {
+            // AdvanceStringIndex: simplified to q+1 (unicode surrogate pair handling deferred)
+            q = q + 1;
+        } else {
+            // d. e = ? ToLength(? Get(splitter, "lastIndex"))
+            Item li_val = js_property_get(splitter, li_key);
+            if (js_exception_pending) return js_array_new(0);
+            Item li_num = js_to_number(li_val);
+            if (js_exception_pending) return js_array_new(0);
+            double dle = js_get_number(li_num);
+            int64_t e_int;
+            if (isnan(dle) || dle <= 0) e_int = 0;
+            else if (dle > 9007199254740991.0) e_int = (int64_t)9007199254740991LL;
+            else e_int = (int64_t)dle;
+            // e. e = min(e, size)
+            int e = (e_int > size) ? size : (int)e_int;
+            // f. If e == p, q = AdvanceStringIndex(S, q, unicode)
+            if (e == p) {
+                q = q + 1;
+            } else {
+                // i. T = substring(S, p, q)
+                int t_len = q - p;
+                Item T = (t_len > 0)
+                    ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))}
+                    : (Item){.item = s2it(heap_create_name("", 0))};
+                // ii. Append T to A; lengthA++; if lengthA == lim, return A
+                js_array_push(A, T); lengthA++;
+                if ((uint32_t)lengthA == lim) return A;
+                // iii. p = e
+                p = e;
+                // iv. nCaptures = max(LengthOfArrayLike(z) - 1, 0)
+                Item len_key2 = (Item){.item = s2it(heap_create_name("length", 6))};
+                Item zl_val = js_property_get(z, len_key2);
+                if (js_exception_pending) return js_array_new(0);
+                Item zl_num = js_to_number(zl_val);
+                if (js_exception_pending) return js_array_new(0);
+                double zlen_d = js_get_number(zl_num);
+                int64_t zlen_i;
+                if (isnan(zlen_d) || zlen_d <= 0) zlen_i = 0;
+                else if (zlen_d > 9007199254740991.0) zlen_i = (int64_t)9007199254740991LL;
+                else zlen_i = (int64_t)zlen_d;
+                int nCaptures = (zlen_i > 0) ? (int)(zlen_i - 1) : 0;
+                // v. For i = 1..nCaptures: append Get(z, i)
+                for (int ci = 1; ci <= nCaptures; ci++) {
+                    char idx_buf[16];
+                    int ilen = snprintf(idx_buf, sizeof(idx_buf), "%d", ci);
+                    Item ck = (Item){.item = s2it(heap_create_name(idx_buf, ilen))};
+                    Item nextCap = js_property_get(z, ck);
+                    if (js_exception_pending) return js_array_new(0);
+                    js_array_push(A, nextCap); lengthA++;
+                    if ((uint32_t)lengthA == lim) return A;
+                }
+                // vi. q = p
+                q = p;
+            }
+        }
+    }
+    // Step 17-18: T = substring(S, p, size); append T
+    int t_len = size - p;
+    Item T = (t_len > 0)
+        ? (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))}
+        : (Item){.item = s2it(heap_create_name("", 0))};
+    js_array_push(A, T);
+    return A;
 }
 
 // =============================================================================

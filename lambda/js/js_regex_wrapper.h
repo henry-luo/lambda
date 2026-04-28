@@ -58,6 +58,12 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
                                    re2::RE2::Options* opts);
 
 /**
+ * Validate pattern under Annex B strict mode (used when `u`/`v` flag set).
+ * Returns true if valid, false if Annex B legacy syntax is present.
+ */
+bool js_regex_wrapper_validate_unicode(const char* pattern, int pattern_len);
+
+/**
  * Execute a compiled regex against input text.
  * Returns number of matches found (0 = no match).
  * match_starts[i] and match_ends[i] are filled with byte offsets for each group.

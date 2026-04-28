@@ -17768,13 +17768,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
 
     // new RegExp(pattern [, flags])
     if (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) {
-        MIR_reg_t pattern_arg = first_arg ? first_arg : jm_box_string_literal(mt, "", 0);
+        MIR_reg_t pattern_arg = first_arg ? first_arg : jm_emit_undefined(mt);
         MIR_reg_t flags_arg;
         JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
         if (arg2) {
             flags_arg = jm_transpile_box_item(mt, arg2);
         } else {
-            flags_arg = jm_box_string_literal(mt, "", 0);
+            flags_arg = jm_emit_undefined(mt);
         }
         return jm_call_2(mt, "js_regexp_construct", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, pattern_arg),

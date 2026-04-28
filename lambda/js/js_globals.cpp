@@ -5587,6 +5587,33 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             if (fn->properties_map.item != 0) {
                 bool own = false;
                 Item val = js_map_get_fast_ext(fn->properties_map.map, name_str->chars, name_str->len, &own);
+                // If no data property, check for accessor (getter/setter)
+                if (!own) {
+                    Map* pm = fn->properties_map.map;
+                    char acc_buf[256];
+                    bool g_own = false, s_own = false;
+                    snprintf(acc_buf, sizeof(acc_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
+                    Item getter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &g_own);
+                    snprintf(acc_buf, sizeof(acc_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
+                    Item setter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &s_own);
+                    if (g_own || s_own) {
+                        Item desc = js_new_object();
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                                        g_own ? getter_val : make_js_undefined());
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                                        s_own ? setter_val : make_js_undefined());
+                        bool nc_found = false, ne_found = false;
+                        snprintf(acc_buf, sizeof(acc_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                        Item nc_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &nc_found);
+                        snprintf(acc_buf, sizeof(acc_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                        Item ne_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &ne_found);
+                        bool is_enumerable = !(ne_found && js_is_truthy(ne_val));
+                        bool is_configurable = !(nc_found && js_is_truthy(nc_val));
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+                        return desc;
+                    }
+                }
                 if (own) {
                     if (val.item == JS_DELETED_SENTINEL_VAL) {
                         // v91 mirror: for "prototype" key, sentinel means "fall through to
