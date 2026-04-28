@@ -11323,6 +11323,23 @@ extern "C" bool js_proto_snapshot_is_valid() {
     return js_proto_snapshot_valid;
 }
 
+// Invalidate snapshot — must be called before pool/heap teardown that frees
+// the underlying ctor / Map allocations (e.g. crash recovery in batch mode).
+// After this, the next js_reset_constructor_prototypes() will take a fresh
+// snapshot rather than restore from stale pointers.
+extern "C" void js_proto_snapshot_invalidate() {
+    js_proto_snapshot_valid = false;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        js_ctor_snapshots[i].valid = false;
+        js_ctor_snapshots[i].proto_map.m = NULL;
+        js_ctor_snapshots[i].props_map.m = NULL;
+    }
+    js_typed_array_base_proto_snap.m = NULL;
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        js_typed_array_per_type_proto_map_snap[i].m = NULL;
+    }
+}
+
 // Get the per-type prototype for a given typed array element type.
 // Creates it lazily if needed.
 extern "C" Item js_get_typed_array_per_type_proto(int element_type);

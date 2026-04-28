@@ -501,6 +501,13 @@ extern "C" void js_batch_reset() {
     // prototypes (Object.prototype, Error.prototype, etc.).
     extern void js_reset_constructor_prototypes(void);
     js_reset_constructor_prototypes();
+    // js_batch_reset() is the heavy/crash-recovery path. After restoring the
+    // prototype snapshot above, invalidate it so (a) the upcoming
+    // js_ctor_cache_reset actually runs, (b) the upcoming heap teardown
+    // doesn't leave stale Map*/JsCtor* pointers in the snapshot, and (c) the
+    // next preamble's js_batch_reset_to takes a fresh snapshot.
+    extern void js_proto_snapshot_invalidate(void);
+    js_proto_snapshot_invalidate();
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
