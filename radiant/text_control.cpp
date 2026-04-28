@@ -14,6 +14,17 @@
 
 // dom_element_get_attribute is declared with C++ linkage in dom_element.hpp.
 
+// Phase 8E: per-text-control selectionchange dispatch. Strong impl lives in
+// lambda/js/js_dom_selection.cpp (queues a coalesced setTimeout(0) drain).
+// Headless/no-JS builds get the no-op weak fallback below.
+extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* elem);
+extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* /*elem*/) {}
+
+void tc_notify_selection_changed(DomElement* elem) {
+    if (!elem) return;
+    js_dom_queue_textcontrol_selectionchange(elem);
+}
+
 // Module-local focus tracker. The JS bindings and event.cpp both write to
 // this so Selection.toString() / document.activeElement can resolve to the
 // same source of truth even when JS runs without Radiant layout.
@@ -191,9 +202,15 @@ void tc_set_selection_range(DomElement* elem,
     if (start > n) start = n;
     if (end > n) end = n;
     if (start > end) start = end;
+    uint32_t old_start = f->selection_start;
+    uint32_t old_end = f->selection_end;
+    uint8_t  old_dir = f->selection_direction;
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
+    if (start != old_start || end != old_end || dir != old_dir) {
+        tc_notify_selection_changed(elem);
+    }
 }
 
 // ---- public: bidirectional sync ---------------------------------------

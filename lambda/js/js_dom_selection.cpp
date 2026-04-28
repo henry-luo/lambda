@@ -28,7 +28,7 @@
 
 #include "../../radiant/dom_range.hpp"
 #include "../../radiant/state_store.hpp"
-
+#include "../../radiant/form_control.hpp"
 #include <cstring>
 #include <cstdlib>
 
@@ -1065,6 +1065,54 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (state->selectionchange_pending) return;  // coalesce
     state->selectionchange_pending = true;
     Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
+    js_setTimeout(cb, (Item){.item = i2it(0)});
+}
+
+// ----------------------------------------------------------------------------
+// Phase 8E: per-text-control selectionchange dispatch
+// ----------------------------------------------------------------------------
+// Called from radiant/text_control.cpp after every programmatic selection
+// mutation on an <input>/<textarea> (e.g. setSelectionRange, value setter,
+// editing). Coalesces per-element via FormControlProp::tc_sc_pending and
+// drains the whole pending list in a single setTimeout(0) callback.
+static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
+    (void)this_val; (void)args; (void)argc;
+    RadiantState* state = get_or_create_state();
+    if (!state) return ItemNull;
+    DomElement* head = state->tc_selectionchange_head;
+    state->tc_selectionchange_head = nullptr;
+    state->tc_selectionchange_drain_scheduled = false;
+    while (head) {
+        DomElement* next = nullptr;
+        FormControlProp* f = head->form;
+        if (f) {
+            next = f->tc_sc_next_pending;
+            f->tc_sc_next_pending = nullptr;
+            f->tc_sc_pending = 0;
+        }
+        // selectionchange on text controls: bubbles=false, cancelable=false
+        // per HTML spec; target = the element.
+        Item ev = js_create_event("selectionchange", /*bubbles=*/false,
+                                  /*cancelable=*/false);
+        js_dom_dispatch_event(js_dom_wrap_element(head), ev);
+        head = next;
+    }
+    return ItemNull;
+}
+
+extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
+    if (!elem) return;
+    FormControlProp* f = elem->form;
+    if (!f) return;
+    RadiantState* state = get_or_create_state();
+    if (!state) return;
+    if (f->tc_sc_pending) return;  // coalesce per-element
+    f->tc_sc_pending = 1;
+    f->tc_sc_next_pending = state->tc_selectionchange_head;
+    state->tc_selectionchange_head = elem;
+    if (state->tc_selectionchange_drain_scheduled) return;
+    state->tc_selectionchange_drain_scheduled = true;
+    Item cb = js_new_function((void*)_tc_selectionchange_drain, 0);
     js_setTimeout(cb, (Item){.item = i2it(0)});
 }
 
