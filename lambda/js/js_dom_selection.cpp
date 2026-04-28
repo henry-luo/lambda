@@ -787,6 +787,20 @@ extern "C" Item js_selection_modify(Item alter_v, Item dir_v, Item gran_v) {
     return make_undef();
 }
 
+// Internal-only: force the selection's direction field to a specific value.
+// Used by the WPT testdriver Actions shim to model click-induced selections
+// which (per Selection API issue 177) are 'none' even when non-collapsed.
+// Not exposed to spec'd selection.* surface.
+extern "C" Item js_selection_force_direction(Item dir_v) {
+    DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    const char* d = fn_to_cstr(dir_v);
+    if (!d) return make_undef();
+    if (strcmp(d, "none") == 0)          s->direction = DOM_SEL_DIR_NONE;
+    else if (strcmp(d, "forward") == 0)  s->direction = DOM_SEL_DIR_FORWARD;
+    else if (strcmp(d, "backward") == 0) s->direction = DOM_SEL_DIR_BACKWARD;
+    return make_undef();
+}
+
 // ============================================================================
 // Selection construction / property sync
 // ============================================================================
@@ -812,6 +826,7 @@ struct SelectionMethods {
     Item empty, collapse, setPosition, collapseToStart, collapseToEnd;
     Item extend, setBaseAndExtent, selectAllChildren, containsNode;
     Item deleteFromDocument, toString, modify;
+    Item __forceDirection; // internal — for WPT testdriver Actions shim only
     bool inited;
 };
 static SelectionMethods _sel_methods = {};
@@ -834,6 +849,7 @@ static void init_selection_methods() {
     _sel_methods.deleteFromDocument = js_new_function((void*)js_selection_delete_from_document, 0);
     _sel_methods.toString           = js_new_function((void*)js_selection_to_string, 0);
     _sel_methods.modify             = js_new_function((void*)js_selection_modify, 3);
+    _sel_methods.__forceDirection   = js_new_function((void*)js_selection_force_direction, 1);
     _sel_methods.inited = true;
 }
 
@@ -862,6 +878,18 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
         return make_int((int64_t)dom_selection_range_count(s));
     if (strcmp(p, "type") == 0)
         return make_str(dom_selection_type(s));
+    if (strcmp(p, "direction") == 0) {
+        // Selection.direction returns 'none' | 'forward' | 'backward' per
+        // the Selection API spec (proposed). 'none' for collapsed or empty
+        // selections (also for click-driven selections that browsers treat
+        // as directionless).
+        if (s->range_count == 0 || s->is_collapsed) return make_str("none");
+        switch (s->direction) {
+            case DOM_SEL_DIR_FORWARD:  return make_str("forward");
+            case DOM_SEL_DIR_BACKWARD: return make_str("backward");
+            default:                   return make_str("none");
+        }
+    }
 
     init_selection_methods();
     if (strcmp(p, "getRangeAt") == 0)         return _sel_methods.getRangeAt;
@@ -880,6 +908,7 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
     if (strcmp(p, "deleteFromDocument") == 0) return _sel_methods.deleteFromDocument;
     if (strcmp(p, "toString") == 0)           return _sel_methods.toString;
     if (strcmp(p, "modify") == 0)             return _sel_methods.modify;
+    if (strcmp(p, "__forceDirection") == 0)   return _sel_methods.__forceDirection;
 
     return ItemNull;
 }
