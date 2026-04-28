@@ -184,6 +184,47 @@ static inline int js_prop_attrs_fast_path(Item obj, const char* name, int name_l
 void js_install_native_accessor(Item obj, Item name, Item getter, Item setter,
                                 uint8_t attrs);
 
+// =============================================================================
+// Phase 4: transpiler accessor producer (partial / merging)
+// =============================================================================
+//
+// `js_define_accessor_partial` is the chokepoint for installing user-defined
+// accessors emitted by the transpiler (class methods, soon object literals).
+// Unlike `js_install_native_accessor` (which receives both halves at once),
+// this helper handles the case where getter and setter for the same property
+// are emitted by separate AST traversals: it locates any existing
+// `JsAccessorPair` under name X and merges in the new half, or allocates a
+// fresh pair if none exists.
+//
+// `is_setter`: 0 → install as getter; 1 → install as setter.
+// `attrs`: JSPD_* bits (e.g. JSPD_NON_ENUMERABLE for class methods; pass 0 for
+// object literal accessors which should default to enumerable+configurable).
+// IS_ACCESSOR is always set on the resulting shape entry.
+void js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
+                                uint8_t attrs);
+
+// =============================================================================
+// Phase 4: js_property_set intercept for legacy __get_X/__set_X writes
+// =============================================================================
+//
+// `js_intercept_accessor_marker` is called at the top of `js_property_set`.
+// If `key` matches the `__get_X`/`__set_X` magic-key pattern (transpiler
+// fallback, computed accessor literals, or any other legacy emitter), it
+// extracts X and routes the write through `js_define_accessor_partial`,
+// merging the half into the existing pair (or allocating a fresh one).
+//
+// Returns true if intercepted (caller MUST skip the normal store path).
+// Returns false for any non-marker key.
+bool js_intercept_accessor_marker(Item obj, Item key, Item value);
+
+// Walk own + prototype chain for an accessor pair on `name`. Returns the pair
+// pointer (without invoking getter/setter) for the first shape entry along
+// the chain that has JSPD_IS_ACCESSOR set. Used by setter dispatch in
+// `js_property_set` to discover inherited accessors after Phase 4 removed
+// the `__set_X` legacy keys that the old proto-walk relied on.
+JsAccessorPair* js_find_accessor_pair_inheritable(Item obj, const char* name,
+                                                  int name_len);
+
 #ifdef __cplusplus
 }
 #endif

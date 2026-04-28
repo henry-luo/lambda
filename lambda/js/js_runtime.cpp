@@ -6752,6 +6752,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     // Convert Symbol keys to unique string keys for property storage
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
 
+    // Phase 4 intercept: if `key` matches __get_X / __set_X marker pattern,
+    // route through `js_define_accessor_partial` to merge into a JsAccessorPair
+    // stored under name X. Skips the legacy magic-key store entirely so no
+    // __get_X/__set_X slots accumulate on the shape.
+    if (js_intercept_accessor_marker(object, key, value)) return value;
+
     // Phase 2a dual-write: if `key` is a marker key (__nw_X / __ne_X / __nc_X /
     // __get_X / __set_X), mirror the information into ShapeEntry::flags on the
     // underlying property X. Idempotent and safe for any code path. The legacy
@@ -7082,6 +7088,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
                                         strncmp(str_key->chars, "__set_", 6) == 0)) &&
                 !(str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0)) {
+                // Phase 4: IS_ACCESSOR setter fast-path. Check own + proto chain
+                // for a JsAccessorPair under name X via shape flags. Dispatch
+                // through pair->setter, or throw if accessor has no setter.
+                JsAccessorPair* _ap = js_find_accessor_pair_inheritable(object,
+                                            str_key->chars, (int)str_key->len);
+                if (_ap) {
+                    if (_ap->setter.item != ItemNull.item &&
+                        get_type_id(_ap->setter) == LMD_TYPE_FUNC) {
+                        Item args[1] = { value };
+                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                        js_call_function(_ap->setter, this_val, args, 1);
+                        return value;
+                    }
+                    // Accessor with no callable setter \u2014 strict TypeError, sloppy no-op.
+                    js_strict_throw_property_error("set property which has only a getter on",
+                                                   str_key->chars, (int)str_key->len);
+                    return value;
+                }
                 char setter_key[256];
                 snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};

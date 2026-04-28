@@ -6,6 +6,7 @@
 #include "js_property_attrs.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
+#include "../../lib/log.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -177,4 +178,144 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         js_property_set(obj, nck, (Item){.item = b2it(BOOL_TRUE)});
     }
     // JSPD_NON_WRITABLE is meaningless for accessors (ES spec); ignored.
+}
+
+// =============================================================================
+// Phase 4: transpiler accessor producer (partial / merging)
+// =============================================================================
+//
+// Merges getter or setter into an existing accessor pair under name X, or
+// allocates a fresh pair if none exists. This handles the common transpiler
+// pattern where `get x()` and `set x(v)` for the same property are emitted as
+// separate top-level calls during class/object body traversal.
+//
+// Storage scheme is identical to js_install_native_accessor (Stage C):
+//   - Slot at name X holds a JsAccessorPair* Item.
+//   - Shape entry for X has JSPD_IS_ACCESSOR + caller-requested attrs bits.
+//   - No legacy __get_X/__set_X writes.
+static Map* js_obj_underlying_map(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t == LMD_TYPE_MAP) return obj.map;
+    if (t == LMD_TYPE_ARRAY) {
+        Array* arr = obj.array;
+        return (arr && arr->extra != 0) ? (Map*)(uintptr_t)arr->extra : nullptr;
+    }
+    if (t == LMD_TYPE_FUNC) {
+        JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
+        if (!fn || fn->properties_map.item == 0) return nullptr;
+        if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
+        return fn->properties_map.map;
+    }
+    return nullptr;
+}
+
+extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
+                                            int is_setter, uint8_t attrs) {
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* ns = it2s(name);
+    if (!ns || ns->len == 0) return;
+
+    // Bypass setter accessor-dispatch in our own recursive js_property_set call:
+    // we are storing the pair Item literally under name X, not invoking the
+    // existing accessor (which would call pair->setter(pair_item) — wrong).
+    extern bool js_skip_accessor_dispatch;
+    bool _prev = js_skip_accessor_dispatch;
+    js_skip_accessor_dispatch = true;
+
+    // Look up any existing accessor pair under name X.
+    JsAccessorPair* pair = nullptr;
+    ShapeEntry* se = js_find_shape_entry(obj, ns->chars, (int)ns->len);
+    if (se && jspd_is_accessor(se)) {
+        Map* m = js_obj_underlying_map(obj);
+        if (m) {
+            bool found = false;
+            Item slot_val = js_map_get_fast_ext(m, ns->chars, (int)ns->len, &found);
+            if (found && slot_val.item != ItemNull.item) {
+                pair = js_item_to_accessor_pair(slot_val);
+            }
+        }
+    }
+
+    if (pair) {
+        // Merge into existing pair (in-place mutation; pair pointer unchanged).
+        if (is_setter) pair->setter = fn;
+        else           pair->getter = fn;
+        // Re-store to keep slot value canonical (idempotent — same pointer bits).
+        Item pair_item = js_accessor_pair_to_item(pair);
+        js_property_set(obj, name, pair_item);
+    } else {
+        // Allocate fresh pair with the requested half populated.
+        Item g = is_setter ? ItemNull : fn;
+        Item s = is_setter ? fn       : ItemNull;
+        pair = js_alloc_accessor_pair(g, s);
+        if (!pair) { js_skip_accessor_dispatch = _prev; return; }
+        Item pair_item = js_accessor_pair_to_item(pair);
+        js_property_set(obj, name, pair_item);
+    }
+
+    js_skip_accessor_dispatch = _prev;
+
+    // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
+    uint8_t set_mask = JSPD_IS_ACCESSOR;
+    if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
+    if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
+    js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, 0);
+}
+
+// =============================================================================
+// Phase 4: js_property_set intercept for legacy __get_X/__set_X writes
+// =============================================================================
+
+extern "C" bool js_intercept_accessor_marker(Item obj, Item key, Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* ks = it2s(key);
+    if (!ks || ks->len < 7) return false;  // need __get_X / __set_X minimum
+    const char* k = ks->chars;
+    if (k[0] != '_' || k[1] != '_') return false;
+    int is_setter;
+    if      (memcmp(k, "__get_", 6) == 0) is_setter = 0;
+    else if (memcmp(k, "__set_", 6) == 0) is_setter = 1;
+    else return false;
+    int prop_len = (int)ks->len - 6;
+    if (prop_len <= 0) return false;
+    // Tombstone (delete __get_X) — fall through to normal path so the marker
+    // entry is properly cleared. Stage C will revisit if needed.
+    if (value.item == JS_DELETED_SENTINEL_VAL) return false;
+    // Build the underlying property name X as an interned String Item.
+    Item name = (Item){.item = s2it(heap_create_name(k + 6, prop_len))};
+    // Class methods are non-enumerable per ES spec; final attrs get applied by
+    // js_mark_all_non_enumerable batch call after class body emission. Pass 0
+    // here so user-side object literal accessors stay enumerable per spec.
+    js_define_accessor_partial(obj, name, value, is_setter, 0);
+    return true;
+}
+
+extern "C" Item js_get_prototype(Item object);
+
+extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
+                                                              const char* name,
+                                                              int name_len) {
+    Item cur = obj;
+    int depth = 0;
+    while (depth < 16) {
+        ShapeEntry* se = js_find_shape_entry(cur, name, name_len);
+        if (se && jspd_is_accessor(se)) {
+            Map* m = js_obj_underlying_map(cur);
+            if (m) {
+                bool found = false;
+                Item slot_val = js_map_get_fast_ext(m, name, name_len, &found);
+                if (found && slot_val.item != ItemNull.item) {
+                    return js_item_to_accessor_pair(slot_val);
+                }
+            }
+        }
+        if (get_type_id(cur) != LMD_TYPE_MAP) break;
+        Item proto = js_get_prototype(cur);
+        if (proto.item == ItemNull.item ||
+            get_type_id(proto) == LMD_TYPE_UNDEFINED ||
+            get_type_id(proto) == LMD_TYPE_NULL) break;
+        cur = proto;
+        depth++;
+    }
+    return nullptr;
 }

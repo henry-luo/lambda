@@ -455,7 +455,13 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     bool data_found = false;
                     js_map_get_fast_ext(obj.map, ns->chars, (int)ns->len, &data_found);
                     if (data_found) {
-                        js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                        // Phase 4: if the slot already holds our JsAccessorPair*
+                        // (IS_ACCESSOR shape flag set by js_define_accessor_partial),
+                        // do NOT tombstone it — the pair IS the canonical value now.
+                        ShapeEntry* _se_chk = js_find_shape_entry(obj, ns->chars, (int)ns->len);
+                        if (!(_se_chk && jspd_is_accessor(_se_chk))) {
+                            js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                        }
                     }
                 }
                 // ES5 §15.4.5.1: if obj is an Array and name is a valid array index >= length,
