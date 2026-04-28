@@ -9032,6 +9032,41 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             js_console_log(a0);
             return make_js_undefined();
         }
+        // Timer/scheduling globals — callable as values (e.g. `new Promise(setTimeout)`).
+        // The transpiler has fast paths for direct setTimeout(...) calls; this dispatch
+        // covers the indirect/value-capture cases.
+        if (nl == 10 && strncmp(n, "setTimeout", 10) == 0) {
+            extern Item js_setTimeout(Item callback, Item delay);
+            return js_setTimeout(a0, a1);
+        }
+        if (nl == 11 && strncmp(n, "setInterval", 11) == 0) {
+            extern Item js_setInterval(Item callback, Item delay);
+            return js_setInterval(a0, a1);
+        }
+        if (nl == 12 && strncmp(n, "clearTimeout", 12) == 0) {
+            extern void js_clearTimeout(Item id);
+            js_clearTimeout(a0);
+            return make_js_undefined();
+        }
+        if (nl == 13 && strncmp(n, "clearInterval", 13) == 0) {
+            extern void js_clearInterval(Item id);
+            js_clearInterval(a0);
+            return make_js_undefined();
+        }
+        if (nl == 12 && strncmp(n, "setImmediate", 12) == 0) {
+            extern Item js_setImmediate(Item callback);
+            return js_setImmediate(a0);
+        }
+        if (nl == 14 && strncmp(n, "clearImmediate", 14) == 0) {
+            extern void js_clearImmediate(Item id);
+            js_clearImmediate(a0);
+            return make_js_undefined();
+        }
+        if (nl == 14 && strncmp(n, "queueMicrotask", 14) == 0) {
+            extern void js_microtask_enqueue(Item callback);
+            js_microtask_enqueue(a0);
+            return make_js_undefined();
+        }
         // %TypedArray% is not directly callable (ES2023 22.2.1.1)
         if (nl == 10 && strncmp(n, "TypedArray", 10) == 0) {
             return js_throw_type_error("Abstract class TypedArray not directly constructable");

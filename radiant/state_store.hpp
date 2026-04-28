@@ -10,6 +10,7 @@
 
 // Forward declarations
 struct AnimationScheduler;
+struct DomElement;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -235,6 +236,19 @@ typedef struct RadiantState {
     // running so the other direction skips itself. Counter (not bool) so
     // nested mutations are safe.
     int                  dom_selection_sync_depth;
+    // Phase 8D: selectionchange event coalescing. `selection_mutation_seq`
+    // is bumped by every spec mutator (via sync_anchor_focus →
+    // notify_selection_changed); `selection_event_seq` is the last seq we
+    // already enqueued a selectionchange task for. Set equal once dispatch
+    // task is queued; cleared/advanced when next mutation runs.
+    uint32_t             selection_mutation_seq;
+    uint32_t             selection_event_seq;
+    bool                 selectionchange_pending;  // task queued and not yet fired
+    // Phase 8E: per-text-control selectionchange coalescing. Linked list head
+    // through `FormControlProp::tc_sc_next_pending`. Drained by a single
+    // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
+    DomElement*          tc_selectionchange_head;
+    bool                 tc_selectionchange_drain_scheduled;
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element

@@ -3,6 +3,8 @@
 #include <string.h>      // strcmp used by inline get_input_control_type
 #include <stdlib.h>      // free used in destructor
 
+struct DomElement;
+
 /**
  * Form Control Support for Radiant
  *
@@ -170,6 +172,12 @@ struct FormControlProp {
     uint32_t selection_end;           // UTF-16 code units
     uint8_t  selection_direction;     // 0=none, 1=forward, 2=backward
     uint8_t  tc_initialized : 1;
+    uint8_t  tc_sc_pending : 1;       // queued in state->tc_selectionchange_head
+
+    // Phase 8E: per-text-control selectionchange coalescing list link.
+    // Single-linked through this pointer when the element is on the pending
+    // list; nullptr otherwise.
+    DomElement* tc_sc_next_pending;
 
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
@@ -183,7 +191,8 @@ struct FormControlProp {
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
         current_value(nullptr), current_value_len(0), current_value_u16_len(0),
         selection_start(0), selection_end(0), selection_direction(0),
-        tc_initialized(0) {}
+        tc_initialized(0), tc_sc_pending(0),
+        tc_sc_next_pending(nullptr) {}
 
     ~FormControlProp() {
         if (current_value) { free(current_value); current_value = nullptr; }

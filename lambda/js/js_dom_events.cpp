@@ -165,8 +165,7 @@ static void parse_listener_options(Item opts, bool* capture, bool* once, bool* p
 // addEventListener / removeEventListener
 // ============================================================================
 
-void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
-    const char* type = fn_to_cstr(type_item);
+void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {    const char* type = fn_to_cstr(type_item);
     if (!type) {
         log_debug("js_dom_add_event_listener: invalid type");
         return;
@@ -333,6 +332,13 @@ Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Ite
 // build propagation path from target to root
 static int build_path(Item target, void** path, int max_path) {
     int count = 0;
+
+    // Document proxy: target is the sentinel; walk to window only.
+    if (js_is_document_proxy(target)) {
+        if (count < max_path) path[count++] = (void*)&_document_sentinel;
+        if (count < max_path) path[count++] = (void*)&_window_sentinel;
+        return count;
+    }
 
     // start from target's DOM node
     void* node_ptr = js_dom_unwrap_element(target);

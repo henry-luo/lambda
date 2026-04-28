@@ -16,6 +16,8 @@
 
 #include "js_dom_selection.h"
 #include "js_dom.h"
+#include "js_dom_events.h"
+#include "js_event_loop.h"
 #include "js_runtime.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
@@ -26,7 +28,7 @@
 
 #include "../../radiant/dom_range.hpp"
 #include "../../radiant/state_store.hpp"
-
+#include "../../radiant/form_control.hpp"
 #include <cstring>
 #include <cstdlib>
 
@@ -1030,6 +1032,88 @@ extern "C" void js_dom_selection_install_globals(void) {
     (void)doc;
 
     log_debug("js_dom_selection: installed global getSelection / Selection / Range");
+}
+
+// ----------------------------------------------------------------------------
+// Phase 8D: selectionchange event bridge
+// ----------------------------------------------------------------------------
+// Called from radiant/dom_range.cpp's notify_selection_changed() (a weak
+// symbol) after every spec mutation funneled through sync_anchor_focus().
+// Per the WHATWG HTML "selectionchange" task: coalesce multiple synchronous
+// mutations into a single async dispatch, fire on the document.
+static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
+    (void)this_val; (void)args; (void)argc;
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    if (!doc || !doc->state) return ItemNull;
+    RadiantState* state = doc->state;
+    state->selectionchange_pending = false;
+    state->selection_event_seq = state->selection_mutation_seq;
+    Item ev = js_create_event("selectionchange", /*bubbles=*/false,
+                              /*cancelable=*/false);
+    Item doc_item = js_get_document_object_value();
+    js_dom_dispatch_event(doc_item, ev);
+    return ItemNull;
+}
+
+extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
+    if (!sel || !sel->state) return;
+    RadiantState* state = sel->state;
+    // Suppress while the legacy↔DOM mirror is running so a single user
+    // mutation doesn't ping-pong into multiple events.
+    if (state->dom_selection_sync_depth > 0) return;
+    state->selection_mutation_seq++;
+    if (state->selectionchange_pending) return;  // coalesce
+    state->selectionchange_pending = true;
+    Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
+    js_setTimeout(cb, (Item){.item = i2it(0)});
+}
+
+// ----------------------------------------------------------------------------
+// Phase 8E: per-text-control selectionchange dispatch
+// ----------------------------------------------------------------------------
+// Called from radiant/text_control.cpp after every programmatic selection
+// mutation on an <input>/<textarea> (e.g. setSelectionRange, value setter,
+// editing). Coalesces per-element via FormControlProp::tc_sc_pending and
+// drains the whole pending list in a single setTimeout(0) callback.
+static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
+    (void)this_val; (void)args; (void)argc;
+    RadiantState* state = get_or_create_state();
+    if (!state) return ItemNull;
+    DomElement* head = state->tc_selectionchange_head;
+    state->tc_selectionchange_head = nullptr;
+    state->tc_selectionchange_drain_scheduled = false;
+    while (head) {
+        DomElement* next = nullptr;
+        FormControlProp* f = head->form;
+        if (f) {
+            next = f->tc_sc_next_pending;
+            f->tc_sc_next_pending = nullptr;
+            f->tc_sc_pending = 0;
+        }
+        // selectionchange on text controls: bubbles=false, cancelable=false
+        // per HTML spec; target = the element.
+        Item ev = js_create_event("selectionchange", /*bubbles=*/false,
+                                  /*cancelable=*/false);
+        js_dom_dispatch_event(js_dom_wrap_element(head), ev);
+        head = next;
+    }
+    return ItemNull;
+}
+
+extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
+    if (!elem) return;
+    FormControlProp* f = elem->form;
+    if (!f) return;
+    RadiantState* state = get_or_create_state();
+    if (!state) return;
+    if (f->tc_sc_pending) return;  // coalesce per-element
+    f->tc_sc_pending = 1;
+    f->tc_sc_next_pending = state->tc_selectionchange_head;
+    state->tc_selectionchange_head = elem;
+    if (state->tc_selectionchange_drain_scheduled) return;
+    state->tc_selectionchange_drain_scheduled = true;
+    Item cb = js_new_function((void*)_tc_selectionchange_drain, 0);
+    js_setTimeout(cb, (Item){.item = i2it(0)});
 }
 
 extern "C" void js_dom_selection_reset(void) {
