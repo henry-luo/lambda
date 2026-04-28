@@ -55,6 +55,11 @@ extern "C" void js_set_strict_mode(int64_t strict) {
     js_strict_mode = (strict != 0);
 }
 
+// When true, js_property_set bypasses accessor (getter/setter) dispatch and writes
+// data directly. Used by Object.defineProperty data branch — defineProperty performs
+// [[DefineOwnProperty]], not [[Set]], so it must NOT trigger inherited accessor logic.
+bool js_skip_accessor_dispatch = false;
+
 // v24: throw TypeError in strict mode for property write violations
 static void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
     if (!js_strict_mode) return;
@@ -6989,7 +6994,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
         // v37: Also skip for __proto__ — it's an internal slot, not an accessor property.
         // Setting [[Prototype]] must bypass user-defined setters on Object.prototype.
-        if (get_type_id(key) == LMD_TYPE_STRING) {
+        // Also skip when writing the deleted sentinel (used by js_delete_property to
+        // tombstone a slot — must not trigger accessor / TypeError-on-no-setter logic).
+        if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key && str_key->len < 64 && str_key->len > 0 &&
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
@@ -6998,17 +7005,62 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 char setter_key[256];
                 snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
-                Item setter = map_get(m, sk);
-                if (setter.item == ItemNull.item) {
-                    setter = js_prototype_lookup(object, sk);
-                }
-                if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
-                    _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
-                    _trace_call_id++;
-                    Item args[1] = { value };
-                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                    js_call_function(setter, this_val, args, 1);
+                char getter_key[256];
+                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
+                Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
+
+                // ES §9.1.9 OrdinarySet: dispatch based on OWN ownDesc first,
+                // only walk prototype chain when OWN has no own property at all.
+                // Marker presence test: defineProperty always stores either FUNC or UNDEFINED
+                // (per ES §6.2.5.4 ToPropertyDescriptor). Other values (ItemNull, sentinel,
+                // BOOL from delete-tombstone, etc.) mean the marker is absent/cleared.
+                Item own_setter = map_get(m, sk);
+                TypeId own_setter_type = get_type_id(own_setter);
+                bool own_setter_marker = (own_setter_type == LMD_TYPE_FUNC || own_setter_type == LMD_TYPE_UNDEFINED);
+                Item own_getter = map_get(m, gk);
+                TypeId own_getter_type = get_type_id(own_getter);
+                bool own_getter_marker = (own_getter_type == LMD_TYPE_FUNC || own_getter_type == LMD_TYPE_UNDEFINED);
+
+                if (own_setter_marker || own_getter_marker) {
+                    // Own property is an accessor.
+                    if (own_setter_marker && own_setter_type == LMD_TYPE_FUNC) {
+                        _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
+                        _trace_call_id++;
+                        Item args[1] = { value };
+                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                        js_call_function(own_setter, this_val, args, 1);
+                        return value;
+                    }
+                    // Own accessor with no callable setter — strict TypeError, sloppy no-op.
+                    js_strict_throw_property_error("set property which has only a getter on", str_key->chars, (int)str_key->len);
                     return value;
+                }
+
+                // Own is not an accessor. Check if OWN has a data property — if so,
+                // do NOT consult the prototype chain for accessors (data shadows proto).
+                bool own_data_present = false;
+                js_map_get_fast_ext(m, str_key->chars, (int)str_key->len, &own_data_present);
+                if (!own_data_present) {
+                    // Walk prototype chain for accessor.
+                    Item proto_setter = js_prototype_lookup(object, sk);
+                    TypeId proto_setter_type = get_type_id(proto_setter);
+                    bool proto_setter_marker = (proto_setter_type == LMD_TYPE_FUNC || proto_setter_type == LMD_TYPE_UNDEFINED);
+                    Item proto_getter = js_prototype_lookup(object, gk);
+                    TypeId proto_getter_type = get_type_id(proto_getter);
+                    bool proto_getter_marker = (proto_getter_type == LMD_TYPE_FUNC || proto_getter_type == LMD_TYPE_UNDEFINED);
+                    if (proto_setter_marker && proto_setter_type == LMD_TYPE_FUNC) {
+                        _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
+                        _trace_call_id++;
+                        Item args[1] = { value };
+                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
+                        js_call_function(proto_setter, this_val, args, 1);
+                        return value;
+                    }
+                    if (proto_setter_marker || proto_getter_marker) {
+                        // Inherited accessor with no callable setter — strict TypeError, sloppy no-op.
+                        js_strict_throw_property_error("set property which has only a getter on", str_key->chars, (int)str_key->len);
+                        return value;
+                    }
                 }
             }
         }

@@ -73,6 +73,15 @@ static bool is_generic_descriptor(Item desc) {
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
+    // Object.defineProperty performs [[DefineOwnProperty]], not [[Set]]. Any internal
+    // js_property_set calls in this function must bypass accessor dispatch (which
+    // would otherwise trigger inherited-setter logic and reject writes for objects
+    // whose prototype chain has an accessor with no setter).
+    extern bool js_skip_accessor_dispatch;
+    bool _prev_skip_accessor_dispatch = js_skip_accessor_dispatch;
+    js_skip_accessor_dispatch = true;
+    struct _RestoreSkip { bool* p; bool v; ~_RestoreSkip() { *p = v; } }
+        _restore_skip{&js_skip_accessor_dispatch, _prev_skip_accessor_dispatch};
     // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey)
     // Symbols stay as internal __sym_N keys; others coerced to string.
     TypeId name_type = get_type_id(name);
@@ -409,30 +418,31 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
             Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
             Item has_get = js_in(get_key, descriptor);
             Item getter = it2b(has_get) ? js_property_get(descriptor, get_key) : make_js_undefined();
-            if (get_type_id(getter) == LMD_TYPE_FUNC) {
+            // ES §6.2.5.4 ToPropertyDescriptor: explicit `get` key (any value) makes this an
+            // accessor descriptor. Record marker even when value is undefined so that the
+            // accessor identity is preserved and assignments via the setter dispatch path
+            // can detect a "no setter" accessor.
+            if (it2b(has_get)) {
+                if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
+                    // already validated above; defensive
+                    getter = make_js_undefined();
+                }
                 is_accessor = true;
                 snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
                 Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
                 js_defprop_set_marker(obj, gk, getter);
-            } else if (it2b(has_get) && already_accessor) {
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, gk, make_js_undefined());
             }
             Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
             Item has_set = js_in(set_key, descriptor);
             Item setter = it2b(has_set) ? js_property_get(descriptor, set_key) : make_js_undefined();
-            if (get_type_id(setter) == LMD_TYPE_FUNC) {
+            if (it2b(has_set)) {
+                if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
+                    setter = make_js_undefined();
+                }
                 is_accessor = true;
                 snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
                 js_defprop_set_marker(obj, sk, setter);
-            } else if (it2b(has_set) && already_accessor) {
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, sk, make_js_undefined());
             }
             if (is_accessor) {
                 snprintf(key_buf, sizeof(key_buf), "__nw_%.*s", (int)ns->len, ns->chars);
@@ -4442,13 +4452,19 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // check getter property (__get___sym_NNN)
+            // check accessor markers (__get_ / __set_) — either presence means own accessor property
             char getter_key[64];
             snprintf(getter_key, sizeof(getter_key), "__get_%s", sym_buf);
             int gk_len = (int)strlen(getter_key);
             bool getter_found = false;
             js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
             if (getter_found) return (Item){.item = b2it(true)};
+            char setter_key[64];
+            snprintf(setter_key, sizeof(setter_key), "__set_%s", sym_buf);
+            int sk_len = (int)strlen(setter_key);
+            bool setter_found = false;
+            js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
+            if (setter_found) return (Item){.item = b2it(true)};
             // walk prototype chain
             Item proto = js_get_prototype(object);
             int depth = 0;
@@ -4462,6 +4478,9 @@ extern "C" Item js_in(Item key, Item object) {
                 bool gfound = false;
                 js_map_get_fast_ext(proto.map, getter_key, gk_len, &gfound);
                 if (gfound) return (Item){.item = b2it(true)};
+                bool sfound = false;
+                js_map_get_fast_ext(proto.map, setter_key, sk_len, &sfound);
+                if (sfound) return (Item){.item = b2it(true)};
                 proto = js_get_prototype(proto);
                 depth++;
             }
@@ -4496,7 +4515,7 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // 2. check getter property (__get_<key>)
+            // 2. check accessor markers (__get_<key> / __set_<key>) — setter-only accessors count too
             if (key_len < 200 && key_len > 0) {
                 char getter_key[256];
                 snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
@@ -4504,8 +4523,14 @@ extern "C" Item js_in(Item key, Item object) {
                 bool getter_found = false;
                 js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
                 if (getter_found) return (Item){.item = b2it(true)};
+                char setter_key[256];
+                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
+                int sk_len = key_len + 6;
+                bool setter_found = false;
+                js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
+                if (setter_found) return (Item){.item = b2it(true)};
             }
-            // 3. walk prototype chain (data properties + getters)
+            // 3. walk prototype chain (data properties + accessors)
             Item proto = js_get_prototype(object);
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
@@ -4523,6 +4548,12 @@ extern "C" Item js_in(Item key, Item object) {
                     bool getter_found = false;
                     js_map_get_fast_ext(proto.map, getter_key, gk_len, &getter_found);
                     if (getter_found) return (Item){.item = b2it(true)};
+                    char setter_key[256];
+                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
+                    int sk_len = key_len + 6;
+                    bool setter_found = false;
+                    js_map_get_fast_ext(proto.map, setter_key, sk_len, &setter_found);
+                    if (setter_found) return (Item){.item = b2it(true)};
                 }
                 proto = js_get_prototype(proto);
                 depth++;
@@ -8300,6 +8331,22 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                     return (Item){.item = b2it(true)};
                 }
             }
+            // Accessor-only properties: defineProperty(fn, name, {get,set}) writes
+            // __get_<name>/__set_<name> markers without a data slot. Treat the
+            // presence of a non-tombstoned accessor marker as own.
+            if (ks->len > 0 && ks->len < 200) {
+                char accessor_key[256];
+                snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
+                bool has_get = false;
+                Item gv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
+                                              (int)strlen(accessor_key), &has_get);
+                if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+                snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
+                bool has_set = false;
+                Item sv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
+                                              (int)strlen(accessor_key), &has_set);
+                if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+            }
         }
         // built-in own properties (not overridden/deleted)
         if ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
@@ -8374,7 +8421,22 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(false)};
     }
-    if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
+    if (val.item == JS_DELETED_SENTINEL_VAL) {
+        // data slot tombstoned — but an accessor marker may have replaced it
+        // (defineProperty(map, key, {get,set}) sentinels the existing data slot).
+        if (ks->len > 0 && ks->len < 200) {
+            char accessor_key[256];
+            snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
+            bool has_get = false;
+            Item gv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_get);
+            if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+            snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
+            bool has_set = false;
+            Item sv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_set);
+            if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
+    }
     return (Item){.item = b2it(true)};
 }
 
@@ -9467,6 +9529,16 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
         key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
+    // Numeric keys (delete obj[1]) must be coerced to canonical decimal string so the
+    // accessor / non-configurable / non-writable marker tombstone code below can match.
+    if (get_type_id(key) == LMD_TYPE_INT) {
+        int64_t iv = it2i(key);
+        if (iv >= 0 && iv < (int64_t)1e15) {
+            char buf[32];
+            int n = snprintf(buf, sizeof(buf), "%lld", (long long)iv);
+            key = (Item){.item = s2it(heap_create_name(buf, n))};
+        }
+    }
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
     extern int g_array_sym_iter_ever_set;
     if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
@@ -9551,20 +9623,27 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 Item ne_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
                 fn_map_set(obj, ne_key, false_val);
             }
-            // Clear getter/setter
+            // Clear getter/setter markers via js_property_set with the deleted sentinel.
+            // Using js_property_set ensures the slot type can be rebuilt (FUNC→INT) even
+            // when the original marker was a function — fn_map_set may reject that
+            // narrowing. Writing the sentinel (rather than `false_val`) lets all readers
+            // (js_has_own_property, js_in, accessor dispatch) treat the marker as absent
+            // via the existing JS_DELETED_SENTINEL_VAL probe. The `__get_/__set_` key
+            // prefix already bypasses accessor dispatch in js_property_set.
+            Item del_sentinel = (Item){.item = JS_DELETED_SENTINEL_VAL};
             snprintf(attr_buf, sizeof(attr_buf), "__get_%.*s", (int)str_key->len, str_key->chars);
             bool get_found = false;
             js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &get_found);
             if (get_found) {
                 Item get_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                fn_map_set(obj, get_key, false_val);
+                js_property_set(obj, get_key, del_sentinel);
             }
             snprintf(attr_buf, sizeof(attr_buf), "__set_%.*s", (int)str_key->len, str_key->chars);
             bool set_found = false;
             js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &set_found);
             if (set_found) {
                 Item set_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                fn_map_set(obj, set_key, false_val);
+                js_property_set(obj, set_key, del_sentinel);
             }
         }
     }
