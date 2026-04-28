@@ -9855,6 +9855,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
             return js_throw_type_error("comparefn is not a function");
         }
+        // ES §23.1.3.27 step 1: Array.prototype.sort must check IsCallable(comparefn)
+        // BEFORE accessing this.length (so a poisoned `length` getter on an
+        // array-like object isn't observed first).
+        if (builtin_id == JS_BUILTIN_ARR_SORT && arg_count >= 1 &&
+            args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_type_error("comparefn is not a function");
+        }
         // Route to js_array_method for actual arrays, js_map_method for maps/typed arrays.
         // Do NOT call js_map_method for plain MAPs — it would recurse through
         // the property access fallback which finds the builtin again.
@@ -14261,7 +14268,20 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 3 && strncmp(method->chars, "set", 3) == 0) {
                 Item source = argc > 0 ? args[0] : ItemNull;
-                int offset = argc > 1 ? (int)it2i(args[1]) : 0;
+                // ES §22.2.3.23 step 6: targetOffset = ? ToInteger(offset)
+                // step 7: if targetOffset < 0, throw RangeError
+                double d_off = 0;
+                if (argc > 1) {
+                    Item n = js_to_number(args[1]);
+                    if (js_check_exception()) return ItemNull;
+                    d_off = it2d(n);
+                }
+                if (d_off != d_off) d_off = 0;  // NaN → 0
+                double trunc_off = d_off >= 0 ? floor(d_off) : ceil(d_off);
+                if (trunc_off < 0 || trunc_off == -INFINITY) {
+                    return js_throw_range_error("offset is out of bounds");
+                }
+                int offset = trunc_off > (double)INT_MAX ? INT_MAX : (int)trunc_off;
                 return js_typed_array_set_from(obj, source, offset);
             }
             if (method->len == 8 && strncmp(method->chars, "subarray", 8) == 0) {
@@ -18575,6 +18595,16 @@ static Item js_get_math_object() {
         // Math inherits from Object.prototype per ES spec (not null prototype)
         js_math_object = js_new_object();
         heap_register_gc_root(&js_math_object.item);
+        // Set [[Prototype]] = Object.prototype explicitly so that property
+        // lookups (e.g. Object.prototype.value in Math) walk the chain.
+        {
+            Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+            if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                Item op = js_property_get(obj_ctor, proto_key);
+                if (get_type_id(op) == LMD_TYPE_MAP) js_set_prototype(js_math_object, op);
+            }
+        }
         // Mark as Math for Object.prototype.toString
         Item mk = (Item){.item = s2it(heap_create_name("__is_math__", 11))};
         js_property_set(js_math_object, mk, (Item){.item = b2it(true)});
@@ -18647,6 +18677,15 @@ extern "C" Item js_get_json_object_value() {
         // JSON inherits from Object.prototype per ES spec
         js_json_object = js_new_object();
         heap_register_gc_root(&js_json_object.item);
+        // Set [[Prototype]] = Object.prototype explicitly (see js_get_math_object).
+        {
+            Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+            if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                Item op = js_property_get(obj_ctor, proto_key);
+                if (get_type_id(op) == LMD_TYPE_MAP) js_set_prototype(js_json_object, op);
+            }
+        }
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_json_object, tag_k, (Item){.item = s2it(heap_create_name("JSON", 4))});
         // v41: Mark Symbol.toStringTag as non-writable, non-enumerable (configurable: true per spec)
@@ -18809,6 +18848,15 @@ extern "C" Item js_get_reflect_object_value() {
         // Reflect inherits from Object.prototype per ES spec
         js_reflect_object = js_new_object();
         heap_register_gc_root(&js_reflect_object.item);
+        // Set [[Prototype]] = Object.prototype explicitly (see js_get_math_object).
+        {
+            Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+            if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                Item op = js_property_get(obj_ctor, proto_key);
+                if (get_type_id(op) == LMD_TYPE_MAP) js_set_prototype(js_reflect_object, op);
+            }
+        }
         Item tag_k = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
         js_property_set(js_reflect_object, tag_k, (Item){.item = s2it(heap_create_name("Reflect", 7))});
 
