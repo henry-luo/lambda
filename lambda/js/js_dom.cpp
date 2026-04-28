@@ -3441,6 +3441,11 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
 
         log_debug("js_dom_set_property: set innerHTML on <%s>",
                   elem->tag_name ? elem->tag_name : "?");
+        // Re-register element ids on the global object so HTML5 named-property
+        // access on Window picks up dynamically inserted elements (the WPT
+        // selection tests rely on `document.body.innerHTML = "<div id=foo>..."`
+        // making `foo` a global).
+        js_dom_register_named_elements(elem);
         js_dom_mutation_notify();
         return value;
     }
