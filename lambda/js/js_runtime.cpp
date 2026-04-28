@@ -12962,15 +12962,21 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         re2 = new re2::RE2(processed_pattern, opts);
         if (!re2->ok()) {
             // fall back to original pattern if preprocessing caused errors
+            std::string err1 = re2->error();
             delete re2;
             re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
             if (!re2->ok()) {
-                log_error("js regex compile error: /%.*s/%.*s: %s (using never-match fallback)",
-                    pattern_len, pattern, flags_len, flags, re2->error().c_str());
-                // Instead of returning null, create a never-matching regex so .test()/.exec() work
+                std::string err2 = re2->error();
+                log_error("js regex compile error: /%.*s/%.*s: %s",
+                    pattern_len, pattern, flags_len, flags, err2.c_str());
                 delete re2;
-                re2 = new re2::RE2("(?!)", opts);  // never matches
-                if (!re2->ok()) { delete re2; return ItemNull; }
+                // throw SyntaxError per ES spec §22.2.3.2.1
+                char msg[512];
+                snprintf(msg, sizeof(msg), "Invalid regular expression: /%.*s/%.*s: %s",
+                    pattern_len, pattern, flags_len, flags, err2.c_str());
+                Item m = (Item){.item = s2it(heap_create_name(msg))};
+                js_throw_syntax_error(m);
+                return ItemNull;
             }
         }
     }
