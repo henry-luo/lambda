@@ -135,11 +135,11 @@ let b = b'\xDE AD BE EF'
 
 len(b)            // 4
 b[0]              // 0xDEu8        — single byte returns u8
-b[-1]             // 0xEFu8        — negative index from end
 b[1 to 2]         // b'\xADBE'     — inclusive‑inclusive range slice → binary
 b[0 to 0]         // b'\xDE'       — single‑byte slice
 b[0 to len(b)-1]  // full copy
 0xAD in b         // true          — byte membership
+// KIV: support of negative index from end, b[-1]
 ```
 
 Semantics:
