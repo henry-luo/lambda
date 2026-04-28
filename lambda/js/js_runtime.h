@@ -274,6 +274,7 @@ Item js_make_setter_key(Item key);
 Item js_object_create(Item proto);
 Item js_object_define_property(Item obj, Item name, Item descriptor);
 Item js_object_define_properties(Item obj, Item props);
+Item js_object_create_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
 Item js_lookup_builtin_method(TypeId type, const char* name, int len);

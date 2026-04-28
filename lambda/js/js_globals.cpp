@@ -6117,7 +6117,12 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (!js_require_object_type(obj, "defineProperties")) return ItemNull;
+    // ES spec §19.1.2.3 step 1: Let props be ? ToObject(Properties).
+    // ToObject throws TypeError on null/undefined.
     TypeId pt = get_type_id(props);
+    if (pt == LMD_TYPE_NULL || pt == LMD_TYPE_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
     if (obj.item == 0 || (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY)) return obj;
     Item keys = js_object_keys(props);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
@@ -6128,6 +6133,17 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         if (js_check_exception()) break; // stop on first error (ES2020 §19.1.2.3.1)
     }
     return obj;
+}
+
+// Wrapper for Object.create(O, Properties): per ES §19.1.2.2 step 4, only call
+// ObjectDefineProperties when Properties is not undefined. Object.defineProperties
+// itself throws TypeError on undefined/null, but Object.create only allows undefined.
+// Per ES §19.1.2.2 step 3: "If Properties is not undefined, return ? ObjectDefineProperties..."
+// — null still flows through and ObjectDefineProperties step 1 ToObject throws TypeError.
+extern "C" Item js_object_create_define_properties(Item obj, Item props) {
+    TypeId pt = get_type_id(props);
+    if (pt == LMD_TYPE_UNDEFINED) return obj;
+    return js_object_define_properties(obj, props);
 }
 
 // =============================================================================

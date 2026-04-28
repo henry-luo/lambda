@@ -10469,7 +10469,9 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_object_from_entries(arg0);
     case JS_BUILTIN_OBJECT_CREATE: {
         Item obj = js_object_create(arg0);
-        if (arg_count >= 2 && arg1.item != ITEM_JS_UNDEFINED && arg1.item != ITEM_NULL) {
+        // ES §19.1.2.2 step 3: only when Properties is not undefined.
+        // null flows through to ObjectDefineProperties which throws TypeError.
+        if (arg_count >= 2 && arg1.item != ITEM_JS_UNDEFINED) {
             js_object_define_properties(obj, arg1);
         }
         return obj;

@@ -10732,10 +10732,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t result = jm_call_1(mt, "js_object_create", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 // If 2nd argument given, apply Object.defineProperties
+                // Per ES §19.1.2.2 step 4: only if Properties is not undefined.
+                // Use js_object_create_define_properties which skips undefined silently
+                // (Object.defineProperties itself throws on undefined per spec).
                 JsAstNode* a2 = call->arguments ? call->arguments->next : NULL;
                 if (a2) {
                     MIR_reg_t props_arg = jm_transpile_box_item(mt, a2);
-                    result = jm_call_2(mt, "js_object_define_properties", MIR_T_I64,
+                    result = jm_call_2(mt, "js_object_create_define_properties", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, props_arg));
                 }
