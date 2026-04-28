@@ -144,6 +144,8 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
+// Phase 8C: Image() constructor (defined in js_dom.cpp)
+extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
 // shared runtime context (defined in mir.c)
 extern Context* _lambda_rt;
@@ -1591,6 +1593,8 @@ JitImport jit_runtime_imports[] = {
     {"js_microtask_enqueue", FPTR(js_microtask_enqueue)},
     // v30: XMLHttpRequest
     {"js_xhr_new", FPTR(js_xhr_new)},
+    // Phase 8C: Image() constructor — `new Image(w?, h?)` creates <img>
+    {"js_image_construct", FPTR(js_image_construct)},
     // v14: ES Module runtime
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},

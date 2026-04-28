@@ -700,6 +700,32 @@ extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
     return js_iframe_get_content_document(iframe);
 }
 
+// ----------------------------------------------------------------------------
+// Phase 8C: `new Image(width?, height?)` constructor.
+// Creates an HTMLImageElement (`<img>`) parented to the current document, sets
+// its `width`/`height` attributes from the (optional) constructor args, and
+// returns the wrapped element. The element is NOT inserted into the DOM tree;
+// the caller (script) does that explicitly via appendChild/insertBefore.
+// ----------------------------------------------------------------------------
+extern "C" Item js_image_construct(Item width_arg, Item height_arg, int argc) {
+    DomDocument* doc = _js_current_document;
+    if (!doc) return ItemNull;
+    MarkBuilder builder(doc->input);
+    Item elem_item = builder.element("img").final();
+    Element* elem = elem_item.element;
+    DomElement* dom_elem = dom_element_create(doc, "img", elem);
+    if (!dom_elem) return ItemNull;
+    if (argc >= 1) {
+        const char* w = fn_to_cstr(width_arg);
+        if (w) dom_element_set_attribute(dom_elem, "width", w);
+    }
+    if (argc >= 2) {
+        const char* h = fn_to_cstr(height_arg);
+        if (h) dom_element_set_attribute(dom_elem, "height", h);
+    }
+    return js_dom_wrap_element(dom_elem);
+}
+
 // Public: create an empty foreign XML/generic document. qualified_name may be
 // null (no document element) or a tag to use as the root.
 extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
@@ -3146,7 +3172,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     static const char* dom_methods[] = {
         "getAttribute", "setAttribute", "removeAttribute", "hasAttribute", "toggleAttribute",
         "querySelector", "querySelectorAll", "closest", "matches",
-        "appendChild", "removeChild", "replaceChild", "insertBefore",
+        "appendChild", "removeChild", "replaceChild", "replaceWith", "insertBefore",
         "insertAdjacentElement", "insertAdjacentHTML",
         "cloneNode", "contains", "hasChildNodes", "normalize",
         "addEventListener", "removeEventListener", "dispatchEvent",
@@ -3737,7 +3763,10 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     // v12b: remove() — self-removal from parent (works on any node type)
     if (strcmp(method, "remove") == 0) {
         if (node->parent) {
+            // Phase 8A: live-range cascade must run before the structural change.
+            dom_pre_remove(node);
             node->parent->remove_child(node);
+            js_dom_mutation_notify();
         }
         return ItemNull;
     }
@@ -4059,6 +4088,15 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
         DomNode* old_child = (DomNode*)js_dom_unwrap_element(args[1]);
         if (!new_child || !old_child) return ItemNull;
+        if (old_child->parent != (DomNode*)elem) return ItemNull;
+        // Self-replace: per DOM §4.2.3 the algorithm still performs an adopt +
+        // remove + insert sequence. For live ranges that means a boundary
+        // anchored inside the node collapses to (container, indexOf(node)).
+        if (new_child == old_child) {
+            dom_pre_remove(old_child);
+            // Tree shape unchanged; the call is otherwise a no-op.
+            return args[1];
+        }
         // detach new_child from its current parent
         if (new_child->parent) {
             dom_pre_remove(new_child);
@@ -4070,6 +4108,51 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         dom_pre_remove(old_child);
         ((DomNode*)elem)->remove_child(old_child);
         return args[1]; // return removed old child
+    }
+
+    // replaceWith(...nodes) — replace this node in its parent's children with
+    // the given nodes (or strings, coerced to text). Per DOM §4.2.7 "ChildNode".
+    // Per spec this performs a removal + (pre-)insert, which is observably
+    // distinct from a no-op for live ranges anchored inside `node` even when
+    // the only argument is `node` itself.
+    if (strcmp(method, "replaceWith") == 0) {
+        DomNode* parent = node->parent;
+        if (!parent) return ItemNull;
+        // Compute the viable next sibling: first following sibling that is
+        // not among the replacement nodes (pre-spec algorithm).
+        DomNode* viable_next = node->next_sibling;
+        for (;;) {
+            bool in_args = false;
+            if (!viable_next) break;
+            for (int i = 0; i < argc; i++) {
+                if ((DomNode*)js_dom_unwrap_element(args[i]) == viable_next) {
+                    in_args = true; break;
+                }
+            }
+            if (!in_args) break;
+            viable_next = viable_next->next_sibling;
+        }
+        // Detach the receiver first; this collapses any live-range endpoint
+        // that lived inside `node` to (parent, indexOf(node)).
+        dom_pre_remove(node);
+        parent->remove_child(node);
+        // Insert each argument in order. Skip nulls / non-DOM args.
+        for (int i = 0; i < argc; i++) {
+            DomNode* a = (DomNode*)js_dom_unwrap_element(args[i]);
+            if (!a) continue;
+            if (a->parent) {
+                dom_pre_remove(a);
+                a->parent->remove_child(a);
+            }
+            if (viable_next && viable_next->parent == parent) {
+                parent->insert_before(a, viable_next);
+            } else {
+                parent->append_child(a);
+            }
+            dom_post_insert(parent, a);
+        }
+        js_dom_mutation_notify();
+        return ItemNull;
     }
 
     // v12b: toggleAttribute(name [, force])

@@ -17424,6 +17424,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 5 && strncmp(ctor_name, "Proxy", 5) == 0) is_builtin = true;
     // XMLHttpRequest constructor (Radiant browser context)
     else if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) is_builtin = true;
+    // Image constructor — `new Image(width?, height?)` (HTML §4.8.4)
+    else if (ctor_len == 5 && strncmp(ctor_name, "Image", 5) == 0) is_builtin = true;
     // Buffer constructor (deprecated new Buffer(size/string/array))
     else if (ctor_len == 6 && strncmp(ctor_name, "Buffer", 6) == 0) { is_buffer = true; is_builtin = true; }
     // OffscreenCanvas constructor (Canvas text measurement)
@@ -17643,6 +17645,20 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new XMLHttpRequest() — returns XHR object with open/send/etc methods
     if (ctor_len == 14 && strncmp(ctor_name, "XMLHttpRequest", 14) == 0) {
         return jm_call_0(mt, "js_xhr_new", MIR_T_I64);
+    }
+
+    // new Image(width?, height?) — Phase 8C: HTMLImageElement constructor.
+    if (ctor_len == 5 && strncmp(ctor_name, "Image", 5) == 0) {
+        MIR_reg_t w_arg = first_arg ? first_arg : jm_emit_undefined(mt);
+        MIR_reg_t h_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) h_arg = jm_transpile_box_item(mt, arg2);
+        MIR_op_t h_op = h_arg ? MIR_new_reg_op(mt->ctx, h_arg)
+                              : MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED);
+        return jm_call_3(mt, "js_image_construct", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, w_arg),
+            MIR_T_I64, h_op,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)arg_count));
     }
 
     // new Date() — returns a Date object with getTime() method

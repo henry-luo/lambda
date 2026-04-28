@@ -764,7 +764,7 @@ extern "C" Item js_selection_to_string(void) {
     if (dom_selection_range_count(s) == 0) return make_str("");
     DomRange* r = dom_selection_get_range_at(s, 0, nullptr);
     if (!r) return make_str("");
-    char* out = dom_range_to_string(r);
+    char* out = dom_range_to_string_ex(r, DOM_STRINGIFY_RENDERED);
     if (!out) return make_str("");
     Item it = make_str(out);
     free(out);
