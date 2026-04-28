@@ -5744,6 +5744,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                         return js_property_get(custom_proto, key);
                     }
                 }
+                // Walk implicit Array.prototype chain for inherited string properties
+                // (e.g. user-defined Array.prototype.foo = ...)
+                {
+                    Item proto = js_get_prototype_of(object);
+                    if (proto.item != ItemNull.item && get_type_id(proto) != LMD_TYPE_UNDEFINED) {
+                        Item result = js_property_get(proto, key);
+                        if (get_type_id(result) != LMD_TYPE_UNDEFINED) return result;
+                    }
+                }
                 // v37: Private member brand check on array objects
                 if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
                     char msg[256];

@@ -4653,6 +4653,40 @@ extern "C" Item js_in(Item key, Item object) {
             }
             return (Item){.item = b2it(false)};
         }
+        // Non-numeric string key: check companion-map own properties, then walk
+        // Array.prototype chain (e.g. Array.prototype.value set by user code).
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0) {
+                if (arr->extra != 0) {
+                    Map* pm = (Map*)(uintptr_t)arr->extra;
+                    bool pm_found = false;
+                    Item pm_val = js_map_get_fast_ext(pm, sk->chars, (int)sk->len, &pm_found);
+                    if (pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+                    if (sk->len < 200) {
+                        char gk[256];
+                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)sk->len, sk->chars);
+                        bool gfound = false;
+                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gfound);
+                        if (gfound) return (Item){.item = b2it(true)};
+                        char ssk[256];
+                        snprintf(ssk, sizeof(ssk), "__set_%.*s", (int)sk->len, sk->chars);
+                        bool sfound = false;
+                        js_map_get_fast_ext(pm, ssk, (int)strlen(ssk), &sfound);
+                        if (sfound) return (Item){.item = b2it(true)};
+                    }
+                }
+                Item proto = js_get_prototype_of(object);
+                int depth = 0;
+                while (proto.item != ItemNull.item && depth < 32) {
+                    Item result = js_in(key, proto);
+                    if (result.item == ITEM_ERROR) return result;
+                    if (it2b(result)) return (Item){.item = b2it(true)};
+                    proto = js_get_prototype_of(proto);
+                    depth++;
+                }
+            }
+        }
         return (Item){.item = b2it(false)};
     }
     if (type == LMD_TYPE_FUNC) {
@@ -4662,8 +4696,10 @@ extern "C" Item js_in(Item key, Item object) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk) {
-                // Walk prototype chain (Function.prototype → Object.prototype)
-                Item proto = js_get_prototype(object);
+                // Walk prototype chain (Function.prototype → Object.prototype).
+                // Use js_get_prototype_of (not js_get_prototype) so the implicit
+                // Function.prototype is returned even when no custom __proto__ is set.
+                Item proto = js_get_prototype_of(object);
                 int depth = 0;
                 while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                     bool found = false;
@@ -4675,8 +4711,13 @@ extern "C" Item js_in(Item key, Item object) {
                         bool gfound = false;
                         js_map_get_fast_ext(proto.map, gk, (int)strlen(gk), &gfound);
                         if (gfound) return (Item){.item = b2it(true)};
+                        char skk[256];
+                        snprintf(skk, sizeof(skk), "__set_%.*s", (int)sk->len, sk->chars);
+                        bool sfound = false;
+                        js_map_get_fast_ext(proto.map, skk, (int)strlen(skk), &sfound);
+                        if (sfound) return (Item){.item = b2it(true)};
                     }
-                    proto = js_get_prototype(proto);
+                    proto = js_get_prototype_of(proto);
                     depth++;
                 }
                 // Check builtin methods (call, apply, bind, toString, etc.)
