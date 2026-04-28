@@ -21,6 +21,8 @@ Lambda already has a `binary` primitive type with hex and base64 literal syntax 
 
 This proposal surveys prior art across scripting languages, identifies the highest‑leverage features to borrow, and lays out a tiered implementation plan starting with a representation refactor.
 
+> **Notation note.** Lambda currently has **no hex integer literal syntax** (no `0xDE`). All numeric literals in this document use decimal; hex equivalents appear only in comments for readability. Adding `0x…` / `0o…` / `0b…` integer literals is a separate, orthogonal language change and is out of scope here.
+
 ---
 
 ## 2. Prior Art Across Scripting Languages
@@ -120,7 +122,7 @@ typedef struct Binary {
 | `lambda/lambda/lambda-proc.cpp` | Update conversion paths (`source_type == LMD_TYPE_BINARY`). |
 | `lambda/lambda/mark_editor.cpp` | Update editor read paths. |
 | Stdlib | New `binary(x)` semantics: from `string` → utf‑8 encode; from `[u8]` → copy; from `int` → encode as min bytes (configurable endianness). |
-| Tests | Add round‑trip: `decode(b'\xDE AD BE EF') == [0xDE,0xAD,0xBE,0xEF]`; `len(b'\xDEADBEEF') == 4`. |
+| Tests | Add round‑trip: `decode(b'\xDE AD BE EF') == [222, 173, 190, 239]` (i.e. `0xDE 0xAD 0xBE 0xEF`); `len(b'\xDEADBEEF') == 4`. Note: Lambda has no hex integer literal syntax yet — tests must use decimal. |
 
 #### Migration risk
 
@@ -134,11 +136,12 @@ Mirror the existing string surface ([Lambda_Data.md §String Indexing and Slicin
 let b = b'\xDE AD BE EF'
 
 len(b)            // 4
-b[0]              // 0xDEu8        — single byte returns u8
+b[0]              // 222u8         — single byte returns u8 (0xDE in the literal)
 b[1 to 2]         // b'\xADBE'     — inclusive‑inclusive range slice → binary
 b[0 to 0]         // b'\xDE'       — single‑byte slice
 b[0 to len(b)-1]  // full copy
-0xAD in b         // true          — byte membership
+173 in b          // true          — byte membership (Lambda has no 0xAD literal yet; use decimal)
+// KIV: hex integer literals (0xDE) — currently must use decimal
 // KIV: support of negative index from end, b[-1]
 ```
 
@@ -154,7 +157,7 @@ Semantics:
 ```lambda
 for byte in b { print(byte) }     // prints each u8
 
-let sum = for (byte in b) byte    // [0xDE, 0xAD, 0xBE, 0xEF] : u8[]
+let sum = for (byte in b) byte    // [222, 173, 190, 239] : u8[]  (0xDE 0xAD 0xBE 0xEF)
 let xor = reduce(b, (a, x) => a ^ x)
 ```
 
@@ -196,7 +199,7 @@ Append‑heavy code (codec output, HTTP body assembly) needs better than O(n²) 
 ```lambda
 let bld = binary.builder()
 bld.append(b'\xDE AD')
-bld.append_u32_be(0xCAFEBABE)
+bld.append_u32_be(3405691582)        // 0xCAFEBABE — Lambda has no hex int literal yet
 bld.append_str_utf8("hello")
 let out: binary = bld.freeze()        // immutable snapshot
 ```
@@ -249,7 +252,7 @@ Naming follows Lambda's snake_case stdlib convention. Bounds checks raise `error
 Adopt Lua 5.3's syntax — the cleanest of the family — with extensions where useful.
 
 ```lambda
-pack(">I4 H s1", 0xCAFEBABE, 16, "hi")       // -> binary
+pack(">I4 H s1", 3405691582, 16, "hi")       // 3405691582 == 0xCAFEBABE -> binary
 unpack(">I4 H s1", b)                          // -> [int, int, string]
 pack_size(">I4 H")                             // -> int
 ```
@@ -276,7 +279,7 @@ The single feature that would make Lambda *uniquely* good at document/binary for
 match packet {
     case <bin u8: ver, u8: type, u16/be: len, binary[len]: body, binary: rest>:
         process(ver, type, body, rest)
-    case <bin u32/be: 0x89504E47, binary: rest>:
+    case <bin u32/be: 2303741511, binary: rest>:    // 0x89504E47 — PNG magic; decimal until hex int literals land
         parse_png(rest)
     default:
         error("unknown format")
