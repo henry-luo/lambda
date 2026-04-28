@@ -4304,6 +4304,10 @@ extern "C" Item js_constructor_create_object(Item callee) {
                     depth++;
                 }
                 js_set_prototype(obj, fn->prototype);
+            } else if (pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
+                // ES OrdinaryCreateFromConstructor: when constructor's .prototype is
+                // any Object (incl. Array/Element), use it as instance's [[Prototype]].
+                js_set_prototype(obj, fn->prototype);
             }
         }
     } else {
@@ -4888,6 +4892,11 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
                 depth++;
             }
             js_set_prototype(obj, fn->prototype);
+        } else if (fn->prototype.item != ItemNull.item) {
+            TypeId fpt = get_type_id(fn->prototype);
+            if (fpt == LMD_TYPE_ARRAY || fpt == LMD_TYPE_ELEMENT || fpt == LMD_TYPE_FUNC) {
+                js_set_prototype(obj, fn->prototype);
+            }
         }
     }
     return obj;
@@ -5937,6 +5946,12 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
                 // Return explicitly-set prototype (e.g., %TypedArray%.prototype) even for builtin_id == -2
                 if (fn->prototype.item != 0 && get_type_id(fn->prototype) == LMD_TYPE_MAP) return fn->prototype;
+                // ES: .prototype can also be set to Array/Element/Function — return as-is.
+                // (Don't lazy-create when an explicit non-MAP object value was assigned.)
+                if (fn->prototype.item != 0) {
+                    TypeId fpt = get_type_id(fn->prototype);
+                    if (fpt == LMD_TYPE_ARRAY || fpt == LMD_TYPE_ELEMENT || fpt == LMD_TYPE_FUNC) return fn->prototype;
+                }
                 // Non-constructor functions don't have .prototype:
                 // - global builtins (builtin_id == -2): parseInt, Math.abs, etc.
                 // - builtin methods (builtin_id > 0): Array.prototype.map, etc.
@@ -14641,6 +14656,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (d_target != d_target) d_target = 0; // NaN → 0
                 if (d_start != d_start) d_start = 0;
                 if (d_end != d_end) d_end = 0;
+                // ES ToInteger: truncate toward zero BEFORE clamping
+                d_target = d_target >= 0 ? floor(d_target) : ceil(d_target);
+                d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
+                d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
                 int target = (d_target < 0) ? (int)fmax(len + d_target, 0) : (int)fmin(d_target, len);
                 int start = (d_start < 0) ? (int)fmax(len + d_start, 0) : (int)fmin(d_start, len);
                 int end = (d_end < 0) ? (int)fmax(len + d_end, 0) : (int)fmin(d_end, len);
@@ -18068,14 +18087,15 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             return js_throw_type_error("Cannot convert a Symbol value to a number");
         if (argc > 2 && js_key_is_symbol(args[2]))
             return js_throw_type_error("Cannot convert a Symbol value to a number");
-        int start = argc > 1 ? (int)js_get_number(args[1]) : 0;
-        int end   = argc > 2 ? (int)js_get_number(args[2]) : len;
-        if (start < 0) start = len + start;
-        if (start < 0) start = 0;
-        if (start > len) start = len;
-        if (end < 0) end = len + end;
-        if (end < 0) end = 0;
-        if (end > len) end = len;
+        // ES ToInteger semantics: NaN→0, truncate toward zero before clamping
+        double d_start = argc > 1 ? js_get_number(args[1]) : 0;
+        double d_end   = argc > 2 ? js_get_number(args[2]) : (double)len;
+        if (d_start != d_start) d_start = 0;
+        if (d_end != d_end) d_end = 0;
+        d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
+        d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
+        int start = (d_start < 0) ? (int)fmax(len + d_start, 0) : (int)fmin(d_start, len);
+        int end   = (d_end < 0)   ? (int)fmax(len + d_end, 0)   : (int)fmin(d_end, len);
         Item val = args[0];
         for (int i = start; i < end; i++) {
             a->items[i] = val;
@@ -18094,6 +18114,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (d_target != d_target) d_target = 0; // NaN → 0
         if (d_start != d_start) d_start = 0;
         if (d_end != d_end) d_end = 0;
+        // ES ToInteger: truncate toward zero BEFORE clamping (per spec relativeStart/relativeEnd)
+        d_target = d_target >= 0 ? floor(d_target) : ceil(d_target);
+        d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
+        d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
         int target = (d_target < 0) ? (int)fmax(len + d_target, 0) : (int)fmin(d_target, len);
         int start = (d_start < 0) ? (int)fmax(len + d_start, 0) : (int)fmin(d_start, len);
         int end = (d_end < 0) ? (int)fmax(len + d_end, 0) : (int)fmin(d_end, len);
@@ -19386,8 +19410,9 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     }
     if (ot != LMD_TYPE_MAP) return;
     TypeId proto_type = get_type_id(prototype);
-    // ES spec: prototype must be an object (MAP or FUNC) or null
+    // ES spec: prototype must be an object (MAP/FUNC/ARRAY/ELEMENT) or null
     if (proto_type != LMD_TYPE_MAP && proto_type != LMD_TYPE_FUNC &&
+        proto_type != LMD_TYPE_ARRAY && proto_type != LMD_TYPE_ELEMENT &&
         prototype.item != ItemNull.item) return;
     // v16: Prevent circular prototype chains (ES spec §9.1.2)
     if (get_type_id(prototype) == LMD_TYPE_MAP) {
@@ -19640,6 +19665,15 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
                 if (builtin.item != ItemNull.item) return builtin;
             }
             break; // Function.prototype → Object.prototype handled by caller
+        }
+        if (pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
+            // ES: an Array can be a prototype object (e.g. `Foo.prototype = [1,2,3]`).
+            // Delegate property lookup through js_property_get on the array.
+            Item r = js_property_get(proto, property);
+            if (r.item != ItemNull.item && get_type_id(r) != LMD_TYPE_UNDEFINED) return r;
+            proto = js_get_prototype_of(proto);
+            depth++;
+            continue;
         }
         if (pt != LMD_TYPE_MAP) break;
         // Proxy in prototype chain: forward through proxy [[Get]] trap
