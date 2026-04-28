@@ -235,6 +235,14 @@ typedef struct RadiantState {
     // running so the other direction skips itself. Counter (not bool) so
     // nested mutations are safe.
     int                  dom_selection_sync_depth;
+    // Phase 8D: selectionchange event coalescing. `selection_mutation_seq`
+    // is bumped by every spec mutator (via sync_anchor_focus →
+    // notify_selection_changed); `selection_event_seq` is the last seq we
+    // already enqueued a selectionchange task for. Set equal once dispatch
+    // task is queued; cleared/advanced when next mutation runs.
+    uint32_t             selection_mutation_seq;
+    uint32_t             selection_event_seq;
+    bool                 selectionchange_pending;  // task queued and not yet fired
     FocusState* focus;             // focus state with navigation info
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element

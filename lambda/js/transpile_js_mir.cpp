@@ -15458,6 +15458,18 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_new_reg_op(mt->ctx, await_result),
                 MIR_new_reg_op(mt->ctx, mt->gen_input_reg)));
 
+            // Reload closure-captured locals from scope_env: callbacks that
+            // ran during suspension (e.g. setTimeout handlers, promise
+            // resolvers) may have mutated locals via the shared scope env.
+            // The gen_env reload above only restores the values we saved at
+            // suspend time; scope_env holds the canonical, post-callback
+            // value for any local also captured by a closure.
+            jm_scope_env_reload_vars(mt);
+            // Likewise, captures from a parent function's shared scope_env
+            // (if this async function is itself a nested closure) may have
+            // changed during suspension.
+            jm_env_reload_shared_captures(mt);
+
             // Check for exception on resume (rejection case)
             {
                 int d = mt->try_ctx_depth - 1;

@@ -16,6 +16,8 @@
 
 #include "js_dom_selection.h"
 #include "js_dom.h"
+#include "js_dom_events.h"
+#include "js_event_loop.h"
 #include "js_runtime.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
@@ -1030,6 +1032,40 @@ extern "C" void js_dom_selection_install_globals(void) {
     (void)doc;
 
     log_debug("js_dom_selection: installed global getSelection / Selection / Range");
+}
+
+// ----------------------------------------------------------------------------
+// Phase 8D: selectionchange event bridge
+// ----------------------------------------------------------------------------
+// Called from radiant/dom_range.cpp's notify_selection_changed() (a weak
+// symbol) after every spec mutation funneled through sync_anchor_focus().
+// Per the WHATWG HTML "selectionchange" task: coalesce multiple synchronous
+// mutations into a single async dispatch, fire on the document.
+static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
+    (void)this_val; (void)args; (void)argc;
+    DomDocument* doc = (DomDocument*)js_dom_get_document();
+    if (!doc || !doc->state) return ItemNull;
+    RadiantState* state = doc->state;
+    state->selectionchange_pending = false;
+    state->selection_event_seq = state->selection_mutation_seq;
+    Item ev = js_create_event("selectionchange", /*bubbles=*/false,
+                              /*cancelable=*/false);
+    Item doc_item = js_get_document_object_value();
+    js_dom_dispatch_event(doc_item, ev);
+    return ItemNull;
+}
+
+extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
+    if (!sel || !sel->state) return;
+    RadiantState* state = sel->state;
+    // Suppress while the legacy↔DOM mirror is running so a single user
+    // mutation doesn't ping-pong into multiple events.
+    if (state->dom_selection_sync_depth > 0) return;
+    state->selection_mutation_seq++;
+    if (state->selectionchange_pending) return;  // coalesce
+    state->selectionchange_pending = true;
+    Item cb = js_new_function((void*)_wpt_selectionchange_fire, 0);
+    js_setTimeout(cb, (Item){.item = i2it(0)});
 }
 
 extern "C" void js_dom_selection_reset(void) {

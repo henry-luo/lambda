@@ -574,6 +574,23 @@ DomRange* dom_selection_get_range_at(DomSelection* s, uint32_t index, const char
     return s->ranges[index];
 }
 
+// Phase 8D: weak symbol bridge to JS layer. Implemented in
+// lambda/js/js_dom_selection.cpp; absent in pure-radiant unit tests where
+// the bindings aren't linked. The hook fires after every selection
+// mutation; the JS side handles spec-compliant task-queuing and
+// coalescing per WHATWG HTML §6.5.2 ("queue a task to fire
+// selectionchange"). We can't include state_store.hpp here (it pulls in
+// GLFW), so the JS side reads sync_depth and the seq counters directly.
+extern "C" __attribute__((weak)) void js_dom_queue_selectionchange(DomSelection* sel);
+extern "C" __attribute__((weak)) void js_dom_queue_selectionchange(DomSelection* /*sel*/) {
+    // weak fallback for unit-test targets without JS bindings linked
+}
+
+static inline void notify_selection_changed(DomSelection* s) {
+    if (!s) return;
+    js_dom_queue_selectionchange(s);
+}
+
 // Sync anchor/focus/is_collapsed from ranges[0] given a direction. If
 // `set_forward` is true, anchor=start, focus=end; otherwise anchor=end,
 // focus=start. Used by the boundary mutators below.
@@ -583,6 +600,8 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
         s->anchor.offset = s->focus.offset = 0;
         s->direction = DOM_SEL_DIR_NONE;
         s->is_collapsed = true;
+        if (s->state) legacy_sync_from_dom_selection(s->state);
+        notify_selection_changed(s);
         return;
     }
     DomRange* r = s->ranges[0];
@@ -601,6 +620,7 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     // Re-entry guarded inside legacy_sync_from_dom_selection so it's a no-op
     // when invoked transitively from a legacy→DOM sync.
     if (s->state) legacy_sync_from_dom_selection(s->state);
+    notify_selection_changed(s);
 }
 
 void dom_selection_add_range(DomSelection* s, DomRange* range) {
