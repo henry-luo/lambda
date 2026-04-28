@@ -179,6 +179,10 @@ void tc_ensure_init(DomElement* elem) {
 void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
+    uint32_t old_start = f->selection_start;
+    uint32_t old_end = f->selection_end;
+    uint8_t  old_dir = f->selection_direction;
+    bool was_initialized = f->tc_initialized;
     if (f->current_value) free(f->current_value);
     char* buf = (char*)malloc(new_len + 1);
     if (new_val && new_len) memcpy(buf, new_val, new_len);
@@ -191,6 +195,15 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
+    // Notify if value-setter caused the selection to move (e.g. previous
+    // selection was past the new length and got clamped). Suppress on
+    // initial init so parsing-time setup doesn't fire spurious events.
+    if (was_initialized &&
+        (f->selection_start != old_start ||
+         f->selection_end != old_end ||
+         f->selection_direction != old_dir)) {
+        tc_notify_selection_changed(elem);
+    }
 }
 
 void tc_set_selection_range(DomElement* elem,

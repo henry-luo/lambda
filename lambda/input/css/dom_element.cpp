@@ -2778,10 +2778,36 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         return nullptr;  // Skip XML declarations
     }
 
-    // skip script elements - they should not participate in layout
-    // script elements have display: none by default in browser user-agent stylesheets
+    // Skip <script> elements during DOM tree building. Per HTML spec the UA
+    // stylesheet sets `script { display: none }`, so they don't participate
+    // in layout. Keeping them out of the DOM also prevents script_runner from
+    // re-executing inline scripts during pure layout passes.
+    //
+    // Exception: when the author explicitly overrides display via inline
+    // style="display: ..." (block, inline, etc.), the script's text content
+    // becomes part of the rendered/selectable text per WPT
+    // selection/script-and-style-elements.html. In that case we keep the
+    // element so DomRange.toString() can include its text.
     if (str_ieq_const(tag_name, strlen(tag_name), "script")) {
-        return nullptr;  // Skip script elements during DOM tree building
+        const char* style_attr = extract_element_attribute(elem, "style", nullptr);
+        bool has_display_override = false;
+        if (style_attr) {
+            // Crude check: the inline style attribute mentions "display:" with
+            // a non-`none` value. css_parse will refine this further when the
+            // element is later checked for visibility.
+            const char* d = strstr(style_attr, "display");
+            if (d) {
+                const char* colon = strchr(d, ':');
+                if (colon) {
+                    const char* v = colon + 1;
+                    while (*v == ' ' || *v == '\t') v++;
+                    if (strncmp(v, "none", 4) != 0) has_display_override = true;
+                }
+            }
+        }
+        if (!has_display_override) {
+            return nullptr;  // Skip script elements during DOM tree building
+        }
     }
 
     // create DomElement

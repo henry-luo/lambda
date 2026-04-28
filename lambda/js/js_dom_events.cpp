@@ -380,7 +380,24 @@ static Item wrap_path_key(void* key) {
 // fire listeners on a specific node for a given phase
 static void fire_listeners(void* key, const char* type, Item event, int phase) {
     NodeListeners* nl = find_listeners(key);
-    if (!nl || nl->count == 0) return;
+    bool has_listeners = (nl && nl->count > 0);
+    // Check for an `on<type>` IDL handler on the target. We fire it during
+    // AT_TARGET / BUBBLING phases (not CAPTURING), matching the HTML spec.
+    Item on_handler = ItemNull;
+    Item target_item = ItemNull;
+    if (phase != 1) {
+        target_item = wrap_path_key(key);
+        TypeId tt = get_type_id(target_item);
+        if (tt == LMD_TYPE_MAP || tt == LMD_TYPE_ELEMENT) {
+            char on_name[64];
+            snprintf(on_name, sizeof(on_name), "on%s", type);
+            Item on_key = (Item){.item = s2it(heap_create_name(on_name))};
+            Item h = js_property_get(target_item, on_key);
+            if (get_type_id(h) == LMD_TYPE_FUNC) on_handler = h;
+        }
+    }
+    bool has_on = (get_type_id(on_handler) == LMD_TYPE_FUNC);
+    if (!has_listeners && !has_on) return;
 
     // set eventPhase
     event_set_int(event, "eventPhase", phase);
@@ -389,9 +406,16 @@ static void fire_listeners(void* key, const char* type, Item event, int phase) {
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
     js_property_set(event, ct_key, wrap_path_key(key));
 
+    // Fire on<type> IDL handler first (fires before addEventListener listeners
+    // per HTML spec ordering when the IDL handler was set first).
+    if (has_on && !_stop_immediate) {
+        Item args[1] = { event };
+        js_call_function(on_handler, target_item, args, 1);
+    }
+
     // iterate (snapshot count, since once-listeners modify the list)
-    int count = nl->count;
-    for (int i = 0; i < count && i < nl->count; i++) {
+    int count = nl ? nl->count : 0;
+    for (int i = 0; i < count && nl && i < nl->count; i++) {
         if (_stop_immediate) return;
 
         EventListener* el = &nl->items[i];

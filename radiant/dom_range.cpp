@@ -17,6 +17,7 @@
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_value.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -1342,23 +1343,35 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
             process_partially_contained(r, op, first_partial, /*left=*/true, fragment);
         }
         // Walk siblings between first_partial (exclusive) and last_partial (exclusive).
-        DomNode* c = first_partial ? first_partial->next_sibling : parent->first_child;
-        while (c && c != last_partial) {
-            DomNode* next = c->next_sibling;
+        // Two-pass: first identify fully-contained children using the ORIGINAL
+        // range geometry, then perform the mutations. This avoids mis-classifying
+        // later siblings after earlier ones are removed (which shifts their
+        // child indices and can make the live range end-offset appear to cover
+        // them retroactively).
+        enum { MAX_CONTAINED = 256 };
+        DomNode* contained[MAX_CONTAINED];
+        uint32_t n_contained = 0;
+        for (DomNode* c = first_partial ? first_partial->next_sibling : parent->first_child;
+             c && c != last_partial; c = c->next_sibling) {
             if (node_fully_contained(c, r)) {
-                if (op == ROP_CLONE) {
-                    DomNode* clone = dom_node_clone(c, /*deep=*/true);
-                    if (clone && fragment) ((DomNode*)fragment)->append_child(clone);
-                } else if (op == ROP_EXTRACT) {
-                    dom_mutation_pre_remove(r->state, c);
-                    parent->remove_child(c);
-                    if (fragment) ((DomNode*)fragment)->append_child(c);
-                } else {
-                    dom_mutation_pre_remove(r->state, c);
-                    parent->remove_child(c);
+                if (n_contained < MAX_CONTAINED) {
+                    contained[n_contained++] = c;
                 }
             }
-            c = next;
+        }
+        for (uint32_t k = 0; k < n_contained; k++) {
+            DomNode* c = contained[k];
+            if (op == ROP_CLONE) {
+                DomNode* clone = dom_node_clone(c, /*deep=*/true);
+                if (clone && fragment) ((DomNode*)fragment)->append_child(clone);
+            } else if (op == ROP_EXTRACT) {
+                dom_mutation_pre_remove(r->state, c);
+                parent->remove_child(c);
+                if (fragment) ((DomNode*)fragment)->append_child(c);
+            } else {
+                dom_mutation_pre_remove(r->state, c);
+                parent->remove_child(c);
+            }
         }
         // Process last partial.
         if (last_partial) {
@@ -1626,6 +1639,15 @@ static DomText* next_text_after(DomNode* n) {
     return t;
 }
 
+// Like next_text_after but does NOT skip non-selectable subtrees
+// (script/style/head/etc). Used by Range.toString() / Selection.toString()
+// where the CSS visibility classifier (`text_excluded_for_rendered_stringify`)
+// makes per-element decisions — e.g. a <style> with `display:block` SHOULD
+// contribute its text content per spec.
+static DomText* next_text_after_any(DomNode* n) {
+    return next_text_after_impl(n);
+}
+
 // Walk to the previous text node in document order preceding `n` (skipping `n`).
 static DomText* prev_text_before_impl(DomNode* n) {
     if (!n) return nullptr;
@@ -1724,6 +1746,9 @@ static bool tag_is_block(const char* tag) {
     return false;
 }
 
+// Forward decl: defined after CSS lookup helpers below.
+static CssEnum effective_keyword(const DomElement* e, CssPropertyId prop);
+
 // Find the nearest ancestor element (or self) that is a block-level element.
 static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
     DomNode* cur = n;
@@ -1731,6 +1756,11 @@ static DomElement* nearest_block_ancestor_or_self(DomNode* n) {
         if (cur->is_element()) {
             DomElement* e = cur->as_element();
             if (tag_is_block(e->tag_name)) return e;
+            // CSS override: any element with explicit display:block (e.g. a
+            // <script style="display:block"> or <style style="display:block">)
+            // becomes block-level for selection-stringify boundary purposes.
+            CssEnum disp = effective_keyword(e, CSS_PROPERTY_DISPLAY);
+            if (disp == CSS_VALUE_BLOCK) return e;
         }
         cur = cur->parent;
     }
@@ -1830,6 +1860,80 @@ static CssEnum specified_keyword(const DomElement* e, CssPropertyId prop) {
     return v->data.keyword;
 }
 
+// On-demand cascade fallback for `prop` on `e`: when JS toString() runs
+// before layout, only the inline-style declarations have been merged into
+// `specified_style`. Author rules from <style> elements still live on
+// `doc->stylesheets`. Scan them, run the selector matcher, and return the
+// highest-specificity keyword declaration for `prop` (0 if none). Used by
+// the rendered-stringify CSS visibility classifier so the test
+// `script-and-style-elements.html` can detect `style { display: block }`
+// without forcing a full layout.
+static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
+    if (!e || !e->doc) return (CssEnum)0;
+    DomDocument* doc = e->doc;
+    if (!doc->stylesheets || doc->stylesheet_count <= 0) return (CssEnum)0;
+    SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+    if (!matcher) return (CssEnum)0;
+    CssDeclaration* best = nullptr;
+    CssSpecificity best_spec = {0, 0, 0, 0, false};
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet) continue;
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_STYLE) continue;
+            if (rule->data.style_rule.declaration_count == 0) continue;
+            bool matched = false;
+            CssSpecificity match_spec = {0, 0, 0, 0, false};
+            PseudoElementType matched_pseudo = PSEUDO_ELEMENT_NONE;
+            CssSelectorGroup* group = rule->data.style_rule.selector_group;
+            CssSelector* single_sel = rule->data.style_rule.selector;
+            if (group && group->selector_count > 0) {
+                for (size_t si = 0; si < group->selector_count; si++) {
+                    CssSelector* sel = group->selectors[si];
+                    if (!sel) continue;
+                    MatchResult result;
+                    if (selector_matcher_matches(matcher, sel, (DomElement*)e, &result)) {
+                        matched = true;
+                        match_spec = result.specificity;
+                        matched_pseudo = result.pseudo_element;
+                        break;
+                    }
+                }
+            } else if (single_sel) {
+                MatchResult result;
+                if (selector_matcher_matches(matcher, single_sel, (DomElement*)e, &result)) {
+                    matched = true;
+                    match_spec = result.specificity;
+                    matched_pseudo = result.pseudo_element;
+                }
+            }
+            if (!matched) continue;
+            // Only consider rules without a pseudo-element target — element
+            // style only.
+            if (matched_pseudo != PSEUDO_ELEMENT_NONE) continue;
+            for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
+                CssDeclaration* decl = rule->data.style_rule.declarations[d];
+                if (!decl || decl->property_id != prop) continue;
+                if (!decl->value || decl->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
+                if (!best || css_specificity_compare(match_spec, best_spec) >= 0) {
+                    best = decl;
+                    best_spec = match_spec;
+                }
+            }
+        }
+    }
+    return best ? best->value->data.keyword : (CssEnum)0;
+}
+
+// `specified_keyword` first; if absent, fall back to a one-shot cascade
+// lookup over the document's stylesheets.
+static CssEnum effective_keyword(const DomElement* e, CssPropertyId prop) {
+    CssEnum kw = specified_keyword(e, prop);
+    if (kw != 0) return kw;
+    return cascaded_keyword(e, prop);
+}
+
 // True iff `e` (or some ancestor) has `content-visibility: hidden`. The
 // property is not inherited per spec, but its visual effect cascades because
 // the element's subtree is skipped from rendering. We walk ancestors to
@@ -1903,7 +2007,7 @@ static bool text_excluded_for_rendered_stringify(const DomText* t) {
             if (tag_ieq(parent->tag_name, never_rendered[i])) return true;
         }
         if (tag_ieq(parent->tag_name, "script") || tag_ieq(parent->tag_name, "style")) {
-            CssEnum disp = specified_keyword(parent, CSS_PROPERTY_DISPLAY);
+            CssEnum disp = effective_keyword(parent, CSS_PROPERTY_DISPLAY);
             // Only include script/style when an author override forces them
             // to be visible (display: block or inline).
             if (disp != CSS_VALUE_BLOCK && disp != CSS_VALUE_INLINE) return true;
@@ -1911,6 +2015,49 @@ static bool text_excluded_for_rendered_stringify(const DomText* t) {
     }
 
     return false;
+}
+
+// True iff `t`'s parent (or some ancestor) has a white-space value that
+// preserves whitespace (`pre`, `pre-wrap`, `pre-line`, or `break-spaces`).
+// This is the condition under which the rendered-stringify pass must NOT
+// collapse internal whitespace.
+static bool text_preserves_whitespace(const DomText* t) {
+    const DomElement* e = (t && t->parent && t->parent->is_element())
+                          ? t->parent->as_element() : nullptr;
+    while (e) {
+        CssEnum kw = specified_keyword(e, CSS_PROPERTY_WHITE_SPACE);
+        if (kw == CSS_VALUE_PRE || kw == CSS_VALUE_PRE_WRAP ||
+            kw == CSS_VALUE_PRE_LINE) return true;
+        if (kw != 0) return false; // non-pre value wins, stops cascade
+        DomNode* parent = e->parent;
+        e = (parent && parent->is_element()) ? parent->as_element() : nullptr;
+    }
+    return false;
+}
+
+// Append `[buf, buf+len)` to `sb`, collapsing runs of [\t\n\r ]+ into a
+// single ASCII space. Used for DOM_STRINGIFY_RENDERED text in normal
+// (white-space:normal) context. If `suppress_leading_ws` is true the
+// segment's leading whitespace is dropped (used when the previous emission
+// flowed into this one continuously); otherwise it is preserved (used when
+// a skipped text node separated the segments — both flank-whitespaces are
+// retained, matching browser behavior, e.g. WPT toString-user-select-none
+// "start  end" with two spaces from skipped <span>).
+static void append_collapsed(StrBuf* sb, const char* buf, size_t len,
+                             bool suppress_leading_ws) {
+    bool in_ws = suppress_leading_ws;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)buf[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            if (!in_ws) {
+                strbuf_append_char(sb, ' ');
+                in_ws = true;
+            }
+        } else {
+            strbuf_append_char(sb, (char)c);
+            in_ws = false;
+        }
+    }
 }
 
 char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
@@ -1923,7 +2070,24 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
     if (!sb) return nullptr;
     DomText* cur = nullptr;
     DomElement* prev_block = nullptr;  // tracks last emitted text's block ancestor
-    bool sep_pending = false;            // emit "\n\n" before next non-skipped text
+    // Number of newlines pending before next non-ws content emission. Each
+    // visible block boundary contributes one; each whitespace-only intermediate
+    // text node between visible content also contributes one. Capped at 2 to
+    // mirror Chrome's collapsing of multiple blank lines into a paragraph
+    // break. Reset to 0 when content is emitted.
+    int  pending_nl = 0;
+    // Number of consecutive ws-only intermediate text nodes seen since the
+    // last content emission (or skipped-text reset). Used to distinguish:
+    //   - ws_streak == 1: a single ws text node between two visible blocks
+    //     contributes one '\n' (preserves the source line break).
+    //   - ws_streak >= 2: two adjacent ws text nodes typically arise when an
+    //     element between them was skipped at DOM-build time (e.g. <script>
+    //     dropped from the tree). Treat as a "phantom" boundary that
+    //     contributes nothing (the implied skipped element absorbs the gap),
+    //     matching how a real display:none element + ws would behave when
+    //     `prev_skipped` rolls back the contribution.
+    int  ws_streak = 0;
+    bool prev_skipped = false;           // last visited text was excluded (user-select:none, etc.)
     if (r->start.node->is_text()) {
         cur = r->start.node->as_text();
     } else if (r->start.node->is_element()) {
@@ -1932,10 +2096,10 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         for (uint32_t i = 0; i < r->start.offset && c; i++) c = c->next_sibling;
         if (c) {
             cur = leftmost_text_in(c);
-            if (!cur) cur = next_text_after(c);
+            if (!cur) cur = next_text_after_any(c);
         } else {
             // start is past last child: walk forward from element
-            cur = next_text_after(r->start.node);
+            cur = next_text_after_any(r->start.node);
         }
     }
 
@@ -1957,27 +2121,40 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
         // surrounding text verbatim — no whitespace inserted.
         if (mode == DOM_STRINGIFY_RENDERED &&
             text_excluded_for_rendered_stringify(cur)) {
+            // A skipped subtree absorbs adjacent whitespace contributions:
+            // any pending ws-streak is consumed and ws_streak is reset, so
+            // a following ws-only text is treated as freshly-adjacent-to-skip.
+            ws_streak = 0;
+            prev_skipped = true;
             if ((DomNode*)cur == r->end.node) break;
             if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after((DomNode*)cur);
+            cur = next_text_after_any((DomNode*)cur);
             continue;
         }
-        // Layout-free block-boundary serialization: when a whitespace-only
-        // intermediate text node sits between two different block-level
-        // ancestors, browsers emit "\n\n" instead of the literal whitespace
-        // (this is what their layout-aware Range.toString iterator produces
-        // for inter-block whitespace in source HTML).
+        // Layout-free block-boundary serialization. Each visible block
+        // boundary contributes one '\n'. A SINGLE whitespace-only
+        // intermediate text node between two visible blocks contributes one
+        // additional '\n' (so blocks separated by literal source whitespace
+        // produce a paragraph break "\n\n"). TWO consecutive ws-only
+        // intermediates indicate an element was dropped from the DOM between
+        // them (e.g. <script> skipped at build time): the gap is treated as
+        // a "phantom skipped subtree" and contributes zero (matching how a
+        // real display:none element + ws would behave with prev_skipped
+        // rollback). Whitespace immediately adjacent to a skipped subtree
+        // is also consumed.
         DomElement* this_block = nearest_block_ancestor_or_self((DomNode*)cur);
         bool intermediate = ((DomNode*)cur != r->start.node && (DomNode*)cur != r->end.node);
         bool ws_only = text_is_ws_only(cur);
-        if (prev_block && this_block != prev_block) sep_pending = true;
         if (intermediate && ws_only) {
-            // Skip emitting this text's content; the block separator (if any)
-            // is handled by sep_pending on the next non-empty emission.
+            if (!prev_skipped) {
+                ws_streak++;
+            }
+            // ws-adjacent-to-skipped is consumed; don't increment streak.
             prev_block = this_block;
+            prev_skipped = false;
             if ((DomNode*)cur == r->end.node) break;
             if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-            cur = next_text_after((DomNode*)cur);
+            cur = next_text_after_any((DomNode*)cur);
             continue;
         }
         // Append the in-text portion (skip if slice fell outside this node).
@@ -1986,26 +2163,95 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode) {
             uint32_t b_start = dom_text_utf16_to_utf8(cur, slice_start.offset);
             uint32_t b_end = dom_text_utf16_to_utf8(cur, slice_end.offset);
             if (b_end > b_start && cur->text) {
-                if (sep_pending) {
-                    strbuf_append_str_n(sb, "\n\n", 2);
-                    sep_pending = false;
+                // Block-transition contribution: emitting content inside a
+                // block different from the previous emission's block adds one
+                // newline. Only counts when prev_block was already set
+                // (otherwise this is the first emission, no prior boundary).
+                // Block-transition contribution: emitting content inside a
+                // block different from the previous emission's block adds one
+                // newline. Only counts when prev_block was already set
+                // (otherwise this is the first emission, no prior boundary).
+                if (prev_block && this_block != prev_block) {
+                    if (pending_nl < 2) pending_nl++;
                 }
-                strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
+                // Whitespace-streak contribution: a single ws-only
+                // intermediate adds one '\n'; two or more (typically the
+                // signature of a dropped element between them) contribute
+                // zero (treated as phantom skipped subtree).
+                if (ws_streak == 1) {
+                    if (pending_nl < 2) pending_nl++;
+                }
+                ws_streak = 0;
+                if (pending_nl > 0) {
+                    // Strip trailing space/tab from sb so the newline
+                    // butts directly against previous content
+                    // ("} \n" → "}\n").
+                    while (sb->length > 0 && sb->str &&
+                           (sb->str[sb->length - 1] == ' ' ||
+                            sb->str[sb->length - 1] == '\t')) {
+                        sb->length--;
+                        sb->str[sb->length] = '\0';
+                    }
+                    for (int i = 0; i < pending_nl; i++) {
+                        strbuf_append_char(sb, '\n');
+                    }
+                }
+                bool just_emitted_nl = (pending_nl > 0);
+                pending_nl = 0;
+                if (mode == DOM_STRINGIFY_RENDERED &&
+                    !text_preserves_whitespace(cur)) {
+                    bool buf_ends_in_ws = (sb->length > 0 && sb->str &&
+                                           sb->str[sb->length - 1] == ' ');
+                    // Suppress leading whitespace of new content when:
+                    //   - we just emitted '\n' separator(s), or
+                    //   - the previous non-skipped text flowed continuously
+                    //     into this one (no skipped text between).
+                    // If a skipped text node intervened (and we didn't emit
+                    // newlines), keep both flank whitespaces so the visible
+                    // gap is preserved (e.g. WPT toString-user-select-none
+                    // "start  end").
+                    bool suppress = just_emitted_nl ||
+                                    (buf_ends_in_ws && !prev_skipped);
+                    append_collapsed(sb, cur->text + b_start, b_end - b_start,
+                                     suppress);
+                } else {
+                    strbuf_append_str_n(sb, cur->text + b_start, b_end - b_start);
+                }
                 prev_block = this_block;
+                prev_skipped = false;
             }
         }
         // Stop once we've covered the end-position.
         if ((DomNode*)cur == r->end.node) break;
         if (dom_boundary_compare(&t_end, &r->end) != DOM_BOUNDARY_BEFORE) break;
-        cur = next_text_after((DomNode*)cur);
+        cur = next_text_after_any((DomNode*)cur);
     }
 
     // Build NUL-terminated copy.
     size_t len = sb->length;
-    char* out = (char*)malloc(len + 1);
+    size_t off = 0;
+    if (mode == DOM_STRINGIFY_RENDERED && sb->str) {
+        // Trim leading spaces/tabs/CR (preserve '\n' — leading newlines are
+        // the encoding of a leading visible block boundary, e.g. in WPT
+        // script-and-style-elements where the range begins with a text node
+        // whitespace gap before the first visible <style> block).
+        while (off < len) {
+            char c = sb->str[off];
+            if (c == ' ' || c == '\t' || c == '\r') off++;
+            else break;
+        }
+        // Trim trailing whitespace.
+        while (len > off) {
+            char c = sb->str[len - 1];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') len--;
+            else break;
+        }
+    }
+    size_t out_len = len - off;
+    char* out = (char*)malloc(out_len + 1);
     if (out) {
-        if (len > 0 && sb->str) memcpy(out, sb->str, len);
-        out[len] = '\0';
+        if (out_len > 0 && sb->str) memcpy(out, sb->str + off, out_len);
+        out[out_len] = '\0';
     }
     strbuf_free(sb);
     return out;
