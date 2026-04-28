@@ -16118,13 +16118,22 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 // For mutable (let/var) module vars in __main__, do NOT create a local variable.
                 // All access goes through js_get/set_module_var so functions can share state.
                 // const module vars keep their locals since they are never mutated by functions.
+                //
+                // BUT: only the TOP-LEVEL declaration is the module var. Nested let/const
+                // declarations (inside a block, for-init, etc.) shadow the outer name and
+                // must be local — otherwise `{ let x = ... }` would clobber the module-level
+                // `let x = ...`. Top-level main scope is scope_depth == 1 (after the entry
+                // jm_push_scope). For 'var', function-scoping means scope_depth > 1
+                // declarations are still hoisted to scope 1 (handled separately below), so
+                // the modvar path is still appropriate when var is hoisted to top.
                 bool is_modvar = false;
                 int modvar_index = -1;
                 if (mt->module_consts && var->kind != JS_VAR_CONST) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (mc && mc->const_type == MCONST_MODVAR &&
+                    bool at_top = (mt->scope_depth <= 1) || (var->kind == JS_VAR_VAR);
+                    if (mc && mc->const_type == MCONST_MODVAR && at_top &&
                         (mt->in_main || (mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body))) {
                         is_modvar = true;
                         modvar_index = (int)mc->int_val;
@@ -16471,10 +16480,14 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 }
 
                 // For const MCONST_MODVAR in __main__ or IIFE body, store local value to module var table
-                // so functions can access it via js_get_module_var
+                // so functions can access it via js_get_module_var.
+                // Same shadowing rule as the is_modvar branch above: only the top-level
+                // declaration writes to the module var slot. Nested let/const shadows
+                // must keep the module var slot intact.
                 bool in_modvar_scope = mt->in_main ||
                     (mt->current_fc && mt->current_fc->is_iife_body);
-                if (!is_modvar && in_modvar_scope && mt->module_consts) {
+                bool at_top_for_writeback = (mt->scope_depth <= 1) || (var->kind == JS_VAR_VAR);
+                if (!is_modvar && in_modvar_scope && at_top_for_writeback && mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
