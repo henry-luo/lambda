@@ -370,7 +370,9 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             // build_dom_tree_from_element returns nullptr (and does NOT create a
             // DomElement sibling) for:
             //   - comments ("!--") and DOCTYPE → stored as DomComment, not DomElement
-            //   - <script> elements → explicitly skipped (display:none, no layout role)
+            //   - <script> elements WITHOUT an inline display override → skipped
+            //     (display:none, no layout role); but a <script style="display:block">
+            //     IS kept so its text contributes to Selection.toString().
             //   - XML declarations (tag starting with "?") → not HTML elements
             // For all such cases we must NOT advance dom_child, because there is
             // no corresponding DomElement in the DOM sibling chain to consume.
@@ -382,8 +384,24 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
                     strcmp(ctn, "!--") == 0 ||
                     strcmp(ctn, "#comment") == 0 ||
                     str_ieq_const(ctn, ctn_len, "!DOCTYPE") ||
-                    str_ieq_const(ctn, ctn_len, "script") ||
                     (ctn_len > 0 && ctn[0] == '?');  // XML declarations
+                if (!is_dom_absent && str_ieq_const(ctn, ctn_len, "script")) {
+                    // Match dom_element.cpp's conditional skip.
+                    const char* sty = extract_element_attribute(html_child, "style", nullptr);
+                    bool has_display_override = false;
+                    if (sty) {
+                        const char* d = strstr(sty, "display");
+                        if (d) {
+                            const char* colon = strchr(d, ':');
+                            if (colon) {
+                                const char* v = colon + 1;
+                                while (*v == ' ' || *v == '\t') v++;
+                                if (strncmp(v, "none", 4) != 0) has_display_override = true;
+                            }
+                        }
+                    }
+                    if (!has_display_override) is_dom_absent = true;
+                }
                 if (is_dom_absent) {
                     continue;  // No corresponding DomElement — do NOT advance dom_child
                 }

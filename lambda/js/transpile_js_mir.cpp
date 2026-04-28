@@ -1361,6 +1361,30 @@ static void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) 
     }
 }
 
+// Walk a node tree collecting only `_js_this` / `_js_arguments` references.
+// Used to propagate lexical-this/arguments requirements from nested arrow
+// functions up to enclosing arrows. Stops at non-arrow function boundaries
+// (those introduce a fresh `this`/`arguments` binding) and only adds the
+// two pseudo-refs (no other identifiers) so it does not pollute the
+// closure-capture analysis with the nested arrow's own free variables.
+static void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs) {
+    if (!node) return;
+    // Use jm_collect_body_refs to walk the immediate body (it already
+    // covers all statement/expression node types, but stops at any nested
+    // function boundary). Capture into a temp set so we can extract only
+    // the two pseudo-refs we care about.
+    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_body_refs(node, tmp);
+    if (jm_name_set_has(tmp, "_js_this")) jm_name_set_add(refs, "_js_this");
+    if (jm_name_set_has(tmp, "_js_arguments")) jm_name_set_add(refs, "_js_arguments");
+    hashmap_free(tmp);
+    // jm_collect_body_refs already invokes us recursively for nested
+    // ARROW bodies (via the FUNCTION_*/ARROW case), so transitive arrows
+    // are covered. Non-arrow nested functions introduce their own
+    // this/arguments and are correctly skipped.
+}
+
 // Collect all identifier references in a function body (excluding nested function bodies)
 static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     if (!node) return;
@@ -1378,8 +1402,21 @@ static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     // Don't recurse into nested function bodies (they have their own scope)
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_DECLARATION: {
+        // Exception: arrow functions inherit `this`/`arguments` lexically.
+        // If a nested arrow (or chain of nested arrows) references `this`
+        // or `arguments`, the enclosing function (which may itself be an
+        // arrow) needs to propagate the capture upward. So when we see a
+        // nested ARROW, recurse into its body collecting only those two
+        // pseudo-refs (`_js_this`, `_js_arguments`); transparently pass
+        // through further nested arrows; STOP at non-arrow function nodes
+        // (those introduce a fresh `this`/`arguments` binding).
+        JsFunctionNode* nested = (JsFunctionNode*)node;
+        if (nested->is_arrow && nested->body) {
+            jm_collect_arrow_lexical_refs(nested->body, refs);
+        }
         break;
+    }
 
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;

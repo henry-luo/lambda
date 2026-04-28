@@ -15,6 +15,7 @@
 #include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
+#include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../mark_builder.hpp"
@@ -698,6 +699,46 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
 }
 extern "C" Item js_iframe_get_content_window(DomElement* iframe) {
     return js_iframe_get_content_document(iframe);
+}
+
+// ----------------------------------------------------------------------------
+// Iframe `load` event synthesis. After an <iframe> is inserted into the
+// document tree, the HTML spec requires firing a `load` event on it once
+// its (possibly blank) document is loaded. WPT tests like Document-open.html
+// gate their async work on `iframe.onload`. We schedule a setTimeout(0)
+// drain that fires `load` on each pending iframe in insertion order.
+// ----------------------------------------------------------------------------
+static __thread DomElement* s_pending_iframe_loads[16] = {};
+static __thread int s_pending_iframe_load_count = 0;
+static __thread bool s_iframe_load_drain_scheduled = false;
+
+static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
+    (void)this_val; (void)args; (void)argc;
+    int n = s_pending_iframe_load_count;
+    s_pending_iframe_load_count = 0;
+    s_iframe_load_drain_scheduled = false;
+    for (int i = 0; i < n; i++) {
+        DomElement* ifr = s_pending_iframe_loads[i];
+        s_pending_iframe_loads[i] = nullptr;
+        if (!ifr) continue;
+        Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
+        js_dom_dispatch_event(js_dom_wrap_element(ifr), ev);
+    }
+    return ItemNull;
+}
+
+static void _schedule_iframe_load(DomElement* iframe) {
+    if (!iframe) return;
+    for (int i = 0; i < s_pending_iframe_load_count; i++) {
+        if (s_pending_iframe_loads[i] == iframe) return;
+    }
+    if (s_pending_iframe_load_count >= 16) return;
+    s_pending_iframe_loads[s_pending_iframe_load_count++] = iframe;
+    if (!s_iframe_load_drain_scheduled) {
+        s_iframe_load_drain_scheduled = true;
+        Item cb = js_new_function((void*)_iframe_load_drain, 0);
+        js_setTimeout(cb, (Item){.item = i2it(0)});
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -3945,6 +3986,13 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         ((DomNode*)elem)->append_child(child_node);
         dom_post_insert((DomNode*)elem, child_node);
         js_dom_mutation_notify();
+        // If we just inserted an <iframe>, queue its synthetic load event.
+        if (child_node->is_element()) {
+            DomElement* ce = child_node->as_element();
+            if (ce->tag_name && strcmp(ce->tag_name, "iframe") == 0) {
+                _schedule_iframe_load(ce);
+            }
+        }
         return args[0];  // return the appended child
     }
 
