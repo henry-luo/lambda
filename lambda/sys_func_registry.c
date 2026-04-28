@@ -1403,6 +1403,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_create", FPTR(js_object_create)},
     {"js_object_define_property", FPTR(js_object_define_property)},
     {"js_object_define_properties", FPTR(js_object_define_properties)},
+    {"js_object_create_define_properties", FPTR(js_object_create_define_properties)},
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},

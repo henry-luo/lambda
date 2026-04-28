@@ -73,6 +73,15 @@ static bool is_generic_descriptor(Item desc) {
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
     if (obj.item == 0) return obj;
+    // Object.defineProperty performs [[DefineOwnProperty]], not [[Set]]. Any internal
+    // js_property_set calls in this function must bypass accessor dispatch (which
+    // would otherwise trigger inherited-setter logic and reject writes for objects
+    // whose prototype chain has an accessor with no setter).
+    extern bool js_skip_accessor_dispatch;
+    bool _prev_skip_accessor_dispatch = js_skip_accessor_dispatch;
+    js_skip_accessor_dispatch = true;
+    struct _RestoreSkip { bool* p; bool v; ~_RestoreSkip() { *p = v; } }
+        _restore_skip{&js_skip_accessor_dispatch, _prev_skip_accessor_dispatch};
     // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey)
     // Symbols stay as internal __sym_N keys; others coerced to string.
     TypeId name_type = get_type_id(name);
@@ -409,30 +418,31 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
             Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
             Item has_get = js_in(get_key, descriptor);
             Item getter = it2b(has_get) ? js_property_get(descriptor, get_key) : make_js_undefined();
-            if (get_type_id(getter) == LMD_TYPE_FUNC) {
+            // ES §6.2.5.4 ToPropertyDescriptor: explicit `get` key (any value) makes this an
+            // accessor descriptor. Record marker even when value is undefined so that the
+            // accessor identity is preserved and assignments via the setter dispatch path
+            // can detect a "no setter" accessor.
+            if (it2b(has_get)) {
+                if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
+                    // already validated above; defensive
+                    getter = make_js_undefined();
+                }
                 is_accessor = true;
                 snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
                 Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
                 js_defprop_set_marker(obj, gk, getter);
-            } else if (it2b(has_get) && already_accessor) {
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, gk, make_js_undefined());
             }
             Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
             Item has_set = js_in(set_key, descriptor);
             Item setter = it2b(has_set) ? js_property_get(descriptor, set_key) : make_js_undefined();
-            if (get_type_id(setter) == LMD_TYPE_FUNC) {
+            if (it2b(has_set)) {
+                if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
+                    setter = make_js_undefined();
+                }
                 is_accessor = true;
                 snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
                 js_defprop_set_marker(obj, sk, setter);
-            } else if (it2b(has_set) && already_accessor) {
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, sk, make_js_undefined());
             }
             if (is_accessor) {
                 snprintf(key_buf, sizeof(key_buf), "__nw_%.*s", (int)ns->len, ns->chars);
@@ -791,7 +801,10 @@ extern "C" Item js_date_new_from(Item value) {
     } else if (tid == LMD_TYPE_STRING) {
         // parse date string — try ISO 8601 format
         String* s = it2s(value);
-        if (s) {
+        // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
+        if (s && s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
+            store_time(NAN);
+        } else if (s) {
             struct tm tm = {};
             char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
             if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
@@ -1426,6 +1439,12 @@ extern "C" Item js_date_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
+    if (s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
@@ -4442,13 +4461,19 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // check getter property (__get___sym_NNN)
+            // check accessor markers (__get_ / __set_) — either presence means own accessor property
             char getter_key[64];
             snprintf(getter_key, sizeof(getter_key), "__get_%s", sym_buf);
             int gk_len = (int)strlen(getter_key);
             bool getter_found = false;
             js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
             if (getter_found) return (Item){.item = b2it(true)};
+            char setter_key[64];
+            snprintf(setter_key, sizeof(setter_key), "__set_%s", sym_buf);
+            int sk_len = (int)strlen(setter_key);
+            bool setter_found = false;
+            js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
+            if (setter_found) return (Item){.item = b2it(true)};
             // walk prototype chain
             Item proto = js_get_prototype(object);
             int depth = 0;
@@ -4462,6 +4487,9 @@ extern "C" Item js_in(Item key, Item object) {
                 bool gfound = false;
                 js_map_get_fast_ext(proto.map, getter_key, gk_len, &gfound);
                 if (gfound) return (Item){.item = b2it(true)};
+                bool sfound = false;
+                js_map_get_fast_ext(proto.map, setter_key, sk_len, &sfound);
+                if (sfound) return (Item){.item = b2it(true)};
                 proto = js_get_prototype(proto);
                 depth++;
             }
@@ -4496,7 +4524,7 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // 2. check getter property (__get_<key>)
+            // 2. check accessor markers (__get_<key> / __set_<key>) — setter-only accessors count too
             if (key_len < 200 && key_len > 0) {
                 char getter_key[256];
                 snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
@@ -4504,9 +4532,17 @@ extern "C" Item js_in(Item key, Item object) {
                 bool getter_found = false;
                 js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
                 if (getter_found) return (Item){.item = b2it(true)};
+                char setter_key[256];
+                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
+                int sk_len = key_len + 6;
+                bool setter_found = false;
+                js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
+                if (setter_found) return (Item){.item = b2it(true)};
             }
-            // 3. walk prototype chain (data properties + getters)
-            Item proto = js_get_prototype(object);
+            // 3. walk prototype chain (data properties + accessors).
+            // Use js_get_prototype_of so plain MAPs without explicit __proto__
+            // still walk the implicit Object.prototype chain.
+            Item proto = js_get_prototype_of(object);
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                 // if prototype is a proxy, delegate to its [[HasProperty]] trap
@@ -4523,8 +4559,14 @@ extern "C" Item js_in(Item key, Item object) {
                     bool getter_found = false;
                     js_map_get_fast_ext(proto.map, getter_key, gk_len, &getter_found);
                     if (getter_found) return (Item){.item = b2it(true)};
+                    char setter_key[256];
+                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
+                    int sk_len = key_len + 6;
+                    bool setter_found = false;
+                    js_map_get_fast_ext(proto.map, setter_key, sk_len, &setter_found);
+                    if (setter_found) return (Item){.item = b2it(true)};
                 }
-                proto = js_get_prototype(proto);
+                proto = js_get_prototype_of(proto);
                 depth++;
             }
         } else {
@@ -4622,6 +4664,40 @@ extern "C" Item js_in(Item key, Item object) {
             }
             return (Item){.item = b2it(false)};
         }
+        // Non-numeric string key: check companion-map own properties, then walk
+        // Array.prototype chain (e.g. Array.prototype.value set by user code).
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0) {
+                if (arr->extra != 0) {
+                    Map* pm = (Map*)(uintptr_t)arr->extra;
+                    bool pm_found = false;
+                    Item pm_val = js_map_get_fast_ext(pm, sk->chars, (int)sk->len, &pm_found);
+                    if (pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+                    if (sk->len < 200) {
+                        char gk[256];
+                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)sk->len, sk->chars);
+                        bool gfound = false;
+                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gfound);
+                        if (gfound) return (Item){.item = b2it(true)};
+                        char ssk[256];
+                        snprintf(ssk, sizeof(ssk), "__set_%.*s", (int)sk->len, sk->chars);
+                        bool sfound = false;
+                        js_map_get_fast_ext(pm, ssk, (int)strlen(ssk), &sfound);
+                        if (sfound) return (Item){.item = b2it(true)};
+                    }
+                }
+                Item proto = js_get_prototype_of(object);
+                int depth = 0;
+                while (proto.item != ItemNull.item && depth < 32) {
+                    Item result = js_in(key, proto);
+                    if (result.item == ITEM_ERROR) return result;
+                    if (it2b(result)) return (Item){.item = b2it(true)};
+                    proto = js_get_prototype_of(proto);
+                    depth++;
+                }
+            }
+        }
         return (Item){.item = b2it(false)};
     }
     if (type == LMD_TYPE_FUNC) {
@@ -4631,8 +4707,10 @@ extern "C" Item js_in(Item key, Item object) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk) {
-                // Walk prototype chain (Function.prototype → Object.prototype)
-                Item proto = js_get_prototype(object);
+                // Walk prototype chain (Function.prototype → Object.prototype).
+                // Use js_get_prototype_of (not js_get_prototype) so the implicit
+                // Function.prototype is returned even when no custom __proto__ is set.
+                Item proto = js_get_prototype_of(object);
                 int depth = 0;
                 while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                     bool found = false;
@@ -4644,8 +4722,13 @@ extern "C" Item js_in(Item key, Item object) {
                         bool gfound = false;
                         js_map_get_fast_ext(proto.map, gk, (int)strlen(gk), &gfound);
                         if (gfound) return (Item){.item = b2it(true)};
+                        char skk[256];
+                        snprintf(skk, sizeof(skk), "__set_%.*s", (int)sk->len, sk->chars);
+                        bool sfound = false;
+                        js_map_get_fast_ext(proto.map, skk, (int)strlen(skk), &sfound);
+                        if (sfound) return (Item){.item = b2it(true)};
                     }
-                    proto = js_get_prototype(proto);
+                    proto = js_get_prototype_of(proto);
                     depth++;
                 }
                 // Check builtin methods (call, apply, bind, toString, etc.)
@@ -5513,6 +5596,33 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             if (fn->properties_map.item != 0) {
                 bool own = false;
                 Item val = js_map_get_fast_ext(fn->properties_map.map, name_str->chars, name_str->len, &own);
+                // If no data property, check for accessor (getter/setter)
+                if (!own) {
+                    Map* pm = fn->properties_map.map;
+                    char acc_buf[256];
+                    bool g_own = false, s_own = false;
+                    snprintf(acc_buf, sizeof(acc_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
+                    Item getter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &g_own);
+                    snprintf(acc_buf, sizeof(acc_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
+                    Item setter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &s_own);
+                    if (g_own || s_own) {
+                        Item desc = js_new_object();
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                                        g_own ? getter_val : make_js_undefined());
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                                        s_own ? setter_val : make_js_undefined());
+                        bool nc_found = false, ne_found = false;
+                        snprintf(acc_buf, sizeof(acc_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                        Item nc_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &nc_found);
+                        snprintf(acc_buf, sizeof(acc_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                        Item ne_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &ne_found);
+                        bool is_enumerable = !(ne_found && js_is_truthy(ne_val));
+                        bool is_configurable = !(nc_found && js_is_truthy(nc_val));
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+                        return desc;
+                    }
+                }
                 if (own) {
                     if (val.item == JS_DELETED_SENTINEL_VAL) {
                         // v91 mirror: for "prototype" key, sentinel means "fall through to
@@ -6043,7 +6153,12 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
 
 extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (!js_require_object_type(obj, "defineProperties")) return ItemNull;
+    // ES spec §19.1.2.3 step 1: Let props be ? ToObject(Properties).
+    // ToObject throws TypeError on null/undefined.
     TypeId pt = get_type_id(props);
+    if (pt == LMD_TYPE_NULL || pt == LMD_TYPE_UNDEFINED) {
+        return js_throw_type_error("Cannot convert undefined or null to object");
+    }
     if (obj.item == 0 || (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY)) return obj;
     Item keys = js_object_keys(props);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
@@ -6054,6 +6169,17 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
         if (js_check_exception()) break; // stop on first error (ES2020 §19.1.2.3.1)
     }
     return obj;
+}
+
+// Wrapper for Object.create(O, Properties): per ES §19.1.2.2 step 4, only call
+// ObjectDefineProperties when Properties is not undefined. Object.defineProperties
+// itself throws TypeError on undefined/null, but Object.create only allows undefined.
+// Per ES §19.1.2.2 step 3: "If Properties is not undefined, return ? ObjectDefineProperties..."
+// — null still flows through and ObjectDefineProperties step 1 ToObject throws TypeError.
+extern "C" Item js_object_create_define_properties(Item obj, Item props) {
+    TypeId pt = get_type_id(props);
+    if (pt == LMD_TYPE_UNDEFINED) return obj;
+    return js_object_define_properties(obj, props);
 }
 
 // =============================================================================
@@ -8300,6 +8426,22 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                     return (Item){.item = b2it(true)};
                 }
             }
+            // Accessor-only properties: defineProperty(fn, name, {get,set}) writes
+            // __get_<name>/__set_<name> markers without a data slot. Treat the
+            // presence of a non-tombstoned accessor marker as own.
+            if (ks->len > 0 && ks->len < 200) {
+                char accessor_key[256];
+                snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
+                bool has_get = false;
+                Item gv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
+                                              (int)strlen(accessor_key), &has_get);
+                if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+                snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
+                bool has_set = false;
+                Item sv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
+                                              (int)strlen(accessor_key), &has_set);
+                if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+            }
         }
         // built-in own properties (not overridden/deleted)
         if ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
@@ -8374,7 +8516,22 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(false)};
     }
-    if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
+    if (val.item == JS_DELETED_SENTINEL_VAL) {
+        // data slot tombstoned — but an accessor marker may have replaced it
+        // (defineProperty(map, key, {get,set}) sentinels the existing data slot).
+        if (ks->len > 0 && ks->len < 200) {
+            char accessor_key[256];
+            snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
+            bool has_get = false;
+            Item gv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_get);
+            if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+            snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
+            bool has_set = false;
+            Item sv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_set);
+            if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
+    }
     return (Item){.item = b2it(true)};
 }
 
@@ -9467,6 +9624,16 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
         key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
     }
+    // Numeric keys (delete obj[1]) must be coerced to canonical decimal string so the
+    // accessor / non-configurable / non-writable marker tombstone code below can match.
+    if (get_type_id(key) == LMD_TYPE_INT) {
+        int64_t iv = it2i(key);
+        if (iv >= 0 && iv < (int64_t)1e15) {
+            char buf[32];
+            int n = snprintf(buf, sizeof(buf), "%lld", (long long)iv);
+            key = (Item){.item = s2it(heap_create_name(buf, n))};
+        }
+    }
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
     extern int g_array_sym_iter_ever_set;
     if (!g_array_sym_iter_ever_set && get_type_id(key) == LMD_TYPE_STRING) {
@@ -9551,20 +9718,27 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 Item ne_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
                 fn_map_set(obj, ne_key, false_val);
             }
-            // Clear getter/setter
+            // Clear getter/setter markers via js_property_set with the deleted sentinel.
+            // Using js_property_set ensures the slot type can be rebuilt (FUNC→INT) even
+            // when the original marker was a function — fn_map_set may reject that
+            // narrowing. Writing the sentinel (rather than `false_val`) lets all readers
+            // (js_has_own_property, js_in, accessor dispatch) treat the marker as absent
+            // via the existing JS_DELETED_SENTINEL_VAL probe. The `__get_/__set_` key
+            // prefix already bypasses accessor dispatch in js_property_set.
+            Item del_sentinel = (Item){.item = JS_DELETED_SENTINEL_VAL};
             snprintf(attr_buf, sizeof(attr_buf), "__get_%.*s", (int)str_key->len, str_key->chars);
             bool get_found = false;
             js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &get_found);
             if (get_found) {
                 Item get_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                fn_map_set(obj, get_key, false_val);
+                js_property_set(obj, get_key, del_sentinel);
             }
             snprintf(attr_buf, sizeof(attr_buf), "__set_%.*s", (int)str_key->len, str_key->chars);
             bool set_found = false;
             js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &set_found);
             if (set_found) {
                 Item set_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                fn_map_set(obj, set_key, false_val);
+                js_property_set(obj, set_key, del_sentinel);
             }
         }
     }
@@ -10834,7 +11008,15 @@ enum JsConstructorId {
 static Item js_constructor_cache[JS_CTOR_MAX];
 static bool js_ctor_cache_init = false;
 
+// Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
+extern "C" bool js_proto_snapshot_is_valid();
+
 void js_ctor_cache_reset() {
+    // If snapshot is valid, the harness preamble has already cached references to
+    // the constructor Items in its module-vars. Zeroing the cache would force
+    // re-creation of NEW JsCtor objects on next access, breaking identity with
+    // the harness-cached references. Skip the reset; snapshot/restore handles state.
+    if (js_proto_snapshot_is_valid()) return;
     memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
     js_ctor_cache_init = false;
 }
@@ -10985,39 +11167,161 @@ struct JsCtor {
 };
 
 // Reset constructor prototype objects between batch tests.
-// Tests may mutate built-in prototypes (e.g., Object.prototype.__proto__,
-// Error.prototype.toString, Function.prototype.prototype, Array.prototype[0]).
-// Clearing the prototype field forces lazy re-creation of a fresh prototype
-// on next access, while keeping the constructor struct itself alive (pool-allocated).
+//
+// Strategy: snapshot+restore (preserves Map* identity across batch tests).
+//
+// The harness preamble caches references like `var TypedArray = Object.getPrototypeOf(Int8Array)`.
+// If we destroy these prototypes between tests and lazily recreate them, the harness's
+// cached references diverge from fresh `Int8Array.prototype` lookups → identity asserts fail
+// downstream (~1400 typed-array test failures).
+//
+// Instead, on the first reset (post-preamble), we take a deep snapshot of each ctor's
+// prototype Map contents (raw bytes of data buffer + type/data/cap pointers).  On subsequent
+// resets we restore that snapshot in-place, preserving the Map* address.  Tests that mutate
+// built-in prototypes are isolated from each other.
 static void js_typed_array_base_reset(); // forward declaration
-extern "C" void js_reset_constructor_prototypes() {
-    if (!js_ctor_cache_init) return;
-    for (int i = 0; i < JS_CTOR_MAX; i++) {
-        if (js_constructor_cache[i].item == 0 || js_constructor_cache[i].item == ItemNull.item)
-            continue;
-        JsCtor* ctor = (JsCtor*)js_constructor_cache[i].function;
-        if (ctor) {
-            ctor->prototype = ItemNull;
-        }
-    }
-    // Clear globalThis so constructor .prototype references are refreshed on next access.
-    // The old globalThis holds constructors whose .prototype fields now point to stale
-    // (freed or mutated) prototype objects.
-    js_global_this_obj = (Item){0};
-    // Reset %TypedArray% intrinsic so it's re-created fresh
-    js_typed_array_base_reset();
-}
 
 // %TypedArray% intrinsic: shared base constructor for all TypedArray types.
-// Object.getPrototypeOf(Int8Array) === %TypedArray%
-// Object.getPrototypeOf(Int8Array.prototype) === %TypedArray%.prototype
+// (Forward declarations moved up so the snapshot code below can reference them.)
 static Item js_typed_array_base = {0};
 static Item js_typed_array_base_proto = {0};
-
-// Per-type prototypes: Int8Array.prototype, Uint8Array.prototype, etc.
-// Indexed by JsTypedArrayType enum values (0-8).
 #define JS_TYPED_ARRAY_TYPE_COUNT 11
 static Item js_typed_array_per_type_proto[JS_TYPED_ARRAY_TYPE_COUNT] = {{0}};
+
+// Map snapshot: captures all mutable Map fields plus a copy of its packed data buffer.
+// On restore, the Map's address is preserved; only its contents are reset.
+struct MapSnapshot {
+    Map*     m;          // identity (NULL = no snapshot)
+    void*    type;       // TypeMap* at preamble
+    void*    data;       // data buffer pointer at preamble (still pool-allocated)
+    int      data_cap;   // data buffer capacity at preamble
+    uint8_t  flags;      // map_kind etc.
+    int      byte_size;  // TypeMap->byte_size at preamble
+    void*    bytes;      // copy of *data (size = byte_size); NULL if byte_size==0
+};
+
+struct CtorSnapshot {
+    JsCtor* ctor;
+    Item    prototype;        // Item value (preserved)
+    Item    properties_map;   // Item value (preserved)
+    MapSnapshot proto_map;    // contents snapshot of prototype Map (if it is a Map)
+    MapSnapshot props_map;    // contents snapshot of properties_map Map (if it is a Map)
+    bool    valid;
+};
+
+static CtorSnapshot js_ctor_snapshots[JS_CTOR_MAX];
+static MapSnapshot  js_typed_array_base_proto_snap;
+static Item         js_typed_array_base_snap = {0};
+static Item         js_typed_array_base_proto_item_snap = {0};
+static Item         js_typed_array_per_type_proto_snap[JS_TYPED_ARRAY_TYPE_COUNT];
+static MapSnapshot  js_typed_array_per_type_proto_map_snap[JS_TYPED_ARRAY_TYPE_COUNT];
+static bool         js_proto_snapshot_valid = false;
+
+static void js_proto_snapshot_map(MapSnapshot* snap, Map* m) {
+    if (!m) { snap->m = NULL; return; }
+    TypeMap* tm = (TypeMap*)m->type;
+    int byte_size = tm ? (int)tm->byte_size : 0;
+    snap->m = m;
+    snap->type = m->type;
+    snap->data = m->data;
+    snap->data_cap = m->data_cap;
+    snap->flags = m->flags;
+    snap->byte_size = byte_size;
+    snap->bytes = NULL;
+    if (byte_size > 0 && m->data) {
+        snap->bytes = mem_alloc(byte_size, MEM_CAT_JS_RUNTIME);
+        memcpy(snap->bytes, m->data, byte_size);
+    }
+}
+
+static void js_proto_restore_map(const MapSnapshot* snap) {
+    if (!snap->m) return;
+    Map* m = snap->m;
+    m->type = snap->type;
+    m->data = snap->data;
+    m->data_cap = snap->data_cap;
+    m->flags = snap->flags;
+    if (snap->byte_size > 0 && snap->data && snap->bytes) {
+        memcpy(snap->data, snap->bytes, snap->byte_size);
+    }
+}
+
+static void js_proto_snapshot_take_locked() {
+    js_proto_snapshot_valid = true;
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        CtorSnapshot* s = &js_ctor_snapshots[i];
+        s->valid = false;
+        s->proto_map.m = NULL;
+        s->props_map.m = NULL;
+        Item ci = js_constructor_cache[i];
+        if (ci.item == 0 || ci.item == ItemNull.item) continue;
+        JsCtor* ctor = (JsCtor*)ci.function;
+        if (!ctor) continue;
+        s->ctor = ctor;
+        s->prototype = ctor->prototype;
+        s->properties_map = ctor->properties_map;
+        s->valid = true;
+        if (ctor->prototype.item != 0 && get_type_id(ctor->prototype) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&s->proto_map, ctor->prototype.map);
+        }
+        if (ctor->properties_map.item != 0 && get_type_id(ctor->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&s->props_map, ctor->properties_map.map);
+        }
+    }
+    // %TypedArray% intrinsic + its prototype + per-type prototypes
+    js_typed_array_base_snap = js_typed_array_base;
+    js_typed_array_base_proto_item_snap = js_typed_array_base_proto;
+    js_typed_array_base_proto_snap.m = NULL;
+    if (js_typed_array_base_proto.item != 0 && get_type_id(js_typed_array_base_proto) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&js_typed_array_base_proto_snap, js_typed_array_base_proto.map);
+    }
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        Item p = js_typed_array_per_type_proto[i];
+        js_typed_array_per_type_proto_snap[i] = p;
+        js_typed_array_per_type_proto_map_snap[i].m = NULL;
+        if (p.item != 0 && get_type_id(p) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&js_typed_array_per_type_proto_map_snap[i], p.map);
+        }
+    }
+}
+
+static void js_proto_snapshot_restore_locked() {
+    for (int i = 0; i < JS_CTOR_MAX; i++) {
+        CtorSnapshot* s = &js_ctor_snapshots[i];
+        if (!s->valid) continue;
+        JsCtor* ctor = s->ctor;
+        ctor->prototype = s->prototype;
+        ctor->properties_map = s->properties_map;
+        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
+        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+    }
+    js_typed_array_base = js_typed_array_base_snap;
+    js_typed_array_base_proto = js_typed_array_base_proto_item_snap;
+    if (js_typed_array_base_proto_snap.m) js_proto_restore_map(&js_typed_array_base_proto_snap);
+    for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
+        js_typed_array_per_type_proto[i] = js_typed_array_per_type_proto_snap[i];
+        if (js_typed_array_per_type_proto_map_snap[i].m)
+            js_proto_restore_map(&js_typed_array_per_type_proto_map_snap[i]);
+    }
+}
+
+extern "C" void js_reset_constructor_prototypes() {
+    if (!js_ctor_cache_init) return;
+    if (!js_proto_snapshot_valid) {
+        // First call after preamble: capture snapshot. State is already correct.
+        js_proto_snapshot_take_locked();
+        // Still clear globalThis so it's regenerated against the snapshotted prototypes.
+        js_global_this_obj = (Item){0};
+        return;
+    }
+    // Subsequent calls: restore snapshot (preserves Map* identity).
+    js_proto_snapshot_restore_locked();
+    js_global_this_obj = (Item){0};
+}
+
+extern "C" bool js_proto_snapshot_is_valid() {
+    return js_proto_snapshot_valid;
+}
 
 // Get the per-type prototype for a given typed array element type.
 // Creates it lazily if needed.
