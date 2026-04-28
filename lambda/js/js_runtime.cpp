@@ -2540,15 +2540,31 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
     }
 
     // ToPrimitive for objects/arrays/functions (ES spec §7.2.14 Abstract Relational Comparison, hint "number")
-    if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
-        left = js_op_to_primitive(left, 1);
-        // ES spec: if left (first source operand for < and >=) threw during ToPrimitive, stop before right
-        if (leftFirst && js_exception_pending) return ItemNull;
-        left_type = get_type_id(left);
-    }
-    if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
-        right = js_op_to_primitive(right, 1);
-        right_type = get_type_id(right);
+    // ES spec: convert source operands in left-to-right order. The `leftFirst` flag indicates
+    // whether `left` is the syntactic-left source operand. When false (e.g. `>` and `<=`),
+    // the right parameter is the syntactic-left source operand and must be converted first.
+    if (leftFirst) {
+        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
+            left = js_op_to_primitive(left, 1);
+            if (js_exception_pending) return ItemNull;
+            left_type = get_type_id(left);
+        }
+        if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
+            right = js_op_to_primitive(right, 1);
+            if (js_exception_pending) return ItemNull;
+            right_type = get_type_id(right);
+        }
+    } else {
+        if (right_type == LMD_TYPE_MAP || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC || right_type == LMD_TYPE_ELEMENT) {
+            right = js_op_to_primitive(right, 1);
+            if (js_exception_pending) return ItemNull;
+            right_type = get_type_id(right);
+        }
+        if (left_type == LMD_TYPE_MAP || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC || left_type == LMD_TYPE_ELEMENT) {
+            left = js_op_to_primitive(left, 1);
+            if (js_exception_pending) return ItemNull;
+            left_type = get_type_id(left);
+        }
     }
     // Propagate any pending exception before performing comparison
     if (js_exception_pending) return ItemNull;
@@ -3310,6 +3326,7 @@ enum JsBuiltinId {
     JS_BUILTIN_DATE_TO_STRING,
     JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING,
     JS_BUILTIN_DATE_VALUE_OF,
+    JS_BUILTIN_DATE_TO_PRIMITIVE,
     JS_BUILTIN_DATE_GET_DAY,
     JS_BUILTIN_DATE_GET_UTC_FULL_YEAR,
     JS_BUILTIN_DATE_GET_UTC_MONTH,
@@ -5582,6 +5599,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 return js_get_or_create_builtin(date_methods[i].id, date_methods[i].name, date_methods[i].pc);
                             }
                         }
+                        // Symbol.toPrimitive (stored as __sym_2)
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
+                            return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+                        }
                     } else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) {
                         // v46: RegExp prototype methods
                         if (str_key->len == 4 && strncmp(str_key->chars, "exec", 4) == 0)
@@ -6260,8 +6281,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 js_mark_non_enumerable(fn->prototype, mk);
                             }
                             // Symbol.toPrimitive
-                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_5", 7))};
-                            Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_VALUE_OF, "[Symbol.toPrimitive]", 1);
+                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+                            Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                             js_property_set(fn->prototype, tp_key, tp_fn);
                             js_mark_non_enumerable(fn->prototype, tp_key);
                         }
@@ -11042,6 +11063,45 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_date_setter(this_val, 42, undef, undef, undef, undef);
     case JS_BUILTIN_DATE_VALUE_OF:
         return js_date_setter(this_val, 43, undef, undef, undef, undef);
+    case JS_BUILTIN_DATE_TO_PRIMITIVE: {
+        // ES §21.4.4.45 Date.prototype[@@toPrimitive](hint)
+        // hint "string"/"default" → OrdinaryToPrimitive(this, "string")
+        // hint "number" → OrdinaryToPrimitive(this, "number")
+        if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ELEMENT) {
+            js_throw_type_error("Date.prototype[Symbol.toPrimitive] called on non-object");
+            return ItemNull;
+        }
+        TypeId ht = get_type_id(arg0);
+        if (ht != LMD_TYPE_STRING) {
+            js_throw_type_error("Date.prototype[Symbol.toPrimitive]: hint must be a string");
+            return ItemNull;
+        }
+        String* hs = it2s(arg0);
+        int try_string;
+        if (hs->len == 6 && memcmp(hs->chars, "string", 6) == 0) try_string = 1;
+        else if (hs->len == 7 && memcmp(hs->chars, "default", 7) == 0) try_string = 1;
+        else if (hs->len == 6 && memcmp(hs->chars, "number", 6) == 0) try_string = 0;
+        else { js_throw_type_error("Date.prototype[Symbol.toPrimitive]: invalid hint"); return ItemNull; }
+        // OrdinaryToPrimitive: invoke toString/valueOf in hint-determined order.
+        // Call them directly (bypassing @@toPrimitive lookup) to avoid re-entry into this builtin.
+        const char* methods[2];
+        if (try_string) { methods[0] = "toString"; methods[1] = "valueOf"; }
+        else            { methods[0] = "valueOf";  methods[1] = "toString"; }
+        for (int i = 0; i < 2; i++) {
+            Item key = (Item){.item = s2it(heap_create_name(methods[i]))};
+            Item fn = js_property_get(this_val, key);
+            if (js_exception_pending) return ItemNull;
+            if (fn.item == ItemNull.item || get_type_id(fn) != LMD_TYPE_FUNC) continue;
+            Item result = js_call_function(fn, this_val, NULL, 0);
+            if (js_exception_pending) return ItemNull;
+            TypeId rt = get_type_id(result);
+            if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_ELEMENT && rt != LMD_TYPE_FUNC) {
+                return result;
+            }
+        }
+        js_throw_type_error("Cannot convert object to primitive value");
+        return ItemNull;
+    }
     case JS_BUILTIN_DATE_TO_JSON:
         return js_date_setter(this_val, 44, undef, undef, undef, undef);
     case JS_BUILTIN_DATE_TO_UTC_STRING:
@@ -12858,6 +12918,12 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             {"\\P{ASCII}",         "[^\\x{00}-\\x{7F}]"},
             {"\\p{Any}",           "[\\x{00}-\\x{10FFFF}]"},
             {"\\P{Any}",           "[^\\x{00}-\\x{10FFFF}]"},
+            // \p{Unknown} / \p{Zzzz}: Script value for unassigned code points.
+            // RE2 has no native category for this; approximate with empty match.
+            {"\\p{Unknown}",       "[^\\x{00}-\\x{10FFFF}]"},
+            {"\\P{Unknown}",       "[\\x{00}-\\x{10FFFF}]"},
+            {"\\p{Zzzz}",          "[^\\x{00}-\\x{10FFFF}]"},
+            {"\\P{Zzzz}",          "[\\x{00}-\\x{10FFFF}]"},
             {"\\p{LC}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
             {"\\P{LC}",            "[^\\p{Lu}\\p{Ll}\\p{Lt}]"},
             {"\\p{L&}",            "[\\p{Lu}\\p{Ll}\\p{Lt}]"},
@@ -12882,7 +12948,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         }
         // \p{Script=X} → \p{X} and \p{General_Category=X} → \p{X}
         // RE2 uses short form directly: \p{Latin}, \p{L}, etc.
-        for (const char* prefix : {"Script=", "General_Category=", "gc=", "sc="}) {
+        for (const char* prefix : {"Script_Extensions=", "scx=", "Script=", "General_Category=", "gc=", "sc="}) {
             int prefix_len = (int)strlen(prefix);
             for (const char* pp : {"\\p{", "\\P{"}) {
                 size_t upos = 0;
@@ -12895,6 +12961,24 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                         upos++;
                     }
                 }
+            }
+        }
+        // After prefix-strip, re-apply Unknown/Zzzz expansion (e.g.,
+        // \p{Script_Extensions=Unknown} -> \p{Unknown} -> empty match).
+        // RE2 has no native category for unassigned/Unknown script.
+        static const struct { const char* from; const char* to; } unknown_expansions[] = {
+            {"\\p{Unknown}", "[^\\x{00}-\\x{10FFFF}]"},
+            {"\\P{Unknown}", "[\\x{00}-\\x{10FFFF}]"},
+            {"\\p{Zzzz}",    "[^\\x{00}-\\x{10FFFF}]"},
+            {"\\P{Zzzz}",    "[\\x{00}-\\x{10FFFF}]"},
+        };
+        for (int ue = 0; ue < (int)(sizeof(unknown_expansions)/sizeof(unknown_expansions[0])); ue++) {
+            int from_len = (int)strlen(unknown_expansions[ue].from);
+            int to_len = (int)strlen(unknown_expansions[ue].to);
+            size_t upos = 0;
+            while ((upos = processed_pattern.find(unknown_expansions[ue].from, upos)) != std::string::npos) {
+                processed_pattern.replace(upos, from_len, unknown_expansions[ue].to);
+                upos += to_len;
             }
         }
     }

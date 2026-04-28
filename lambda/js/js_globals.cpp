@@ -801,7 +801,10 @@ extern "C" Item js_date_new_from(Item value) {
     } else if (tid == LMD_TYPE_STRING) {
         // parse date string — try ISO 8601 format
         String* s = it2s(value);
-        if (s) {
+        // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
+        if (s && s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
+            store_time(NAN);
+        } else if (s) {
             struct tm tm = {};
             char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
             if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
@@ -1436,6 +1439,12 @@ extern "C" Item js_date_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
+        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *fp = NAN;
+        return (Item){.item = d2it(fp)};
+    }
+    // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
+    if (s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
