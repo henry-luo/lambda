@@ -20,6 +20,7 @@
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
+#include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
 #include "../lib/hashmap.h"           // hashmap for event handler registry lookup
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -1104,6 +1105,104 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
     return false;
 }
 
+/**
+ * §7 unification (U-0): walk a layout View up to the nearest DOM element node.
+ * Layout views are themselves DomNode-derived, but text/anonymous views map
+ * to their containing element for event-target purposes.
+ */
+static DomElement* radiant_view_to_dom_element(View* v) {
+    DomNode* node = (DomNode*)v;
+    int depth = 0;
+    while (node && depth < 200) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            return (DomElement*)node;
+        }
+        node = node->parent;
+        depth++;
+    }
+    return nullptr;
+}
+
+// Internal: enter/exit the JS EvalContext that DOM event callbacks run under.
+// Both factories AND dispatch must run between enter/exit because Item creation
+// allocates from the JS runtime's GC nursery.
+typedef struct {
+    EvalContext  handler_ctx;
+    EvalContext* saved_ctx;
+    Context*     saved_input_ctx;
+    DomDocument* doc;
+    ArrayList*   tmp_type_list;
+    bool         active;
+} JsCtxScope;
+
+static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
+    s->active = false;
+    s->tmp_type_list = nullptr;
+    s->doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+    if (!s->doc || !s->doc->js_mir_ctx || !s->doc->js_runtime_heap) return false;
+    memset(&s->handler_ctx, 0, sizeof(s->handler_ctx));
+    Heap* heap = (Heap*)s->doc->js_runtime_heap;
+    s->handler_ctx.heap = heap;
+    s->handler_ctx.nursery = (gc_nursery_t*)s->doc->js_runtime_nursery;
+    s->handler_ctx.name_pool = (NamePool*)s->doc->js_runtime_name_pool;
+    s->handler_ctx.pool = heap->pool;
+    // Allocate a per-dispatch type_list. C-level `js_create_event` callers
+    // need a non-NULL type_list so map_rebuild_for_type_change can append
+    // freshly-created TypeMaps. Compiled JS handlers swap to their own
+    // module type_list via the `_with_tl` wrappers and restore on return,
+    // so the per-dispatch list is only used by our C-side construction.
+    s->tmp_type_list = arraylist_new(16);
+    s->handler_ctx.type_list = s->tmp_type_list;
+    s->saved_ctx = context;
+    s->saved_input_ctx = input_context;
+    context = &s->handler_ctx;
+    input_context = nullptr;
+    js_dom_set_document(s->doc);
+    s->doc->js_mutation_count = 0;
+    s->active = true;
+    return true;
+}
+
+static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
+                                std::chrono::high_resolution_clock::time_point t_start)
+{
+    if (!s->active) return;
+    auto t_handler = std::chrono::high_resolution_clock::now();
+    context = s->saved_ctx;
+    input_context = s->saved_input_ctx;
+    if (s->tmp_type_list) {
+        arraylist_free(s->tmp_type_list);
+        s->tmp_type_list = nullptr;
+    }
+    post_html_handler_rebuild(evcon, t_start, t_handler);
+    s->active = false;
+}
+
+/**
+ * §7 unification (U-1): dispatch a "mouseover" / "mouseout" / generic mouse
+ * event through the JS EventTarget pipeline at the given target view. Returns
+ * true if default action should be prevented.
+ */
+static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
+                                         const char* type, int client_x, int client_y,
+                                         int button, int buttons,
+                                         bool ctrl, bool shift, bool alt, bool meta,
+                                         int detail)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item ev = js_create_native_mouse_event(type, client_x, client_y,
+        button, buttons, ctrl, shift, alt, meta, detail, ItemNull);
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    bool prevented = js_event_is_default_prevented(ev);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    return prevented;
+}
+
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
@@ -1200,7 +1299,17 @@ void update_hover_state(EventContext* evcon, View* new_target) {
         log_debug("update_hover_state: set hover on %p", new_target);
 
         // Dispatch HTML onmouseover handler if registered
-        dispatch_html_event_handler(evcon, new_target, "mouseover");
+        bool inline_fired = dispatch_html_event_handler(evcon, new_target, "mouseover");
+
+        // §7 unification (U-1): also fire addEventListener listeners through the
+        // spec-compliant JS dispatcher. Skip if an inline `on*` handler already
+        // ran — the post-handler rebuild may have invalidated transient JS state.
+        // U-6 will collapse both paths into a single dispatcher.
+        if (!inline_fired) {
+            radiant_dispatch_mouse_event(evcon, new_target, "mouseover",
+                evcon->event.mouse_position.x, evcon->event.mouse_position.y,
+                0, 0, false, false, false, false, 0);
+        }
     }
 
     state->hover_target = new_target;

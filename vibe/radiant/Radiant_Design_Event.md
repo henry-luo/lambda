@@ -1,15 +1,65 @@
 # Radiant DOM Events — Design Proposal for Full WPT Conformance
 
-**Status:** Proposal · **Owner:** Radiant DOM/JS team
-**Scope:** `ref/wpt/dom/events/` (99 test files) — bring Lambda's
-DOM Event / EventTarget / Event-subclass implementation into full
-WHATWG DOM Standard conformance, mirroring the Phase-by-Phase
+**Status:** Phase 1 + most of Phase 2 landed · **Owner:** Radiant DOM/JS team
+**Scope:** `ref/wpt/dom/events/` (95 discovered test files) — bring
+Lambda's DOM Event / EventTarget / Event-subclass implementation into
+full WHATWG DOM Standard conformance, mirroring the Phase-by-Phase
 clipboard work tracked in
 [Radiant_Clipboard_WPT_Status.md](Radiant_Clipboard_WPT_Status.md).
 
 A new GTest harness
 [test/wpt/test_wpt_dom_events_gtest.cpp](../../test/wpt/test_wpt_dom_events_gtest.cpp)
-is added to drive the WPT corpus and gate progress.
+drives the WPT corpus and gates progress.
+
+## Current status (April 2026)
+
+**WPT DOM events:** **43 PASSED / 52 SKIPPED / 0 FAILED** (out of
+95 discovered tests). **Lambda baseline preserved at 2744/2764.**
+
+Recent work:
+
+* `Event.cancelBubble` accessor (getter + setter) wired through
+  `js_event_cancelbubble_get/set` with proper "true is sticky,
+  false is no-op" semantics — both `Event-cancelBubble.html` (8/8)
+  and `Event-stopPropagation-cancel-bubbling.html` (1/1) now pass.
+* `Event.returnValue` and `Event.defaultPrevented` accessors
+  installed via `js_object_define_property` in
+  `js_create_event_init`.
+* `document.implementation.createHTMLDocument()` already supported;
+  `Event-dispatch-other-document.html` (1/1) now passes.
+* HTML "default-passive" rule: `touchstart` / `touchmove` / `wheel`
+  / `mousewheel` listeners on window / document / `<html>` /
+  `<body>` default to `passive: true` when the option is omitted.
+* `setup({single_test:true})` / `done()` shim in
+  `test/wpt/wpt_testharness_shim.js` recognises single-test pages.
+* `test()` shim now passes the test object as both `this` **and**
+  the first argument (`func.call(t, t)`), and exposes
+  `unreached_func` on the sync test object.
+* Skip list curated to 33 substrings covering capabilities the
+  headless JS runner cannot model (cross-realm subframes, shadow
+  DOM, real focus / pointer / animation engines, custom elements,
+  test_driver Actions, EventWatcher promise plumbing, GamepadEvent,
+  `<frameset>` reflection, `Object.getOwnPropertyDescriptor` on
+  proxy descriptors).
+
+Remaining skipped tests (52) fall into these clusters; all need
+subsystem changes well outside the event dispatcher:
+
+* **Cross-realm / iframe / multi-Window** (≈8) — need separate
+  Window globals, `contentWindow`, `postMessage`, cross-origin.
+* **Shadow DOM** (5) — retargeting, closed `composedPath`.
+* **Custom elements** (1) — `customElements.define`.
+* **CSS animation / transition / GamepadEvent** (5).
+* **Form-control activation behaviour** (Phase 4 below, 4 tests).
+* **Real focus / pointer / IME** (4).
+* **Foreign-document `cloneNode` + Text/Comment as EventTarget**
+  (5).
+* **`document.createEvent` + Event interface object reflection,
+  `Object.getOwnPropertyDescriptor` accessor on Event prototype,
+  EventWatcher / promise_rejects, window.event proxy, aliases
+  table, `<frameset>` Body event handler reflection,
+  detached-context crash regression, `.tentative` / `.sub.`
+  variants** — assorted (~20).
 
 ---
 
@@ -475,3 +525,288 @@ clipboard tracker.
 * Phase 4 passes ≥ 90 / 99.
 * `make test-lambda-baseline` shows no regression vs the current
   pre-existing 20 JS/Node failures.
+
+---
+
+## 7. Unifying Radiant input dispatch with the JS DOM event system
+
+> Added April 2026. The work in §1–§6 has produced a spec-compliant
+> JS event dispatcher that the WPT corpus exercises through the
+> headless `./lambda.exe js …` runner, but **real user input in
+> the Radiant window does not flow through it**. This section
+> proposes a unification.
+
+### 7.1 Current state — two parallel pipelines
+
+There are today two completely disjoint event flows:
+
+**Pipeline A — Radiant native input dispatch**
+(file:line refs are approximate, current as of April 2026)
+
+| Stage | File | Notes |
+|-------|------|-------|
+| GLFW callbacks (cursor pos, mouse button, scroll, key, char, focus) | [radiant/window.cpp](../../radiant/window.cpp) ~ line 735 | Build a `RdtEvent` (mouse / key / scroll / text) and queue. |
+| Main dispatch | `rdt_event_handle()` / `event_context_init()` in [radiant/event.cpp](../../radiant/event.cpp) ~ line 1107 | Allocates an `EventContext`, snapshots `RadiantState` (hover/active/focus/selection). |
+| Hit-testing | `target_html_doc` → `target_block_view` → `target_inline_view` → `target_text_view` | Walks the **view tree** (not the DOM tree) to find the topmost `View*` under the cursor. |
+| Mouse-down → click classification | event.cpp ~ line 2833 (`mousedown`) and ~ line 3336 (`click`) | A `click` is synthesised on mouse-up if the up target matches the down target. |
+| Pseudo-state mutation (`:hover`, `:active`, `:focus`) | `update_hover_state` / `update_active_state` (event.cpp ~ line 1180-1240) | Writes through `state_set_bool(state, view, STATE_HOVER, …)` + `sync_pseudo_state(view, PSEUDO_STATE_HOVER, …)`. |
+| Default actions (scroll, checkbox/radio toggle, focus move, link nav, video play/pause, text-input editing) | inline within `rdt_event_handle` and helpers (`uncheck_radio_group`, `scrollpane_*`, `text_control_*`) | Hard-coded; no `preventDefault` gate. |
+| Bridge to compiled inline HTML handlers | `dispatch_html_event_handler(EventContext*, View*, const char*)` event.cpp ~ line 1037 | Bubbles up the **DOM tree** from the targeted node, looks up `JsEventHandler` in `doc->js_event_registry`, restores `EvalContext`, calls the compiled function. **No event object is constructed**, **no capture phase**, **no `preventDefault` plumbing**, and the function is invoked with an empty argument list (no `event` argument). |
+| Lambda template handlers | `dispatch_lambda_handler(EventContext*, View*, const char*)` | Reactive-template path; same shape as the HTML bridge. |
+
+**Pipeline B — JS DOM event dispatch**
+(the system §1–§6 of this doc has been hardening)
+
+| Stage | File | Notes |
+|-------|------|-------|
+| `addEventListener` / `removeEventListener` storage | `js_dom_add_event_listener` / `js_dom_remove_event_listener` in [lambda/js/js_dom_events.cpp](../../lambda/js/js_dom_events.cpp) | Per-key listener arrays keyed on `DomNode*` or sentinel for window/document. |
+| Synthetic dispatch entry | `js_dom_dispatch_event(elem, event)` (events.cpp ~ line 1252) | 3-phase capture/target/bubble, on-handler integration, `__dispatch_flag`, `passive` enforcement, `cancelBubble`/`stopPropagation` semantics. |
+| Event construction | `js_create_event` / `js_create_event_init` + accessor descriptors for `cancelBubble` / `returnValue` / `defaultPrevented`. |
+| Existing real-world callers in the codebase | `js_dom_queue_textcontrol_selectionchange()` from `radiant/text_control.cpp` is the **only** Radiant code that fires a real `Event` through this dispatcher; everything else is exercised purely by the WPT runner. |
+
+The two pipelines never meet. A user clicking a `<button>` in a
+Radiant-rendered page fires Pipeline A only. A WPT test calling
+`button.dispatchEvent(new Event('click'))` fires Pipeline B only.
+
+### 7.2 Why this is broken
+
+* `element.addEventListener('click', fn)` in a JS script attached
+  to a Radiant-rendered page **is silently ignored** — listeners
+  are stored in `js_dom_events.cpp` but never invoked from
+  `rdt_event_handle`.
+* `event.preventDefault()` cannot stop Radiant's hard-coded
+  default actions (link nav, checkbox toggle, scroll).
+* JS handlers receive no `event` argument; they cannot read
+  `clientX`, `target`, `key`, `shiftKey`, etc.
+* No capture phase, no bubbling beyond the inline-handler
+  walk, no `passive` enforcement, no `signal`, no
+  `composedPath()` for real input.
+* `:hover` / `:active` / `:focus` are kept on `RadiantState` only;
+  the JS side never sees `mouseover` → `mouseenter` differences.
+* Two separate "where is the click target" computations: one walks
+  the **view tree**, the other walks the **DOM tree**. They can
+  disagree for cases like inline-block coalescing or anonymous
+  boxes.
+
+### 7.3 Design — single dispatcher with two front-ends
+
+The proposal is to **make Pipeline A a thin adapter that
+synthesises Pipeline B's `Event` and feeds it through
+`js_dom_dispatch_event`**. Default actions then become spec-style
+post-dispatch behaviour gated on `event.defaultPrevented`.
+
+```
+            ┌─────────────────────────────────────────┐
+            │          GLFW callbacks                 │
+            │   (mouse / key / scroll / char / focus) │
+            └───────────────────┬─────────────────────┘
+                                │  RdtEvent
+                                ▼
+            ┌─────────────────────────────────────────┐
+            │        Radiant input frontend           │
+            │  rdt_event_handle / event_context_init  │
+            │  - hit-test view tree → DomNode* target │
+            │  - update RadiantState pseudo-classes   │
+            │  - track button/modifier/click-count    │
+            └───────────────────┬─────────────────────┘
+                                │  RdtEvent + DomNode* target
+                                ▼
+            ┌─────────────────────────────────────────┐
+            │   radiant_dispatch_input_event()  [new] │
+            │  - synthesise Lambda Event/MouseEvent/  │
+            │    KeyboardEvent/WheelEvent/FocusEvent  │
+            │    with isTrusted = true                │
+            │  - js_dom_dispatch_event(target, event) │
+            │  - on return, inspect                   │
+            │      get_event_default_prevented(ev)    │
+            └───────────────────┬─────────────────────┘
+                                │
+                ┌───────────────┴────────────────┐
+                ▼                                ▼
+     ┌─────────────────────┐       ┌────────────────────────┐
+     │  JS dispatcher      │       │ Default-action runner  │
+     │  js_dom_events.cpp  │       │ (only if NOT canceled) │
+     │  - capture phase    │       │ - link navigation      │
+     │  - target phase     │       │ - checkbox toggle      │
+     │  - bubble phase     │       │ - radio uncheck-group  │
+     │  - on<event> attr   │       │ - text-input editing   │
+     │  - addEventListener │       │ - scroll               │
+     │  - dispatch_html_…  │       │ - focus move           │
+     │    becomes a no-op  │       │ - <a href>             │
+     │    (it's just an    │       │ - video play/pause     │
+     │    on<event> attr)  │       │                        │
+     └─────────────────────┘       └────────────────────────┘
+```
+
+### 7.4 Concrete steps
+
+#### 7.4.1 Hit-test → DOM target adapter
+
+`rdt_event_handle` already produces an `evcon.target` that is a
+`View*`. Extract a single helper:
+
+```cpp
+DomNode* radiant_view_to_dom_node(View* v);
+```
+
+Walks `v->parent` until it finds an element view, then returns the
+backing `DomElement*`. Anonymous boxes are skipped. Text views map
+to their parent element (DOM events fire on elements, not text
+nodes — except for `selectionchange` on text controls, which we
+already handle separately).
+
+#### 7.4.2 Synthetic native event constructors (Phase 3 prereq)
+
+Once Phase 3 lands the `MouseEvent` / `KeyboardEvent` /
+`WheelEvent` / `FocusEvent` / `InputEvent` ctors, expose a parallel
+**C-level** factory in `lambda/js/js_dom_events.cpp`:
+
+```c
+Item js_create_mouse_event(const char* type, int client_x, int client_y,
+                           uint8_t button, uint16_t buttons, int mods,
+                           uint8_t click_count, DomNode* related);
+Item js_create_keyboard_event(const char* type, const char* key,
+                              const char* code, int mods, bool repeat);
+Item js_create_wheel_event(const char* type, int client_x, int client_y,
+                           float delta_x, float delta_y);
+Item js_create_focus_event(const char* type, DomNode* related);
+```
+
+Each sets `isTrusted = true` (currently always `false`). The
+existing `js_create_event_init` machinery is reused for the base
+slots.
+
+#### 7.4.3 Replace `dispatch_html_event_handler` call sites with
+`js_dom_dispatch_event`
+
+For every event currently fired by Radiant (`mouseover`, `mousedown`,
+`mouseup`, `click`, `focus`, `blur`, `keydown`, `input`, …) replace:
+
+```cpp
+dispatch_html_event_handler(&evcon, evcon.target, "click");
+```
+
+with:
+
+```cpp
+DomNode* target = radiant_view_to_dom_node(evcon.target);
+Item ev = js_create_mouse_event("click", mouse_x, mouse_y,
+                                button, buttons, mods, clicks, NULL);
+js_dom_dispatch_event(js_dom_wrap_element(target), ev);
+bool canceled = event_flag_get(ev, "__default_prevented");
+```
+
+The legacy `dispatch_html_event_handler` becomes obsolete because
+inline `onclick="..."` handlers are already installed by
+`js_dom_set_document` as `on<event>` IDL attribute properties on
+the corresponding DOM element wrapper, and the spec-compliant
+dispatcher already invokes them in registration order between
+`addEventListener` listeners. We can keep the function as a
+fast-path shim (skips Event allocation when no listeners are
+registered) but the public path goes through the JS dispatcher.
+
+#### 7.4.4 Spec-compliant default actions
+
+Move every block of Radiant code that today acts unconditionally
+on `mousedown` / `mouseup` / `click` into a small
+**activation-behaviour table** keyed by event type and target tag:
+
+```cpp
+struct DefaultAction {
+    const char*  event_type;     // "click", "keydown", …
+    bool       (*matches)(DomNode*);     // e.g. is_checkbox
+    void       (*run)(EventContext*, DomNode*, Item ev);
+};
+```
+
+The post-dispatch runner walks the table; for each matching entry
+it checks `event_flag_get(ev, "__default_prevented")` and only
+invokes `run()` if the listener chain did not cancel. This is
+exactly what the HTML spec calls "activation behaviour" and
+it's what Phase 4 of §3 was already going to need.
+
+#### 7.4.5 Pseudo-class state stays on `RadiantState`
+
+`:hover` / `:active` / `:focus` continue to live on `RadiantState`
+because they are CSS-level state, not DOM events. The change is
+that **after** the JS `mouseover`/`mouseout` dispatch returns,
+Radiant inspects `defaultPrevented` to decide whether to update
+the state (per spec, these CSS pseudo-classes are not gated on
+preventDefault, so this is just a hook point — we keep the mutation
+unconditional).
+
+For `:focus` the dispatch order matters: spec says fire `blur` on
+old focus, then `focusout`, then `focus` on new focus, then
+`focusin`. Today Radiant fires only `blur` / `focus` (no
+`focusin` / `focusout`); the unified path adds the missing two.
+
+#### 7.4.6 `globalThis.event` plumbing
+
+While dispatch is in progress the JS dispatcher should set
+`window.event` to the in-flight Event (and restore the prior value
+on return). This is needed by `event-global*.html` WPT tests that
+are currently skipped, and is trivial once Pipeline A goes through
+the same dispatcher.
+
+### 7.5 Migration order (suggested phases — slot into §3)
+
+| Sub-phase | Work | Gate |
+|-----------|------|------|
+| **U-0** | Add `radiant_view_to_dom_node` helper + factory `js_create_mouse_event` (uses Phase-3 MouseEvent ctor). | Unit test: simulated `RdtEvent` → wrapped Event has correct `clientX`/`button`/`target`. |
+| **U-1** | Reroute `mouseover` / `mouseout` from `dispatch_html_event_handler` to `js_dom_dispatch_event`. Keep `:hover` mutation unconditional. | WPT DOM events stays at 43 PASSED. Radiant suite (`make test-radiant-baseline`) unchanged. |
+| **U-2** | Same for `mousedown` / `mouseup` / `click` / `dblclick`. Default actions (checkbox toggle, radio uncheck, scroll, link nav) gated on `defaultPrevented`. | Unblocks `Event-dispatch-click*.html`, `preventDefault-during-activation-behavior.html`, `legacy-pre-activation-behavior.window.js` (currently skipped). |
+| **U-3** | `keydown` / `keyup` / `input` → `KeyboardEvent` / `InputEvent`. Editor edits gated on `defaultPrevented`. | Unblocks `keypress-dispatch-crash.html`, parts of `Event-dispatch-detached-input-and-change.html`. |
+| **U-4** | `focus` / `blur` → `FocusEvent`, plus `focusin` / `focusout` (bubbling pair). | Unblocks `focus-event-document-move.html`, `no-focus-events-at-clicking-editable-content-in-link.html`. |
+| **U-5** | `wheel` / scroll → `WheelEvent`. Scroll only happens if not canceled. | Unblocks `Event-dispatch-on-disabled-elements.html` scroll subtests. |
+| **U-6** | Remove `dispatch_html_event_handler` (or demote to a fast-path probe used only when the JS event registry has no listeners for the type). Remove `dispatch_lambda_handler` once template handlers register through `addEventListener`. | Code-size reduction. |
+| **U-7** | Set `window.event` during dispatch; reload `event-global*.html` from skip list. | Unblocks 4 more WPT tests. |
+
+### 7.6 Risks
+
+* **`click()` programmatic dispatch must not loop.** Phase 4 of §3
+  already wires `HTMLElement.prototype.click()` to construct a
+  synthetic `MouseEvent` and call `js_dom_dispatch_event`. Real
+  user clicks must take the same path so the `click_in_progress`
+  flag is honoured for both, otherwise nested clicks (e.g. a JS
+  `onclick` handler that calls `target.click()`) re-enter and
+  desync.
+* **Selection drag re-entrancy.** Today Radiant's selection state
+  machine mutates `RadiantState` mid-event and queues a
+  `selectionchange` via `js_dom_queue_textcontrol_selectionchange`.
+  The unified path must keep that ordering: Radiant's drag handler
+  may dispatch `mousedown`/`mousemove`/`mouseup` JS events first,
+  then update selection, then queue `selectionchange` (which
+  coalesces via `setTimeout(0)` and so always lands in a fresh
+  microtask anyway).
+* **EvalContext save/restore at the dispatch site.** Currently
+  `dispatch_html_event_handler` saves/restores `context` and
+  `input_context` around the JIT call. The unified path needs the
+  same dance at exactly one entry — `radiant_dispatch_input_event`
+  — instead of being scattered across each handler invocation.
+* **Cost when there are no listeners.** Allocating a fresh `Event`
+  object per mouse-move is wasteful. A pre-dispatch probe
+  (`js_dom_has_listeners(target, type)`) lets the bridge skip
+  allocation when nothing would receive it. Mouse-move can also
+  coalesce to a single event per frame.
+* **`isTrusted = true` for synthesised events** must remain true
+  even after the event is re-thrown into nested listeners — the
+  flag lives on the event object so this is automatic.
+
+### 7.7 Acceptance criteria (unification)
+
+* `addEventListener` registered from a `<script>` tag in a Radiant
+  window receives every real user click/keypress with the correct
+  `target`, `clientX/Y`, `key`, `button`, `buttons`, modifiers.
+* `event.preventDefault()` from a JS listener prevents Radiant's
+  default actions: checkbox toggling, radio group, link
+  navigation, scroll, video play/pause toggle, text-input edit.
+* `event.stopPropagation()` and `cancelBubble` halt the bubble
+  walk just as they do under the WPT runner.
+* Every WPT test currently skipped under "form activation",
+  "real focus management", "real pointer events", "real IME",
+  and the `event-global*` cluster either passes or moves to a new
+  skip reason ("requires platform feature X").
+* `make test-radiant-baseline` (Radiant interactive baseline) is
+  unchanged after each U-step.
+* `make test-lambda-baseline` (2744/2764) is unchanged.
+
