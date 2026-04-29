@@ -281,6 +281,20 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         return js_props_desc_from_storage(object, fn->properties_map.map,
                                            name, name_len, out);
     }
+    if (t == LMD_TYPE_ARRAY) {
+        // ARRAY: own properties (named keys + numeric-index accessors) live
+        // in the companion map. The bare-data slot at arr->items[idx] is
+        // synthesized as a data descriptor when no accessor is present.
+        Array* arr = object.array;
+        if (arr->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)arr->extra;
+            Item pm_item = (Item){.map = pm};
+            if (js_props_desc_from_storage(pm_item, pm, name, name_len, out)) {
+                return true;
+            }
+        }
+        return false;
+    }
     return false;
 }
 
@@ -443,24 +457,67 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         }
 
         if (is_array_exotic) {
-            // Use js_defprop_set_marker which routes to the array companion
-            // map (MAP_KIND_ARRAY_PROPS). Writing directly to LMD_TYPE_ARRAY
-            // would mis-route through the array's index storage.
-            // Note: we write the descriptor's value verbatim — including
-            // explicit-undefined halves. Tombstoning would collapse "explicit
-            // undefined accessor half" into "marker absent", and breaks
-            // hasOwnProperty for arrays where presence is detected via the
-            // companion-map __get_X/__set_X keys.
-            char gk_buf[256], sk_buf[256];
-            snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", name_len, name);
-            snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", name_len, name);
-            Item gk = js_props_str(gk_buf, (int)strlen(gk_buf));
-            Item sk = js_props_str(sk_buf, (int)strlen(sk_buf));
-            if (pd->flags & JS_PD_HAS_GET) {
-                js_defprop_set_marker(object, gk, pd->getter);
+            // Numeric (index) array properties: use legacy __get_<idx>/__set_<idx>
+            // markers in the companion map. Index slots can't carry IS_ACCESSOR
+            // shape flags reliably (no shape entry per index, and writing the
+            // pair into arr->items[idx] would clobber any data slot/hole).
+            //
+            // Non-numeric (named) array properties: route through the IS_ACCESSOR
+            // chokepoint just like regular objects. The companion map carries
+            // the bare-name shape entry, and js_obj_typemap() returns it for
+            // arrays via arr->extra, so JSPD_IS_ACCESSOR works end-to-end.
+            bool is_numeric_index = false;
+            if (name_len > 0) {
+                is_numeric_index = true;
+                if (name_len == 1 && name[0] == '0') {
+                    is_numeric_index = true;
+                } else if (name[0] >= '1' && name[0] <= '9') {
+                    for (int i = 1; i < name_len; i++) {
+                        if (name[i] < '0' || name[i] > '9') {
+                            is_numeric_index = false;
+                            break;
+                        }
+                    }
+                } else {
+                    is_numeric_index = false;
+                }
             }
-            if (pd->flags & JS_PD_HAS_SET) {
-                js_defprop_set_marker(object, sk, pd->setter);
+
+            if (is_numeric_index) {
+                // Phase 5D: route numeric-index accessors through the IS_ACCESSOR
+                // chokepoint *on the companion map* (not the array itself).
+                // Calling js_define_accessor_partial(arr, ...) would recurse into
+                // js_property_set(arr, "<idx>", pair) which routes to js_array_set
+                // and clobbers arr->items[idx]. Targeting the companion map keeps
+                // the bare-name slot under the digit-string key with IS_ACCESSOR
+                // on its shape entry.
+                Item target;
+                if (get_type_id(object) == LMD_TYPE_ARRAY) {
+                    Array* arr = object.array;
+                    if (arr->extra == 0) {
+                        Item nm = js_new_object();
+                        nm.map->map_kind = MAP_KIND_ARRAY_PROPS;
+                        arr->extra = (int64_t)(uintptr_t)nm.map;
+                    }
+                    target = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                } else {
+                    // object IS the companion map (MAP_KIND_ARRAY_PROPS); use it.
+                    target = object;
+                }
+                if (pd->flags & JS_PD_HAS_GET) {
+                    js_define_accessor_partial(target, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                }
+                if (pd->flags & JS_PD_HAS_SET) {
+                    js_define_accessor_partial(target, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                }
+            } else {
+                // Named-key path: IS_ACCESSOR + JsAccessorPair via chokepoint.
+                if (pd->flags & JS_PD_HAS_GET) {
+                    js_define_accessor_partial(object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                }
+                if (pd->flags & JS_PD_HAS_SET) {
+                    js_define_accessor_partial(object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                }
             }
         } else {
             // Install getter/setter halves via Scheme B chokepoint.

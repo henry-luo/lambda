@@ -4529,18 +4529,10 @@ extern "C" Item js_in(Item key, Item object) {
                     bool pm_found = false;
                     Item pm_val = js_map_get_fast_ext(pm, sk->chars, (int)sk->len, &pm_found);
                     if (pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-                    if (sk->len < 200) {
-                        char gk[256];
-                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)sk->len, sk->chars);
-                        bool gfound = false;
-                        js_map_get_fast_ext(pm, gk, (int)strlen(gk), &gfound);
-                        if (gfound) return (Item){.item = b2it(true)};
-                        char ssk[256];
-                        snprintf(ssk, sizeof(ssk), "__set_%.*s", (int)sk->len, sk->chars);
-                        bool sfound = false;
-                        js_map_get_fast_ext(pm, ssk, (int)strlen(ssk), &sfound);
-                        if (sfound) return (Item){.item = b2it(true)};
-                    }
+                    // Phase 5D array migration: legacy __get_<name>/__set_<name>
+                    // probes removed for named keys. Named-key accessors are stored
+                    // as IS_ACCESSOR + JsAccessorPair under the bare name (found by
+                    // the fast probe above). Numeric indices retain legacy markers.
                 }
                 Item proto = js_get_prototype_of(object);
                 int depth = 0;
@@ -4571,18 +4563,9 @@ extern "C" Item js_in(Item key, Item object) {
                     bool found = false;
                     Item pval = js_map_get_fast_ext(proto.map, sk->chars, (int)sk->len, &found);
                     if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-                    if (sk->len < 200) {
-                        char gk[256];
-                        snprintf(gk, sizeof(gk), "__get_%.*s", (int)sk->len, sk->chars);
-                        bool gfound = false;
-                        js_map_get_fast_ext(proto.map, gk, (int)strlen(gk), &gfound);
-                        if (gfound) return (Item){.item = b2it(true)};
-                        char skk[256];
-                        snprintf(skk, sizeof(skk), "__set_%.*s", (int)sk->len, sk->chars);
-                        bool sfound = false;
-                        js_map_get_fast_ext(proto.map, skk, (int)strlen(skk), &sfound);
-                        if (sfound) return (Item){.item = b2it(true)};
-                    }
+                    // Phase-5D: legacy __get_/__set_ proto-chain probes removed.
+                    // IS_ACCESSOR shape entries on protos are detected by the data
+                    // probe above (JsAccessorPair pointer != JS_DELETED_SENTINEL_VAL).
                     proto = js_get_prototype_of(proto);
                     depth++;
                 }
@@ -5592,6 +5575,27 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             // check for accessor properties in companion map (even when idx >= length)
             if (idx >= 0 && obj.array->extra != 0) {
                 Map* props = (Map*)(uintptr_t)obj.array->extra;
+                // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+                Item pm_item = (Item){.map = props};
+                ShapeEntry* _se_idx = js_find_shape_entry(pm_item, name_str->chars, (int)name_str->len);
+                if (_se_idx && jspd_is_accessor(_se_idx)) {
+                    bool slot_found = false;
+                    Item slot_val = js_map_get_fast_ext(props, name_str->chars, (int)name_str->len, &slot_found);
+                    if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                        JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                        Item desc = js_new_object();
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                            (pair && pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined());
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                            (pair && pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined());
+                        bool is_enumerable = jspd_is_enumerable(_se_idx);
+                        bool is_configurable = jspd_is_configurable(_se_idx);
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
+                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+                        return desc;
+                    }
+                }
+                // Legacy __get_<idx>/__set_<idx> markers (back-compat).
                 char gk_buf[256], sk_buf[256];
                 snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
                 snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
@@ -7937,6 +7941,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                     // still check for accessor marker
                     if (arr->extra != 0) {
                         Map* pm = (Map*)(uintptr_t)arr->extra;
+                        // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+                        Item pm_item = (Item){.map = pm};
+                        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
+                        if (_se_idx && jspd_is_accessor(_se_idx)) {
+                            bool slot_found = false;
+                            Item slot_val = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &slot_found);
+                            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                                return (Item){.item = b2it(true)};
+                            }
+                        }
                         char gk[64];
                         snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
                         bool gk_found = false;
@@ -7953,6 +7967,16 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             // index out of bounds — check for accessor markers in companion map
             if (arr->extra != 0) {
                 Map* pm = (Map*)(uintptr_t)arr->extra;
+                // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+                Item pm_item = (Item){.map = pm};
+                ShapeEntry* _se_idx = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
+                if (_se_idx && jspd_is_accessor(_se_idx)) {
+                    bool slot_found = false;
+                    Item slot_val = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &slot_found);
+                    if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                        return (Item){.item = b2it(true)};
+                    }
+                }
                 char gk[64];
                 snprintf(gk, sizeof(gk), "__get_%.*s", (int)ks->len, ks->chars);
                 bool gk_found = false;
@@ -8006,22 +8030,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                     return (Item){.item = b2it(true)};
                 }
             }
-            // Accessor-only properties: defineProperty(fn, name, {get,set}) writes
-            // __get_<name>/__set_<name> markers without a data slot. Treat the
-            // presence of a non-tombstoned accessor marker as own.
-            if (ks->len > 0 && ks->len < 200) {
-                char accessor_key[256];
-                snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
-                bool has_get = false;
-                Item gv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
-                                              (int)strlen(accessor_key), &has_get);
-                if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-                snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
-                bool has_set = false;
-                Item sv = js_map_get_fast_ext(fn->properties_map.map, accessor_key,
-                                              (int)strlen(accessor_key), &has_set);
-                if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            }
+            // Phase-5D: legacy __get_/__set_ accessor-marker probes removed.
+            // Phase-4 intercept routes function-property accessors into a single
+            // bare-name slot containing a JsAccessorPair, with IS_ACCESSOR shape
+            // flag. The bare-name fast probe above returns own=true with a
+            // non-sentinel value for IS_ACCESSOR slots.
         }
         // built-in own properties (not overridden/deleted)
         if ((ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
@@ -8172,15 +8185,8 @@ extern "C" Item js_object_is_frozen(Item obj) {
             if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
             // accessor properties don't need to be non-writable per ES spec
             bool is_accessor = jspd_is_accessor(e);
-            if (!is_accessor) {
-                char buf[256];
-                snprintf(buf, sizeof(buf), "__get_%.*s", nlen, n);
-                js_map_get_fast_ext(m, buf, (int)strlen(buf), &is_accessor);
-                if (!is_accessor) {
-                    snprintf(buf, sizeof(buf), "__set_%.*s", nlen, n);
-                    js_map_get_fast_ext(m, buf, (int)strlen(buf), &is_accessor);
-                }
-            }
+            // Phase-5D: legacy __get_/__set_ fallback probe removed.
+            // Accessors are detected via IS_ACCESSOR shape flag on the bare-name entry.
             if (!is_accessor) {
                 if (js_props_query_writable(m, e, n, nlen)) return (Item){.item = b2it(false)};
             }
@@ -9131,6 +9137,15 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                             Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
                             js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
                         }
+                        // Phase 5: clear IS_ACCESSOR shape flag on the bare-key
+                        // slot (which holds JsAccessorPair*) before tombstoning,
+                        // so reads no longer dispatch to the deleted accessor.
+                        ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
+                        if (_se && jspd_is_accessor(_se)) {
+                            jspd_set_accessor(_se, false);
+                        }
+                        Item bare_k = (Item){.item = s2it(heap_create_name(ks->chars, ks->len))};
+                        js_property_set(pm_item, bare_k, (Item){.item = JS_DELETED_SENTINEL_VAL});
                     }
                 }
             }

@@ -13026,18 +13026,15 @@ static MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t ar
     // result = items[idx] — each Item is 8 bytes
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, items_ptr, idx_native, 8)));
-    // v25: check for deleted sentinel (array hole) — replace with undefined
+    // v25: check for deleted sentinel (array hole) — fall through to slow path
+    // so that prototype chain / accessor (companion-map IS_ACCESSOR) lookups run.
     {
-        MIR_label_t l_not_del = jm_new_label(mt);
         MIR_reg_t del_cmp = jm_new_reg(mt, "delc", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, del_cmp),
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_uint_op(mt->ctx, (uint64_t)JS_DELETED_SENTINEL_VAL)));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_del),
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
             MIR_new_reg_op(mt->ctx, del_cmp)));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-        jm_emit_label(mt, l_not_del);
     }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
