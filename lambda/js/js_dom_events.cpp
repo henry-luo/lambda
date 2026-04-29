@@ -1067,6 +1067,137 @@ extern "C" Item js_create_click_mouse_event(void) {
 }
 
 // ============================================================================
+// Native event factories — entry points used by the Radiant input bridge.
+// All set isTrusted=true (per spec, browser-fired events are trusted) and
+// stamp standard EventInit defaults appropriate for each interface.
+// ============================================================================
+
+static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool meta) {
+    event_set_bool(init, "ctrlKey",  ctrl);
+    event_set_bool(init, "shiftKey", shift);
+    event_set_bool(init, "altKey",   alt);
+    event_set_bool(init, "metaKey",  meta);
+}
+
+extern "C" Item js_create_native_mouse_event(const char* type,
+    int client_x, int client_y,
+    int button, int buttons,
+    bool ctrl, bool shift, bool alt, bool meta,
+    int detail, Item related_target)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", true);
+    event_set_bool(init, "composed", true);
+    event_set_int(init, "detail", detail);
+    event_set_int(init, "clientX", client_x);
+    event_set_int(init, "clientY", client_y);
+    event_set_int(init, "screenX", client_x);
+    event_set_int(init, "screenY", client_y);
+    event_set_int(init, "pageX", client_x);
+    event_set_int(init, "pageY", client_y);
+    event_set_int(init, "button", button);
+    event_set_int(init, "buttons", buttons);
+    stamp_modifier_init(init, ctrl, shift, alt, meta);
+    if (related_target.item != 0) {
+        event_set_item(init, "relatedTarget", related_target);
+    }
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item ev = js_ctor_mouse_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" Item js_create_native_keyboard_event(const char* type,
+    const char* key, const char* code,
+    bool ctrl, bool shift, bool alt, bool meta,
+    bool repeat)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", true);
+    event_set_bool(init, "composed", true);
+    if (key) event_set_str(init, "key", key);
+    if (code) event_set_str(init, "code", code);
+    event_set_bool(init, "repeat", repeat);
+    stamp_modifier_init(init, ctrl, shift, alt, meta);
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item ev = js_ctor_keyboard_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" Item js_create_native_focus_event(const char* type, Item related_target) {
+    Item init = js_new_object();
+    // focus/blur do NOT bubble; focusin/focusout DO. Caller decides via type.
+    bool bubbles = (type && (strcmp(type, "focusin") == 0 || strcmp(type, "focusout") == 0));
+    event_set_bool(init, "bubbles", bubbles);
+    event_set_bool(init, "cancelable", false);
+    event_set_bool(init, "composed", true);
+    if (related_target.item != 0) {
+        event_set_item(init, "relatedTarget", related_target);
+    }
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item ev = js_ctor_focus_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" Item js_create_native_wheel_event(const char* type,
+    int client_x, int client_y,
+    double delta_x, double delta_y,
+    int buttons,
+    bool ctrl, bool shift, bool alt, bool meta)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", true);
+    event_set_bool(init, "composed", true);
+    event_set_int(init, "clientX", client_x);
+    event_set_int(init, "clientY", client_y);
+    event_set_int(init, "screenX", client_x);
+    event_set_int(init, "screenY", client_y);
+    event_set_int(init, "buttons", buttons);
+    event_set_double(init, "deltaX", delta_x);
+    event_set_double(init, "deltaY", delta_y);
+    event_set_int(init, "deltaMode", 0); // DOM_DELTA_PIXEL
+    stamp_modifier_init(init, ctrl, shift, alt, meta);
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "wheel"))};
+    Item ev = js_ctor_wheel_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" bool js_event_is_default_prevented(Item event) {
+    if (get_type_id(event) != LMD_TYPE_MAP) return false;
+    return event_flag_get(event, "__default_prevented");
+}
+
+// ============================================================================
+// Legacy IE-style `window.event` plumbing for the Radiant inline-handler
+// (`onclick="..."`) path. The bridge dispatch (`js_dom_dispatch_event`)
+// already sets/restores `window.event` around its listener invocation.
+// Inline handlers compiled by `collect_and_compile_event_handlers` take no
+// `event` parameter, so the only way for handler bodies like
+// `onclick="alert(event.type)"` to see the event is through this global.
+// `js_set_window_event_for_legacy` returns the prior value (so the caller
+// can restore it after invoking the handler).
+// ============================================================================
+extern "C" Item js_set_window_event_for_legacy(Item event) {
+    Item global = js_get_global_this();
+    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    Item prev = js_property_get(global, event_key);
+    js_property_set(global, event_key, event);
+    return prev;
+}
+
+extern "C" void js_restore_window_event_for_legacy(Item prev) {
+    Item global = js_get_global_this();
+    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    js_property_set(global, event_key, prev);
+}
+
+// ============================================================================
 // Event Dispatch (3-phase propagation)
 // ============================================================================
 

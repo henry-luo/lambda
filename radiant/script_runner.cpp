@@ -18,6 +18,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_dom.h"
+#include "../lambda/js/js_dom_events.h"
 #include "../lambda/transpiler.hpp"
 #include "../lib/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -39,6 +40,7 @@
 #include <unistd.h>
 
 extern __thread EvalContext* context;
+extern __thread Context* input_context;
 
 // Crash guard for JS JIT execution (catches SIGSEGV/SIGBUS in compiled code)
 static sigjmp_buf js_exec_jmpbuf;

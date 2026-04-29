@@ -22,6 +22,11 @@ typedef struct EventContext {
     char* new_target;
     bool need_repaint;
 
+    // §7 unification (U-2): set by JS bridge dispatch when a listener calls
+    // event.preventDefault(). Default-action sites (link nav, checkbox toggle,
+    // radio select, video play/pause) check this flag to skip the default.
+    bool default_prevented;
+
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
 

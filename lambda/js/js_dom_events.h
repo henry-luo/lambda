@@ -104,6 +104,52 @@ Item js_ctor_input_event_fn(Item type, Item init);
 Item js_ctor_pointer_event_fn(Item type, Item init);
 
 // ============================================================================
+// Native event factories (Radiant input bridge — §7 of Radiant_Design_Event.md).
+// Each builds a spec-compliant Event object with isTrusted = true and
+// bubbles = true so it propagates through the JS dispatcher just like a
+// scripted user event. Caller passes pre-decoded modifier booleans to keep
+// js_dom_events independent of radiant/event.hpp's RDT_MOD_* layout.
+// ============================================================================
+Item js_create_native_mouse_event(const char* type,
+    int client_x, int client_y,
+    int button, int buttons,
+    bool ctrl, bool shift, bool alt, bool meta,
+    int detail, Item related_target);
+
+Item js_create_native_keyboard_event(const char* type,
+    const char* key, const char* code,
+    bool ctrl, bool shift, bool alt, bool meta,
+    bool repeat);
+
+Item js_create_native_focus_event(const char* type, Item related_target);
+
+Item js_create_native_wheel_event(const char* type,
+    int client_x, int client_y,
+    double delta_x, double delta_y,
+    int buttons,
+    bool ctrl, bool shift, bool alt, bool meta);
+
+/**
+ * Returns true if event has been preventDefault()'d (or, for cancelable
+ * legacy paths, returnValue=false). Mirrors the spec's "canceled flag".
+ */
+bool js_event_is_default_prevented(Item event);
+
+/**
+ * §7.4.6 (U-7) — legacy IE-style `window.event` set/restore for the
+ * Radiant inline-handler path (onclick="..." etc.). Use around the
+ * compiled handler invocation:
+ *   Item prev = js_set_window_event_for_legacy(event);
+ *   handler_fn();
+ *   js_restore_window_event_for_legacy(prev);
+ * The bridge dispatch (`js_dom_dispatch_event`) sets `window.event`
+ * itself; these helpers are for the legacy `dispatch_html_event_handler`
+ * path which doesn't go through the bridge.
+ */
+Item js_set_window_event_for_legacy(Item event);
+void js_restore_window_event_for_legacy(Item prev);
+
+// ============================================================================
 // Lifecycle
 // ============================================================================
 
