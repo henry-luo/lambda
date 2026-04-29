@@ -39,6 +39,10 @@ static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+// 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
+// forward-declare here so the kernels below can build name keys.
+extern "C++" String* heap_create_name(const char* name, size_t len);
+
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
     // Caller is responsible for ensuring `object` is LMD_TYPE_MAP and `key`
@@ -148,6 +152,101 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
     }
     if (out_value) *out_value = slot;
     return JS_DESC_DATA;
+}
+
+// Stage A1.8: own-only HasProperty boolean kernel.
+//
+// Spec: ES §10.1.5.1 OrdinaryGetOwnProperty step "If desc is undefined,
+// return undefined". This collapses the slot+sentinel+IS_ACCESSOR detection
+// into a single boolean, used by `js_has_own_property` MAP/FUNC branches and
+// by callers that only need to know "is there an own property here?".
+//
+// Returns true iff (object has type LMD_TYPE_MAP) AND there is an own slot
+// AND the slot is not the deleted sentinel. IS_ACCESSOR slots count as
+// present (the pair itself is the descriptor).
+extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    bool found = false;
+    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
+    if (!found) return false;
+    if (js_props_is_deleted_sentinel(slot)) return false;
+    return true;
+}
+
+// Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
+extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {
+    Item cur = object;
+    int depth = 0;
+    while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
+        if (js_ordinary_has_own(cur, name, name_len)) return true;
+        cur = js_get_prototype_of(cur);
+        depth++;
+    }
+    return false;
+}
+
+// Stage A1.10: OrdinaryGet — own + proto chain MAP-only kernel.
+extern "C" bool js_ordinary_get(Item object, const char* name, int name_len,
+                                 Item Receiver, Item* out_value) {
+    if (!out_value) return false;
+    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
+    Item cur = object;
+    int depth = 0;
+    while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
+        Item val = ItemNull;
+        JsOwnGetStatus st = js_ordinary_get_own(cur, key, Receiver, &val);
+        if (st == JS_OWN_READY) { *out_value = val; return true; }
+        // NOT_FOUND or DELETED — keep walking.
+        cur = js_get_prototype_of(cur);
+        depth++;
+    }
+    return false;
+}
+
+// Stage A1.11: OrdinarySet — inherited-setter dispatch + own data write.
+extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_len,
+                                                    Item value, Item Receiver) {
+    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(object, name, name_len, value, Receiver);
+    if (st != JS_SET_NOT_FOUND) return st;
+    // No inherited accessor — perform own data write on Receiver.
+    Item target = (Receiver.item ? Receiver : object);
+    if (get_type_id(target) != LMD_TYPE_MAP) return JS_SET_NOT_FOUND;
+    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
+    js_property_set(target, key, value);
+    return JS_SET_NOT_FOUND;
+}
+
+// Stage A1.12: OrdinaryDelete — own-property delete on LMD_TYPE_MAP.
+extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return true;
+    Map* m = object.map;
+    bool slot_found = false;
+    Item slot = js_map_get_fast_ext(m, name, name_len, &slot_found);
+    // Absent or tombstoned: per spec, delete of non-existent property succeeds.
+    if (!slot_found || js_props_is_deleted_sentinel(slot)) return true;
+
+    // Non-configurable check (shape-flag-first via existing helper).
+    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    if (!js_props_query_configurable(m, se, name, name_len)) return false;
+
+    // Clear IS_ACCESSOR shape flag so future reads don't dispatch the
+    // deleted accessor pair under the bare-name slot.
+    if (se && jspd_is_accessor(se)) jspd_set_accessor(se, false);
+
+    // Tombstone legacy descriptor markers FIRST so the subsequent sentinel
+    // write to the data slot is not blocked by __nw_X non-writable guard.
+    if (name_len > 0 && name_len < 200) {
+        const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
+        for (int pi = 0; pi < 5; pi++) {
+            char mk[256];
+            snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], name_len, name);
+            Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
+            js_property_set(object, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        }
+    }
+    Item bare = (Item){.item = s2it(heap_create_name(name, name_len))};
+    js_property_set(object, bare, (Item){.item = JS_DELETED_SENTINEL_VAL});
+    return true;
 }
 
 // External: defined in lambda-data-runtime.cpp (C++ linkage).

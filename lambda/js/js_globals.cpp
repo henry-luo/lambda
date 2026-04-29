@@ -8066,15 +8066,19 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (!ks) return (Item){.item = b2it(false)};
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
-    // Use js_map_get_fast_ext which uses the hash table (last-writer-wins)
-    // to always find the latest value for a key. The old linear shape walk
-    // could find stale entries when a property was updated (e.g. deleted).
-    bool found = false;
-    Item val = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &found);
-    if (!found) {
-        // Phase-5D: legacy __get_/__set_ accessor-key probes removed.
-        // IS_ACCESSOR shape entries store under the bare name; the bare-name
-        // probe above returns found=true with a JsAccessorPair-tagged value.
+    // Stage A1.8: own-presence check via the shared kernel. If the slot is
+    // tombstoned (deleted sentinel), the property is NOT present and we
+    // must NOT fall through to the builtin-method / String-wrapper probe
+    // (which would resurrect a deleted builtin).
+    {
+        bool slot_found = false;
+        Item slot = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &slot_found);
+        if (slot_found) {
+            return (Item){.item = b2it(slot.item != JS_DELETED_SENTINEL_VAL)};
+        }
+    }
+    // Slot truly absent: fall back to builtin methods / String-wrapper indexed access.
+    {
         // v26: check if this is a prototype Map with builtin methods
         if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
         // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
@@ -8103,15 +8107,6 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         return (Item){.item = b2it(false)};
     }
-    if (val.item == JS_DELETED_SENTINEL_VAL) {
-        // Phase-5D: data slot tombstoned. Legacy __get_/__set_ accessor-marker
-        // probes removed: js_define_accessor_partial replaces the sentinel
-        // with a JsAccessorPair item under the bare name (and sets
-        // IS_ACCESSOR shape flag), so a re-defined accessor would have made
-        // the bare-name fast probe above return found=true with non-sentinel val.
-        return (Item){.item = b2it(false)};
-    }
-    return (Item){.item = b2it(true)};
 }
 
 // =============================================================================
