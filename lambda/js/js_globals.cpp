@@ -11385,14 +11385,43 @@ static Item js_ctor_eval_error_fn(Item msg) {
     return js_new_error_with_name(tn, msg);
 }
 
-// Event(type, options) / CustomEvent(type, options) — called without 'new'
-static Item js_ctor_event_fn(Item type_arg) {
+// Event(type, init) / CustomEvent(type, init) -- called without 'new' too.
+// Honours EventInitDict {bubbles, cancelable, composed [, detail]} per spec.
+static Item js_ctor_event_fn(Item type_arg, Item init_arg) {
     const char* type = fn_to_cstr(type_arg);
-    return js_create_event(type ? type : "", false, false);
+    bool bub = false, can = false, comp = false;
+    if (get_type_id(init_arg) == LMD_TYPE_MAP) {
+        Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+        Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+        Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+        Item bv = js_property_get(init_arg, bk);
+        Item cv = js_property_get(init_arg, ck);
+        Item ov = js_property_get(init_arg, ok);
+        if (bv.item != 0 && get_type_id(bv) != LMD_TYPE_UNDEFINED) bub = js_is_truthy(bv);
+        if (cv.item != 0 && get_type_id(cv) != LMD_TYPE_UNDEFINED) can = js_is_truthy(cv);
+        if (ov.item != 0 && get_type_id(ov) != LMD_TYPE_UNDEFINED) comp = js_is_truthy(ov);
+    }
+    return js_create_event_init(type ? type : "", bub, can, comp);
 }
-static Item js_ctor_custom_event_fn(Item type_arg) {
+static Item js_ctor_custom_event_fn(Item type_arg, Item init_arg) {
     const char* type = fn_to_cstr(type_arg);
-    return js_create_custom_event(type ? type : "", false, false, ItemNull);
+    bool bub = false, can = false, comp = false;
+    Item detail = ItemNull;
+    if (get_type_id(init_arg) == LMD_TYPE_MAP) {
+        Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+        Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+        Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+        Item dk = (Item){.item = s2it(heap_create_name("detail"))};
+        Item bv = js_property_get(init_arg, bk);
+        Item cv = js_property_get(init_arg, ck);
+        Item ov = js_property_get(init_arg, ok);
+        Item dv = js_property_get(init_arg, dk);
+        if (bv.item != 0 && get_type_id(bv) != LMD_TYPE_UNDEFINED) bub = js_is_truthy(bv);
+        if (cv.item != 0 && get_type_id(cv) != LMD_TYPE_UNDEFINED) can = js_is_truthy(cv);
+        if (ov.item != 0 && get_type_id(ov) != LMD_TYPE_UNDEFINED) comp = js_is_truthy(ov);
+        if (dv.item != 0) detail = dv;
+    }
+    return js_create_custom_event_init(type ? type : "", bub, can, comp, detail);
 }
 
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
@@ -11841,6 +11870,23 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     // Populate constructor-specific own properties
     if (ctor_id == JS_CTOR_NUMBER) js_populate_number_ctor(fn_item);
     if (ctor_id == JS_CTOR_SYMBOL) js_populate_symbol_ctor(fn_item);
+    if (ctor_id == JS_CTOR_EVENT || ctor_id == JS_CTOR_CUSTOM_EVENT) {
+        // Static phase constants on Event / CustomEvent constructor + prototype.
+        struct { const char* n; int v; } ph[] = {
+            {"NONE", 0}, {"CAPTURING_PHASE", 1}, {"AT_TARGET", 2}, {"BUBBLING_PHASE", 3}
+        };
+        Item proto = js_new_object();
+        for (int i = 0; i < 4; i++) {
+            Item k = (Item){.item = s2it(heap_create_name(ph[i].n, strlen(ph[i].n)))};
+            Item v = (Item){.item = i2it(ph[i].v)};
+            js_func_init_property(fn_item, k, v);
+            js_property_set(proto, k, v);
+        }
+        // .constructor on prototype points back to the function.
+        Item ck = (Item){.item = s2it(heap_create_name("constructor", 11))};
+        js_property_set(proto, ck, fn_item);
+        ((JsCtor*)fn_item.function)->prototype = proto;
+    }
     // Populate static methods as own properties for all constructors
     js_populate_constructor_statics(fn_item, name, strlen(name));
     // TypedArray constructors: set up per-type prototype with constructor + BYTES_PER_ELEMENT
@@ -11918,8 +11964,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"BigInt64Array", 13, JS_CTOR_BIGINT64ARRAY, 3},
         {"BigUint64Array", 14, JS_CTOR_BIGUINT64ARRAY, 3},
         {"Proxy", 5, JS_CTOR_PROXY, 2},
-        {"Event", 5, JS_CTOR_EVENT, 1},
-        {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 1},
+        {"Event", 5, JS_CTOR_EVENT, 2},
+        {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 2},
         {NULL, 0, 0, 0}
     };
 

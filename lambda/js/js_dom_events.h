@@ -56,9 +56,20 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item);
 Item js_create_event(const char* type, bool bubbles, bool cancelable);
 
 /**
+ * Create an Event with full EventInit (composed flag set explicitly).
+ */
+Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed);
+
+/**
  * Create a CustomEvent object with a detail property.
  */
 Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Item detail);
+
+/**
+ * Create a CustomEvent with full EventInit (composed flag) plus detail.
+ */
+Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,
+                                 bool composed, Item detail);
 
 // ============================================================================
 // Lifecycle

@@ -4564,20 +4564,21 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 const char* type = "";
-                bool bubbles = false, cancelable = false;
+                bool bubbles = false, cancelable = false, composed = false;
                 if (argc > 0 && args) {
                     const char* t = fn_to_cstr(args[0]);
                     if (t) type = t;
                 }
                 if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
-                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
-                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
-                    Item bv = js_property_get(args[1], bk);
-                    Item cv = js_property_get(args[1], ck);
-                    bubbles = js_is_truthy(bv);
-                    cancelable = js_is_truthy(cv);
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+                    Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+                    bubbles    = js_is_truthy(js_property_get(args[1], bk));
+                    cancelable = js_is_truthy(js_property_get(args[1], ck));
+                    composed   = js_is_truthy(js_property_get(args[1], ok));
                 }
-                return js_create_event(type, bubbles, cancelable);
+                extern Item js_create_event_init(const char*, bool, bool, bool);
+                return js_create_event_init(type, bubbles, cancelable, composed);
             }
 
             // CustomEvent(type, options)
@@ -4585,23 +4586,24 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 const char* type = "";
-                bool bubbles = false, cancelable = false;
+                bool bubbles = false, cancelable = false, composed = false;
                 Item detail = ItemNull;
                 if (argc > 0 && args) {
                     const char* t = fn_to_cstr(args[0]);
                     if (t) type = t;
                 }
                 if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
-                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
-                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
-                    Item dk = (Item){.item = s2it(heap_create_name("detail", 6))};
-                    Item bv = js_property_get(args[1], bk);
-                    Item cv = js_property_get(args[1], ck);
-                    detail = js_property_get(args[1], dk);
-                    bubbles = js_is_truthy(bv);
-                    cancelable = js_is_truthy(cv);
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+                    Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+                    Item dk = (Item){.item = s2it(heap_create_name("detail"))};
+                    bubbles    = js_is_truthy(js_property_get(args[1], bk));
+                    cancelable = js_is_truthy(js_property_get(args[1], ck));
+                    composed   = js_is_truthy(js_property_get(args[1], ok));
+                    detail     = js_property_get(args[1], dk);
                 }
-                return js_create_custom_event(type, bubbles, cancelable, detail);
+                extern Item js_create_custom_event_init(const char*, bool, bool, bool, Item);
+                return js_create_custom_event_init(type, bubbles, cancelable, composed, detail);
             }
         }
 

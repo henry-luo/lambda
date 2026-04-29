@@ -3059,6 +3059,18 @@
                         "icon": "📋"
                     },
                     {
+                        "source": "test/wpt/test_wpt_dom_events_gtest.cpp",
+                        "name": "WPT DOM Events Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_dom_events_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🪝"
+                    },
+                    {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
                         "dependencies": [],

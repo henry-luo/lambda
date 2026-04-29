@@ -1986,14 +1986,26 @@ static String* uppercase_tag_name(const char* tag_name) {
 // ============================================================================
 
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
-    if (!_js_current_document) {
-        log_error("js_document_method: no document set");
-        return ItemNull;
-    }
-
     const char* method = fn_to_cstr(method_name);
     if (!method) {
         log_error("js_document_method: invalid method name");
+        return ItemNull;
+    }
+
+    // createEvent is document-independent — handle before document presence check
+    // so that JS scripts without an associated HTML document can still construct
+    // events.
+    if (strcmp(method, "createEvent") == 0) {
+        const char* iface = (argc > 0) ? fn_to_cstr(args[0]) : NULL;
+        if (!iface) iface = "";
+        if (strcmp(iface, "CustomEvent") == 0) {
+            return js_create_custom_event_init("", false, false, false, ItemNull);
+        }
+        return js_create_event_init("", false, false, false);
+    }
+
+    if (!_js_current_document) {
+        log_error("js_document_method: no document set");
         return ItemNull;
     }
 
@@ -2595,6 +2607,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "createDocumentFragment", "importNode", "adoptNode",
         "addEventListener", "removeEventListener",
         "createRange", "getSelection",
+        "createEvent",
         "execCommand",
         NULL
     };
