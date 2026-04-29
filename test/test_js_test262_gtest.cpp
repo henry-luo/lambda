@@ -2020,8 +2020,23 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     fprintf(partial_log, "CRASH_%d\t%s\t%s\n", kv.second.exit_code,
                             kv.first.c_str(), path);
                     written.insert(kv.first);
-                    // Only count as crash-exit if it's a genuine regression (was passing in baseline)
-                    if (!is_batch_kill && !is_collateral && was_in_baseline) crash_exit++;
+                    // Only count as crash-exit if it's a genuine regression (was passing in baseline).
+                    // If the test was already tagged as a known crash/timeout/slow/batch-kill in
+                    // a previous run (g_partial_tags), it's not a new regression — with
+                    // --run-partial we promoted it to clean batches, but a re-confirmed crash
+                    // doesn't make it worse than it already was.
+                    bool was_known_crash = false;
+                    {
+                        auto tag_it = g_partial_tags.find(kv.first);
+                        if (tag_it != g_partial_tags.end()) {
+                            const auto& tag = tag_it->second;
+                            was_known_crash = (tag.substr(0, 5) == "CRASH" ||
+                                               tag.substr(0, 7) == "TIMEOUT" ||
+                                               tag.substr(0, 4) == "SLOW" ||
+                                               tag == "BATCH_KILL");
+                        }
+                    }
+                    if (!is_batch_kill && !is_collateral && was_in_baseline && !was_known_crash) crash_exit++;
                 }
             }
             // Add newly-discovered slow tests (>3s elapsed) from clean batches

@@ -1631,17 +1631,16 @@ extern "C" Item js_to_string(Item value) {
         {
             bool ts_callable = false;
             Item ts_fn = ItemNull;
-            // Check own first (direct property), then prototype chain
+            // Track ownership for valueOf gating, but always route through
+            // js_property_get so that accessor (getter) toString is invoked,
+            // not the raw JsAccessorPair* slot value.
             bool own_ts = false;
-            ts_fn = js_map_get_fast(value.map, "toString", 8, &own_ts);
-            bool ts_found = own_ts;
-            if (!own_ts) {
-                // v90: Use js_property_get to handle getter-defined toString (e.g., {get toString() {...}})
-                Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                ts_fn = js_property_get(value, ts_key);
-                if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
-                if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) != LMD_TYPE_UNDEFINED) ts_found = true;
-            }
+            (void)js_map_get_fast(value.map, "toString", 8, &own_ts);
+            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            ts_fn = js_property_get(value, ts_key);
+            if (js_check_exception()) return (Item){.item = s2it(heap_create_name(""))};
+            bool ts_found = own_ts ||
+                (ts_fn.item != ItemNull.item && get_type_id(ts_fn) != LMD_TYPE_UNDEFINED);
             if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
                 ts_callable = true;
                 Item result = js_call_function(ts_fn, value, NULL, 0);
@@ -5094,6 +5093,7 @@ extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
 
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup(Item object, Item property);
+extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 
 // P10f: Fast property lookup for JS objects.
 // Like _map_get but avoids strncmp+strlen overhead by using pre-computed key_len.
@@ -5422,9 +5422,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             result = map_get(object.map, key);  // fallback for non-string keys
             own_found = (result.item != ItemNull.item);
         }
+        bool own_was_deleted_sentinel = false;
         if (own_found) {
             // If property was deleted (sentinel), fall through to getter/prototype
-            if (js_is_deleted_sentinel(result)) { /* deleted — check getter first */ }
+            if (js_is_deleted_sentinel(result)) { own_was_deleted_sentinel = true; /* deleted — check getter first */ }
             else {
                 // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot holds
                 // a JsAccessorPair*; dispatch via pair->getter instead of returning slot raw.
@@ -5435,6 +5436,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (pair && pair->getter.item != ItemNull.item) {
                             Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
                             return js_call_function(pair->getter, this_val, NULL, 0);
+                        }
+                        // ES §PrivateFieldGet: setter-only private accessor throws TypeError.
+                        // Public setter-only accessor returns undefined per §9.1.8.1.
+                        const char* kc = key.get_chars();
+                        int kl = (int)key.get_len();
+                        if (kl > 10 && strncmp(kc, "__private_", 10) == 0) {
+                            char msg[256];
+                            snprintf(msg, sizeof(msg), "'#%.*s' was defined without a getter", kl - 10, kc + 10);
+                            return js_throw_type_error(msg);
                         }
                         return make_js_undefined();
                     }
@@ -5475,11 +5485,25 @@ extern "C" Item js_property_get(Item object, Item key) {
         // IS_ACCESSOR shape-flag fast-path above (own_found branch) handles all
         // accessor dispatch including setter-only shadowing (a setter-only pair
         // has getter == ItemNull, returning undefined per ES §9.1.8).
-        // Prototype chain fallback: if property not found on own object, walk __proto__
-        result = js_prototype_lookup(object, key);
-        if (result.item != ItemNull.item) return result;
+        // Prototype chain fallback: if property not found on own object, walk __proto__.
+        // Use _ex variant to distinguish "found, returned JS null" from "not found".
+        bool proto_found = false;
+        result = js_prototype_lookup_ex(object, key, &proto_found);
+        if (proto_found) return result;
         // Phase 5: legacy __get_X proto-chain probe removed. js_prototype_lookup
         // walks the chain and dispatches IS_ACCESSOR pairs internally.
+        // ES §10.1.5 [[Get]] on Object.prototype: when an own slot has been
+        // tombstoned by `delete` and the object IS Object.prototype itself
+        // (top of the chain, [[Prototype]] == null), the virtual built-in
+        // method fallback below must NOT resurrect the deleted method —
+        // there is no further prototype to inherit from. Skip the fallback
+        // and return undefined, matching test262 S15.2.4_A1_T2.
+        if (own_was_deleted_sentinel) {
+            Map* obj_proto = js_resolve_object_prototype();
+            if (obj_proto && object.map == obj_proto) {
+                return make_js_undefined();
+            }
+        }
         // Property not found — check for built-in methods (Object.prototype)
         // Also check Array/String methods for prototype objects
         if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -6941,8 +6965,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 }
             }
         }
-        // v16: Enforce non-writable properties via __nw_<name> marker
-        if (get_type_id(key) == LMD_TYPE_STRING) {
+        // v16: Enforce non-writable properties via __nw_<name> marker.
+        // Phase 4: skip when js_skip_accessor_dispatch is set — that flag indicates
+        // the caller is installing engine-internal accessor storage (e.g.
+        // js_define_accessor_partial writing a JsAccessorPair* to the slot during
+        // data→accessor conversion via Object.defineProperty). Honoring __nw_ here
+        // would leave the slot at the stale data value while IS_ACCESSOR gets set,
+        // causing reads to dereference the integer as a JsAccessorPair* and crash.
+        if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
             String* str_key = it2s(key);
             if (str_key && str_key->len > 0 && str_key->len < 200 &&
                 !(str_key->len >= 5 && strncmp(str_key->chars, "__nw_", 5) == 0) &&
@@ -7074,6 +7104,37 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
                                         strncmp(str_key->chars, "__set_", 6) == 0)) &&
                 !(str_key->len == 9 && strncmp(str_key->chars, "__proto__", 9) == 0)) {
+                // ES §9.5.9: Proxy in prototype chain forwards [[Set]] through
+                // the proxy's set trap with the original receiver. Without this,
+                // setter dispatch silently bypasses the proxy.
+                {
+                    Item _cur = object;
+                    int _depth = 0;
+                    bool own_has = false;
+                    {
+                        ShapeEntry* _se_own = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+                        own_has = (_se_own != NULL);
+                    }
+                    if (!own_has && get_type_id(_cur) == LMD_TYPE_MAP) {
+                        Item _proto = js_get_prototype(_cur);
+                        while (_proto.item != ItemNull.item &&
+                               get_type_id(_proto) == LMD_TYPE_MAP && _depth < 16) {
+                            if (js_is_proxy(_proto)) {
+                                Item prev_recv = js_proxy_receiver;
+                                if (!js_proxy_receiver.item) js_proxy_receiver = object;
+                                js_proxy_trap_set(_proto, key, value);
+                                js_proxy_receiver = prev_recv;
+                                return value;
+                            }
+                            // Stop walking when we find an own entry on this proto:
+                            // either accessor (handled below) or data (no proxy interception needed).
+                            ShapeEntry* _se_p = js_find_shape_entry(_proto, str_key->chars, (int)str_key->len);
+                            if (_se_p) break;
+                            _proto = js_get_prototype(_proto);
+                            _depth++;
+                        }
+                    }
+                }
                 // Phase 4: IS_ACCESSOR setter fast-path. Check own + proto chain
                 // for a JsAccessorPair under name X via shape flags. Dispatch
                 // through pair->setter, or throw if accessor has no setter.
@@ -7553,22 +7614,40 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
 
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
 
-    // check setter on proto — call with receiver as this
+    // check setter on proto chain — call with receiver as this.
+    // Use accessor-pair lookup (IS_ACCESSOR shape flag) which is the new
+    // canonical accessor representation. Falls back to legacy __set_X marker
+    // lookup for compatibility with code paths that still use the old
+    // representation (e.g. some built-in prototypes).
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
-        if (str_key && str_key->len < 64 && str_key->len > 0) {
-            char setter_key[256];
-            snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
-            bool sk_found = false;
-            Item setter = js_map_get_fast(proto.map, setter_key, (int)strlen(setter_key), &sk_found);
-            if (!sk_found || get_type_id(setter) != LMD_TYPE_FUNC) {
-                Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
-                setter = js_prototype_lookup(proto, sk);
-            }
-            if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+        if (str_key && str_key->len > 0) {
+            // Phase 4 accessor lookup via JsAccessorPair on proto chain
+            JsAccessorPair* ap = js_find_accessor_pair_inheritable(
+                proto, str_key->chars, (int)str_key->len);
+            if (ap && ap->setter.item != ItemNull.item &&
+                get_type_id(ap->setter) == LMD_TYPE_FUNC) {
                 Item args[1] = { value };
-                js_call_function(setter, receiver, args, 1);
+                js_call_function(ap->setter, receiver, args, 1);
                 return value;
+            }
+            // Legacy __set_X marker lookup (for builtins not yet migrated)
+            if (str_key->len < 64) {
+                char setter_key[256];
+                snprintf(setter_key, sizeof(setter_key), "__set_%.*s",
+                         (int)str_key->len, str_key->chars);
+                bool sk_found = false;
+                Item setter = js_map_get_fast(proto.map, setter_key,
+                                              (int)strlen(setter_key), &sk_found);
+                if (!sk_found || get_type_id(setter) != LMD_TYPE_FUNC) {
+                    Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
+                    setter = js_prototype_lookup(proto, sk);
+                }
+                if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item args[1] = { value };
+                    js_call_function(setter, receiver, args, 1);
+                    return value;
+                }
             }
         }
     }
@@ -16135,9 +16214,33 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (get_type_id(str) != LMD_TYPE_STRING || get_type_id(method_name) != LMD_TYPE_STRING) {
         // v18n: coerce this to string if not already (for .call() with non-string this)
         if (get_type_id(str) != LMD_TYPE_STRING) {
-            str = js_to_string(str);
-            if (js_exception_pending) return ItemNull;
-            if (get_type_id(str) != LMD_TYPE_STRING) return ItemNull;
+            // ES5: String wrapper MAP — extract __primitiveValue__ directly to avoid
+            // ToPrimitive recursion (calling js_to_string on a String wrapper MAP
+            // re-enters here through toString/valueOf prototype dispatch).
+            // String.prototype itself has __class_name__="String" but no
+            // __primitiveValue__; per ES5 [[StringData]] = "" so default to empty.
+            if (get_type_id(str) == LMD_TYPE_MAP) {
+                bool cn_found = false;
+                Item cn = js_map_get_fast(str.map, "__class_name__", 14, &cn_found);
+                if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                    String* cn_str = it2s(cn);
+                    if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                        bool pv_found = false;
+                        Item pv = js_map_get_fast(str.map, "__primitiveValue__", 18, &pv_found);
+                        if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
+                            str = pv;
+                        } else {
+                            // String.prototype-style: default to empty string
+                            str = (Item){.item = s2it(heap_create_name("", 0))};
+                        }
+                    }
+                }
+            }
+            if (get_type_id(str) != LMD_TYPE_STRING) {
+                str = js_to_string(str);
+                if (js_exception_pending) return ItemNull;
+                if (get_type_id(str) != LMD_TYPE_STRING) return ItemNull;
+            }
         }
         if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     }
@@ -18604,15 +18707,31 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (dc_d > old_len - start_d) dc_d = old_len - start_d;
             int insert_count = argc > 2 ? argc - 2 : 0;
             double new_len = old_len + (double)insert_count - dc_d;
-            // Check if length is accessor (getter-only) → Set throws TypeError per ES spec
-            Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-            Item getter = js_property_get(cb_this, getter_key);
-            if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                Item setter_key = (Item){.item = s2it(heap_create_name("__set_length", 12))};
-                Item setter = js_property_get(cb_this, setter_key);
-                if (setter.item == ItemNull.item || get_type_id(setter) != LMD_TYPE_FUNC) {
-                    js_throw_type_error("Cannot set property length of object which has only a getter");
-                    return make_js_undefined();
+            // Check if length is getter-only accessor → Set throws TypeError per ES spec.
+            // Phase 5: prefer IS_ACCESSOR shape flag; fall back to legacy markers.
+            {
+                ShapeEntry* _se = js_find_shape_entry(cb_this, "length", 6);
+                if (_se && jspd_is_accessor(_se)) {
+                    bool sf = false;
+                    Item slot = js_map_get_fast_ext(cb_this.map, "length", 6, &sf);
+                    if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
+                        JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+                        if (pair && pair->setter.item == ItemNull.item) {
+                            js_throw_type_error("Cannot set property length of object which has only a getter");
+                            return make_js_undefined();
+                        }
+                    }
+                } else {
+                    Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
+                    Item getter = js_property_get(cb_this, getter_key);
+                    if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
+                        Item setter_key = (Item){.item = s2it(heap_create_name("__set_length", 12))};
+                        Item setter = js_property_get(cb_this, setter_key);
+                        if (setter.item == ItemNull.item || get_type_id(setter) != LMD_TYPE_FUNC) {
+                            js_throw_type_error("Cannot set property length of object which has only a getter");
+                            return make_js_undefined();
+                        }
+                    }
                 }
             }
             // Check non-writable length
@@ -20084,6 +20203,23 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
+    // ES [[GetPrototypeOf]] is an internal slot — independent of any user-
+    // defined __proto__ accessor on Object.prototype. If the own __proto__
+    // slot has been redefined via Object.defineProperty as an accessor (e.g.
+    // `Object.defineProperty(Object.prototype, '__proto__', { set: ... })`),
+    // the slot now holds a `JsAccessorPair*` raw pointer; treating it as a
+    // prototype Item causes a bus error during chain walks. Detect this and
+    // skip — the [[Prototype]] internal slot is conceptually unaffected by
+    // the user's accessor redefinition. See test/js_props/proto_accessor_redef_safe.js.
+    ShapeEntry* proto_se = js_find_shape_entry(object, PROTO_KEY, PROTO_KEY_LEN);
+    if (proto_se && jspd_is_accessor(proto_se)) {
+        // Accessor on __proto__ — internal [[Prototype]] is unknown via this
+        // slot. For the special case of Object.prototype itself, the parent
+        // is null (top of chain). For other objects we can't recover the
+        // hidden prototype; returning ItemNull is the safe fallback that
+        // preserves [[GetPrototypeOf]] semantics for the proto-walk consumers.
+        return ItemNull;
+    }
     // P10f+P10d: direct first-match lookup with interned key
     Item proto = js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
     // TypedArray instances don't store __proto__; use per-type prototype
@@ -20097,13 +20233,179 @@ extern "C" Item js_get_prototype(Item object) {
     return proto;
 }
 
+// Resolve the effective prototype of `object` for property-chain walking.
+// If `object` has an own `__proto__` slot, return it. Otherwise synthesize the
+// implicit prototype from `__class_name__`: e.g. an instance with __class_name__
+// "Date" implicitly inherits from Date.prototype, which in turn inherits from
+// Object.prototype. This unifies behavior with `Object.getPrototypeOf` (which
+// performs the same constructor-based fallback in `js_get_prototype_of`) so that
+// user-added properties on built-in prototypes are visible during property
+// lookup, not just the small set of built-in methods dispatched via class name.
+//
+// Returns ItemNull only at the top of the chain (Object.prototype itself, or
+// when the explicit `__proto__` slot holds the null sentinel).
+static Item js_get_implicit_proto(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    Map* m = object.map;
+    Item raw = js_get_prototype(object);
+    if (raw.item != ItemNull.item) {
+        // Object.create(null) sentinel → end of chain
+        if (raw.item == ITEM_JS_UNDEFINED) return ItemNull;
+        return raw;
+    }
+    // No own __proto__ slot — synthesize from __class_name__.
+    // Determine the class name (default to "Object" for plain instances).
+    bool cn_found = false;
+    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
+    const char* cls = "Object";
+    int cls_len = 6;
+    if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
+        if (s && s->len > 0) { cls = s->chars; cls_len = (int)s->len; }
+    }
+    // Look up the constructor and read its `.prototype` property.
+    Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(cls, cls_len))});
+    if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
+    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    Item proto = js_property_get(ctor, proto_key);
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    if (proto.map == m) {
+        // `object` IS the constructor's prototype object itself.
+        // For Object.prototype → top of chain. For Date.prototype, RegExp.prototype,
+        // etc. → continue walking to Object.prototype.
+        if (cls_len == 6 && strncmp(cls, "Object", 6) == 0) return ItemNull;
+        Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+        if (get_type_id(obj_ctor) != LMD_TYPE_FUNC) return ItemNull;
+        Item op = js_property_get(obj_ctor, proto_key);
+        if (get_type_id(op) != LMD_TYPE_MAP || op.map == m) return ItemNull;
+        return op;
+    }
+    return proto;
+}
+
+// Dispatch a class-specific built-in method on a prototype object during
+// proto-chain walking. Returns ItemNull if no class-specific method matches.
+// This is used so that, e.g., `(new Boolean()).toString()` finds Boolean's
+// toString on Boolean.prototype before the walk continues to Object.prototype
+// (which physically owns the generic Object.toString).
+static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int key_len) {
+    if (!key_str || key_len <= 0) return ItemNull;
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    Map* pm = proto.map;
+    bool ip_own = false;
+    js_map_get_fast_ext(pm, "__is_proto__", 12, &ip_own);
+    if (!ip_own) return ItemNull;
+    bool cn_own = false;
+    Item cn = js_map_get_fast_ext(pm, "__class_name__", 14, &cn_own);
+    if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return ItemNull;
+    String* cn_str = it2s(cn);
+    if (!cn_str) return ItemNull;
+    int cl = (int)cn_str->len;
+    const char* cs = cn_str->chars;
+    // Class-name dispatch table — matches js_property_get's MAP fallback.
+    if (cl == 7 && strncmp(cs, "Boolean", 7) == 0) {
+        return js_lookup_builtin_method(LMD_TYPE_BOOL, key_str, key_len);
+    }
+    if (cl == 6 && strncmp(cs, "Number", 6) == 0) {
+        // Number prototype methods
+        if (key_len == 8 && strncmp(key_str, "toString", 8) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
+        if (key_len == 7 && strncmp(key_str, "valueOf", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
+        if (key_len == 7 && strncmp(key_str, "toFixed", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
+        if (key_len == 11 && strncmp(key_str, "toPrecision", 11) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
+        if (key_len == 13 && strncmp(key_str, "toExponential", 13) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
+        return ItemNull;
+    }
+    if (cl == 6 && strncmp(cs, "String", 6) == 0) {
+        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+        return js_lookup_builtin_method(LMD_TYPE_STRING, key_str, key_len);
+    }
+    if (cl == 5 && strncmp(cs, "Array", 5) == 0) {
+        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
+            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+        return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
+    }
+    if (cl == 4 && strncmp(cs, "Date", 4) == 0) {
+        // Date.prototype methods table — mirrors js_property_get fallback at ~L5530.
+        struct { const char* name; int len; int id; int pc; } date_methods[] = {
+            {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
+            {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
+            {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
+            {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
+            {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
+            {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
+            {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
+            {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
+            {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
+            {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 0},
+            {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
+            {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
+            {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
+            {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
+            {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+            {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
+            {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
+            {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
+            {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
+            {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
+            {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
+            {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
+            {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
+            {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
+            {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
+            {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
+            {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
+            {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
+            {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
+            {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
+            {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
+            {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
+            {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
+            {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
+            {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
+            {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
+            {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
+            {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
+            {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
+            {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
+            {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
+            {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
+            {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
+            {NULL, 0, 0, 0}
+        };
+        for (int i = 0; date_methods[i].name; i++) {
+            if (key_len == date_methods[i].len && strncmp(key_str, date_methods[i].name, key_len) == 0) {
+                return js_get_or_create_builtin(date_methods[i].id, date_methods[i].name, date_methods[i].pc);
+            }
+        }
+        if (key_len == 7 && strncmp(key_str, "__sym_2", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
+        return ItemNull;
+    }
+    if (cl == 6 && strncmp(cs, "RegExp", 6) == 0) {
+        if (key_len == 4 && strncmp(key_str, "exec", 4) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_EXEC, "exec", 1);
+        if (key_len == 4 && strncmp(key_str, "test", 4) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
+        if (key_len == 8 && strncmp(key_str, "toString", 8) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
+        if (key_len == 7 && strncmp(key_str, "compile", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
+        return ItemNull;
+    }
+    return ItemNull;
+}
+
 // Walk the prototype chain to find a property
 // P10f: uses first-match lookup on each prototype level
-extern "C" Item js_prototype_lookup(Item object, Item property) {
+extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found) {
+    if (out_found) *out_found = false;
     // first check own properties (skip — caller already checked)
-    // walk up the chain via __proto__
-    Item proto = js_get_prototype(object);
-    int depth = 0;
     // P10f: extract key string once for first-match lookup
     const char* key_str = NULL;
     int key_len = 0;
@@ -20112,13 +20414,36 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
         key_str = s->chars;
         key_len = (int)s->len;
     }
+    // If `object` is itself a built-in prototype (e.g., Boolean.prototype),
+    // dispatch its class-specific built-in methods BEFORE walking. This prevents
+    // generic Object.prototype methods (which are physically installed) from
+    // shadowing class-specific overrides like Boolean.prototype.toString.
+    // BUT: if the property was explicitly deleted on this prototype (own slot
+    // holds the deleted sentinel), skip class dispatch so the lookup falls
+    // through to the next prototype level (e.g., Object.prototype).
+    if (key_str && get_type_id(object) == LMD_TYPE_MAP) {
+        Item own_slot = js_map_get_fast(object.map, key_str, key_len);
+        if (!js_is_deleted_sentinel(own_slot)) {
+            Item cm = js_proto_class_method_dispatch(object, key_str, key_len);
+            if (cm.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return cm;
+            }
+        }
+    }
+    // walk up the chain via implicit __proto__ (own slot, or synthesized from __class_name__)
+    Item proto = js_get_implicit_proto(object);
+    int depth = 0;
     while (proto.item != ItemNull.item && depth < 32) {
         TypeId pt = get_type_id(proto);
         if (pt == LMD_TYPE_FUNC) {
             // FUNC in prototype chain: resolve Function.prototype builtins (apply, call, bind, toString)
             if (key_str) {
                 Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, key_str, key_len);
-                if (builtin.item != ItemNull.item) return builtin;
+                if (builtin.item != ItemNull.item) {
+                    if (out_found) *out_found = true;
+                    return builtin;
+                }
             }
             break; // Function.prototype → Object.prototype handled by caller
         }
@@ -20126,7 +20451,10 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
             // ES: an Array can be a prototype object (e.g. `Foo.prototype = [1,2,3]`).
             // Delegate property lookup through js_property_get on the array.
             Item r = js_property_get(proto, property);
-            if (r.item != ItemNull.item && get_type_id(r) != LMD_TYPE_UNDEFINED) return r;
+            if (r.item != ItemNull.item && get_type_id(r) != LMD_TYPE_UNDEFINED) {
+                if (out_found) *out_found = true;
+                return r;
+            }
             proto = js_get_prototype_of(proto);
             depth++;
             continue;
@@ -20141,6 +20469,7 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
             }
             Item result = js_proxy_trap_get(proto, property);
             js_proxy_receiver = saved_receiver;
+            if (out_found) *out_found = true;
             return result;
         }
         Item result;
@@ -20155,22 +20484,50 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
             if (key_str) {
                 ShapeEntry* _se = js_find_shape_entry(proto, key_str, key_len);
                 if (_se && jspd_is_accessor(_se)) {
+                    if (out_found) *out_found = true;
                     JsAccessorPair* pair = js_item_to_accessor_pair(result);
                     if (pair && pair->getter.item != ItemNull.item) {
                         Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
                         return js_call_function(pair->getter, this_val, NULL, 0);
                     }
-                    return ItemNull;
+                    // ES §PrivateFieldGet: setter-only private accessor throws TypeError.
+                    // Public setter-only accessor returns undefined per §9.1.8.1.
+                    if (key_len > 10 && strncmp(key_str, "__private_", 10) == 0) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "'#%.*s' was defined without a getter", key_len - 10, key_str + 10);
+                        return js_throw_type_error(msg);
+                    }
+                    return make_js_undefined();
                 }
             }
+            if (out_found) *out_found = true;
             return result;
         }
         // Phase 5: legacy __get_<key> proto-level probe removed. The IS_ACCESSOR
         // fast-path above handles all accessor dispatch on each proto level.
-        proto = js_get_prototype(proto);
+        // Class-specific built-in method dispatch: if `proto` is a built-in
+        // prototype (has __is_proto__ + __class_name__), check class-specific
+        // methods (Boolean.prototype.toString, Date.prototype.getTime, etc.)
+        // before walking to the next proto level. This prevents Object.prototype's
+        // physical generic methods from incorrectly shadowing class-specific ones.
+        // BUT: skip if the key was explicitly deleted on this proto level (own
+        // slot is the deleted sentinel), so the lookup falls through.
+        if (key_str && !js_is_deleted_sentinel(result)) {
+            Item cm = js_proto_class_method_dispatch(proto, key_str, key_len);
+            if (cm.item != ItemNull.item) {
+                if (out_found) *out_found = true;
+                return cm;
+            }
+        }
+        proto = js_get_implicit_proto(proto);
         depth++;
     }
     return ItemNull;
+}
+
+extern "C" Item js_prototype_lookup(Item object, Item property) {
+    bool _f;
+    return js_prototype_lookup_ex(object, property, &_f);
 }
 
 // =============================================================================

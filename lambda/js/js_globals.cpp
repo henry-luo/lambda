@@ -9879,21 +9879,13 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         return (Item){.item = b2it(true)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // Convert Symbol keys to __sym_N string format so marker checks work
-    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
-        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
-        key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    // Numeric keys (delete obj[1]) must be coerced to canonical decimal string so the
-    // accessor / non-configurable / non-writable marker tombstone code below can match.
-    if (get_type_id(key) == LMD_TYPE_INT) {
-        int64_t iv = it2i(key);
-        if (iv >= 0 && iv < (int64_t)1e15) {
-            char buf[32];
-            int n = snprintf(buf, sizeof(buf), "%lld", (long long)iv);
-            key = (Item){.item = s2it(heap_create_name(buf, n))};
+    // Stage A1: canonicalize key via js_to_property_key (Symbol→__sym_N,
+    // INT/FLOAT→decimal string) so marker tombstones below match the shape
+    // entry created at defineProperty time.
+    {
+        TypeId kt0 = get_type_id(key);
+        if (kt0 == LMD_TYPE_INT || kt0 == LMD_TYPE_FLOAT) {
+            key = js_to_property_key(key);
         }
     }
     // v95: Track __sym_1 deletion on a map (Array.prototype[Symbol.iterator] may be deleted)
@@ -10037,6 +10029,20 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     break;
                 }
                 entry = entry->next;
+            }
+        }
+    }
+    // Phase 4: clear IS_ACCESSOR shape flag before writing sentinel.
+    // If the property was an accessor (slot holds JsAccessorPair*), the
+    // sentinel write would leave IS_ACCESSOR set with a stale int sentinel
+    // in the slot — subsequent reads (descriptor synthesis, dispatch) would
+    // dereference the sentinel as a pair pointer and crash.
+    if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            ShapeEntry* _se = js_find_shape_entry(obj, str_key->chars, (int)str_key->len);
+            if (_se && jspd_is_accessor(_se)) {
+                jspd_set_accessor(_se, false);
             }
         }
     }

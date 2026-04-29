@@ -472,6 +472,7 @@ static std::vector<JsTestParam> discover_all_js_tests() {
     static const char* dirs[] = {
         "test/js",
         "test/node",
+        "test/js_props",  // property-model invariant tests (Stage B harness, see vibe/jube/Transpile_Js38_Refactor.md)
     };
     std::vector<JsTestParam> all;
     for (const char* d : dirs) {
