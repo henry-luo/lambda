@@ -21922,8 +21922,33 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     int64_t next_state = it2i(arr->items[1]);
 
     if (next_state == -1) {
-        // Done — fulfill the async function's promise
-        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_FULFILLED, value);
+        // Done — fulfill the async function's promise.
+        // Per ECMAScript spec, if the returned value is a thenable, the
+        // outer promise must adopt the thenable's state (chain) rather
+        // than fulfill with the thenable as its value. Mirror the logic
+        // in js_resolve_callback().
+        JsPromise* outer = &js_promises[ctx->promise_idx];
+        JsPromise* thenable = js_get_promise(value);
+        if (thenable) {
+            if (thenable->state != JS_PROMISE_PENDING) {
+                js_promise_settle(outer, thenable->state, thenable->result);
+            } else {
+                // Forward thenable's eventual settlement directly to outer
+                // promise. Reuse the microtask resolve/reject helpers used
+                // by Promise.resolve / chain logic.
+                Item p_item = js_promise_to_item(outer);
+                if (thenable->then_count < 8) {
+                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
+                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
+                    thenable->on_fulfilled[thenable->then_count] = js_bind_function(resolve_fn, ItemNull, &p_item, 1);
+                    thenable->on_rejected[thenable->then_count] = js_bind_function(reject_fn, ItemNull, &p_item, 1);
+                    thenable->next_promise[thenable->then_count] = ItemNull;
+                    thenable->then_count++;
+                }
+            }
+        } else {
+            js_promise_settle(outer, JS_PROMISE_FULFILLED, value);
+        }
     } else if (next_state == -2) {
         // Rejected — reject the async function's promise
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value);

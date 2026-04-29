@@ -1369,6 +1369,9 @@ int main(int argc, char *argv[]) {
 
             // If --document is provided, load HTML and set up DOM context
             if (html_file) {
+                // Make relative fetch() URLs resolve against the document's
+                // directory (so WPT tests can load sibling resources from disk).
+                js_fetch_set_base_path(html_file);
                 // Parse HTML into Lambda Element tree
                 char* html_content = read_text_file(html_file);
                 if (!html_content) {

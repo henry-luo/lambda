@@ -2603,36 +2603,43 @@ char* extract_selected_html(RadiantState* state, Arena* arena) {
     return result;
 }
 
+// Clipboard helpers — delegate to the canonical Radiant ClipboardStore
+// (see radiant/clipboard.hpp). The store mirrors writes to the OS
+// pasteboard via its installed backend; for headless / test builds the
+// default in-memory backend is used and writes never touch GLFW.
+
+#include "clipboard.hpp"
+
 void clipboard_copy_text(const char* text) {
     if (!text) return;
-
-    // Get GLFW window from UI context (assumes single window for now)
-    // In production, this should be passed as parameter
+    clipboard_store_write_text(text);
+    // Best-effort GLFW mirror so existing interactive flows keep working
+    // in builds where a GLFW window is present.
     extern UiContext ui_context;
     if (ui_context.window) {
         glfwSetClipboardString(ui_context.window, text);
-        log_info("Copied %zu bytes to clipboard", strlen(text));
-    } else {
-        log_error("clipboard_copy_text: no active window");
     }
+    log_info("Copied %zu bytes to clipboard", strlen(text));
 }
 
 const char* clipboard_get_text() {
     extern UiContext ui_context;
     if (ui_context.window) {
-        return glfwGetClipboardString(ui_context.window);
+        const char* s = glfwGetClipboardString(ui_context.window);
+        if (s) return s;
     }
-    log_error("clipboard_get_text: no active window");
-    return nullptr;
+    return clipboard_store_read_text();
 }
 
 void clipboard_copy_html(const char* html) {
     if (!html) return;
-
-    // GLFW only supports plain text clipboard
-    // For HTML, we'd need platform-specific code (NSPasteboard, Win32 API, X11)
-    // For now, just copy as plain text
-    clipboard_copy_text(html);
-
-    log_debug("clipboard_copy_html: HTML copied as plain text (HTML clipboard not yet supported)");
+    // Write both representations so paste handlers that ask for text/html
+    // get rich content and plain-text consumers still see something useful.
+    clipboard_store_write_mime("text/html", html);
+    clipboard_store_write_mime("text/plain", html);
+    extern UiContext ui_context;
+    if (ui_context.window) {
+        glfwSetClipboardString(ui_context.window, html);
+    }
+    log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));
 }

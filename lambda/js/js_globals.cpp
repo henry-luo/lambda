@@ -11026,6 +11026,13 @@ extern "C" Item js_get_global_this() {
                 (Item){.item = s2it(heap_create_name("DOMException", 12))}, ctor);
         }
 
+        // Web Clipboard / Blob / File / ClipboardItem / ClipboardEvent /
+        // navigator.clipboard / navigator.permissions
+        {
+            extern void js_register_clipboard_globals(Item global_this);
+            js_register_clipboard_globals(js_global_this_obj);
+        }
+
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
     }

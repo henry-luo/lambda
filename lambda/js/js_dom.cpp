@@ -2273,6 +2273,21 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
         return (Item){.item = ITEM_FALSE};
     }
+
+    // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
+    // We delegate to a JS-side helper installed by the WPT shim so that
+    // the page's `oncopy`/`oncut`/`onpaste` handlers and any
+    // `addEventListener('copy', ...)` listeners fire and can populate the
+    // synthetic clipboard. Returns false if no handler is installed.
+    if (strcmp(method, "execCommand") == 0) {
+        Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
+        Item helper = js_get_global_property(helper_key);
+        TypeId htype = get_type_id(helper);
+        if (htype == LMD_TYPE_FUNC) {
+            return js_call_function(helper, js_get_document_object_value(), args, argc);
+        }
+        return (Item){.item = ITEM_FALSE};
+    }
     // document.contains(node) — true iff node is document or a descendant.
     if (strcmp(method, "contains") == 0) {
         if (argc >= 1) {
@@ -2580,6 +2595,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "createDocumentFragment", "importNode", "adoptNode",
         "addEventListener", "removeEventListener",
         "createRange", "getSelection",
+        "execCommand",
         NULL
     };
     for (int i = 0; doc_methods[i]; i++) {
