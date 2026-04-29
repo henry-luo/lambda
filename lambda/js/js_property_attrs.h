@@ -115,6 +115,35 @@ void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
                                  uint8_t set_mask, uint8_t clear_mask);
 
 // =============================================================================
+// Stage A3: shape-flag-first attribute query helpers
+// =============================================================================
+//
+// Query whether the named own property of map `m` is enumerable / writable /
+// configurable. The shape entry `se` (if non-NULL) is consulted FIRST: if its
+// JSPD_NON_* flag bit is set, the property is treated accordingly without
+// further probing. Otherwise (or when `se == NULL`), a legacy `__ne_X` /
+// `__nw_X` / `__nc_X` marker probe on `m` provides the answer. This combined
+// check is robust against shared (pool-deduplicated) shape entries whose flag
+// bits could not be safely mutated by `js_dual_write_marker_flags`.
+//
+// Use these to replace the repetitive `snprintf("__ne_%.*s") + map_get_fast_ext
+// + js_is_truthy` pattern across enumerator/spread/assign sites.
+bool js_props_query_enumerable(Map* m, ShapeEntry* se,
+                                const char* name, int name_len);
+bool js_props_query_writable(Map* m, ShapeEntry* se,
+                              const char* name, int name_len);
+bool js_props_query_configurable(Map* m, ShapeEntry* se,
+                                  const char* name, int name_len);
+
+// Item-accepting wrappers — accept any object (MAP / FUNC / ARRAY) and resolve
+// the appropriate Map* + ShapeEntry* internally before delegating to the
+// Map*-based helpers above. Use these at sites that operate on a generic
+// `Item obj` to avoid manual MAP/FUNC dispatch.
+bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len);
+bool js_props_obj_query_writable(Item obj, const char* name, int name_len);
+bool js_props_obj_query_configurable(Item obj, const char* name, int name_len);
+
+// =============================================================================
 // Phase 2a: Universal dual-write hook
 // =============================================================================
 //
@@ -202,6 +231,12 @@ void js_install_native_accessor(Item obj, Item name, Item getter, Item setter,
 // IS_ACCESSOR is always set on the resulting shape entry.
 void js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
                                 uint8_t attrs);
+
+// Phase-5C transpiler chokepoint: 4-arg wrapper around
+// `js_define_accessor_partial(..., attrs=0)` returning the object Item so MIR
+// emit sites can replace the legacy `js_make_getter_key`+`js_property_set`
+// pair with a single call. `is_setter` is an int (0/1) for MIR ABI simplicity.
+Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
 // =============================================================================
 // Phase 4: js_property_set intercept for legacy __get_X/__set_X writes

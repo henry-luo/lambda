@@ -19174,13 +19174,9 @@ static Item js_get_math_object() {
             Item key = (Item){.item = s2it(heap_create_name(mc[i].name, nlen))};
             js_property_set(js_math_object, key, js_make_number(mc[i].val));
             // Mark non-enumerable, non-writable, non-configurable
-            char buf[64];
-            snprintf(buf, sizeof(buf), "__ne_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
-            snprintf(buf, sizeof(buf), "__nw_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
-            snprintf(buf, sizeof(buf), "__nc_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
+            js_mark_non_enumerable(js_math_object, key);
+            js_mark_non_writable(js_math_object, key);
+            js_mark_non_configurable(js_math_object, key);
         }
         // Populate Math methods as function properties for dynamic access (Math[m])
         struct { const char* name; int id; int pc; } mm[] = {
@@ -20111,6 +20107,21 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     js_property_set(object, nk, (Item){.item = b2it(true)});
 }
 
+// Mark a property as non-configurable by setting __nc_<name> marker.
+// Stage A4: writer-side API symmetry with js_mark_non_writable /
+// js_mark_non_enumerable. Dual-write at js_property_set top mirrors the
+// JSPD_NON_CONFIGURABLE bit onto the ShapeEntry::flags.
+extern "C" void js_mark_non_configurable(Item object, Item name) {
+    TypeId tid = get_type_id(object);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    char nc_key[256];
+    snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str->len, str->chars);
+    Item nk = (Item){.item = s2it(heap_create_name(nc_key, strlen(nc_key)))};
+    js_property_set(object, nk, (Item){.item = b2it(true)});
+}
+
 // Mark all user-visible properties on an object as non-enumerable (used for class prototypes)
 extern "C" void js_mark_all_non_enumerable(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
@@ -20497,13 +20508,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
                     continue;
                 }
             }
-            // skip non-enumerable properties (ES spec: CopyDataProperties only copies own enumerable)
-            char ne_buf[256];
-            snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", nlen, n);
-            bool ne_found = false;
-            extern Item js_map_get_fast_ext(Map* m, const char* key, int key_len, bool* found);
-            Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
-            if (ne_found && js_is_truthy(ne_val)) {
+            // skip non-enumerable properties (Stage A3.2: shape-flag-first)
+            if (!js_props_query_enumerable(m, e, n, nlen)) {
                 e = e->next;
                 continue;
             }
@@ -20535,12 +20541,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
                 const char* prop_name = s + 6;
                 int prop_len = slen - 6;
                 if (prop_len > 0 && prop_len < 200) {
-                    // skip non-enumerable accessors
-                    char ne_buf[256];
-                    snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", prop_len, prop_name);
-                    bool ne_found = false;
-                    Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
-                    if (!(ne_found && js_is_truthy(ne_val))) {
+                    // Stage A3.2: shape-flag-first non-enumerable check on accessor prop
+                    if (js_props_query_enumerable(m, NULL, prop_name, prop_len)) {
                         // skip if already copied (had a data entry)
                         bool data_found = false;
                         js_map_get_fast_ext(m, prop_name, prop_len, &data_found);

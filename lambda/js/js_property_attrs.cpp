@@ -90,6 +90,93 @@ extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name
     se->flags = (uint8_t)((se->flags | set_mask) & ~clear_mask);
 }
 
+// =============================================================================
+// Stage A3: shape-flag-first attribute query helpers
+// =============================================================================
+//
+// Prefer ShapeEntry::flags (kept in sync with legacy markers via dual-write).
+// Fall back to a __ne_X / __nw_X / __nc_X marker probe only when no shape entry
+// exists for X (e.g. companion-map indexed properties on arrays).
+
+extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
+                                          const char* name, int name_len) {
+    // Shape flag is authoritative when it indicates non-enumerable.
+    if (se && !jspd_is_enumerable(se)) return false;
+    // Otherwise fall back to legacy marker probe — covers cases where a shared
+    // (pool-deduplicated) shape entry could not be safely mutated by
+    // dual-write, leaving the JSPD_NON_ENUMERABLE bit unset on this map's view
+    // even though the __ne_X marker is present.
+    if (!m || name_len <= 0 || name_len >= 240) return true;
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
+    if (n <= 0 || n >= (int)sizeof(buf)) return true;
+    bool found = false;
+    Item v = js_map_get_fast_ext(m, buf, n, &found);
+    return !(found && js_is_truthy(v));
+}
+
+extern "C" bool js_props_query_writable(Map* m, ShapeEntry* se,
+                                        const char* name, int name_len) {
+    if (se && !jspd_is_writable(se)) return false;
+    if (!m || name_len <= 0 || name_len >= 240) return true;
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "__nw_%.*s", name_len, name);
+    if (n <= 0 || n >= (int)sizeof(buf)) return true;
+    bool found = false;
+    Item v = js_map_get_fast_ext(m, buf, n, &found);
+    return !(found && js_is_truthy(v));
+}
+
+extern "C" bool js_props_query_configurable(Map* m, ShapeEntry* se,
+                                            const char* name, int name_len) {
+    if (se && !jspd_is_configurable(se)) return false;
+    if (!m || name_len <= 0 || name_len >= 240) return true;
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
+    if (n <= 0 || n >= (int)sizeof(buf)) return true;
+    bool found = false;
+    Item v = js_map_get_fast_ext(m, buf, n, &found);
+    return !(found && js_is_truthy(v));
+}
+
+// Resolve the underlying Map* for an object: MAP → obj.map; FUNC →
+// fn->properties_map.map (when initialized); ARRAY → companion map (in
+// arr->extra). Returns nullptr if the object has no map storage.
+static Map* js_obj_resolve_map(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t == LMD_TYPE_MAP) return obj.map;
+    if (t == LMD_TYPE_FUNC) {
+        JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
+        if (!fn || fn->properties_map.item == 0) return nullptr;
+        if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
+        return fn->properties_map.map;
+    }
+    if (t == LMD_TYPE_ARRAY) {
+        Array* arr = obj.array;
+        if (!arr || arr->extra == 0) return nullptr;
+        return (Map*)(uintptr_t)arr->extra;
+    }
+    return nullptr;
+}
+
+extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len) {
+    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    Map* m = js_obj_resolve_map(obj);
+    return js_props_query_enumerable(m, se, name, name_len);
+}
+
+extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name_len) {
+    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    Map* m = js_obj_resolve_map(obj);
+    return js_props_query_writable(m, se, name, name_len);
+}
+
+extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int name_len) {
+    ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+    Map* m = js_obj_resolve_map(obj);
+    return js_props_query_configurable(m, se, name, name_len);
+}
+
 extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
     // Quick reject: only string keys can be markers.
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
@@ -261,6 +348,19 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     if (attrs & JSPD_NON_ENUMERABLE)   set_mask |= JSPD_NON_ENUMERABLE;
     if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
     js_shape_entry_update_flags(obj, ns->chars, (int)ns->len, set_mask, 0);
+}
+
+// Phase-5C: 4-arg MIR-friendly wrapper. Returns `obj` so transpiler call sites
+// can drop the result on the floor without needing a void-returning helper.
+extern "C" Item js_to_property_key(Item key);
+extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
+                                          int is_setter) {
+    // Canonicalize the property key per ES §7.1.14 ToPropertyKey: numeric/bool
+    // literal keys (e.g. `{ get [1]() {} }`) must be converted to their string
+    // form before the chokepoint stores under that name.
+    name = js_to_property_key(name);
+    js_define_accessor_partial(obj, name, fn, is_setter, 0);
+    return obj;
 }
 
 // =============================================================================

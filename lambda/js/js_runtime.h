@@ -300,6 +300,7 @@ Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
+void js_mark_non_configurable(Item object, Item name);
 void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);

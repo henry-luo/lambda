@@ -818,6 +818,7 @@ extern Item js_reflect_prevent_extensions(Item obj);
 extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
 extern Item js_get_reflect_object_value();
 extern Item js_get_atomics_object_value();
+extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
 // v23: Performance facade functions (js_runtime.cpp)
 extern int64_t js_typeof_is(Item value, const char* type_str);
@@ -1430,6 +1431,7 @@ JitImport jit_runtime_imports[] = {
     {"js_reflect_apply", FPTR(js_reflect_apply)},
     {"js_make_getter_key", FPTR(js_make_getter_key)},
     {"js_make_setter_key", FPTR(js_make_setter_key)},
+    {"js_install_user_accessor", FPTR(js_install_user_accessor)},
     {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},
     {"js_number_property", FPTR(js_number_property)},
