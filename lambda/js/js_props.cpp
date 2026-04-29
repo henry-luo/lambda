@@ -39,6 +39,10 @@ static inline Item js_props_undefined() {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+// 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
+// forward-declare here so the kernels below can build name keys.
+extern "C++" String* heap_create_name(const char* name, size_t len);
+
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
     // Caller is responsible for ensuring `object` is LMD_TYPE_MAP and `key`
@@ -150,6 +154,101 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
     return JS_DESC_DATA;
 }
 
+// Stage A1.8: own-only HasProperty boolean kernel.
+//
+// Spec: ES §10.1.5.1 OrdinaryGetOwnProperty step "If desc is undefined,
+// return undefined". This collapses the slot+sentinel+IS_ACCESSOR detection
+// into a single boolean, used by `js_has_own_property` MAP/FUNC branches and
+// by callers that only need to know "is there an own property here?".
+//
+// Returns true iff (object has type LMD_TYPE_MAP) AND there is an own slot
+// AND the slot is not the deleted sentinel. IS_ACCESSOR slots count as
+// present (the pair itself is the descriptor).
+extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    bool found = false;
+    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
+    if (!found) return false;
+    if (js_props_is_deleted_sentinel(slot)) return false;
+    return true;
+}
+
+// Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
+extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {
+    Item cur = object;
+    int depth = 0;
+    while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
+        if (js_ordinary_has_own(cur, name, name_len)) return true;
+        cur = js_get_prototype_of(cur);
+        depth++;
+    }
+    return false;
+}
+
+// Stage A1.10: OrdinaryGet — own + proto chain MAP-only kernel.
+extern "C" bool js_ordinary_get(Item object, const char* name, int name_len,
+                                 Item Receiver, Item* out_value) {
+    if (!out_value) return false;
+    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
+    Item cur = object;
+    int depth = 0;
+    while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
+        Item val = ItemNull;
+        JsOwnGetStatus st = js_ordinary_get_own(cur, key, Receiver, &val);
+        if (st == JS_OWN_READY) { *out_value = val; return true; }
+        // NOT_FOUND or DELETED — keep walking.
+        cur = js_get_prototype_of(cur);
+        depth++;
+    }
+    return false;
+}
+
+// Stage A1.11: OrdinarySet — inherited-setter dispatch + own data write.
+extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_len,
+                                                    Item value, Item Receiver) {
+    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(object, name, name_len, value, Receiver);
+    if (st != JS_SET_NOT_FOUND) return st;
+    // No inherited accessor — perform own data write on Receiver.
+    Item target = (Receiver.item ? Receiver : object);
+    if (get_type_id(target) != LMD_TYPE_MAP) return JS_SET_NOT_FOUND;
+    Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
+    js_property_set(target, key, value);
+    return JS_SET_NOT_FOUND;
+}
+
+// Stage A1.12: OrdinaryDelete — own-property delete on LMD_TYPE_MAP.
+extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return true;
+    Map* m = object.map;
+    bool slot_found = false;
+    Item slot = js_map_get_fast_ext(m, name, name_len, &slot_found);
+    // Absent or tombstoned: per spec, delete of non-existent property succeeds.
+    if (!slot_found || js_props_is_deleted_sentinel(slot)) return true;
+
+    // Non-configurable check (shape-flag-first via existing helper).
+    ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    if (!js_props_query_configurable(m, se, name, name_len)) return false;
+
+    // Clear IS_ACCESSOR shape flag so future reads don't dispatch the
+    // deleted accessor pair under the bare-name slot.
+    if (se && jspd_is_accessor(se)) jspd_set_accessor(se, false);
+
+    // Tombstone legacy descriptor markers FIRST so the subsequent sentinel
+    // write to the data slot is not blocked by __nw_X non-writable guard.
+    if (name_len > 0 && name_len < 200) {
+        const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
+        for (int pi = 0; pi < 5; pi++) {
+            char mk[256];
+            snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], name_len, name);
+            Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
+            js_property_set(object, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        }
+    }
+    Item bare = (Item){.item = s2it(heap_create_name(name, name_len))};
+    js_property_set(object, bare, (Item){.item = JS_DELETED_SENTINEL_VAL});
+    return true;
+}
+
 // External: defined in lambda-data-runtime.cpp (C++ linkage).
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
@@ -225,43 +324,15 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
         return true;
     }
 
-    if (name_len > 0 && name_len < 240) {
-        char buf[256];
-        bool g_found = false, s_found = false;
-        Item getter = ItemNull, setter = ItemNull;
+    if (!slot_found) return false;
 
-        snprintf(buf, sizeof(buf), "__get_%.*s", name_len, name);
-        getter = js_map_get_fast_ext(m, buf, (int)strlen(buf), &g_found);
-        if (g_found && js_props_is_deleted_sentinel(getter)) g_found = false;
-
-        snprintf(buf, sizeof(buf), "__set_%.*s", name_len, name);
-        setter = js_map_get_fast_ext(m, buf, (int)strlen(buf), &s_found);
-        if (s_found && js_props_is_deleted_sentinel(setter)) s_found = false;
-
-        if (g_found || s_found) {
-            out->flags |= JS_PD_HAS_GET | JS_PD_HAS_SET;
-            out->getter = (g_found && get_type_id(getter) == LMD_TYPE_FUNC)
-                            ? getter : js_props_undefined();
-            out->setter = (s_found && get_type_id(setter) == LMD_TYPE_FUNC)
-                            ? setter : js_props_undefined();
-            out->flags |= JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-            if (se) {
-                if (jspd_is_enumerable(se))   out->flags |= JS_PD_ENUMERABLE;
-                if (jspd_is_configurable(se)) out->flags2 |= 0x01u;
-            } else {
-                bool nc_f = false, ne_f = false;
-                snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
-                Item nc_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &nc_f);
-                snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
-                Item ne_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &ne_f);
-                if (!(ne_f && js_is_truthy(ne_v))) out->flags  |= JS_PD_ENUMERABLE;
-                if (!(nc_f && js_is_truthy(nc_v))) out->flags2 |= 0x01u;
-            }
-            return true;
-        }
+    if (slot_found && se && jspd_is_accessor(se)) {
+        // already handled above
     }
 
-    if (!slot_found) return false;
+    // Phase-5D: legacy __get_X/__set_X probe removed. IS_ACCESSOR own-path
+    // above is the sole accessor-detection path. Producers no longer create
+    // these magic-key markers (Phase 4 intercept routes them to JsAccessorPair).
 
     out->flags |= JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE
                 | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
@@ -308,6 +379,20 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         if (!fn || fn->properties_map.item == 0) return false;
         return js_props_desc_from_storage(object, fn->properties_map.map,
                                            name, name_len, out);
+    }
+    if (t == LMD_TYPE_ARRAY) {
+        // ARRAY: own properties (named keys + numeric-index accessors) live
+        // in the companion map. The bare-data slot at arr->items[idx] is
+        // synthesized as a data descriptor when no accessor is present.
+        Array* arr = object.array;
+        if (arr->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)arr->extra;
+            Item pm_item = (Item){.map = pm};
+            if (js_props_desc_from_storage(pm_item, pm, name, name_len, out)) {
+                return true;
+            }
+        }
+        return false;
     }
     return false;
 }
@@ -471,24 +556,67 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         }
 
         if (is_array_exotic) {
-            // Use js_defprop_set_marker which routes to the array companion
-            // map (MAP_KIND_ARRAY_PROPS). Writing directly to LMD_TYPE_ARRAY
-            // would mis-route through the array's index storage.
-            // Note: we write the descriptor's value verbatim — including
-            // explicit-undefined halves. Tombstoning would collapse "explicit
-            // undefined accessor half" into "marker absent", and breaks
-            // hasOwnProperty for arrays where presence is detected via the
-            // companion-map __get_X/__set_X keys.
-            char gk_buf[256], sk_buf[256];
-            snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", name_len, name);
-            snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", name_len, name);
-            Item gk = js_props_str(gk_buf, (int)strlen(gk_buf));
-            Item sk = js_props_str(sk_buf, (int)strlen(sk_buf));
-            if (pd->flags & JS_PD_HAS_GET) {
-                js_defprop_set_marker(object, gk, pd->getter);
+            // Numeric (index) array properties: use legacy __get_<idx>/__set_<idx>
+            // markers in the companion map. Index slots can't carry IS_ACCESSOR
+            // shape flags reliably (no shape entry per index, and writing the
+            // pair into arr->items[idx] would clobber any data slot/hole).
+            //
+            // Non-numeric (named) array properties: route through the IS_ACCESSOR
+            // chokepoint just like regular objects. The companion map carries
+            // the bare-name shape entry, and js_obj_typemap() returns it for
+            // arrays via arr->extra, so JSPD_IS_ACCESSOR works end-to-end.
+            bool is_numeric_index = false;
+            if (name_len > 0) {
+                is_numeric_index = true;
+                if (name_len == 1 && name[0] == '0') {
+                    is_numeric_index = true;
+                } else if (name[0] >= '1' && name[0] <= '9') {
+                    for (int i = 1; i < name_len; i++) {
+                        if (name[i] < '0' || name[i] > '9') {
+                            is_numeric_index = false;
+                            break;
+                        }
+                    }
+                } else {
+                    is_numeric_index = false;
+                }
             }
-            if (pd->flags & JS_PD_HAS_SET) {
-                js_defprop_set_marker(object, sk, pd->setter);
+
+            if (is_numeric_index) {
+                // Phase 5D: route numeric-index accessors through the IS_ACCESSOR
+                // chokepoint *on the companion map* (not the array itself).
+                // Calling js_define_accessor_partial(arr, ...) would recurse into
+                // js_property_set(arr, "<idx>", pair) which routes to js_array_set
+                // and clobbers arr->items[idx]. Targeting the companion map keeps
+                // the bare-name slot under the digit-string key with IS_ACCESSOR
+                // on its shape entry.
+                Item target;
+                if (get_type_id(object) == LMD_TYPE_ARRAY) {
+                    Array* arr = object.array;
+                    if (arr->extra == 0) {
+                        Item nm = js_new_object();
+                        nm.map->map_kind = MAP_KIND_ARRAY_PROPS;
+                        arr->extra = (int64_t)(uintptr_t)nm.map;
+                    }
+                    target = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                } else {
+                    // object IS the companion map (MAP_KIND_ARRAY_PROPS); use it.
+                    target = object;
+                }
+                if (pd->flags & JS_PD_HAS_GET) {
+                    js_define_accessor_partial(target, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                }
+                if (pd->flags & JS_PD_HAS_SET) {
+                    js_define_accessor_partial(target, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                }
+            } else {
+                // Named-key path: IS_ACCESSOR + JsAccessorPair via chokepoint.
+                if (pd->flags & JS_PD_HAS_GET) {
+                    js_define_accessor_partial(object, name_item, pd->getter, /*is_setter*/0, /*attrs*/0);
+                }
+                if (pd->flags & JS_PD_HAS_SET) {
+                    js_define_accessor_partial(object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
+                }
             }
         } else {
             // Install getter/setter halves via Scheme B chokepoint.

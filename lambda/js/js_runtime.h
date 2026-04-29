@@ -264,8 +264,8 @@ Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
-Item js_make_getter_key(Item key);
-Item js_make_setter_key(Item key);
+// Phase-5C: js_make_getter_key/js_make_setter_key removed (no callers).
+
 
 // =============================================================================
 // v8: Object & Global extensions
@@ -300,6 +300,7 @@ Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
+void js_mark_non_configurable(Item object, Item name);
 void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);

@@ -222,74 +222,9 @@ extern "C" Item js_to_property_key(Item key) {
     return js_to_string(key);
 }
 
-// Convert any key (string or symbol) to a getter key (__get_<key_string>)
-extern "C" Item js_make_getter_key(Item key) {
-    // convert symbol to string key first
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
-    TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
-        char nbuf[64];
-        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else {
-            double dv = it2d(key);
-            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
-            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
-            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
-            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
-            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
-        }
-        key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
-    } else if (kt == LMD_TYPE_BOOL) {
-        const char* s = it2b(key) ? "true" : "false";
-        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
-    } else if (kt == LMD_TYPE_NULL) {
-        key = (Item){.item = s2it(heap_create_name("null", 4))};
-    } else if (kt == LMD_TYPE_UNDEFINED) {
-        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* s = it2s(key);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "__get_%.*s", (int)s->len, s->chars);
-        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    return key;
-}
-
-// Convert any key (string or symbol) to a setter key (__set_<key_string>)
-extern "C" Item js_make_setter_key(Item key) {
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
-    TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
-        char nbuf[64];
-        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else {
-            double dv = it2d(key);
-            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
-            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
-            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
-            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
-            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
-        }
-        key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
-    } else if (kt == LMD_TYPE_BOOL) {
-        const char* s = it2b(key) ? "true" : "false";
-        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
-    } else if (kt == LMD_TYPE_NULL) {
-        key = (Item){.item = s2it(heap_create_name("null", 4))};
-    } else if (kt == LMD_TYPE_UNDEFINED) {
-        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* s = it2s(key);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "__set_%.*s", (int)s->len, s->chars);
-        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    return key;
-}
+// Phase-5C: js_make_getter_key / js_make_setter_key removed.
+// Transpiler now emits js_install_user_accessor directly which routes to
+// js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
 extern "C" void js_set_module_var(int index, Item value) {
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
@@ -5691,25 +5626,24 @@ extern "C" Item js_property_get(Item object, Item key) {
                     Map* pm = (Map*)(uintptr_t)object.array->extra;
                     bool pm_found = false;
                     Item pm_val = js_map_get_fast_ext(pm, str_key->chars, (int)str_key->len, &pm_found);
-                    if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
-                    // check for accessor getter (__get_<propname>) in companion map
-                    if (str_key->len < 200) {
-                        char getter_key[256];
-                        snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-                        bool gk_found = false;
-                        Item getter = js_map_get_fast(pm, getter_key, (int)strlen(getter_key), &gk_found);
-                        if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                            return js_call_function(getter, object, NULL, 0);
+                    if (pm_found && !js_is_deleted_sentinel(pm_val)) {
+                        // Phase 5D array migration: if shape entry has JSPD_IS_ACCESSOR,
+                        // slot holds a JsAccessorPair*; dispatch via pair->getter.
+                        ShapeEntry* _se = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
+                        if (_se && jspd_is_accessor(_se)) {
+                            JsAccessorPair* pair = js_item_to_accessor_pair(pm_val);
+                            if (pair && pair->getter.item != ItemNull.item) {
+                                return js_call_function(pair->getter, object, NULL, 0);
+                            }
+                            return make_js_undefined();
                         }
-                        // setter-only accessor: return undefined without falling through
-                        if (!gk_found) {
-                            char setter_key[256];
-                            snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
-                            bool sk_found = false;
-                            js_map_get_fast(pm, setter_key, (int)strlen(setter_key), &sk_found);
-                            if (sk_found) return make_js_undefined();
-                        }
+                        return pm_val;
                     }
+                    // Phase 5D array migration: legacy __get_<name>/__set_<name>
+                    // probes removed for named-key accessors. The bare-name fast
+                    // probe above with IS_ACCESSOR shape-flag dispatch is the
+                    // sole accessor-detection path. Numeric index accessors still
+                    // use legacy markers (handled separately in numeric-index path).
                     // v29: strict arguments — throw TypeError on callee/caller access
                     if (object.array->is_content == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
@@ -5774,11 +5708,33 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // Numeric index access
         int idx = (int)js_get_number(key);
-        // check for accessor (getter) on companion map — must check even when idx >= length
+        // check for accessor on companion map — must check even when idx >= length
         if (idx >= 0 && object.array->extra != 0) {
+            Map* props = (Map*)(uintptr_t)object.array->extra;
+            // Phase 5D: IS_ACCESSOR shape-flag dispatch under the digit-string
+            // name. js_define_accessor_partial stores a JsAccessorPair* under
+            // "<idx>" when defineProperty installs an accessor on an array index.
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+            Item pm_item = (Item){.map = props};
+            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+            if (_se_idx && jspd_is_accessor(_se_idx)) {
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    if (pair && pair->getter.item != ItemNull.item) {
+                        return js_call_function(pair->getter, object, NULL, 0);
+                    }
+                    // setter-only accessor: shadows inherited (ES §9.1.8)
+                    return make_js_undefined();
+                }
+            }
+            // Legacy __get_<idx>/__set_<idx> markers (back-compat for paths
+            // that haven't been migrated yet — e.g. companion-map writes
+            // outside js_props.cpp's defineProperty path).
             char gk[64];
             snprintf(gk, sizeof(gk), "__get_%d", idx);
-            Map* props = (Map*)(uintptr_t)object.array->extra;
             bool gk_found = false;
             Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
             if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
@@ -6832,9 +6788,30 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (object.array->extra != 0) {
             int idx = (int)js_get_number(key);
             if (idx >= 0) {
+                Map* props = (Map*)(uintptr_t)object.array->extra;
+                // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+                char idx_buf[32];
+                int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+                Item pm_item = (Item){.map = props};
+                ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+                if (_se_idx && jspd_is_accessor(_se_idx)) {
+                    bool slot_found = false;
+                    Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+                    if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                        JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                        if (pair && pair->setter.item != ItemNull.item) {
+                            Item args[1] = { value };
+                            js_call_function(pair->setter, object, args, 1);
+                            return value;
+                        }
+                        // getter-only accessor: silently no-op (sloppy) — strict
+                        // throw is handled by the regular setter dispatch path.
+                        return value;
+                    }
+                }
+                // Legacy __set_<idx> marker (back-compat).
                 char sk_buf[64];
                 snprintf(sk_buf, sizeof(sk_buf), "__set_%d", idx);
-                Map* props = (Map*)(uintptr_t)object.array->extra;
                 bool sk_found = false;
                 Item setter = js_map_get_fast(props, sk_buf, (int)strlen(sk_buf), &sk_found);
                 if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
@@ -7778,17 +7755,9 @@ extern "C" int64_t js_get_length(Item object) {
             }
             return (int64_t)js_get_number(result);
         }
-        // Check getter __get_length on own object
-        Item getter = js_map_get_fast(m, "__get_length", 12);
-        if (getter.item == ItemNull.item) {
-            // Check prototype chain for getter
-            Item gk = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-            getter = js_prototype_lookup(object, gk);
-        }
-        if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-            Item val = js_call_function(getter, object, NULL, 0);
-            return (int64_t)js_get_number(val);
-        }
+        // Phase-5D: legacy __get_length own + proto probes removed.
+        // IS_ACCESSOR own-path is handled above; proto-chain accessor
+        // dispatch is performed by js_prototype_lookup below.
         // Check prototype chain for regular "length" property
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
@@ -7835,15 +7804,7 @@ extern "C" Item js_get_length_item(Item object) {
             }
             return result;  // return raw Item, not converted to number
         }
-        // Check getter __get_length
-        Item getter = js_map_get_fast(m, "__get_length", 12);
-        if (getter.item == ItemNull.item) {
-            Item gk = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-            getter = js_prototype_lookup(object, gk);
-        }
-        if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-            return js_call_function(getter, object, NULL, 0);
-        }
+        // Phase-5D: legacy __get_length own + proto probes removed.
         // Check prototype chain
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
@@ -8013,9 +7974,26 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         Array* arr = array.array;
         // check for accessor (getter) on companion map — must check even when idx >= length
         if (index >= 0 && arr->extra != 0) {
+            Map* props = (Map*)(uintptr_t)arr->extra;
+            // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+            Item pm_item = (Item){.map = props};
+            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+            if (_se_idx && jspd_is_accessor(_se_idx)) {
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    if (pair && pair->getter.item != ItemNull.item) {
+                        return js_call_function(pair->getter, array, NULL, 0);
+                    }
+                    return make_js_undefined();
+                }
+            }
+            // Legacy __get_<idx> marker (back-compat).
             char gk[64];
             snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
-            Map* props = (Map*)(uintptr_t)arr->extra;
             bool gk_found = false;
             Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
             if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
@@ -8071,6 +8049,24 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     // check companion map for accessor/non-writable markers — must check even when idx >= length
     if (arr->extra != 0 && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
+        // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+        char idx_buf[32];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
+        Item pm_item = (Item){.map = pm};
+        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+        if (_se_idx && jspd_is_accessor(_se_idx)) {
+            bool slot_found = false;
+            Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
+            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->setter.item != ItemNull.item) {
+                    js_call_function(pair->setter, array, &value, 1);
+                    return value;
+                }
+                // getter-only: silently no-op (sloppy)
+                return value;
+            }
+        }
         // check setter accessor
         char sk[64];
         snprintf(sk, sizeof(sk), "__set_%lld", (long long)index);
@@ -9345,7 +9341,9 @@ static bool js_has_property(Item obj, Item key) {
     if (get_type_id(obj) == LMD_TYPE_STRING) {
         String* s = it2s(obj);
         if (!s) return false;
-        Item k = js_to_string(key);
+        // Stage A1: ToPropertyKey per spec — Symbol keys must coerce to __sym_N
+        // not throw, so the subsequent length/index probe sees a real string.
+        Item k = js_to_property_key(key);
         String* ks = it2s(k);
         if (!ks) return false;
         if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) return true;
@@ -17539,9 +17537,26 @@ extern "C" void js_throw_reference_error(Item message) {
 static inline Item js_array_element(Item arr_item, int idx) {
     Array* arr = arr_item.array;
     if (arr->extra != 0) {
+        Map* props = (Map*)(uintptr_t)arr->extra;
+        // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+        char idx_buf[32];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+        Item pm_item = (Item){.map = props};
+        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+        if (_se_idx && jspd_is_accessor(_se_idx)) {
+            bool slot_found = false;
+            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    return js_call_function(pair->getter, arr_item, NULL, 0);
+                }
+                return make_js_undefined();
+            }
+        }
+        // Legacy __get_<idx> marker (back-compat).
         char gk[64];
         snprintf(gk, sizeof(gk), "__get_%d", idx);
-        Map* props = (Map*)(uintptr_t)arr->extra;
         bool gk_found = false;
         Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
         if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
@@ -17757,6 +17772,26 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
     // Check own accessor markers on companion map
     if (a->extra != 0) {
         Map* props = (Map*)(uintptr_t)a->extra;
+        // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
+        char idx_buf[32];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
+        Item pm_item = (Item){.map = props};
+        ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+        if (_se_idx && jspd_is_accessor(_se_idx)) {
+            bool slot_found = false;
+            Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    *out = js_call_function(pair->getter, arr, NULL, 0);
+                } else {
+                    // setter-only accessor: shadows inherited, value undefined
+                    *out = make_js_undefined();
+                }
+                return true;
+            }
+        }
+        // Legacy __get_<idx>/__set_<idx> markers (back-compat).
         char gk[64];
         snprintf(gk, sizeof(gk), "__get_%d", idx);
         bool gk_found = false;
@@ -18678,18 +18713,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                         js_throw_type_error("Cannot set property length of object which has only a getter");
                         return make_js_undefined();
                     }
-                } else {
-                    Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-                    Item getter = js_property_get(cb_this, getter_key);
-                    if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                        Item setter_key = (Item){.item = s2it(heap_create_name("__set_length", 12))};
-                        Item setter = js_property_get(cb_this, setter_key);
-                        if (setter.item == ItemNull.item || get_type_id(setter) != LMD_TYPE_FUNC) {
-                            js_throw_type_error("Cannot set property length of object which has only a getter");
-                            return make_js_undefined();
-                        }
-                    }
                 }
+                // Phase-5D: legacy __get_length/__set_length probe removed;
+                // js_ordinary_get_own_descriptor + IS_ACCESSOR shape flag covers it.
             }
             // Check non-writable length
             js_property_set(cb_this, len_key, (Item){.item = i2it((int64_t)new_len)});
@@ -19180,13 +19206,9 @@ static Item js_get_math_object() {
             Item key = (Item){.item = s2it(heap_create_name(mc[i].name, nlen))};
             js_property_set(js_math_object, key, js_make_number(mc[i].val));
             // Mark non-enumerable, non-writable, non-configurable
-            char buf[64];
-            snprintf(buf, sizeof(buf), "__ne_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
-            snprintf(buf, sizeof(buf), "__nw_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
-            snprintf(buf, sizeof(buf), "__nc_%s", mc[i].name);
-            js_property_set(js_math_object, (Item){.item = s2it(heap_create_name(buf, strlen(buf)))}, (Item){.item = b2it(true)});
+            js_mark_non_enumerable(js_math_object, key);
+            js_mark_non_writable(js_math_object, key);
+            js_mark_non_configurable(js_math_object, key);
         }
         // Populate Math methods as function properties for dynamic access (Math[m])
         struct { const char* name; int id; int pc; } mm[] = {
@@ -20117,6 +20139,21 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     js_property_set(object, nk, (Item){.item = b2it(true)});
 }
 
+// Mark a property as non-configurable by setting __nc_<name> marker.
+// Stage A4: writer-side API symmetry with js_mark_non_writable /
+// js_mark_non_enumerable. Dual-write at js_property_set top mirrors the
+// JSPD_NON_CONFIGURABLE bit onto the ShapeEntry::flags.
+extern "C" void js_mark_non_configurable(Item object, Item name) {
+    TypeId tid = get_type_id(object);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    char nc_key[256];
+    snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str->len, str->chars);
+    Item nk = (Item){.item = s2it(heap_create_name(nc_key, strlen(nc_key)))};
+    js_property_set(object, nk, (Item){.item = b2it(true)});
+}
+
 // Mark all user-visible properties on an object as non-enumerable (used for class prototypes)
 extern "C" void js_mark_all_non_enumerable(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
@@ -20503,13 +20540,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
                     continue;
                 }
             }
-            // skip non-enumerable properties (ES spec: CopyDataProperties only copies own enumerable)
-            char ne_buf[256];
-            snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", nlen, n);
-            bool ne_found = false;
-            extern Item js_map_get_fast_ext(Map* m, const char* key, int key_len, bool* found);
-            Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
-            if (ne_found && js_is_truthy(ne_val)) {
+            // skip non-enumerable properties (Stage A3.2: shape-flag-first)
+            if (!js_props_query_enumerable(m, e, n, nlen)) {
                 e = e->next;
                 continue;
             }
@@ -20541,12 +20573,8 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
                 const char* prop_name = s + 6;
                 int prop_len = slen - 6;
                 if (prop_len > 0 && prop_len < 200) {
-                    // skip non-enumerable accessors
-                    char ne_buf[256];
-                    snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", prop_len, prop_name);
-                    bool ne_found = false;
-                    Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
-                    if (!(ne_found && js_is_truthy(ne_val))) {
+                    // Stage A3.2: shape-flag-first non-enumerable check on accessor prop
+                    if (js_props_query_enumerable(m, NULL, prop_name, prop_len)) {
                         // skip if already copied (had a data entry)
                         bool data_found = false;
                         js_map_get_fast_ext(m, prop_name, prop_len, &data_found);

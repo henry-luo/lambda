@@ -152,6 +152,93 @@ JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
                                               JsAccessorPair** out_pair,
                                               Item* out_value);
 
+// Stage A1.8: own-only HasProperty boolean kernel.
+//
+// True iff `object` is LMD_TYPE_MAP, has an own slot under (name, name_len),
+// and the slot is not the deleted sentinel. IS_ACCESSOR slots count as
+// present (the JsAccessorPair* itself is the descriptor).
+//
+// This is the read-only fast path for callers that just need a boolean
+// answer — `js_has_own_property` MAP/FUNC branches, defineProperty
+// "is_new_property" probe, Object.freeze key iteration, etc. Avoids the
+// allocation-free shape walk done by `js_ordinary_get_own_descriptor` when
+// only the presence flag is needed.
+bool js_ordinary_has_own(Item object, const char* name, int name_len);
+
+// Stage A1.9: ES §10.1.7.1 OrdinaryHasProperty (O, P) — own + proto chain.
+//
+// Walks `object`.[[Prototype]]* using js_get_prototype_of, returning true at
+// the first own slot with a non-sentinel value. A sentinel-tombstoned own
+// slot does NOT short-circuit — we keep walking up the chain (matches the
+// existing js_in semantics where a deleted own slot still allows an
+// inherited property to satisfy `in`).
+//
+// This kernel intentionally omits Proxy [[HasProperty]] traps and builtin-
+// method fallbacks; callers that need them (notably `js_in`) handle those
+// cases themselves before/around this call. Depth is capped at 32 to match
+// the legacy chain-walk caps.
+bool js_ordinary_has_property(Item object, const char* name, int name_len);
+
+// Stage A1.10: ES §10.1.8.1 OrdinaryGet (O, P, Receiver) — own + proto
+// chain MAP-only kernel.
+//
+// Walks `object`.[[Prototype]]* via js_get_prototype_of. At each level
+// dispatches `js_ordinary_get_own` with explicit `Receiver` for IS_ACCESSOR
+// getter `this`. Returns the resolved value, or `out_found = false` (with
+// *out_value untouched) if no entry is found anywhere on the chain.
+//
+// JS_OWN_DELETED at any level still permits the walk to continue (legacy
+// js_property_get top-of-chain semantics). Depth-capped at 32.
+//
+// Excludes: proxies, MAP_KIND_TYPED_ARRAY / DOC_PROXY / DOM / CSSOM exotics,
+// String-wrapper indexed access, builtin-method fallbacks. Callers that
+// need any of those must handle them before/around this call.
+bool js_ordinary_get(Item object, const char* name, int name_len,
+                     Item Receiver, Item* out_value);
+
+// Stage A1.11: ES §10.1.9.1 OrdinarySet (O, P, V, Receiver) — inherited-
+// setter dispatch followed by own data write.
+//
+// Composition of the two kernels already in place:
+//   1. js_ordinary_set_via_accessor: walk own + proto chain looking for an
+//      IS_ACCESSOR pair; if found and pair has a callable setter, dispatch
+//      it with `Receiver` as `this` and return JS_SET_DISPATCHED.
+//   2. Otherwise (no inherited accessor, or accessor without setter):
+//      write `value` to the own slot under (name, name_len) on `Receiver`
+//      (must be LMD_TYPE_MAP) via js_map_get_fast_ext + map_put.
+//
+// Returns:
+//   JS_SET_DISPATCHED if an inherited setter ran (V was passed to setter),
+//   JS_SET_NO_SETTER  if an inherited accessor had no setter (caller decides
+//                     strict-throw vs sloppy no-op),
+//   JS_SET_NOT_FOUND  if the data write succeeded (no inherited accessor).
+//
+// Excludes: non-writable / non-extensible / frozen checks, proxies, exotic
+// objects, array length, function-property metadata. Use
+// `js_property_set` for the full ABI.
+JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_len,
+                                       Item value, Item Receiver);
+
+// Stage A1.12: ES §10.1.10.1 OrdinaryDelete (O, P) — own-property delete on
+// LMD_TYPE_MAP.
+//
+// Steps:
+//   1. If no own slot exists or slot is already tombstoned, return true
+//      (delete of absent property is per spec a no-op success).
+//   2. If shape-flag-first non-configurable check via js_props_query_configurable
+//      reports non-configurable, return false (cannot delete).
+//   3. Clear IS_ACCESSOR shape flag on the bare-key slot if set, so future
+//      reads do not dispatch a deleted accessor.
+//   4. Tombstone the data slot AND the legacy `__get_X` / `__set_X` /
+//      `__nw_X` / `__ne_X` / `__nc_X` markers (so subsequent define-property
+//      treats this as a fresh property).
+//   5. Return true.
+//
+// Excludes: arrays (sentinel-hole semantics), functions (properties_map
+// indirection), proxies, frozen-object checks. Use `js_delete_property`
+// for the full ABI.
+bool js_ordinary_delete(Item object, const char* name, int name_len);
+
 // Outcome of `js_ordinary_resolve_shape_value` (Stage A1.7) — the
 // shape-iteration value-resolution kernel.
 typedef enum {
@@ -313,20 +400,26 @@ void js_define_own_property_from_descriptor(Item object,
                                              const JsPropertyDescriptor* pd,
                                              bool is_new_property);
 
-// ES §10.1.9 OrdinarySet (O, P, V, Receiver)
-// int  js_ordinary_set(Item O, Item P, Item V, Item Receiver);
-
-// ES §10.1.10 OrdinaryDelete (O, P)
-// int  js_ordinary_delete(Item O, Item P);
-
-// ES §10.1.7 OrdinaryHasProperty (O, P)
-// int  js_ordinary_has_property(Item O, Item P);
-
-// ES §10.1.2 OrdinaryGetOwnProperty (O, P)
-// returns descriptor in caller-supplied out-param; false if not present.
-
-// ES §10.1.6 OrdinaryDefineOwnProperty (O, P, Desc)
-// int  js_ordinary_define_own_property(Item O, Item P, /* PropertyDescriptor */ const void* desc);
+// Stage A1 kernel surface: complete.
+//   js_to_property_key                  (A1)
+//   js_ordinary_get_own                 (A1.3)
+//   js_ordinary_set_via_accessor        (A1.4)
+//   js_ordinary_get_own_descriptor      (A1.5)
+//   js_ordinary_resolve_shape_value     (A1.7)
+//   js_ordinary_has_own                 (A1.8)
+//   js_ordinary_has_property            (A1.9)
+//   js_ordinary_get                     (A1.10)
+//   js_ordinary_set                     (A1.11)
+//   js_ordinary_delete                  (A1.12)
+//
+// Stage A1.13 (OrdinaryDefineOwnProperty) is provided by Stage A2's
+// `js_define_own_property_from_descriptor` (above) \u2014 the descriptor-form
+// is the spec-canonical input shape, and the kernel composes the same
+// storage writes A1.13 would.
+//
+// Routing of legacy entry points (js_property_get, js_property_set,
+// js_delete_property, js_in, etc.) through these kernels happens
+// incrementally and is gated by the test262 baseline + Props gtest.
 
 #ifdef __cplusplus
 }
