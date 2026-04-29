@@ -3047,6 +3047,18 @@
                         "icon": "🖱️"
                     },
                     {
+                        "source": "test/wpt/test_wpt_clipboard_gtest.cpp",
+                        "name": "WPT Clipboard API Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_clipboard_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📋"
+                    },
+                    {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
                         "dependencies": [],
