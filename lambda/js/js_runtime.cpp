@@ -12085,6 +12085,25 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
     return this_val;
 }
 
+// super() for native (built-in) parent constructors that ignore `this` and return a fresh
+// object (e.g. Event, URL, AbortController). Calls the parent, then merges the returned
+// object's own enumerable properties onto `this_val` so the derived constructor's body sees
+// the populated base fields. Returns `this_val` so subsequent member writes hit the same
+// receiver the JIT already holds.
+extern "C" Item js_object_assign(Item target, Item* sources, int count);
+extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int argc) {
+    Item result = js_call_function(callee, this_val, args, argc);
+    if (js_check_exception()) return this_val;
+    // If the parent returned the same receiver (or a non-object), nothing to merge.
+    TypeId rtid = get_type_id(result);
+    if (rtid != LMD_TYPE_MAP) return this_val;
+    if (result.item == this_val.item) return this_val;
+    // Only merge if `this_val` is itself a plain object — otherwise leave it alone.
+    if (get_type_id(this_val) != LMD_TYPE_MAP) return this_val;
+    js_object_assign(this_val, &result, 1);
+    return this_val;
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap

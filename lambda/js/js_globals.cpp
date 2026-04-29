@@ -4399,6 +4399,40 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                     return (Item){.item = b2it(true)};
                 }
             }
+            // Event hierarchy: any *Event subtype instanceof Event
+            if (rn->len == 5 && strncmp(rn->chars, "Event", 5) == 0) {
+                if (on->len > 5 && strncmp(on->chars + on->len - 5, "Event", 5) == 0) {
+                    return (Item){.item = b2it(true)};
+                }
+            }
+            // UIEvent hierarchy: Mouse / Keyboard / Focus / Composition /
+            // Input / Wheel / Pointer events all extend UIEvent.
+            if (rn->len == 7 && strncmp(rn->chars, "UIEvent", 7) == 0) {
+                static const char* const ui_subs[] = {
+                    "MouseEvent", "KeyboardEvent", "FocusEvent",
+                    "CompositionEvent", "InputEvent", "WheelEvent",
+                    "PointerEvent", NULL };
+                for (int i = 0; ui_subs[i]; i++) {
+                    size_t sl = strlen(ui_subs[i]);
+                    if (on->len == sl && strncmp(on->chars, ui_subs[i], sl) == 0) {
+                        return (Item){.item = b2it(true)};
+                    }
+                }
+            }
+            // MouseEvent hierarchy: Wheel / Pointer extend MouseEvent.
+            if (rn->len == 10 && strncmp(rn->chars, "MouseEvent", 10) == 0) {
+                if ((on->len == 10 && strncmp(on->chars, "WheelEvent", 10) == 0) ||
+                    (on->len == 12 && strncmp(on->chars, "PointerEvent", 12) == 0)) {
+                    return (Item){.item = b2it(true)};
+                }
+            }
+            // EventTarget: any DOM Node, document, or constructed EventTarget
+            // is an EventTarget. Plain Event instances are NOT.
+            if (rn->len == 11 && strncmp(rn->chars, "EventTarget", 11) == 0) {
+                if (on->len == 11 && strncmp(on->chars, "EventTarget", 11) == 0) {
+                    return (Item){.item = b2it(true)};
+                }
+            }
         }
         // walk up __proto__
         Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
@@ -10848,7 +10882,10 @@ extern "C" Item js_get_global_this() {
             {"Float32Array", 12}, {"Float64Array", 12},
             {"BigInt64Array", 13}, {"BigUint64Array", 14},
             {"Proxy", 5},
-            {"Event", 5}, {"CustomEvent", 11},
+            {"Event", 5}, {"CustomEvent", 11}, {"EventTarget", 11},
+            {"UIEvent", 7}, {"FocusEvent", 10}, {"MouseEvent", 10},
+            {"WheelEvent", 10}, {"KeyboardEvent", 13},
+            {"CompositionEvent", 16}, {"InputEvent", 10}, {"PointerEvent", 12},
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -10860,6 +10897,9 @@ extern "C" Item js_get_global_this() {
         }
         // globalThis self-reference
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
+        // HTML / Web Workers spec aliases of the global object.
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("self", 4))}, js_global_this_obj);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("window", 6))}, js_global_this_obj);
 
         // populate namespace objects on globalThis (Math, JSON, Reflect, console)
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Math", 4))}, js_get_math_object_value());
@@ -11251,6 +11291,15 @@ enum JsConstructorId {
     JS_CTOR_PROXY,
     JS_CTOR_EVENT,
     JS_CTOR_CUSTOM_EVENT,
+    JS_CTOR_EVENT_TARGET,
+    JS_CTOR_UI_EVENT,
+    JS_CTOR_FOCUS_EVENT,
+    JS_CTOR_MOUSE_EVENT,
+    JS_CTOR_WHEEL_EVENT,
+    JS_CTOR_KEYBOARD_EVENT,
+    JS_CTOR_COMPOSITION_EVENT,
+    JS_CTOR_INPUT_EVENT,
+    JS_CTOR_POINTER_EVENT,
     JS_CTOR_MAX
 };
 
@@ -11422,6 +11471,15 @@ static Item js_ctor_custom_event_fn(Item type_arg, Item init_arg) {
         if (dv.item != 0) detail = dv;
     }
     return js_create_custom_event_init(type ? type : "", bub, can, comp, detail);
+}
+
+// EventTarget() — fresh JS object with addEventListener / removeEventListener /
+// dispatchEvent methods. Per spec, callable with `new` only; called as a
+// function still returns a fresh target (matches V8 / Firefox behaviour for
+// historical EventTarget extension semantics).
+static Item js_ctor_event_target_fn() {
+    extern Item js_create_event_target(void);
+    return js_create_event_target();
 }
 
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
@@ -11847,6 +11905,15 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_EVAL_ERROR) fn->func_ptr = (void*)js_ctor_eval_error_fn;
     else if (ctor_id == JS_CTOR_EVENT) fn->func_ptr = (void*)js_ctor_event_fn;
     else if (ctor_id == JS_CTOR_CUSTOM_EVENT) fn->func_ptr = (void*)js_ctor_custom_event_fn;
+    else if (ctor_id == JS_CTOR_EVENT_TARGET) fn->func_ptr = (void*)js_ctor_event_target_fn;
+    else if (ctor_id == JS_CTOR_UI_EVENT) fn->func_ptr = (void*)js_ctor_ui_event_fn;
+    else if (ctor_id == JS_CTOR_FOCUS_EVENT) fn->func_ptr = (void*)js_ctor_focus_event_fn;
+    else if (ctor_id == JS_CTOR_MOUSE_EVENT) fn->func_ptr = (void*)js_ctor_mouse_event_fn;
+    else if (ctor_id == JS_CTOR_WHEEL_EVENT) fn->func_ptr = (void*)js_ctor_wheel_event_fn;
+    else if (ctor_id == JS_CTOR_KEYBOARD_EVENT) fn->func_ptr = (void*)js_ctor_keyboard_event_fn;
+    else if (ctor_id == JS_CTOR_COMPOSITION_EVENT) fn->func_ptr = (void*)js_ctor_composition_event_fn;
+    else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
+    else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_DATAVIEW ||
@@ -11966,6 +12033,15 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Proxy", 5, JS_CTOR_PROXY, 2},
         {"Event", 5, JS_CTOR_EVENT, 2},
         {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 2},
+        {"EventTarget", 11, JS_CTOR_EVENT_TARGET, 0},
+        {"UIEvent", 7, JS_CTOR_UI_EVENT, 2},
+        {"FocusEvent", 10, JS_CTOR_FOCUS_EVENT, 2},
+        {"MouseEvent", 10, JS_CTOR_MOUSE_EVENT, 2},
+        {"WheelEvent", 10, JS_CTOR_WHEEL_EVENT, 2},
+        {"KeyboardEvent", 13, JS_CTOR_KEYBOARD_EVENT, 2},
+        {"CompositionEvent", 16, JS_CTOR_COMPOSITION_EVENT, 2},
+        {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
+        {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
         {NULL, 0, 0, 0}
     };
 

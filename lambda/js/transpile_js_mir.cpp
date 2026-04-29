@@ -10245,7 +10245,10 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             log_debug("js-mir: super() for builtin Error class '%.*s'", slen, sname);
                             return this_val;
                         }
-                        // Non-class, non-builtin superclass: resolve at runtime and call with this
+                        // Non-class, non-builtin superclass: resolve at runtime and call with this.
+                        // Use js_super_call_native so that native parent ctors that return a fresh
+                        // object (e.g. Event, URL) get their own props merged onto `this` — without
+                        // this merge the derived `this` would lack the base fields like `type`.
                         {
                             MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
@@ -10254,7 +10257,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             MIR_reg_t cur_nt3 = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                             jm_call_void_1(mt, "js_set_new_target",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt3));
-                            jm_call_4(mt, "js_call_function", MIR_T_I64,
+                            jm_call_4(mt, "js_super_call_native", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),

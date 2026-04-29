@@ -42,6 +42,8 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
+// super() for native parent constructors: merges returned object's own props onto `this`
+extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 
 // Symbol key check for typed array P9 guard (js_runtime.cpp)
 extern int64_t js_key_is_symbol_c(Item key);
@@ -1249,6 +1251,7 @@ JitImport jit_runtime_imports[] = {
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
     {"js_super_call_class", FPTR(js_super_call_class)},
+    {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_property_get_str", FPTR(js_property_get_str)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},

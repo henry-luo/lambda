@@ -221,6 +221,102 @@ static void expando_reset() {
     _expando_initialized = false;
 }
 
+// ------------------------------------------------------------------
+// HTML form-control IDL helpers (Phase 4 click activation).
+// `checked` and `disabled` are boolean IDL attributes that must be
+// returned as real booleans (assert_true requires `=== true`). We
+// store the live "checkedness" in the expando map under
+// `__checked` (initialised from the `checked` content attribute on
+// first read). `disabled` is reflected directly to/from the
+// `disabled` content attribute.
+// ------------------------------------------------------------------
+
+// Lowercase tag-name comparison helper. Returns true if elem->tag_name
+// case-insensitively matches `name`.
+static inline bool _is_tag(DomElement* elem, const char* name) {
+    return elem && elem->tag_name && strcasecmp(elem->tag_name, name) == 0;
+}
+
+// Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
+// "submit", "button", "text"). Falls back to "text" when missing.
+static const char* _input_type_lower(DomElement* elem) {
+    static __thread char buf[24];
+    const char* raw = dom_element_get_attribute(elem, "type");
+    if (!raw || !*raw) return "text";
+    int n = 0;
+    while (raw[n] && n < (int)sizeof(buf) - 1) {
+        buf[n] = (char)tolower((unsigned char)raw[n]);
+        n++;
+    }
+    buf[n] = '\0';
+    return buf;
+}
+
+static bool _is_checkbox_or_radio(DomElement* elem) {
+    if (!_is_tag(elem, "input")) return false;
+    const char* t = _input_type_lower(elem);
+    return strcmp(t, "checkbox") == 0 || strcmp(t, "radio") == 0;
+}
+
+// Read the live "checkedness" state. Initialised lazily from the
+// `checked` content attribute (HTML's defaultChecked) on first read.
+static bool _get_checkedness(DomElement* elem) {
+    Item exp = expando_get_map((DomNode*)elem);
+    if (exp.item != ITEM_NULL) {
+        Item key = (Item){.item = s2it(heap_create_name("__checked"))};
+        Item v = js_property_get(exp, key);
+        if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
+    }
+    // not initialised yet — derive from content attribute.
+    return dom_element_has_attribute(elem, "checked");
+}
+
+static void _set_checkedness(DomElement* elem, bool v) {
+    Item exp = expando_get_or_create_map((DomNode*)elem);
+    if (exp.item == ITEM_NULL) return;
+    Item key = (Item){.item = s2it(heap_create_name("__checked"))};
+    js_property_set(exp, key, (Item){.item = b2it(v)});
+}
+
+// Exposed for js_dom_events.cpp pre/post-click activation.
+extern "C" bool js_dom_is_checkbox_or_radio(void* dom_elem) {
+    return _is_checkbox_or_radio((DomElement*)dom_elem);
+}
+extern "C" bool js_dom_get_checkedness(void* dom_elem) {
+    return _get_checkedness((DomElement*)dom_elem);
+}
+extern "C" void js_dom_set_checkedness(void* dom_elem, bool v) {
+    _set_checkedness((DomElement*)dom_elem, v);
+}
+extern "C" const char* js_dom_input_type_lower(void* dom_elem) {
+    return _input_type_lower((DomElement*)dom_elem);
+}
+extern "C" const char* js_dom_tag_name_raw(void* dom_elem) {
+    DomElement* e = (DomElement*)dom_elem;
+    return e ? e->tag_name : nullptr;
+}
+extern "C" bool js_dom_is_disabled(void* dom_elem) {
+    DomElement* e = (DomElement*)dom_elem;
+    return e && dom_element_has_attribute(e, "disabled");
+}
+
+// Returns true when the element is "connected" to its owning document
+// (HTML's "is connected" predicate). Walks the parent chain looking for
+// the document's root element. Newly-created elements that haven't been
+// inserted into the tree are not connected.
+extern "C" bool js_dom_is_connected(void* dom_elem) {
+    DomElement* e = (DomElement*)dom_elem;
+    if (!e || !e->doc) return false;
+    DomElement* root = e->doc->root;
+    if (!root) return false;
+    DomNode* cur = (DomNode*)e;
+    while (cur) {
+        if (cur == (DomNode*)root) return true;
+        cur = cur->parent;
+    }
+    return false;
+}
+
 // ============================================================================
 // Named element access on Window (HTML spec: named access on Window object)
 // Walks DOM tree, registers elements with id as global properties
@@ -3176,6 +3272,21 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
 
     // ------------------------------------------------------------------
+    // Boolean IDL attributes that must be returned as real booleans
+    // (HTML form-control properties used by activation behavior).
+    // ------------------------------------------------------------------
+    if (strcmp(prop, "checked") == 0 && _is_tag(elem, "input")) {
+        return (Item){.item = b2it(_get_checkedness(elem))};
+    }
+    if (strcmp(prop, "disabled") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "button") ||
+         _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
+         _is_tag(elem, "fieldset") || _is_tag(elem, "optgroup") ||
+         _is_tag(elem, "option"))) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "disabled"))};
+    }
+
+    // ------------------------------------------------------------------
     // HTML form text-control (HTMLInputElement / HTMLTextAreaElement)
     // properties — must intercept BEFORE attribute fallback so .value
     // returns the live IDL value, not the static `value` attribute.
@@ -3517,6 +3628,16 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         // making `foo` a global).
         js_dom_register_named_elements(elem);
         js_dom_mutation_notify();
+        return value;
+    }
+
+    // ------------------------------------------------------------------
+    // Boolean IDL setters that must update internal state, not just the
+    // content attribute. `checked` writes the live "checkedness" flag
+    // (HTML §4.10.5.3.21).
+    // ------------------------------------------------------------------
+    if (strcmp(prop, "checked") == 0 && _is_tag(elem, "input")) {
+        _set_checkedness(elem, js_is_truthy(value));
         return value;
     }
 
@@ -4539,12 +4660,25 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return make_js_undefined();
     }
 
-    // HTMLElement.click() — synthesise and dispatch a `click` event
-    // (bubbles, cancelable). WPT stringifier_editable_element.tentative
-    // and many other tests rely on this for `anchor.click()`-style
-    // programmatic dispatch.
+    // HTMLElement.click() — synthesise and dispatch a `click` MouseEvent
+    // (bubbles, cancelable, composed). Per the HTML spec §6.4.4, calling
+    // click() on a disabled form control is a no-op (no event fires).
     if (strcmp(method, "click") == 0) {
-        Item ev = js_create_event("click", /*bubbles=*/true, /*cancelable=*/true);
+        // Disabled form-control guard: button/input/select/textarea with the
+        // `disabled` content attribute set must not dispatch the click event.
+        if (elem->tag_name) {
+            const char* tag = elem->tag_name;
+            bool is_form_ctrl =
+                strcasecmp(tag, "button") == 0 ||
+                strcasecmp(tag, "input") == 0 ||
+                strcasecmp(tag, "select") == 0 ||
+                strcasecmp(tag, "textarea") == 0 ||
+                strcasecmp(tag, "fieldset") == 0;
+            if (is_form_ctrl && dom_element_has_attribute(elem, "disabled")) {
+                return make_js_undefined();
+            }
+        }
+        Item ev = js_create_click_mouse_event();
         return js_dom_dispatch_event(elem_item, ev);
     }
 
