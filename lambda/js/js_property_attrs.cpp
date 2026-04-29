@@ -216,6 +216,13 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     bool _prev = js_skip_accessor_dispatch;
     js_skip_accessor_dispatch = true;
 
+    // Normalize "absent half" to ItemNull so read paths that gate on
+    // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined
+    // descriptor field (e.g. defineProperty with `{set: ...}` only) as absent.
+    // Without this, Item-typed undefined leaks into pair->getter and dispatch
+    // attempts to invoke `undefined` as a function.
+    if (get_type_id(fn) == LMD_TYPE_UNDEFINED) fn = ItemNull;
+
     // Look up any existing accessor pair under name X.
     JsAccessorPair* pair = nullptr;
     ShapeEntry* se = js_find_shape_entry(obj, ns->chars, (int)ns->len);
@@ -261,6 +268,12 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
 // =============================================================================
 
 extern "C" bool js_intercept_accessor_marker(Item obj, Item key, Item value) {
+    // Companion maps stash legacy `__get_N`/`__set_N` keys for array indices,
+    // arguments, and similar exotic-storage paths where there are no shape
+    // entries to carry IS_ACCESSOR. Writes targeting those maps must keep the
+    // literal key — bypass the JsAccessorPair routing.
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        obj.map->map_kind == MAP_KIND_ARRAY_PROPS) return false;
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* ks = it2s(key);
     if (!ks || ks->len < 7) return false;  // need __get_X / __set_X minimum

@@ -4816,6 +4816,12 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         ne->byte_offset = byte_offset;
         ne->next = NULL;
         ne->ns = e->ns;
+        // Preserve property attribute flags (JSPD_IS_ACCESSOR, NW, NE, NC, etc.)
+        // and default_value across shape rebuild. Without this, accessors lose
+        // their IS_ACCESSOR flag and writable/enum/config flags get reset to JS
+        // defaults whenever a sibling field's type transitions trigger a rebuild.
+        ne->flags = e->flags;
+        ne->default_value = e->default_value;
 
         if (!first) first = ne;
         if (prev) prev->next = ne;

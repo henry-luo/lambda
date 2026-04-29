@@ -954,6 +954,7 @@ extern "C" Item js_build_arguments_object() {
     arr.array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     Item companion = js_new_object();
+    companion.map->map_kind = MAP_KIND_ARRAY_PROPS;
     arr.array->extra = (int64_t)(uintptr_t)companion.map;
     js_property_set(companion, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
                     (Item){.item = s2it(heap_create_name("Arguments", 9))});
@@ -6627,7 +6628,22 @@ extern "C" Item js_property_get(Item object, Item key) {
                         JsFunction* proto_fn = (JsFunction*)proto.function;
                         if (proto_fn->properties_map.item != 0 && get_type_id(proto_fn->properties_map) == LMD_TYPE_MAP) {
                             Item result = map_get(proto_fn->properties_map.map, key);
-                            if (result.item != ItemNull.item) return result;
+                            if (result.item != ItemNull.item) {
+                                ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
+                                // Phase 4: if shape entry has IS_ACCESSOR, slot holds a
+                                // JsAccessorPair*; dispatch via pair->getter with `object`
+                                // as `this`. Required for inherited accessors like
+                                // Float64Array[Symbol.species] (getter installed on
+                                // %TypedArray%).
+                                if (_se && jspd_is_accessor(_se)) {
+                                    JsAccessorPair* pair = js_item_to_accessor_pair(result);
+                                    if (pair && pair->getter.item != ItemNull.item) {
+                                        return js_call_function(pair->getter, object, NULL, 0);
+                                    }
+                                    return make_js_undefined();
+                                }
+                                return result;
+                            }
                         }
                         // Check constructor statics on the proto function too
                         if (proto_fn->name) {
@@ -6638,6 +6654,21 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         proto = js_get_prototype_of(proto);
                     } else if (get_type_id(proto) == LMD_TYPE_MAP) {
+                        // Phase 5: dispatch IS_ACCESSOR slots in MAP proto with
+                        // `object` as receiver. Without this, the raw
+                        // JsAccessorPair* leaks out as if it were a Function.
+                        ShapeEntry* _se_m = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
+                        if (_se_m && jspd_is_accessor(_se_m)) {
+                            bool sf = false;
+                            Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
+                            if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
+                                JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+                                if (pair && pair->getter.item != ItemNull.item) {
+                                    return js_call_function(pair->getter, object, NULL, 0);
+                                }
+                                return make_js_undefined();
+                            }
+                        }
                         Item result = map_get(proto.map, key);
                         if (result.item != ItemNull.item) return result;
                         result = js_prototype_lookup(proto, key);
@@ -6777,6 +6808,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     Map* pm;
                     if (arr->extra == 0) {
                         Item obj = js_new_object();
+                        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
                         arr->extra = (int64_t)(uintptr_t)obj.map;
                     }
                     pm = (Map*)(uintptr_t)arr->extra;
@@ -6821,6 +6853,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 Map* pm;
                 if (arr->extra == 0) {
                     Item obj = js_new_object();
+                    obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
                     arr->extra = (int64_t)(uintptr_t)obj.map;
                 }
                 pm = (Map*)(uintptr_t)arr->extra;
@@ -7197,7 +7230,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // v23: .name and .length are non-writable by default on functions.
         // Simple assignment should be silently ignored unless the property was
         // explicitly made writable via Object.defineProperty.
-        if (str_key && ((str_key->len == 4 && memcmp(str_key->chars, "name", 4) == 0) ||
+        // Phase 5: bypass when called via js_define_accessor_partial — that
+        // helper installs a JsAccessorPair into properties_map under "name"
+        // and must not be blocked by the virtual non-writable guard.
+        if (!js_skip_accessor_dispatch &&
+            str_key && ((str_key->len == 4 && memcmp(str_key->chars, "name", 4) == 0) ||
                         (str_key->len == 6 && memcmp(str_key->chars, "length", 6) == 0))) {
             if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                 bool has_key = false;
@@ -7374,6 +7411,27 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
 
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
 
+    // Phase 5: if proto has an own accessor at `key` (IS_ACCESSOR flag),
+    // dispatch the getter with `receiver` as this. Must check BEFORE map_get
+    // since map_get returns the raw JsAccessorPair* slot value as Item.
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
+            if (_se && jspd_is_accessor(_se)) {
+                bool sf = false;
+                Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
+                if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+                    if (pair && pair->getter.item != ItemNull.item) {
+                        return js_call_function(pair->getter, receiver, NULL, 0);
+                    }
+                    return make_js_undefined();
+                }
+            }
+        }
+    }
+
     // check data property on proto
     Item result = map_get(proto.map, key);
     if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
@@ -7389,11 +7447,26 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
             if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
                 return js_call_function(getter, receiver, NULL, 0);
             }
-            // check prototype chain of proto for getter
-            Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
-            getter = js_prototype_lookup(proto, gk);
-            if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, receiver, NULL, 0);
+            // walk prototype chain of proto looking for an inherited accessor
+            Item p = js_get_prototype(proto);
+            if (p.item == ItemNull.item) p = js_get_prototype_of(proto);
+            int depth = 0;
+            while (p.item != ItemNull.item && get_type_id(p) == LMD_TYPE_MAP && depth++ < 64) {
+                ShapeEntry* _se2 = js_find_shape_entry(p, str_key->chars, (int)str_key->len);
+                if (_se2 && jspd_is_accessor(_se2)) {
+                    bool sf2 = false;
+                    Item slot2 = js_map_get_fast_ext(p.map, str_key->chars, (int)str_key->len, &sf2);
+                    if (sf2 && slot2.item != JS_DELETED_SENTINEL_VAL) {
+                        JsAccessorPair* pair2 = js_item_to_accessor_pair(slot2);
+                        if (pair2 && pair2->getter.item != ItemNull.item) {
+                            return js_call_function(pair2->getter, receiver, NULL, 0);
+                        }
+                        return make_js_undefined();
+                    }
+                }
+                Item next = js_get_prototype(p);
+                if (next.item == ItemNull.item) next = js_get_prototype_of(p);
+                p = next;
             }
         }
     }
@@ -7423,6 +7496,25 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
     if (type != LMD_TYPE_MAP) return js_property_get(proto, key);
 
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+
+    // Phase 5: check own accessor at `key` on proto first.
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
+            if (_se && jspd_is_accessor(_se)) {
+                bool sf = false;
+                Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
+                if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot);
+                    if (pair && pair->getter.item != ItemNull.item) {
+                        return js_call_function(pair->getter, receiver, NULL, 0);
+                    }
+                    return make_js_undefined();
+                }
+            }
+        }
+    }
 
     Item result = map_get(proto.map, key);
     if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
@@ -7632,6 +7724,18 @@ extern "C" int64_t js_get_length(Item object) {
         bool own_found = false;
         Item result = js_map_get_fast(m, "length", 6, &own_found);
         if (own_found && !js_is_deleted_sentinel(result)) {
+            // Phase 5: own "length" may be a JsAccessorPair stored under
+            // IS_ACCESSOR shape flag. Dispatch the getter rather than coercing
+            // the pair (which would yield NaN→0 via js_get_number).
+            ShapeEntry* _se = js_find_shape_entry(object, "length", 6);
+            if (_se && jspd_is_accessor(_se)) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(result);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    Item v = js_call_function(pair->getter, object, NULL, 0);
+                    return (int64_t)js_get_number(v);
+                }
+                return 0;
+            }
             return (int64_t)js_get_number(result);
         }
         // Check getter __get_length on own object
@@ -7678,6 +7782,17 @@ extern "C" Item js_get_length_item(Item object) {
         bool own_found = false;
         Item result = js_map_get_fast(m, "length", 6, &own_found);
         if (own_found && !js_is_deleted_sentinel(result)) {
+            // Phase 5: own "length" may be a JsAccessorPair stored under
+            // IS_ACCESSOR shape flag. Dispatch the getter instead of returning
+            // the raw pair (which would surface as a function-typed Item).
+            ShapeEntry* _se = js_find_shape_entry(object, "length", 6);
+            if (_se && jspd_is_accessor(_se)) {
+                JsAccessorPair* pair = js_item_to_accessor_pair(result);
+                if (pair && pair->getter.item != ItemNull.item) {
+                    return js_call_function(pair->getter, object, NULL, 0);
+                }
+                return make_js_undefined();
+            }
             return result;  // return raw Item, not converted to number
         }
         // Check getter __get_length
@@ -7939,6 +8054,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         Map* pm;
         if (arr->extra == 0) {
             Item obj = js_new_object();
+            obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
             arr->extra = (int64_t)(uintptr_t)obj.map;
         }
         pm = (Map*)(uintptr_t)arr->extra;
@@ -7985,6 +8101,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         Array* arr = array.array;
         if (arr->extra == 0) {
             Item obj = js_new_object();
+            obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
             arr->extra = (int64_t)(uintptr_t)obj.map;
         }
         Map* pm = (Map*)(uintptr_t)arr->extra;
@@ -8024,6 +8141,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         Map* pm;
         if (arr->extra == 0) {
             Item obj = js_new_object();
+            obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
             arr->extra = (int64_t)(uintptr_t)obj.map;
         }
         pm = (Map*)(uintptr_t)arr->extra;
@@ -9252,17 +9370,21 @@ static Item js_array_like_to_array(Item obj) {
         // Object.prototype manually (unless it's an own setter-only accessor).
         bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN);
         bool is_own_setter_only = false;
-        if (plain_map && blen < 200) {
-            char sk[256];
-            int sklen = snprintf(sk, sizeof(sk), "__set_%.*s", blen, buf);
-            bool sk_found = false;
-            js_map_get_fast(obj.map, sk, sklen, &sk_found);
-            if (sk_found) {
-                bool gk_found = false;
-                char gk[256];
-                int gklen = snprintf(gk, sizeof(gk), "__get_%.*s", blen, buf);
-                js_map_get_fast(obj.map, gk, gklen, &gk_found);
-                if (!gk_found) is_own_setter_only = true;
+        if (plain_map) {
+            // Phase 5: accessors are stored as JsAccessorPair with the
+            // JSPD_IS_ACCESSOR flag on the shape entry. A setter-only accessor
+            // (getter == ItemNull) shadows any inherited property and must
+            // produce undefined here, never fall through to Object.prototype.
+            ShapeEntry* _se_acc = js_find_shape_entry(obj, buf, blen);
+            if (_se_acc && jspd_is_accessor(_se_acc)) {
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(obj.map, buf, blen, &slot_found);
+                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    if (pair && pair->getter.item == ItemNull.item) {
+                        is_own_setter_only = true;
+                    }
+                }
             }
         }
         if (has) {
@@ -11493,7 +11615,15 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Create new regex and copy its internal data to this_val
         Item new_regex = js_create_regex(pattern, pattern_len, flags_str, flags_len);
         if (new_regex.item == ItemNull.item || js_exception_pending) return make_js_undefined();
-        // Copy __rd, source, flags, and flag properties from new_regex to this_val
+        // Copy __rd, source, flags, and flag properties from new_regex to this_val.
+        // RegExp.prototype carries `flags`/`source`/`global`/... as IS_ACCESSOR
+        // entries. A plain js_property_set here would walk the proto chain to a
+        // getter-only accessor and silently no-op (sloppy) or throw (strict).
+        // RegExp.prototype.compile is a [[DefineOwnProperty]]-equivalent operation,
+        // so bypass accessor dispatch and write the data slot directly on the
+        // instance.
+        bool _prev_skip_accessor_dispatch = js_skip_accessor_dispatch;
+        js_skip_accessor_dispatch = true;
         Item rd_key = (Item){.item = s2it(heap_create_name("__rd", 4))};
         js_property_set(this_val, rd_key, js_property_get(new_regex, rd_key));
         Item source_key = (Item){.item = s2it(heap_create_name("source", 6))};
@@ -11508,6 +11638,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Reset lastIndex to 0
         Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
         js_property_set(this_val, li_key, (Item){.item = i2it(0)});
+        js_skip_accessor_dispatch = _prev_skip_accessor_dispatch;
         return this_val;
     }
 

@@ -509,6 +509,9 @@ enum MapKind {
     MAP_KIND_DOC_PROXY   = 8,  // document proxy — JS document object
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
     MAP_KIND_FOREIGN_DOC = 10, // foreign document (createHTMLDocument/createDocument result)
+    MAP_KIND_ARRAY_PROPS = 11, // array `extra` companion map: stores literal
+                               // legacy markers (__get_N/__set_N/__nw_N/...)
+                               // — bypasses Phase 4 accessor-marker intercept.
 };
 
 // Array and List struct defintions needed for for-loop
