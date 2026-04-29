@@ -4564,20 +4564,21 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 const char* type = "";
-                bool bubbles = false, cancelable = false;
+                bool bubbles = false, cancelable = false, composed = false;
                 if (argc > 0 && args) {
                     const char* t = fn_to_cstr(args[0]);
                     if (t) type = t;
                 }
                 if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
-                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
-                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
-                    Item bv = js_property_get(args[1], bk);
-                    Item cv = js_property_get(args[1], ck);
-                    bubbles = js_is_truthy(bv);
-                    cancelable = js_is_truthy(cv);
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+                    Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+                    bubbles    = js_is_truthy(js_property_get(args[1], bk));
+                    cancelable = js_is_truthy(js_property_get(args[1], ck));
+                    composed   = js_is_truthy(js_property_get(args[1], ok));
                 }
-                return js_create_event(type, bubbles, cancelable);
+                extern Item js_create_event_init(const char*, bool, bool, bool);
+                return js_create_event_init(type, bubbles, cancelable, composed);
             }
 
             // CustomEvent(type, options)
@@ -4585,23 +4586,24 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 const char* type = "";
-                bool bubbles = false, cancelable = false;
+                bool bubbles = false, cancelable = false, composed = false;
                 Item detail = ItemNull;
                 if (argc > 0 && args) {
                     const char* t = fn_to_cstr(args[0]);
                     if (t) type = t;
                 }
                 if (argc > 1 && args && get_type_id(args[1]) == LMD_TYPE_MAP) {
-                    Item bk = (Item){.item = s2it(heap_create_name("bubbles", 7))};
-                    Item ck = (Item){.item = s2it(heap_create_name("cancelable", 10))};
-                    Item dk = (Item){.item = s2it(heap_create_name("detail", 6))};
-                    Item bv = js_property_get(args[1], bk);
-                    Item cv = js_property_get(args[1], ck);
-                    detail = js_property_get(args[1], dk);
-                    bubbles = js_is_truthy(bv);
-                    cancelable = js_is_truthy(cv);
+                    Item bk = (Item){.item = s2it(heap_create_name("bubbles"))};
+                    Item ck = (Item){.item = s2it(heap_create_name("cancelable"))};
+                    Item ok = (Item){.item = s2it(heap_create_name("composed"))};
+                    Item dk = (Item){.item = s2it(heap_create_name("detail"))};
+                    bubbles    = js_is_truthy(js_property_get(args[1], bk));
+                    cancelable = js_is_truthy(js_property_get(args[1], ck));
+                    composed   = js_is_truthy(js_property_get(args[1], ok));
+                    detail     = js_property_get(args[1], dk);
                 }
-                return js_create_custom_event(type, bubbles, cancelable, detail);
+                extern Item js_create_custom_event_init(const char*, bool, bool, bool, Item);
+                return js_create_custom_event_init(type, bubbles, cancelable, composed, detail);
             }
         }
 
@@ -12113,6 +12115,25 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
         }
         // Empty class with no constructor — no-op, this is already created
     }
+    return this_val;
+}
+
+// super() for native (built-in) parent constructors that ignore `this` and return a fresh
+// object (e.g. Event, URL, AbortController). Calls the parent, then merges the returned
+// object's own enumerable properties onto `this_val` so the derived constructor's body sees
+// the populated base fields. Returns `this_val` so subsequent member writes hit the same
+// receiver the JIT already holds.
+extern "C" Item js_object_assign(Item target, Item* sources, int count);
+extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int argc) {
+    Item result = js_call_function(callee, this_val, args, argc);
+    if (js_check_exception()) return this_val;
+    // If the parent returned the same receiver (or a non-object), nothing to merge.
+    TypeId rtid = get_type_id(result);
+    if (rtid != LMD_TYPE_MAP) return this_val;
+    if (result.item == this_val.item) return this_val;
+    // Only merge if `this_val` is itself a plain object — otherwise leave it alone.
+    if (get_type_id(this_val) != LMD_TYPE_MAP) return this_val;
+    js_object_assign(this_val, &result, 1);
     return this_val;
 }
 

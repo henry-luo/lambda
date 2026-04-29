@@ -56,9 +56,52 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item);
 Item js_create_event(const char* type, bool bubbles, bool cancelable);
 
 /**
+ * Create an Event with full EventInit (composed flag set explicitly).
+ */
+Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool composed);
+
+/**
+ * Build a synthetic click MouseEvent for HTMLElement.prototype.click().
+ * Composed=true, bubbles=true, cancelable=true, detail=1; all coordinate/
+ * button/modifier fields default to 0/false per the HTML spec.
+ */
+Item js_create_click_mouse_event(void);
+
+/**
  * Create a CustomEvent object with a detail property.
  */
 Item js_create_custom_event(const char* type, bool bubbles, bool cancelable, Item detail);
+
+/**
+ * Create a CustomEvent with full EventInit (composed flag) plus detail.
+ */
+Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable,
+                                 bool composed, Item detail);
+
+// ============================================================================
+// Generic EventTarget — a plain JS object that can be used as an event target
+// ============================================================================
+
+/**
+ * Construct a fresh EventTarget. The returned object has addEventListener,
+ * removeEventListener, and dispatchEvent methods bound such that this-receiver
+ * is the storage key.
+ */
+Item js_create_event_target(void);
+
+// ============================================================================
+// Event subclass constructors (called by JsCtor wrappers in js_globals.cpp).
+// Each takes (type, init) and returns an Event-shaped object stamped with the
+// extra IDL members and `__class_name__` for instanceof.
+// ============================================================================
+Item js_ctor_ui_event_fn(Item type, Item init);
+Item js_ctor_focus_event_fn(Item type, Item init);
+Item js_ctor_mouse_event_fn(Item type, Item init);
+Item js_ctor_wheel_event_fn(Item type, Item init);
+Item js_ctor_keyboard_event_fn(Item type, Item init);
+Item js_ctor_composition_event_fn(Item type, Item init);
+Item js_ctor_input_event_fn(Item type, Item init);
+Item js_ctor_pointer_event_fn(Item type, Item init);
 
 // ============================================================================
 // Lifecycle
