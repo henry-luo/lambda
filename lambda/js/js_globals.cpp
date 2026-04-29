@@ -6887,7 +6887,9 @@ extern "C" Item js_object_group_by(Item items, Item callback) {
         Item idx_item = {.item = i2it(i)};
         Item fn_args[2] = {elem, idx_item};
         Item key = js_call_function(callback, make_js_undefined(), fn_args, 2);
-        Item key_str = js_to_string(key);
+        // Stage A1: ToPropertyKey per spec — Symbol callback returns must yield
+        // a property key (__sym_N), not throw via js_to_string.
+        Item key_str = js_to_property_key(key);
         // get or create array for this group
         String* ks = it2s(key_str);
         bool found = false;
@@ -7912,7 +7914,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     }
     // v23: handle array objects — numeric indices and "length"
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
-        Item k = js_to_string(key);
+        // Stage A1: ToPropertyKey — symbol keys may be present on companion map.
+        Item k = js_to_property_key(key);
         if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
         String* ks = it2s(k);
         if (!ks) return (Item){.item = b2it(false)};
@@ -9108,7 +9111,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         if (idx >= 0 && idx < arr->length) {
             // v27: check __nc_ (non-configurable) marker before deleting
             if (arr->extra != 0) {
-                Item k_str = js_to_string(key);
+                // Stage A1: ToPropertyKey — uniform stringification.
+                Item k_str = js_to_property_key(key);
                 if (get_type_id(k_str) == LMD_TYPE_STRING) {
                     String* ks = it2s(k_str);
                     if (ks) {
@@ -9125,7 +9129,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             // also clear any descriptor markers/accessors in companion map so the
             // index is no longer treated as an own property after delete.
             if (arr->extra != 0) {
-                Item k_str = js_to_string(key);
+                // Stage A1: ToPropertyKey — uniform stringification.
+                Item k_str = js_to_property_key(key);
                 if (get_type_id(k_str) == LMD_TYPE_STRING) {
                     String* ks = it2s(k_str);
                     if (ks && ks->len > 0 && ks->len < 200) {
@@ -9154,7 +9159,9 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         // Non-numeric or out-of-range key: check companion map
         if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
-            Item k = js_to_string(key);
+            // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
+            // are canonicalized identically to define-property time.
+            Item k = js_to_property_key(key);
             // Honor __nc_<key> non-configurable marker on companion map.
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);

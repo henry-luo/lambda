@@ -9341,7 +9341,9 @@ static bool js_has_property(Item obj, Item key) {
     if (get_type_id(obj) == LMD_TYPE_STRING) {
         String* s = it2s(obj);
         if (!s) return false;
-        Item k = js_to_string(key);
+        // Stage A1: ToPropertyKey per spec — Symbol keys must coerce to __sym_N
+        // not throw, so the subsequent length/index probe sees a real string.
+        Item k = js_to_property_key(key);
         String* ks = it2s(k);
         if (!ks) return false;
         if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) return true;

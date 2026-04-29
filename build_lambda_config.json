@@ -3013,6 +3013,18 @@
                         "icon": "🟨"
                     },
                     {
+                        "source": "test/test_js_props_gtest.cpp",
+                        "name": "JS Property-Model Invariant Tests (Stage B)",
+                        "dependencies": [],
+                        "binary": "test_js_props_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🧩"
+                    },
+                    {
                         "source": "test/test_node_gtest.cpp",
                         "name": "Node.js Module Tests",
                         "dependencies": [],
