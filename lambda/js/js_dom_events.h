@@ -135,6 +135,20 @@ Item js_create_native_wheel_event(const char* type,
  */
 bool js_event_is_default_prevented(Item event);
 
+/**
+ * §7.4.6 (U-7) — legacy IE-style `window.event` set/restore for the
+ * Radiant inline-handler path (onclick="..." etc.). Use around the
+ * compiled handler invocation:
+ *   Item prev = js_set_window_event_for_legacy(event);
+ *   handler_fn();
+ *   js_restore_window_event_for_legacy(prev);
+ * The bridge dispatch (`js_dom_dispatch_event`) sets `window.event`
+ * itself; these helpers are for the legacy `dispatch_html_event_handler`
+ * path which doesn't go through the bridge.
+ */
+Item js_set_window_event_for_legacy(Item event);
+void js_restore_window_event_for_legacy(Item prev);
+
 // ============================================================================
 // Lifecycle
 // ============================================================================

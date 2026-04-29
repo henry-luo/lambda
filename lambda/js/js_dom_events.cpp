@@ -1174,6 +1174,30 @@ extern "C" bool js_event_is_default_prevented(Item event) {
 }
 
 // ============================================================================
+// Legacy IE-style `window.event` plumbing for the Radiant inline-handler
+// (`onclick="..."`) path. The bridge dispatch (`js_dom_dispatch_event`)
+// already sets/restores `window.event` around its listener invocation.
+// Inline handlers compiled by `collect_and_compile_event_handlers` take no
+// `event` parameter, so the only way for handler bodies like
+// `onclick="alert(event.type)"` to see the event is through this global.
+// `js_set_window_event_for_legacy` returns the prior value (so the caller
+// can restore it after invoking the handler).
+// ============================================================================
+extern "C" Item js_set_window_event_for_legacy(Item event) {
+    Item global = js_get_global_this();
+    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    Item prev = js_property_get(global, event_key);
+    js_property_set(global, event_key, event);
+    return prev;
+}
+
+extern "C" void js_restore_window_event_for_legacy(Item prev) {
+    Item global = js_get_global_this();
+    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    js_property_set(global, event_key, prev);
+}
+
+// ============================================================================
 // Event Dispatch (3-phase propagation)
 // ============================================================================
 

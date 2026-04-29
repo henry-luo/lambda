@@ -1074,6 +1074,12 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                     handler_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
                     handler_ctx.pool = heap->pool;
                 }
+                // §7.4.6 (U-7): allocate transient type_list so the
+                // synthetic-event factories below (which install accessor
+                // descriptors via map_rebuild_for_type_change) don't deref
+                // a NULL ArrayList. Same root-cause as the U-1 SEGV fix.
+                ArrayList* tl = arraylist_new(16);
+                handler_ctx.type_list = tl;
 
                 EvalContext* saved_ctx = context;
                 Context* saved_input_ctx = input_context;
@@ -1086,17 +1092,65 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 // Reset mutation counter before handler
                 doc->js_mutation_count = 0;
 
+                // §7.4.6 (U-7): set legacy `window.event` so handler bodies
+                // like `onclick="alert(event.type)"` can see the event.
+                // We only have the event type string here, so build a minimal
+                // synthetic Event of the right class with zeroed fields.
+                Item synth_ev = ItemNull;
+                {
+                    bool is_mouse = (strcmp(event_type, "click") == 0 ||
+                        strcmp(event_type, "dblclick") == 0 ||
+                        strcmp(event_type, "mousedown") == 0 ||
+                        strcmp(event_type, "mouseup") == 0 ||
+                        strcmp(event_type, "mouseover") == 0 ||
+                        strcmp(event_type, "mouseout") == 0 ||
+                        strcmp(event_type, "mousemove") == 0 ||
+                        strcmp(event_type, "mouseenter") == 0 ||
+                        strcmp(event_type, "mouseleave") == 0);
+                    bool is_key = (strcmp(event_type, "keydown") == 0 ||
+                        strcmp(event_type, "keyup") == 0 ||
+                        strcmp(event_type, "keypress") == 0);
+                    bool is_focus = (strcmp(event_type, "focus") == 0 ||
+                        strcmp(event_type, "blur") == 0 ||
+                        strcmp(event_type, "focusin") == 0 ||
+                        strcmp(event_type, "focusout") == 0);
+                    bool is_wheel = (strcmp(event_type, "wheel") == 0 ||
+                        strcmp(event_type, "mousewheel") == 0);
+                    if (is_mouse) {
+                        synth_ev = js_create_native_mouse_event(event_type,
+                            0, 0, 0, 0, false, false, false, false, 1, ItemNull);
+                    } else if (is_key) {
+                        synth_ev = js_create_native_keyboard_event(event_type,
+                            "", "", false, false, false, false, false);
+                    } else if (is_focus) {
+                        synth_ev = js_create_native_focus_event(event_type, ItemNull);
+                    } else if (is_wheel) {
+                        synth_ev = js_create_native_wheel_event(event_type,
+                            0, 0, 0.0, 0.0, 0, false, false, false, false);
+                    }
+                }
+                Item prev_window_event = ItemNull;
+                bool window_event_set = (synth_ev.item != ItemNull.item);
+                if (window_event_set) {
+                    prev_window_event = js_set_window_event_for_legacy(synth_ev);
+                }
+
                 // Invoke: function __evt_handler_N() { ... }
                 // JS handler functions return Item but we ignore the return value
                 typedef Item (*js_handler_fn)(void);
                 js_handler_fn fn = (js_handler_fn)handler->compiled_func;
                 fn();
 
+                if (window_event_set) {
+                    js_restore_window_event_for_legacy(prev_window_event);
+                }
+
                 auto t_handler = high_resolution_clock::now();
 
                 // Restore context
                 context = saved_ctx;
                 input_context = saved_input_ctx;
+                arraylist_free(tl);
 
                 // Post-handler: detect DOM changes and rebuild
                 post_html_handler_rebuild(evcon, t_start, t_handler);
@@ -1385,17 +1439,15 @@ void update_hover_state(EventContext* evcon, View* new_target) {
         log_debug("update_hover_state: set hover on %p", new_target);
 
         // Dispatch HTML onmouseover handler if registered
-        bool inline_fired = dispatch_html_event_handler(evcon, new_target, "mouseover");
+        dispatch_html_event_handler(evcon, new_target, "mouseover");
 
-        // §7 unification (U-1): also fire addEventListener listeners through the
-        // spec-compliant JS dispatcher. Skip if an inline `on*` handler already
-        // ran — the post-handler rebuild may have invalidated transient JS state.
-        // U-6 will collapse both paths into a single dispatcher.
-        if (!inline_fired) {
-            radiant_dispatch_mouse_event(evcon, new_target, "mouseover",
-                evcon->event.mouse_position.x, evcon->event.mouse_position.y,
-                0, 0, false, false, false, false, 0);
-        }
+        // §7 unification (U-1/U-6): also fire addEventListener listeners through
+        // the spec-compliant JS dispatcher. Both paths target disjoint registries
+        // (inline `on*` handlers vs addEventListener listeners), so running both
+        // unconditionally cannot double-fire.
+        radiant_dispatch_mouse_event(evcon, new_target, "mouseover",
+            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
+            0, 0, false, false, false, false, 0);
     }
 
     state->hover_target = new_target;
@@ -2154,12 +2206,10 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
-            bool blur_inline_fired = dispatch_html_event_handler(evcon, prev_focus, "blur");
-            // §7 unification (U-4): bridge dispatch when no inline handler.
-            if (!blur_inline_fired) {
-                radiant_dispatch_focus_event(evcon, prev_focus, "blur", new_focus);
-            }
-            // focusout always bubbles via JS bridge (not legacy inline)
+            // §7 unification (U-4/U-6): legacy inline + bridge listeners both run
+            // unconditionally. They target disjoint registries so cannot double-fire.
+            dispatch_html_event_handler(evcon, prev_focus, "blur");
+            radiant_dispatch_focus_event(evcon, prev_focus, "blur", new_focus);
             radiant_dispatch_focus_event(evcon, prev_focus, "focusout", new_focus);
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
@@ -2171,13 +2221,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         // Set :focus on new element
         sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
 
-        // Dispatch HTML onfocus handler if registered
-        bool focus_inline_fired = dispatch_html_event_handler(evcon, new_focus, "focus");
-        // §7 unification (U-4): bridge dispatch when no inline handler.
-        if (!focus_inline_fired) {
-            radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
-        }
-        // focusin always bubbles via JS bridge
+        // §7 unification (U-4/U-6): inline + bridge always both fire.
+        dispatch_html_event_handler(evcon, new_focus, "focus");
+        radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
         radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
 
         // Set :focus-visible only for keyboard navigation
@@ -2196,11 +2242,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
-            bool blur_inline_fired = dispatch_html_event_handler(evcon, prev_focus, "blur");
-            // §7 unification (U-4): bridge dispatch when no inline handler.
-            if (!blur_inline_fired) {
-                radiant_dispatch_focus_event(evcon, prev_focus, "blur", nullptr);
-            }
+            // §7 unification (U-4/U-6): inline + bridge always both fire.
+            dispatch_html_event_handler(evcon, prev_focus, "blur");
+            radiant_dispatch_focus_event(evcon, prev_focus, "blur", nullptr);
             radiant_dispatch_focus_event(evcon, prev_focus, "focusout", nullptr);
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
@@ -3042,11 +3086,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             update_active_state(&evcon, evcon.target, true);
 
             // Dispatch HTML onmousedown handler
-            bool md_inline_fired = dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
-            // §7 unification (U-2): if no inline handler exists, dispatch via JS
-            // EventTarget bridge so addEventListener("mousedown",...) listeners run.
-            // Track preventDefault so link navigation in fire_inline_event can be gated.
-            if (!md_inline_fired) {
+            dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
+            // §7 unification (U-2/U-6): always dispatch via JS EventTarget bridge so
+            // addEventListener("mousedown",...) listeners run. Bridge and inline target
+            // disjoint registries; preventDefault from real listeners gates link nav.
+            {
                 bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                     "mousedown", btn_event->x, btn_event->y,
                     btn_event->button, 1 << btn_event->button,
@@ -3448,37 +3492,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Only process other click handlers if dropdown wasn't involved and not a drag
             if (!dropdown_handled && !drag_handled) {
-                // §7 unification (U-2): dispatch click via JS EventTarget bridge
-                // BEFORE built-in default actions, so addEventListener("click")
-                // listeners can call event.preventDefault() to suppress them.
-                // Gated by !inline-handler to preserve current inline-handler
-                // semantics (legacy inline path still runs at end of block).
-                bool click_inline_present = false;
+                // §7 unification (U-2/U-6): always dispatch click via JS EventTarget
+                // bridge BEFORE built-in default actions, so addEventListener("click")
+                // listeners can call event.preventDefault() to suppress them. The
+                // legacy inline-handler path runs separately at end of block on a
+                // disjoint registry, so no double-fire.
                 if (evcon.target) {
-                    DomDocument* d = evcon.ui_context ? evcon.ui_context->document : nullptr;
-                    if (d && d->js_event_registry) {
-                        DomElement* del = radiant_view_to_dom_element(evcon.target);
-                        DomNode* n = (DomNode*)del; int depth = 0;
-                        while (n && depth < 100) {
-                            if (n->node_type == DOM_NODE_ELEMENT &&
-                                find_html_event_handler((JsEventRegistry*)d->js_event_registry,
-                                                        (DomElement*)n, "click")) {
-                                click_inline_present = true; break;
-                            }
-                            n = n->parent; depth++;
-                        }
-                    }
-                    if (!click_inline_present) {
-                        bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
-                            "click", mouse_x, mouse_y,
-                            btn_event->button, 0,
-                            (btn_event->mods & GLFW_MOD_CONTROL) != 0,
-                            (btn_event->mods & GLFW_MOD_SHIFT) != 0,
-                            (btn_event->mods & GLFW_MOD_ALT) != 0,
-                            (btn_event->mods & GLFW_MOD_SUPER) != 0,
-                            1);
-                        if (prevented) evcon.default_prevented = true;
-                    }
+                    bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                        "click", mouse_x, mouse_y,
+                        btn_event->button, 0,
+                        (btn_event->mods & GLFW_MOD_CONTROL) != 0,
+                        (btn_event->mods & GLFW_MOD_SHIFT) != 0,
+                        (btn_event->mods & GLFW_MOD_ALT) != 0,
+                        (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                        1);
+                    if (prevented) evcon.default_prevented = true;
                 }
 
                 // Handle checkbox/radio click toggle
@@ -3815,16 +3843,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
-            // §7 unification (U-5): dispatch "wheel" via JS bridge before
-            // native scroll. preventDefault() suppresses the native scroll.
+            // §7 unification (U-5/U-6): dispatch "wheel" via inline + JS bridge before
+            // native scroll. preventDefault() from real listeners suppresses native
+            // scroll. Inline handlers run on a disjoint registry — no double-fire.
             bool wheel_prevented = false;
-            if (!dispatch_html_event_handler(&evcon, evcon.target, "wheel")) {
-                wheel_prevented = radiant_dispatch_wheel_event(&evcon, evcon.target,
-                    mouse_x, mouse_y,
-                    -(double)scroll->xoffset * 100.0,
-                    -(double)scroll->yoffset * 100.0,
-                    0);
-            }
+            dispatch_html_event_handler(&evcon, evcon.target, "wheel");
+            wheel_prevented = radiant_dispatch_wheel_event(&evcon, evcon.target,
+                mouse_x, mouse_y,
+                -(double)scroll->xoffset * 100.0,
+                -(double)scroll->yoffset * 100.0,
+                0);
             if (wheel_prevented) {
                 log_debug("wheel default suppressed by preventDefault()");
                 break;
@@ -3907,13 +3935,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             focused = focus_get(state);
         }
 
-        // Dispatch HTML onkeydown handler (any key)
+        // Dispatch HTML onkeydown handler (any key) — inline + bridge always run.
         if (focused) {
             if (dispatch_html_event_handler(&evcon, focused, "keydown")) {
                 evcon.need_repaint = true;
                 focused = focus_get(state);
-            } else {
-                // §7 unification (U-3): dispatch via JS EventTarget bridge.
+            }
+            // §7 unification (U-3/U-6): always dispatch via JS EventTarget bridge.
+            if (focused) {
                 bool prevented = radiant_dispatch_keyboard_event(&evcon, focused,
                     "keydown", key_event->key, key_event->mods, false);
                 if (prevented) evcon.default_prevented = true;
@@ -4485,10 +4514,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         break;
                     }
                 }
-                // §7 unification (U-3): dispatch keyup via JS EventTarget bridge
-                // when no inline handler is present.
-                if (focused &&
-                    !dispatch_html_event_handler(&evcon, focused, "keyup")) {
+                // §7 unification (U-3/U-6): inline + bridge always both fire.
+                if (focused) {
+                    dispatch_html_event_handler(&evcon, focused, "keyup");
                     radiant_dispatch_keyboard_event(&evcon, focused,
                         "keyup", event->key.key, event->key.mods, false);
                 }
