@@ -12,6 +12,7 @@
 #include "js_typed_array.h"
 #include "js_dom_events.h"
 #include "js_property_attrs.h"
+#include "js_props.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -5652,105 +5653,49 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
 
     // Function properties: length, name, prototype
     if (type == LMD_TYPE_FUNC) {
-        // v23: Check properties_map FIRST for overridden/deleted properties
+        // Stage A2.2: route FUNC own-property descriptor synthesis through
+        // the unified inspector. Handles both IS_ACCESSOR and legacy
+        // __get_/__set_ accessor patterns and the data-property attribute
+        // markers in fn->properties_map. Falls through to the synthetic
+        // length/name/prototype intrinsics below when no own property is
+        // present in fn->properties_map.
         {
+            JsPropertyDescriptor pd = {};
+            if (js_get_own_property_descriptor(obj, name_str->chars,
+                                                (int)name_str->len, &pd)) {
+                Item desc = js_new_object();
+                if (js_pd_is_accessor(&pd)) {
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                                    (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                                    (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
+                } else {
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
+                                    (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
+                                    (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+                }
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                                (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
+                                (Item){.item = b2it(js_pd_is_configurable(&pd))});
+                return desc;
+            }
+            // Special case: properties_map may carry a deleted-sentinel for
+            // "prototype" meaning "fall through to fn->prototype synth".
+            // js_get_own_property_descriptor returns false on sentinel, so
+            // we re-check explicitly below for that key.
             JsFuncProps* fn = (JsFuncProps*)obj.function;
-            if (fn->properties_map.item != 0) {
+            if (fn->properties_map.item != 0 &&
+                name_str->len == 9 &&
+                strncmp(name_str->chars, "prototype", 9) == 0) {
                 bool own = false;
-                Item val = js_map_get_fast_ext(fn->properties_map.map, name_str->chars, name_str->len, &own);
-                // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot value is a
-                // JsAccessorPair*; build an accessor descriptor from the pair regardless
-                // of `own`. This must precede both the data and legacy-accessor branches.
-                {
-                    ShapeEntry* _se_acc = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-                    if (_se_acc && jspd_is_accessor(_se_acc) && own) {
-                        JsAccessorPair* pair = js_item_to_accessor_pair(val);
-                        Item desc = js_new_object();
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
-                                        (pair && pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined());
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
-                                        (pair && pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined());
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
-                                        (Item){.item = b2it(jspd_is_enumerable(_se_acc))});
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
-                                        (Item){.item = b2it(jspd_is_configurable(_se_acc))});
-                        return desc;
-                    }
+                Item val = js_map_get_fast_ext(fn->properties_map.map,
+                                                name_str->chars, name_str->len, &own);
+                if (own && val.item == JS_DELETED_SENTINEL_VAL) {
+                    goto func_prototype_synth;
                 }
-                // If no data property, check for accessor (getter/setter)
-                if (!own) {
-                    Map* pm = fn->properties_map.map;
-                    char acc_buf[256];
-                    bool g_own = false, s_own = false;
-                    snprintf(acc_buf, sizeof(acc_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
-                    Item getter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &g_own);
-                    snprintf(acc_buf, sizeof(acc_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
-                    Item setter_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &s_own);
-                    if (g_own || s_own) {
-                        Item desc = js_new_object();
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
-                                        g_own ? getter_val : make_js_undefined());
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
-                                        s_own ? setter_val : make_js_undefined());
-                        // Phase 2d fast path: consult ShapeEntry::flags for nc/ne.
-                        bool is_enumerable, is_configurable;
-                        ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-                        if (_se) {
-                            is_enumerable = jspd_is_enumerable(_se);
-                            is_configurable = jspd_is_configurable(_se);
-                        } else {
-                            bool nc_found = false, ne_found = false;
-                            snprintf(acc_buf, sizeof(acc_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                            Item nc_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &nc_found);
-                            snprintf(acc_buf, sizeof(acc_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                            Item ne_val = js_map_get_fast_ext(pm, acc_buf, (int)strlen(acc_buf), &ne_found);
-                            is_enumerable = !(ne_found && js_is_truthy(ne_val));
-                            is_configurable = !(nc_found && js_is_truthy(nc_val));
-                        }
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
-                        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
-                        return desc;
-                    }
-                }
-                if (own) {
-                    if (val.item == JS_DELETED_SENTINEL_VAL) {
-                        // v91 mirror: for "prototype" key, sentinel means "fall through to
-                        // fn->prototype field" (js_property_set stores a sentinel when
-                        // prototype is restored to a MAP, to clear any previous non-MAP entry).
-                        if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0)
-                            goto func_prototype_synth;
-                        return make_js_undefined();
-                    }
-                    // Return descriptor with attributes from properties_map's attribute markers
-                    Item desc = js_new_object();
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, val);
-                    // Phase 2d fast path: consult ShapeEntry::flags first, fall back
-                    // to legacy attribute markers if no entry exists.
-                    bool is_writable, is_configurable, is_enumerable;
-                    ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-                    if (_se) {
-                        is_writable = jspd_is_writable(_se);
-                        is_configurable = jspd_is_configurable(_se);
-                        is_enumerable = jspd_is_enumerable(_se);
-                    } else {
-                        Map* pm = fn->properties_map.map;
-                        char attr_buf[256];
-                        bool nw_found = false, nc_found = false, ne_found = false;
-                        snprintf(attr_buf, sizeof(attr_buf), "__nw_%.*s", (int)name_str->len, name_str->chars);
-                        Item nw_val = js_map_get_fast_ext(pm, attr_buf, (int)strlen(attr_buf), &nw_found);
-                        snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                        Item nc_val = js_map_get_fast_ext(pm, attr_buf, (int)strlen(attr_buf), &nc_found);
-                        snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                        Item ne_val = js_map_get_fast_ext(pm, attr_buf, (int)strlen(attr_buf), &ne_found);
-                        is_writable = !(nw_found && js_is_truthy(nw_val));
-                        is_configurable = !(nc_found && js_is_truthy(nc_val));
-                        is_enumerable = !(ne_found && js_is_truthy(ne_val));
-                    }
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(is_writable)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
-                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
-                    return desc;
-                }
+                if (own) return make_js_undefined();
             }
         }
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
@@ -5973,70 +5918,31 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Map* m = obj.map;
         if (!m || !m->type) return make_js_undefined();
 
-        // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot under name X
-        // holds a JsAccessorPair*. Build accessor descriptor from the pair.
+        // Stage A2.1: route accessor/legacy-marker descriptor synthesis
+        // through unified js_get_own_property_descriptor inspector. Falls
+        // through to the data-property + virtual-builtin paths below when
+        // the kernel reports an own data property (or no own property at
+        // all) — those paths still depend on `__class_name__` and shape
+        // shape semantics that A2 has not yet collapsed.
         {
-            ShapeEntry* _se_acc = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-            if (_se_acc && jspd_is_accessor(_se_acc)) {
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(m, name_str->chars, (int)name_str->len, &slot_found);
-                if (slot_found) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+            JsPropertyDescriptor pd = {};
+            if (js_get_own_property_descriptor(obj, name_str->chars,
+                                                (int)name_str->len, &pd)) {
+                if (js_pd_is_accessor(&pd)) {
                     Item desc = js_new_object();
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
-                                    (pair && pair->getter.item != ItemNull.item) ? pair->getter : make_js_undefined());
+                                    (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
-                                    (pair && pair->setter.item != ItemNull.item) ? pair->setter : make_js_undefined());
+                                    (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
-                                    (Item){.item = b2it(jspd_is_enumerable(_se_acc))});
+                                    (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
                     js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
-                                    (Item){.item = b2it(jspd_is_configurable(_se_acc))});
+                                    (Item){.item = b2it(js_pd_is_configurable(&pd))});
                     return desc;
                 }
+                // Data descriptor — fall through to the legacy data-property
+                // path (which handles __class_name__ virtual-builtin synth).
             }
-        }
-
-        // Check for accessor properties (__get_<name> / __set_<name>)
-        char key_buf[256];
-        snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
-        Item getter_key = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-        Item has_getter = js_has_own_property(obj, getter_key);
-        snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
-        Item setter_key = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-        Item has_setter = js_has_own_property(obj, setter_key);
-
-        if (it2b(has_getter) || it2b(has_setter)) {
-            // Accessor descriptor
-            Item desc = js_new_object();
-            if (it2b(has_getter)) {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, js_property_get(obj, getter_key));
-            } else {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, make_js_undefined());
-            }
-            if (it2b(has_setter)) {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, js_property_get(obj, setter_key));
-            } else {
-                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, make_js_undefined());
-            }
-            // Phase 2d fast path: consult ShapeEntry::flags for nc/ne.
-            bool is_enumerable, is_configurable;
-            ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-            if (_se) {
-                is_enumerable = jspd_is_enumerable(_se);
-                is_configurable = jspd_is_configurable(_se);
-            } else {
-                char attr_buf[256];
-                bool nc_found = false, ne_found = false;
-                snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                Item nc_val = js_map_get_fast_ext(m, attr_buf, (int)strlen(attr_buf), &nc_found);
-                snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                Item ne_val = js_map_get_fast_ext(m, attr_buf, (int)strlen(attr_buf), &ne_found);
-                is_enumerable = !(ne_found && js_is_truthy(ne_val));
-                is_configurable = !(nc_found && js_is_truthy(nc_val));
-            }
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
-            return desc;
         }
 
         // Check for own data property
@@ -8286,24 +8192,15 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
                 }
                 Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
                 Item val;
-                // Phase 5: invoke getter for IS_ACCESSOR slots; propagate exceptions.
-                if (jspd_is_accessor(e)) {
-                    Item slot_val = _map_read_field(e, m->data);
-                    if (slot_val.item == JS_DELETED_SENTINEL_VAL) {
-                        e = e->next;
-                        continue;
-                    }
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        val = js_call_function(pair->getter, source, NULL, 0);
-                        if (js_check_exception()) return ItemNull;
-                    } else {
-                        val = make_js_undefined();
-                    }
-                } else {
-                    val = _map_read_field(e, m->data);
+                // Stage A1.7: route shape-iteration accessor dispatch through
+                // js_ordinary_resolve_shape_value.
+                {
+                    JsResolveFieldStatus rs = js_ordinary_resolve_shape_value(
+                        e, m, source, &val);
+                    if (rs == JS_RESOLVE_DELETED) { e = e->next; continue; }
+                    if (rs == JS_RESOLVE_THREW) return ItemNull;
                 }
-                if (val.item != JS_DELETED_SENTINEL_VAL) {
+                {
                     // Per ES spec: Set with Throw=true; throw TypeError if target
                     // has a non-writable property of the same name
                     if (get_type_id(target) == LMD_TYPE_MAP) {
@@ -8397,28 +8294,16 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
                 continue;
             }
             Item val;
-            // Phase 5: if the shape entry has JSPD_IS_ACCESSOR, the slot stores a
-            // JsAccessorPair*. Spread/CopyDataProperties must invoke the getter
-            // (with `source` as the receiver) and copy the resulting value as a
-            // plain data property. A setter-only accessor produces undefined and
-            // per ES CopyDataProperties is still copied as a data property.
-            if (jspd_is_accessor(e)) {
-                Item slot_val = _map_read_field(e, m->data);
-                if (slot_val.item == JS_DELETED_SENTINEL_VAL) {
-                    e = e->next;
-                    continue;
-                }
-                JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                if (pair && pair->getter.item != ItemNull.item) {
-                    val = js_call_function(pair->getter, source, NULL, 0);
-                    if (js_check_exception()) return target;
-                } else {
-                    val = make_js_undefined();
-                }
-            } else {
-                val = _map_read_field(e, m->data);
+            // Stage A1.7: route shape-iteration accessor dispatch through
+            // js_ordinary_resolve_shape_value. CopyDataProperties resolves
+            // setter-only accessors as undefined and copies them.
+            {
+                JsResolveFieldStatus rs = js_ordinary_resolve_shape_value(
+                    e, m, source, &val);
+                if (rs == JS_RESOLVE_DELETED) { e = e->next; continue; }
+                if (rs == JS_RESOLVE_THREW) return target;
             }
-            if (val.item != JS_DELETED_SENTINEL_VAL) {
+            {
                 Item key = (Item){.item = s2it(heap_create_name(n, nlen))};
                 js_property_set(target, key, val);
             }
