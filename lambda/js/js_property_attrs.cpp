@@ -106,8 +106,9 @@ extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
     if      (klen >= 5 && memcmp(k, "__nw_", 5) == 0) { flag = JSPD_NON_WRITABLE;     prefix_len = 5; }
     else if (klen >= 5 && memcmp(k, "__ne_", 5) == 0) { flag = JSPD_NON_ENUMERABLE;   prefix_len = 5; }
     else if (klen >= 5 && memcmp(k, "__nc_", 5) == 0) { flag = JSPD_NON_CONFIGURABLE; prefix_len = 5; }
-    else if (klen >= 6 && memcmp(k, "__get_", 6) == 0) { flag = JSPD_IS_ACCESSOR;     prefix_len = 6; }
-    else if (klen >= 6 && memcmp(k, "__set_", 6) == 0) { flag = JSPD_IS_ACCESSOR;     prefix_len = 6; }
+    // Phase 5: __get_ / __set_ branch removed. js_intercept_accessor_marker
+    // (called before dual_write in js_property_set) routes accessor writes
+    // through JsAccessorPair storage and never falls through to dual_write.
     else return false;
 
     const char* prop = k + prefix_len;
@@ -115,16 +116,9 @@ extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
     if (prop_len <= 0) return true; // matched marker prefix but no name; nothing to update
 
     // Boolean markers (nw/ne/nc): truthy → set, tombstone-or-falsy → clear.
-    // Accessor markers (get/set): presence sets IS_ACCESSOR. Tombstoning a single
-    // half (e.g. only __get_X) does NOT clear IS_ACCESSOR because the other half
-    // may still exist; Phase 2b reader migration will properly handle clear.
     uint8_t set_mask = 0, clear_mask = 0;
-    if (flag == JSPD_IS_ACCESSOR) {
-        if (!is_tombstone) set_mask = JSPD_IS_ACCESSOR;
-    } else {
-        if (is_truthy_val) set_mask = flag;
-        else               clear_mask = flag;
-    }
+    if (is_truthy_val) set_mask = flag;
+    else               clear_mask = flag;
     js_shape_entry_update_flags(obj, prop, prop_len, set_mask, clear_mask);
     return true;
 }

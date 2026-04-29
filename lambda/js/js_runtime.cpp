@@ -5468,56 +5468,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
             }
         }
-        // Own getter check: check for __get_<propName> on THIS object BEFORE prototype chain.
-        // This ensures own accessors take priority over inherited data properties (ES spec §9.1.8).
-        // Skip getter check only for __get_/__set_ keys (to prevent infinite recursion).
-        if (key._type_id == LMD_TYPE_STRING) {
-            String* str_key = it2s(key);
-            bool check_getter = (str_key->len < 128 && str_key->len > 0 &&
-                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
-                                        strncmp(str_key->chars, "__set_", 6) == 0)));
-            if (check_getter) {
-                char getter_key[256];
-                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
-                bool gk_found = false;
-                Item getter = js_map_get_fast(object.map, getter_key, (int)strlen(getter_key), &gk_found);
-                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    // Invoke getter with this = receiver (proxy if forwarding, else object)
-                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                    return js_call_function(getter, this_val, NULL, 0);
-                }
-                // v37: Own setter-only accessor shadows inherited properties (ES spec §9.1.8).
-                // If own setter exists but no getter, return undefined (don't walk prototype chain).
-                if (!gk_found) {
-                    char setter_key[256];
-                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
-                    bool sk_found = false;
-                    js_map_get_fast(object.map, setter_key, (int)strlen(setter_key), &sk_found);
-                    if (sk_found) return make_js_undefined();
-                }
-            }
-        }
+        // Phase 5: legacy __get_X / __set_X own-property probes removed. The
+        // IS_ACCESSOR shape-flag fast-path above (own_found branch) handles all
+        // accessor dispatch including setter-only shadowing (a setter-only pair
+        // has getter == ItemNull, returning undefined per ES §9.1.8).
         // Prototype chain fallback: if property not found on own object, walk __proto__
         result = js_prototype_lookup(object, key);
         if (result.item != ItemNull.item) return result;
-        // Getter on prototype chain: check for __get_<propName> inherited from prototype
-        if (key._type_id == LMD_TYPE_STRING) {
-            String* str_key = it2s(key);
-            bool check_getter = (str_key->len < 128 && str_key->len > 0 &&
-                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
-                                        strncmp(str_key->chars, "__set_", 6) == 0)));
-            if (check_getter) {
-                char getter_key[256];
-                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
-                Item getter = js_prototype_lookup(object, gk);
-                if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                    Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                    return js_call_function(getter, this_val, NULL, 0);
-                }
-            }
-        }
+        // Phase 5: legacy __get_X proto-chain probe removed. js_prototype_lookup
+        // walks the chain and dispatches IS_ACCESSOR pairs internally.
         // Property not found — check for built-in methods (Object.prototype)
         // Also check Array/String methods for prototype objects
         if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -5925,16 +5884,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                         return pm_val;
                     }
                 }
-                // Check for accessor descriptor (__get_<propName>) in properties_map
-                if (str_key->len < 128) {
-                    char getter_key[256];
-                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-                    bool gk_found = false;
-                    Item getter = js_map_get_fast_ext(fn->properties_map.map, getter_key, (int)strlen(getter_key), &gk_found);
-                    if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                        return js_call_function(getter, object, NULL, 0);
-                    }
-                }
+                // Phase 5: legacy __get_<propName> probe in properties_map removed.
+                // The IS_ACCESSOR fast-path above handles all FUNC accessors.
             }
             // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
             if (fn->name && fn->name->len == 6 && strncmp(fn->name->chars, "RegExp", 6) == 0) {
@@ -7106,66 +7057,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                                                    str_key->chars, (int)str_key->len);
                     return value;
                 }
-                char setter_key[256];
-                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
-                char getter_key[256];
-                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(getter_key, strlen(getter_key)))};
-
-                // ES §9.1.9 OrdinarySet: dispatch based on OWN ownDesc first,
-                // only walk prototype chain when OWN has no own property at all.
-                // Marker presence test: defineProperty always stores either FUNC or UNDEFINED
-                // (per ES §6.2.5.4 ToPropertyDescriptor). Other values (ItemNull, sentinel,
-                // BOOL from delete-tombstone, etc.) mean the marker is absent/cleared.
-                Item own_setter = map_get(m, sk);
-                TypeId own_setter_type = get_type_id(own_setter);
-                bool own_setter_marker = (own_setter_type == LMD_TYPE_FUNC || own_setter_type == LMD_TYPE_UNDEFINED);
-                Item own_getter = map_get(m, gk);
-                TypeId own_getter_type = get_type_id(own_getter);
-                bool own_getter_marker = (own_getter_type == LMD_TYPE_FUNC || own_getter_type == LMD_TYPE_UNDEFINED);
-
-                if (own_setter_marker || own_getter_marker) {
-                    // Own property is an accessor.
-                    if (own_setter_marker && own_setter_type == LMD_TYPE_FUNC) {
-                        _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
-                        _trace_call_id++;
-                        Item args[1] = { value };
-                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                        js_call_function(own_setter, this_val, args, 1);
-                        return value;
-                    }
-                    // Own accessor with no callable setter — strict TypeError, sloppy no-op.
-                    js_strict_throw_property_error("set property which has only a getter on", str_key->chars, (int)str_key->len);
-                    return value;
-                }
-
-                // Own is not an accessor. Check if OWN has a data property — if so,
-                // do NOT consult the prototype chain for accessors (data shadows proto).
-                bool own_data_present = false;
-                js_map_get_fast_ext(m, str_key->chars, (int)str_key->len, &own_data_present);
-                if (!own_data_present) {
-                    // Walk prototype chain for accessor.
-                    Item proto_setter = js_prototype_lookup(object, sk);
-                    TypeId proto_setter_type = get_type_id(proto_setter);
-                    bool proto_setter_marker = (proto_setter_type == LMD_TYPE_FUNC || proto_setter_type == LMD_TYPE_UNDEFINED);
-                    Item proto_getter = js_prototype_lookup(object, gk);
-                    TypeId proto_getter_type = get_type_id(proto_getter);
-                    bool proto_getter_marker = (proto_getter_type == LMD_TYPE_FUNC || proto_getter_type == LMD_TYPE_UNDEFINED);
-                    if (proto_setter_marker && proto_setter_type == LMD_TYPE_FUNC) {
-                        _trace_setter_prop = str_key->chars; _trace_setter_prop_len = (int)str_key->len;
-                        _trace_call_id++;
-                        Item args[1] = { value };
-                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                        js_call_function(proto_setter, this_val, args, 1);
-                        return value;
-                    }
-                    if (proto_setter_marker || proto_getter_marker) {
-                        // Inherited accessor with no callable setter — strict TypeError, sloppy no-op.
-                        js_strict_throw_property_error("set property which has only a getter on", str_key->chars, (int)str_key->len);
-                        return value;
-                    }
-                }
+                // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
+                // intercept routes all transpiled accessor writes through
+                // JsAccessorPair storage, and Phase 3 Stage C migrated native
+                // installs. The IS_ACCESSOR fast-path above is the only source
+                // of accessor dispatch.
             }
         }
         // JS object / Lambda map: try fn_map_set first (update existing field),
@@ -20117,17 +20013,8 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
             }
             return result;
         }
-        // also check getter (__get_<key>) on this prototype level
-        if (key_str && key_len < 200 &&
-            !(key_len > 6 && (strncmp(key_str, "__get_", 6) == 0 || strncmp(key_str, "__set_", 6) == 0))) {
-            char getter_key[256];
-            int gklen = snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
-            Item getter_result = js_map_get_fast(proto.map, getter_key, gklen);
-            if (getter_result.item != ItemNull.item && !js_is_deleted_sentinel(getter_result) &&
-                get_type_id(getter_result) == LMD_TYPE_FUNC) {
-                return js_call_function(getter_result, object, NULL, 0);
-            }
-        }
+        // Phase 5: legacy __get_<key> proto-level probe removed. The IS_ACCESSOR
+        // fast-path above handles all accessor dispatch on each proto level.
         proto = js_get_prototype(proto);
         depth++;
     }
