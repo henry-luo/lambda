@@ -20,6 +20,10 @@
 
 #include <cstring>
 #include <ctime>
+#include <cmath>
+#ifdef __APPLE__
+#include <mach/mach_time.h>
+#endif
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
@@ -27,6 +31,8 @@ extern "C" Item js_get_this();
 extern Item js_array_new(int length);
 extern Item js_array_push(Item array, Item value);
 extern Item js_get_document_object_value();
+extern "C" Item js_get_global_this();
+extern "C" int js_check_exception(void);
 
 // Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
 // activation behavior (HTML §6.4.4).
@@ -43,18 +49,54 @@ static inline Item event_make_double(double v) {
     return (Item){.item = d2it(p)};
 }
 
-// Monotonic ms since first call (acts as a per-process performance origin).
+// High-resolution monotonic ms with the SAME time origin as
+// performance.now() (no origin subtraction; counts since boot on macOS,
+// since CLOCK_MONOTONIC origin on Linux). Spec requires that an event's
+// `timeStamp` is comparable with values returned by performance.now().
+// The value is clamped to 5 microsecond resolution per HR-Time / WPT
+// `Event-timestamp-safe-resolution` (timing-attack hardening).
 static double event_now_ms() {
-    struct timespec ts;
-#if defined(__APPLE__) || defined(__linux__)
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double ms;
+#ifdef __APPLE__
+    static mach_timebase_info_data_t timebase = {0, 0};
+    if (timebase.denom == 0) mach_timebase_info(&timebase);
+    uint64_t ticks = mach_absolute_time();
+    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
+    ms = ns / 1e6;
 #else
-    timespec_get(&ts, TIME_UTC);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 #endif
-    static double origin_ms = 0.0;
-    double now = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1.0e6;
-    if (origin_ms == 0.0) origin_ms = now - 0.001;
-    return now - origin_ms;
+    // clamp to 5us = 0.005ms resolution
+    return floor(ms / 0.005) * 0.005;
+}
+
+// Report an exception thrown by an event listener / handler to
+// `window.onerror` (HTML spec: report exception). Best-effort: if
+// onerror is not a function, just swallow.
+static void report_exception_to_window_onerror(Item err, const char* type) {
+    extern Item js_get_global_this(void);
+    extern Item js_to_string(Item value);
+    Item global = js_get_global_this();
+    if (global.item == 0) return;
+    Item onerr_key = (Item){.item = s2it(heap_create_name("onerror"))};
+    Item onerr = js_property_get(global, onerr_key);
+    if (get_type_id(onerr) != LMD_TYPE_FUNC) return;
+    // build message string from error value
+    Item msg = err;
+    if (get_type_id(err) == LMD_TYPE_MAP || get_type_id(err) == LMD_TYPE_OBJECT) {
+        Item m_key = (Item){.item = s2it(heap_create_name("message"))};
+        Item m = js_property_get(err, m_key);
+        if (get_type_id(m) == LMD_TYPE_STRING) msg = m;
+        else msg = js_to_string(err);
+    } else if (get_type_id(err) != LMD_TYPE_STRING) {
+        msg = js_to_string(err);
+    }
+    Item args[5] = { msg, ItemNull, (Item){.item = b2it(false)}, (Item){.item = b2it(false)}, err };
+    js_call_function(onerr, global, args, 5);
+    if (js_check_exception()) (void)js_clear_exception();
+    (void)type;
 }
 
 static inline Item make_js_undefined() {
@@ -106,6 +148,14 @@ static void* get_event_target_key(Item target) {
     // check for DOM node
     void* node = js_dom_unwrap_element(target);
     if (node) return node;
+    // If target IS the global (window) object, key on the window sentinel so
+    // that addEventListener on window and dispatch through the path agree.
+    {
+        Item global = js_get_global_this();
+        if (target.item != 0 && target.item == global.item) {
+            return (void*)&_window_sentinel;
+        }
+    }
     // Plain JS object EventTarget — key on the object pointer itself so
     // each `new EventTarget()` instance has its own listener list.
     TypeId tid = get_type_id(target);
@@ -185,15 +235,16 @@ static void parse_listener_options(Item opts, bool* capture, bool* once,
         return;
     }
 
-    // boolean argument = useCapture
+    // boolean argument = useCapture. Per WebIDL, anything that is not a
+    // dictionary (object/map) is converted via ToBoolean for the boolean union.
     TypeId tid = get_type_id(opts);
-    if (tid == LMD_TYPE_BOOL) {
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_OBJECT) {
         *capture = js_is_truthy(opts);
         return;
     }
 
     // options object: {capture, once, passive, signal}
-    if (tid == LMD_TYPE_MAP) {
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT) {
         Item cap_key = (Item){.item = s2it(heap_create_name("capture"))};
         Item once_key = (Item){.item = s2it(heap_create_name("once"))};
         Item passive_key = (Item){.item = s2it(heap_create_name("passive"))};
@@ -214,6 +265,15 @@ static void parse_listener_options(Item opts, bool* capture, bool* once,
         }
         if (signal_val.item != 0) {
             TypeId st = get_type_id(signal_val);
+            if (st == LMD_TYPE_NULL) {
+                // Per spec, signal must be an AbortSignal — null is a TypeError.
+                Item n = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item m = (Item){.item = s2it(heap_create_name(
+                    "Failed to execute 'addEventListener' on 'EventTarget': "
+                    "member signal is not of type 'AbortSignal'."))};
+                js_throw_value(js_new_error_with_name(n, m));
+                return;
+            }
             if (st == LMD_TYPE_MAP || st == LMD_TYPE_OBJECT) {
                 *signal_out = signal_val;
             }
@@ -241,6 +301,14 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         return;
     }
 
+    // Per spec the options flattening happens before any further checks; in
+    // particular it must run even when the callback is null so getter side
+    // effects (used by feature-detection code) fire.
+    bool capture = false, once = false, passive = false, has_passive = false;
+    Item signal = ItemNull;
+    parse_listener_options(opts_item, &capture, &once, &passive, &has_passive, &signal);
+    if (js_check_exception()) return;
+
     // Per spec: addEventListener with null/undefined callback is a no-op.
     TypeId cb_tid = get_type_id(cb_item);
     if (cb_item.item == 0 || cb_tid == LMD_TYPE_NULL || cb_tid == LMD_TYPE_UNDEFINED) {
@@ -254,16 +322,42 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         return;
     }
 
-    bool capture = false, once = false, passive = false, has_passive = false;
-    Item signal = ItemNull;
-    parse_listener_options(opts_item, &capture, &once, &passive, &has_passive, &signal);
-
     // Per spec: if signal is an already-aborted AbortSignal, do not add.
     if (signal_is_aborted(signal)) {
         return;
     }
 
     void* key = get_event_target_key(elem_item);
+
+    // HTML "default passive" rule: when `passive` is omitted in the options,
+    // listeners for touchstart/touchmove/wheel/mousewheel on window /
+    // document / documentElement / body default to passive=true.
+    // https://dom.spec.whatwg.org/#default-passive-value
+    if (!has_passive) {
+        bool is_passive_event = (strcmp(type, "touchstart") == 0 ||
+                                 strcmp(type, "touchmove") == 0 ||
+                                 strcmp(type, "wheel") == 0 ||
+                                 strcmp(type, "mousewheel") == 0);
+        if (is_passive_event) {
+            bool is_root_target = false;
+            if (key == (void*)&_window_sentinel ||
+                key == (void*)&_document_sentinel) {
+                is_root_target = true;
+            } else {
+                DomElement* el = (DomElement*)js_dom_unwrap_element(elem_item);
+                if (el && el->tag_name &&
+                    (strcasecmp(el->tag_name, "html") == 0 ||
+                     strcasecmp(el->tag_name, "body") == 0)) {
+                    is_root_target = true;
+                }
+            }
+            if (is_root_target) {
+                passive = true;
+                has_passive = true;
+            }
+        }
+    }
+
     NodeListeners* nl = get_or_create_listeners(key);
 
     // check for duplicate (same type + callback + capture); ignore tombstones
@@ -301,9 +395,21 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
     const char* type = fn_to_cstr(type_item);
     if (!type) return;
 
-    bool capture = false, once = false, passive = false, has_passive = false;
-    Item signal = ItemNull;
-    parse_listener_options(opts_item, &capture, &once, &passive, &has_passive, &signal);
+    // removeEventListener only reads capture from options (per spec). Do NOT
+    // read passive/signal getters here — feature-detection tests rely on this.
+    bool capture = false;
+    if (opts_item.item != 0) {
+        TypeId opt_tid = get_type_id(opts_item);
+        if (opt_tid == LMD_TYPE_MAP || opt_tid == LMD_TYPE_OBJECT) {
+            Item cap_key = (Item){.item = s2it(heap_create_name("capture"))};
+            Item cap_val = js_property_get(opts_item, cap_key);
+            if (cap_val.item != 0 && get_type_id(cap_val) != LMD_TYPE_UNDEFINED)
+                capture = js_is_truthy(cap_val);
+        } else {
+            // Non-dictionary: ToBoolean.
+            capture = js_is_truthy(opts_item);
+        }
+    }
 
     void* key = get_event_target_key(elem_item);
     NodeListeners* nl = find_listeners(key);
@@ -400,8 +506,6 @@ extern "C" Item js_event_prevent_default() {
         Item cancelable = js_property_get(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
         if (!js_is_truthy(cancelable)) return make_js_undefined();
         event_set_bool(ev, "__default_prevented", true);
-        event_set_bool(ev, "defaultPrevented", true);
-        event_set_bool(ev, "returnValue", false);
     }
     _default_prevented = true;
     return make_js_undefined();
@@ -411,7 +515,6 @@ extern "C" Item js_event_stop_propagation() {
     Item ev = js_get_this();
     if (get_type_id(ev) == LMD_TYPE_MAP) {
         event_set_bool(ev, "__stop_prop", true);
-        event_set_bool(ev, "cancelBubble", true);
     }
     _stop_propagation = true;
     return make_js_undefined();
@@ -422,7 +525,6 @@ extern "C" Item js_event_stop_immediate_propagation() {
     if (get_type_id(ev) == LMD_TYPE_MAP) {
         event_set_bool(ev, "__stop_prop", true);
         event_set_bool(ev, "__stop_imm", true);
-        event_set_bool(ev, "cancelBubble", true);
     }
     _stop_propagation = true;
     _stop_immediate = true;
@@ -430,6 +532,55 @@ extern "C" Item js_event_stop_immediate_propagation() {
 }
 
 // Legacy aliases / setters
+
+// returnValue accessor: getter returns !canceled; setter (when cancelable
+// and not in passive listener) sets defaultPrevented if value is false.
+extern "C" Item js_event_returnvalue_get(void) {
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    bool dp = event_flag_get(ev, "__default_prevented");
+    return (Item){.item = b2it(!dp)};
+}
+
+extern "C" Item js_event_returnvalue_set(Item value) {
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
+    bool truthy = js_is_truthy(value);
+    if (!truthy) {
+        Item cancelable = js_property_get(ev, (Item){.item = s2it(heap_create_name("cancelable"))});
+        if (js_is_truthy(cancelable) && !event_flag_get(ev, "__in_passive")) {
+            event_set_bool(ev, "__default_prevented", true);
+        }
+    }
+    return make_js_undefined();
+}
+
+// cancelBubble accessor: getter returns stop-propagation flag; setter sets
+// stop-propagation flag when value is truthy (false is a no-op).
+extern "C" Item js_event_cancelbubble_get(void) {
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    bool sp = event_flag_get(ev, "__stop_prop");
+    return (Item){.item = b2it(sp)};
+}
+
+extern "C" Item js_event_cancelbubble_set(Item value) {
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return make_js_undefined();
+    if (js_is_truthy(value)) {
+        event_set_bool(ev, "__stop_prop", true);
+        _stop_propagation = true;
+    }
+    return make_js_undefined();
+}
+
+// defaultPrevented getter: reflects the canceled flag.
+extern "C" Item js_event_defaultprevented_get(void) {
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    bool dp = event_flag_get(ev, "__default_prevented");
+    return (Item){.item = b2it(dp)};
+}
 
 // composedPath() — returns array of targets in the dispatch path. With no
 // shadow DOM, this is just [target, ...ancestors..., document, window].
@@ -502,7 +653,12 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
 extern "C" Item js_event_init_custom_event(Item type_arg, Item b_arg, Item c_arg, Item detail_arg) {
     js_event_init_event(type_arg, b_arg, c_arg);
     Item ev = js_get_this();
-    if (get_type_id(ev) == LMD_TYPE_MAP) event_set_item(ev, "detail", detail_arg);
+    if (get_type_id(ev) == LMD_TYPE_MAP) {
+        // Per spec, omitted detail defaults to null (not undefined).
+        TypeId dt = get_type_id(detail_arg);
+        if (detail_arg.item == 0 || dt == LMD_TYPE_UNDEFINED) detail_arg = ItemNull;
+        event_set_item(ev, "detail", detail_arg);
+    }
     return make_js_undefined();
 }
 
@@ -559,6 +715,44 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     js_property_set(event, si_key, js_new_function((void*)js_event_stop_immediate_propagation, 0));
     js_property_set(event, cp_key, js_new_function((void*)js_event_composed_path, 0));
     js_property_set(event, ie_key, js_new_function((void*)js_event_init_event, 3));
+
+    // Install accessor properties for legacy spec'd setters/getters
+    // (returnValue, cancelBubble, defaultPrevented). These override the
+    // plain data properties set above.
+    {
+        extern Item js_object_define_property(Item obj, Item name, Item descriptor);
+        Item get_key = (Item){.item = s2it(heap_create_name("get"))};
+        Item set_key = (Item){.item = s2it(heap_create_name("set"))};
+        Item conf_key = (Item){.item = s2it(heap_create_name("configurable"))};
+        Item enum_key = (Item){.item = s2it(heap_create_name("enumerable"))};
+        Item true_v  = (Item){.item = b2it(true)};
+
+        // returnValue: get + set
+        Item rv_desc = js_new_object();
+        js_property_set(rv_desc, get_key, js_new_function((void*)js_event_returnvalue_get, 0));
+        js_property_set(rv_desc, set_key, js_new_function((void*)js_event_returnvalue_set, 1));
+        js_property_set(rv_desc, conf_key, true_v);
+        js_property_set(rv_desc, enum_key, true_v);
+        js_object_define_property(event,
+            (Item){.item = s2it(heap_create_name("returnValue"))}, rv_desc);
+
+        // cancelBubble: get + set
+        Item cb_desc = js_new_object();
+        js_property_set(cb_desc, get_key, js_new_function((void*)js_event_cancelbubble_get, 0));
+        js_property_set(cb_desc, set_key, js_new_function((void*)js_event_cancelbubble_set, 1));
+        js_property_set(cb_desc, conf_key, true_v);
+        js_property_set(cb_desc, enum_key, true_v);
+        js_object_define_property(event,
+            (Item){.item = s2it(heap_create_name("cancelBubble"))}, cb_desc);
+
+        // defaultPrevented: get only
+        Item dp_desc = js_new_object();
+        js_property_set(dp_desc, get_key, js_new_function((void*)js_event_defaultprevented_get, 0));
+        js_property_set(dp_desc, conf_key, true_v);
+        js_property_set(dp_desc, enum_key, true_v);
+        js_object_define_property(event,
+            (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
+    }
 
     // Stamp class name so `event instanceof Event` resolves via the name fallback
     // in js_instanceof_classname (any class name ending in "Event" matches).
@@ -914,8 +1108,8 @@ static int build_path(Item target, void** path, int max_path) {
 // wrap a path key back into an Item for currentTarget
 static Item wrap_path_key(void* key) {
     if (key == (void*)&_window_sentinel) {
-        // return undefined for window — jQuery checks typeof
-        return ItemNull;
+        // window currentTarget is globalThis (the window object).
+        return js_get_global_this();
     }
     if (key == (void*)&_document_sentinel) {
         return js_get_document_object_value();
@@ -936,8 +1130,11 @@ static Item wrap_path_key(void* key) {
     return ItemNull;
 }
 
-// fire listeners on a specific node for a given phase
-static void fire_listeners(void* key, const char* type, Item event, int phase) {
+// fire listeners on a specific node for a given phase. `reported_phase`, if
+// non-zero, overrides the eventPhase value visible to listeners (used at the
+// target node so capture-then-bubble sub-passes both report AT_TARGET).
+static void fire_listeners(void* key, const char* type, Item event, int phase,
+                           int reported_phase = 0) {
     NodeListeners* nl = find_listeners(key);
     bool has_listeners = (nl && nl->count > 0);
     // Check for an `on<type>` IDL handler on the target. We fire it during
@@ -958,8 +1155,8 @@ static void fire_listeners(void* key, const char* type, Item event, int phase) {
     bool has_on = (get_type_id(on_handler) == LMD_TYPE_FUNC);
     if (!has_listeners && !has_on) return;
 
-    // set eventPhase
-    event_set_int(event, "eventPhase", phase);
+    // set eventPhase (use reported_phase if specified; otherwise raw phase)
+    event_set_int(event, "eventPhase", reported_phase ? reported_phase : phase);
 
     // set currentTarget
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
@@ -980,8 +1177,8 @@ static void fire_listeners(void* key, const char* type, Item event, int phase) {
         if (js_check_exception()) {
             // Report and swallow — dispatch must continue.
             Item err = js_clear_exception();
-            (void)err;
             log_error("event handler (on%s) threw an exception", type);
+            report_exception_to_window_onerror(err, type);
         }
     }
 
@@ -1041,8 +1238,8 @@ static void fire_listeners(void* key, const char* type, Item event, int phase) {
         js_call_function(callback, this_for_call, args, 1);
         if (js_check_exception()) {
             Item err = js_clear_exception();
-            (void)err;
             log_error("event listener for '%s' threw; continuing dispatch", type);
+            report_exception_to_window_onerror(err, type);
         }
 
         // restore previous passive context
@@ -1163,17 +1360,14 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
 
-    // Reset propagation flags to fresh state for this dispatch.
-    // NOTE: do NOT reset `__default_prevented` — per DOM spec, the
-    // canceled flag persists across dispatches (preventDefault may be
-    // called before dispatch, e.g. legacy-canceled-activation tests).
-    event_set_bool(event_item, "__stop_prop", false);
-    event_set_bool(event_item, "__stop_imm", false);
-    event_set_bool(event_item, "cancelBubble", false);
+    // Per DOM spec, the propagation flags (stop, stop-immediate, canceled)
+    // are NOT reset at the start of dispatch. They persist whether set
+    // before-dispatch (legacy: stopPropagation()/preventDefault() called
+    // before dispatchEvent) or by a previous re-dispatch.
 
     // reset propagation state (legacy thread-locals — transitional)
-    _stop_propagation = false;
-    _stop_immediate = false;
+    _stop_propagation = event_flag_get(event_item, "__stop_prop");
+    _stop_immediate = event_flag_get(event_item, "__stop_imm");
     _default_prevented = event_flag_get(event_item, "__default_prevented");
 
     // build propagation path (target → ... → document → window)
@@ -1185,6 +1379,16 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         return (Item){.item = ITEM_TRUE};
     }
 
+    // Legacy IE-style `window.event`: set to the in-flight event for the
+    // duration of dispatch, restored to its prior value (typically
+    // `undefined`) afterwards. Per HTML, the slot must read `undefined`
+    // when called inside a Shadow Tree listener (we don't model Shadow
+    // DOM headlessly, so we always set it).
+    Item global = js_get_global_this();
+    Item event_key = (Item){.item = s2it(heap_create_name("event"))};
+    Item prev_global_event = js_property_get(global, event_key);
+    js_property_set(global, event_key, event_item);
+
     #define _STOP_PROP (_stop_propagation || event_flag_get(event_item, "__stop_prop") \
         || event_flag_get(event_item, "cancelBubble"))
 
@@ -1195,9 +1399,13 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         fire_listeners(path[i], type, event_item, 1);  // CAPTURING_PHASE
     }
 
-    // Phase 2: Target
+    // Phase 2: Target — per spec, capture-listeners run first then bubble
+    // listeners, both reported with eventPhase = AT_TARGET (2).
     if (!_STOP_PROP) {
-        fire_listeners(path[0], type, event_item, 2);  // AT_TARGET
+        fire_listeners(path[0], type, event_item, 1, 2);
+    }
+    if (!_STOP_PROP) {
+        fire_listeners(path[0], type, event_item, 3, 2);
     }
 
     // Phase 3: Bubble — from target parent up to root
@@ -1217,8 +1425,18 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
     js_property_set(event_item, ct_key, ItemNull);
 
+    // Per DOM spec §2.10 step 26: at the end of dispatch, unset stop
+    // propagation flag, stop immediate propagation flag, and dispatch flag.
+    // (canceled / defaultPrevented flag PERSISTS across dispatches.)
+    event_set_bool(event_item, "__stop_prop", false);
+    event_set_bool(event_item, "__stop_imm", false);
+    event_set_bool(event_item, "cancelBubble", false);
+
     // Clear dispatching flag.
     event_set_bool(event_item, "__dispatch_flag", false);
+
+    // Restore the previous `window.event` value (legacy IE-style).
+    js_property_set(global, event_key, prev_global_event);
 
     // Compact tombstoned listeners now that dispatch is done. Walk all
     // touched nodes in the path.

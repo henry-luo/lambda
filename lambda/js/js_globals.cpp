@@ -10852,6 +10852,9 @@ extern "C" Item js_get_global_this() {
         js_global_this_obj = js_new_object();
         // populate standard globals
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, make_js_undefined());
+        // Legacy IE-style `window.event` — initially undefined, set to the
+        // in-flight event during dispatch by js_dom_dispatch_event.
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("event", 5))}, make_js_undefined());
         double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *nan_p = NAN;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, (Item){.item = d2it(nan_p)});
@@ -10943,6 +10946,23 @@ extern "C" Item js_get_global_this() {
 
         // Node.js: 'global' is an alias for globalThis
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("global", 6))}, js_global_this_obj);
+
+        // EventTarget interface methods on globalThis (window/self acts as
+        // an EventTarget per HTML spec).
+        {
+            extern Item js_eventtarget_add_listener(Item, Item, Item);
+            extern Item js_eventtarget_remove_listener(Item, Item, Item);
+            extern Item js_eventtarget_dispatch(Item);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("addEventListener", 16))},
+                js_new_function((void*)js_eventtarget_add_listener, 3));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("removeEventListener", 19))},
+                js_new_function((void*)js_eventtarget_remove_listener, 3));
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("dispatchEvent", 13))},
+                js_new_function((void*)js_eventtarget_dispatch, 1));
+        }
 
         // Node.js: Buffer is a global
         extern Item js_get_buffer_namespace(void);
