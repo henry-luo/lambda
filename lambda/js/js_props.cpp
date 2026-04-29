@@ -225,43 +225,15 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
         return true;
     }
 
-    if (name_len > 0 && name_len < 240) {
-        char buf[256];
-        bool g_found = false, s_found = false;
-        Item getter = ItemNull, setter = ItemNull;
+    if (!slot_found) return false;
 
-        snprintf(buf, sizeof(buf), "__get_%.*s", name_len, name);
-        getter = js_map_get_fast_ext(m, buf, (int)strlen(buf), &g_found);
-        if (g_found && js_props_is_deleted_sentinel(getter)) g_found = false;
-
-        snprintf(buf, sizeof(buf), "__set_%.*s", name_len, name);
-        setter = js_map_get_fast_ext(m, buf, (int)strlen(buf), &s_found);
-        if (s_found && js_props_is_deleted_sentinel(setter)) s_found = false;
-
-        if (g_found || s_found) {
-            out->flags |= JS_PD_HAS_GET | JS_PD_HAS_SET;
-            out->getter = (g_found && get_type_id(getter) == LMD_TYPE_FUNC)
-                            ? getter : js_props_undefined();
-            out->setter = (s_found && get_type_id(setter) == LMD_TYPE_FUNC)
-                            ? setter : js_props_undefined();
-            out->flags |= JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-            if (se) {
-                if (jspd_is_enumerable(se))   out->flags |= JS_PD_ENUMERABLE;
-                if (jspd_is_configurable(se)) out->flags2 |= 0x01u;
-            } else {
-                bool nc_f = false, ne_f = false;
-                snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
-                Item nc_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &nc_f);
-                snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
-                Item ne_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &ne_f);
-                if (!(ne_f && js_is_truthy(ne_v))) out->flags  |= JS_PD_ENUMERABLE;
-                if (!(nc_f && js_is_truthy(nc_v))) out->flags2 |= 0x01u;
-            }
-            return true;
-        }
+    if (slot_found && se && jspd_is_accessor(se)) {
+        // already handled above
     }
 
-    if (!slot_found) return false;
+    // Phase-5D: legacy __get_X/__set_X probe removed. IS_ACCESSOR own-path
+    // above is the sole accessor-detection path. Producers no longer create
+    // these magic-key markers (Phase 4 intercept routes them to JsAccessorPair).
 
     out->flags |= JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE
                 | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;

@@ -222,74 +222,9 @@ extern "C" Item js_to_property_key(Item key) {
     return js_to_string(key);
 }
 
-// Convert any key (string or symbol) to a getter key (__get_<key_string>)
-extern "C" Item js_make_getter_key(Item key) {
-    // convert symbol to string key first
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
-    TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
-        char nbuf[64];
-        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else {
-            double dv = it2d(key);
-            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
-            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
-            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
-            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
-            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
-        }
-        key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
-    } else if (kt == LMD_TYPE_BOOL) {
-        const char* s = it2b(key) ? "true" : "false";
-        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
-    } else if (kt == LMD_TYPE_NULL) {
-        key = (Item){.item = s2it(heap_create_name("null", 4))};
-    } else if (kt == LMD_TYPE_UNDEFINED) {
-        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* s = it2s(key);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "__get_%.*s", (int)s->len, s->chars);
-        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    return key;
-}
-
-// Convert any key (string or symbol) to a setter key (__set_<key_string>)
-extern "C" Item js_make_setter_key(Item key) {
-    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
-    // convert non-string keys to string (JS ToPropertyKey coerces all values to strings)
-    TypeId kt = get_type_id(key);
-    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_FLOAT) {
-        char nbuf[64];
-        if (kt == LMD_TYPE_INT) snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(key));
-        else {
-            double dv = it2d(key);
-            if (dv != dv) snprintf(nbuf, sizeof(nbuf), "NaN");
-            else if (dv == 1.0/0.0) snprintf(nbuf, sizeof(nbuf), "Infinity");
-            else if (dv == -1.0/0.0) snprintf(nbuf, sizeof(nbuf), "-Infinity");
-            else if (dv == 0.0) snprintf(nbuf, sizeof(nbuf), "0");
-            else snprintf(nbuf, sizeof(nbuf), "%g", dv);
-        }
-        key = (Item){.item = s2it(heap_create_name(nbuf, strlen(nbuf)))};
-    } else if (kt == LMD_TYPE_BOOL) {
-        const char* s = it2b(key) ? "true" : "false";
-        key = (Item){.item = s2it(heap_create_name(s, strlen(s)))};
-    } else if (kt == LMD_TYPE_NULL) {
-        key = (Item){.item = s2it(heap_create_name("null", 4))};
-    } else if (kt == LMD_TYPE_UNDEFINED) {
-        key = (Item){.item = s2it(heap_create_name("undefined", 9))};
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* s = it2s(key);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "__set_%.*s", (int)s->len, s->chars);
-        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-    }
-    return key;
-}
+// Phase-5C: js_make_getter_key / js_make_setter_key removed.
+// Transpiler now emits js_install_user_accessor directly which routes to
+// js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
 extern "C" void js_set_module_var(int index, Item value) {
     if (index >= 0 && index < JS_MAX_MODULE_VARS) {
@@ -7778,17 +7713,9 @@ extern "C" int64_t js_get_length(Item object) {
             }
             return (int64_t)js_get_number(result);
         }
-        // Check getter __get_length on own object
-        Item getter = js_map_get_fast(m, "__get_length", 12);
-        if (getter.item == ItemNull.item) {
-            // Check prototype chain for getter
-            Item gk = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-            getter = js_prototype_lookup(object, gk);
-        }
-        if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-            Item val = js_call_function(getter, object, NULL, 0);
-            return (int64_t)js_get_number(val);
-        }
+        // Phase-5D: legacy __get_length own + proto probes removed.
+        // IS_ACCESSOR own-path is handled above; proto-chain accessor
+        // dispatch is performed by js_prototype_lookup below.
         // Check prototype chain for regular "length" property
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
@@ -7835,15 +7762,7 @@ extern "C" Item js_get_length_item(Item object) {
             }
             return result;  // return raw Item, not converted to number
         }
-        // Check getter __get_length
-        Item getter = js_map_get_fast(m, "__get_length", 12);
-        if (getter.item == ItemNull.item) {
-            Item gk = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-            getter = js_prototype_lookup(object, gk);
-        }
-        if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-            return js_call_function(getter, object, NULL, 0);
-        }
+        // Phase-5D: legacy __get_length own + proto probes removed.
         // Check prototype chain
         Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
         Item proto_result = js_prototype_lookup(object, len_key);
@@ -18672,18 +18591,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                         js_throw_type_error("Cannot set property length of object which has only a getter");
                         return make_js_undefined();
                     }
-                } else {
-                    Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
-                    Item getter = js_property_get(cb_this, getter_key);
-                    if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
-                        Item setter_key = (Item){.item = s2it(heap_create_name("__set_length", 12))};
-                        Item setter = js_property_get(cb_this, setter_key);
-                        if (setter.item == ItemNull.item || get_type_id(setter) != LMD_TYPE_FUNC) {
-                            js_throw_type_error("Cannot set property length of object which has only a getter");
-                            return make_js_undefined();
-                        }
-                    }
                 }
+                // Phase-5D: legacy __get_length/__set_length probe removed;
+                // js_ordinary_get_own_descriptor + IS_ACCESSOR shape flag covers it.
             }
             // Check non-writable length
             js_property_set(cb_this, len_key, (Item){.item = i2it((int64_t)new_len)});

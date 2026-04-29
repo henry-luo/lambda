@@ -6204,36 +6204,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         }
         e = e->next;
     }
-    // Detect accessor properties from __get_<name> or __set_<name> entries
-    e = tm->shape;
-    while (e) {
-        const char* s = e->name->str;
-        int slen = (int)e->name->length;
-        const char* prop_name = NULL;
-        int prop_len = 0;
-        if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-            prop_name = s + 6;
-            prop_len = slen - 6;
-        } else if (slen > 6 && strncmp(s, "__set_", 6) == 0) {
-            prop_name = s + 6;
-            prop_len = slen - 6;
-        }
-        if (prop_name) {
-            bool already = false;
-            for (int j = 0; j < arr->length; j++) {
-                String* ex = it2s(arr->items[j]);
-                if (ex && (int)ex->len == prop_len && memcmp(ex->chars, prop_name, prop_len) == 0) {
-                    already = true;
-                    break;
-                }
-            }
-            if (!already) {
-                Item key_item = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-                array_push(arr, key_item);
-            }
-        }
-        e = e->next;
-    }
+    // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
+    // Accessor properties now use IS_ACCESSOR shape flag with bare-name
+    // shape entries — pass 1 above already enumerates them.
     // v26: for prototype Maps with __class_name__ and __is_proto__, append builtin method names
     {
         bool ip_own = false;
@@ -6539,71 +6512,9 @@ extern "C" Item js_object_keys(Item object) {
         e = e->next;
     }
 
-    // Second pass: detect accessor properties defined via __get_<name> or __set_<name>
-    e = tm->shape;
-    while (e) {
-        const char* s = e->name->str;
-        int slen = (int)e->name->length;
-        // Look for __get_<name> or __set_<name> entries
-        const char* prop_name = NULL;
-        int prop_len = 0;
-        if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-            prop_name = s + 6;
-            prop_len = slen - 6;
-        } else if (slen > 6 && strncmp(s, "__set_", 6) == 0) {
-            prop_name = s + 6;
-            prop_len = slen - 6;
-        }
-        if (prop_name) {
-            // Check if this property is already collected
-            bool already_present = false;
-            // check index keys
-            for (int j = 0; j < idx_count; j++) {
-                String* existing = it2s(idx_items[j]);
-                if (existing && (int)existing->len == prop_len && memcmp(existing->chars, prop_name, prop_len) == 0) {
-                    already_present = true;
-                    break;
-                }
-            }
-            // check string keys
-            if (!already_present) {
-                for (int j = 0; j < str_count; j++) {
-                    String* existing = it2s(str_items[j]);
-                    if (existing && (int)existing->len == prop_len && memcmp(existing->chars, prop_name, prop_len) == 0) {
-                        already_present = true;
-                        break;
-                    }
-                }
-            }
-            // check overflow keys already in arr
-            if (!already_present) {
-                for (int j = 0; j < arr->length; j++) {
-                    String* existing = it2s(arr->items[j]);
-                    if (existing && (int)existing->len == prop_len && memcmp(existing->chars, prop_name, prop_len) == 0) {
-                        already_present = true;
-                        break;
-                    }
-                }
-            }
-            if (!already_present) {
-                // Stage A3: shape-flag-first non-enumerable check on accessor prop
-                bool skip_ne = !js_props_query_enumerable(m, NULL, prop_name, prop_len);
-                if (!skip_ne) {
-                    Item key_str = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-                    int64_t idx = js_parse_array_index(prop_name, prop_len);
-                    if (idx >= 0 && idx_count < idx_cap) {
-                        idx_vals[idx_count] = idx;
-                        idx_items[idx_count] = key_str;
-                        idx_count++;
-                    } else {
-                        if (str_count < str_cap) str_items[str_count++] = key_str;
-                        else array_push(arr, key_str);
-                    }
-                }
-            }
-        }
-        e = e->next;
-    }
+    // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
+    // Accessor properties use IS_ACCESSOR shape flag with bare-name shape
+    // entries — pass 1 above already enumerates them.
 
     // v20: sort index keys numerically
     // Simple insertion sort (typically few index keys on objects)
@@ -6754,50 +6665,9 @@ extern "C" Item js_for_in_keys(Item object) {
                 e = e->next;
             }
         }
-        // Second pass on this level: detect accessor properties via __get_<name> or __set_<name>
-        if (m && m->type) {
-            TypeMap* tm = (TypeMap*)m->type;
-            ShapeEntry* e = tm->shape;
-            while (e) {
-                const char* s = e->name->str;
-                int slen = (int)e->name->length;
-                // Look for __get_<name> or __set_<name> entries (accessor properties)
-                const char* prop_name = NULL;
-                int prop_len = 0;
-                if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-                    prop_name = s + 6;
-                    prop_len = slen - 6;
-                } else if (slen > 6 && strncmp(s, "__set_", 6) == 0) {
-                    prop_name = s + 6;
-                    prop_len = slen - 6;
-                }
-                if (prop_name) {
-                    // Stage A3: shape-flag-first non-enumerable check on accessor prop
-                    bool skip_ne = !js_props_query_enumerable(m, NULL, prop_name, prop_len);
-                    if (!skip_ne) {
-                        // deduplicate
-                        struct SeenEntry probe;
-                        int nlen = prop_len < 255 ? prop_len : 255;
-                        memcpy(probe.name, prop_name, nlen);
-                        probe.name[nlen] = '\0';
-                        const struct SeenEntry* existing = (const struct SeenEntry*)hashmap_get(seen, &probe);
-                        if (!existing) {
-                            hashmap_set(seen, &probe);
-                            Item key_str = (Item){.item = s2it(heap_create_name(probe.name, nlen))};
-                            int64_t idx = js_parse_array_index(prop_name, prop_len);
-                            if (idx >= 0 && idx_count < idx_cap) {
-                                idx_vals[idx_count] = idx;
-                                idx_items[idx_count] = key_str;
-                                idx_count++;
-                            } else {
-                                js_array_push(str_result, key_str);
-                            }
-                        }
-                    }
-                }
-                e = e->next;
-            }
-        }
+        // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
+        // Accessor properties use IS_ACCESSOR shape flag with bare-name
+        // shape entries — pass 1 above already enumerates them.
 
         // walk up prototype chain
         current = js_get_prototype(current);
@@ -7946,37 +7816,9 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         }
         // Second pass: detect accessor-only properties (__get_<name> / __set_<name>)
         // that have no regular data entry (e.g. properties defined only with a getter)
-        e = tm->shape;
-        while (e) {
-            if (e->name) {
-                const char* s = e->name->str;
-                int slen = (int)e->name->length;
-                const char* prop_name = NULL;
-                int prop_len = 0;
-                if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-                    prop_name = s + 6;
-                    prop_len = slen - 6;
-                }
-                if (prop_name && prop_len > 0 && prop_len < 200) {
-                    // Stage A3: shape-flag-first non-enumerable check on accessor property
-                    if (js_props_query_enumerable(m, NULL, prop_name, prop_len)) {
-                        // Check if we already copied this property (it had a data entry)
-                        bool already_copied = false;
-                        bool data_found = false;
-                        Item data_val = js_map_get_fast_ext(m, prop_name, prop_len, &data_found);
-                        if (data_found && data_val.item != JS_DELETED_SENTINEL_VAL) {
-                            already_copied = true;
-                        }
-                        if (!already_copied) {
-                            Item key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-                            Item val = js_property_get(source, key);
-                            js_property_set(target, key, val);
-                        }
-                    }
-                }
-            }
-            e = e->next;
-        }
+        // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
+        // Accessor properties use IS_ACCESSOR shape flag with bare-name
+        // shape entries — pass 1 above already handled them.
     }
     return target;
 }
@@ -8022,30 +7864,7 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
         e = e->next;
     }
     // Second pass: detect accessor-only properties (__get_<name>)
-    e = tm->shape;
-    while (e) {
-        if (e->name) {
-            const char* s = e->name->str;
-            int slen = (int)e->name->length;
-            if (slen > 6 && strncmp(s, "__get_", 6) == 0) {
-                const char* prop_name = s + 6;
-                int prop_len = slen - 6;
-                if (prop_len > 0 && prop_len < 200) {
-                    // Stage A3: shape-flag-first non-enumerable check
-                    if (js_props_query_enumerable(m, NULL, prop_name, prop_len)) {
-                        bool data_found = false;
-                        js_map_get_fast_ext(m, prop_name, prop_len, &data_found);
-                        if (!data_found) {
-                            Item key = (Item){.item = s2it(heap_create_name(prop_name, prop_len))};
-                            Item val = js_property_get(source, key);
-                            js_property_set(target, key, val);
-                        }
-                    }
-                }
-            }
-        }
-        e = e->next;
-    }
+    // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
     return target;
 }
 

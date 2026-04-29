@@ -1429,8 +1429,7 @@ JitImport jit_runtime_imports[] = {
     {"js_reflect_set_prototype_of", FPTR(js_reflect_set_prototype_of)},
     {"js_reflect_prevent_extensions", FPTR(js_reflect_prevent_extensions)},
     {"js_reflect_apply", FPTR(js_reflect_apply)},
-    {"js_make_getter_key", FPTR(js_make_getter_key)},
-    {"js_make_setter_key", FPTR(js_make_setter_key)},
+
     {"js_install_user_accessor", FPTR(js_install_user_accessor)},
     {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},

@@ -264,8 +264,8 @@ Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
-Item js_make_getter_key(Item key);
-Item js_make_setter_key(Item key);
+// Phase-5C: js_make_getter_key/js_make_setter_key removed (no callers).
+
 
 // =============================================================================
 // v8: Object & Global extensions
