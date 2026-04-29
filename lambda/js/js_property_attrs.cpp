@@ -306,15 +306,22 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
     int depth = 0;
     while (depth < 16) {
         ShapeEntry* se = js_find_shape_entry(cur, name, name_len);
-        if (se && jspd_is_accessor(se)) {
-            Map* m = js_obj_underlying_map(cur);
-            if (m) {
-                bool found = false;
-                Item slot_val = js_map_get_fast_ext(m, name, name_len, &found);
-                if (found && slot_val.item != ItemNull.item) {
-                    return js_item_to_accessor_pair(slot_val);
+        if (se) {
+            if (jspd_is_accessor(se)) {
+                Map* m = js_obj_underlying_map(cur);
+                if (m) {
+                    bool found = false;
+                    Item slot_val = js_map_get_fast_ext(m, name, name_len, &found);
+                    if (found && slot_val.item != ItemNull.item) {
+                        return js_item_to_accessor_pair(slot_val);
+                    }
                 }
             }
+            // ES OrdinarySet: an own property (data or accessor) terminates
+            // the lookup. Don't walk past an own data property to inherited
+            // accessors — that would route writes through the inherited
+            // setter instead of the receiver's own data slot.
+            return nullptr;
         }
         if (get_type_id(cur) != LMD_TYPE_MAP) break;
         Item proto = js_get_prototype(cur);
