@@ -46,8 +46,8 @@ extern Item parse_json_to_item_strict(Input* input, const char* json_string, boo
 
 // forward declarations for functions used by ES2020 descriptor helpers below
 static inline Item make_js_undefined();
-static void js_defprop_set_marker(Item obj, Item key, Item value);
-static bool js_defprop_has_marker(Item obj, Item key);
+extern "C" void js_defprop_set_marker(Item obj, Item key, Item value);
+extern "C" bool js_defprop_has_marker(Item obj, Item key);
 static bool js_require_object_type(Item arg, const char* method_name);
 static Item js_defprop_get_marker(Item obj, const char* key, int keylen, bool* found);
 extern "C" Item js_strict_equal(Item left, Item right);
@@ -370,247 +370,57 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
         }
     }
 
-    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
-    bool is_accessor = false;
-    bool was_accessor = false; // track accessor→data conversion
-    if (it2b(js_in(value_key, descriptor))) {
-        // data property descriptor: set value directly
-        Item value = js_property_get(descriptor, value_key);
-        // Phase 4 accessor→data conversion: if the existing property is stored
-        // as a JsAccessorPair (IS_ACCESSOR shape flag set), the slot currently
-        // holds a pair pointer. Clear the IS_ACCESSOR flag BEFORE writing the
-        // data value so that subsequent reads (descriptor synthesis, getters)
-        // do not dereference the new value as a JsAccessorPair*.
-        if (!is_new_property) {
-            Item ns_tmp_acc = js_to_string(name);
-            if (get_type_id(ns_tmp_acc) == LMD_TYPE_STRING) {
-                String* ns_acc = it2s(ns_tmp_acc);
-                if (ns_acc && ns_acc->len > 0) {
-                    ShapeEntry* _se_acc = js_find_shape_entry(obj, ns_acc->chars, (int)ns_acc->len);
-                    if (_se_acc && jspd_is_accessor(_se_acc)) {
-                        jspd_set_accessor(_se_acc, false);
-                        was_accessor = true;
-                    }
-                }
-            }
+    // Stage A2.4: route storage through unified kernel
+    // `js_define_own_property_from_descriptor` (in js_props.cpp).
+    //
+    // The kernel performs all storage writes:
+    //   - Accessor: install via the IS_ACCESSOR chokepoint (`js_define_accessor_partial`).
+    //               Tombstones data slot when converting data→accessor.
+    //               Conditionally clears stale __nw_ marker.
+    //   - Data: clears IS_ACCESSOR shape flag if previously accessor;
+    //           tombstones legacy __get_/__set_ markers; tracks was_accessor.
+    //   - Attribute markers __nw_/__nc_/__ne_ written from HAS_* bits;
+    //     new-property defaults to non-* (ES §6.2.5.5).
+    //   - For new data property OR accessor→data conversion without explicit
+    //     `writable`, default to non-writable.
+    //
+    // What stays inline here:
+    //   - Generic-descriptor undefined-write fallback (no value/get/set).
+    //   - Array index hole-fill for accessor descriptors at sparse indices.
+
+    Item nm = js_to_string(name);
+    if (get_type_id(nm) != LMD_TYPE_STRING) return obj;
+    String* nm_s = it2s(nm);
+    if (!nm_s || nm_s->len >= 200) return obj;
+    const char* nm_chars = nm_s->chars;
+    int nm_len = (int)nm_s->len;
+
+    JsPropertyDescriptor pd;
+    if (!js_descriptor_from_object(descriptor, &pd)) return obj;
+
+    bool is_accessor = js_pd_is_accessor(&pd);
+    bool is_data = (pd.flags & JS_PD_HAS_VALUE) != 0;
+
+    js_define_own_property_from_descriptor(obj, nm_chars, nm_len, &pd, is_new_property);
+
+    // ES5 §15.4.5.1: array exotic — accessor at sparse index grows items array.
+    if (is_accessor && get_type_id(obj) == LMD_TYPE_ARRAY && nm_len > 0 && nm_len <= 10) {
+        bool is_idx = true;
+        int64_t idx = 0;
+        for (int ci = 0; ci < nm_len; ci++) {
+            char ch = nm_chars[ci];
+            if (ch < '0' || ch > '9') { is_idx = false; break; }
+            idx = idx * 10 + (ch - '0');
         }
-        // defineProperty must bypass __nw_ (non-writable) guard in js_property_set.
-        // The writable+configurable validation was already done above for non-configurable
-        // properties; for configurable properties, value changes are always allowed.
-        // Temporarily clear __nw_ marker before setting, then restore it.
-        bool had_nw = false;
-        if (!is_new_property) {
-            Item ns_tmp = js_to_string(name);
-            if (get_type_id(ns_tmp) == LMD_TYPE_STRING) {
-                String* ns = it2s(ns_tmp);
-                if (ns && ns->len > 0 && ns->len < 200) {
-                    char nw_buf[256];
-                    snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)ns->len, ns->chars);
-                    Item nw_k = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
-                    if (js_defprop_has_marker(obj, nw_k)) {
-                        bool nw_found_tmp = false;
-                        Item nw_val = js_defprop_get_marker(obj, nw_buf, (int)strlen(nw_buf), &nw_found_tmp);
-                        had_nw = nw_found_tmp && js_is_truthy(nw_val);
-                    }
-                    if (had_nw) {
-                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
-                    }
+        if (is_idx && (nm_len == 1 || nm_chars[0] != '0') && idx >= 0) {
+            Array* arr = obj.array;
+            int64_t gap = idx - (int64_t)arr->length;
+            if (gap >= 0 && gap < 100000) {
+                extern void js_array_push_item_direct(Array* arr, Item value);
+                Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                while ((int64_t)arr->length <= idx) {
+                    js_array_push_item_direct(arr, hole);
                 }
-            }
-        }
-        if (get_type_id(obj) == LMD_TYPE_FUNC) {
-            js_func_init_property(obj, name, value);
-        } else {
-            js_property_set(obj, name, value);
-        }
-        // Restore __nw_ marker if it was set
-        if (had_nw) {
-            Item ns_tmp = js_to_string(name);
-            if (get_type_id(ns_tmp) == LMD_TYPE_STRING) {
-                String* ns = it2s(ns_tmp);
-                if (ns && ns->len > 0 && ns->len < 200) {
-                    char nw_buf[256];
-                    snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)ns->len, ns->chars);
-                    Item nw_k = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
-                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
-                }
-            }
-        }
-        // v18m: when converting accessor→data, remove accessor markers
-        Item name_str_conv = js_to_string(name);
-        if (get_type_id(name_str_conv) == LMD_TYPE_STRING) {
-            String* ns = it2s(name_str_conv);
-            if (ns && ns->len > 0 && ns->len < 200) {
-                char mk_buf[256];
-                snprintf(mk_buf, sizeof(mk_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
-                if (js_defprop_has_marker(obj, gk)) {
-                    was_accessor = true;
-                    js_defprop_set_marker(obj, gk, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                }
-                snprintf(mk_buf, sizeof(mk_buf), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(mk_buf, strlen(mk_buf)))};
-                if (js_defprop_has_marker(obj, sk)) {
-                    was_accessor = true;
-                    js_defprop_set_marker(obj, sk, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                }
-            }
-        }
-    } else {
-        // accessor descriptor: check for get/set
-        Item name_str2 = js_to_string(name);
-        if (get_type_id(name_str2) == LMD_TYPE_STRING) {
-            String* ns = it2s(name_str2);
-            char key_buf[256];
-            bool already_accessor = false;
-            {
-                char gk_chk[256], sk_chk[256];
-                snprintf(gk_chk, sizeof(gk_chk), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk_chk_item = (Item){.item = s2it(heap_create_name(gk_chk, strlen(gk_chk)))};
-                snprintf(sk_chk, sizeof(sk_chk), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk_chk_item = (Item){.item = s2it(heap_create_name(sk_chk, strlen(sk_chk)))};
-                if (js_defprop_has_marker(obj, gk_chk_item) || js_defprop_has_marker(obj, sk_chk_item))
-                    already_accessor = true;
-            }
-            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-            Item has_get = js_in(get_key, descriptor);
-            Item getter = it2b(has_get) ? js_property_get(descriptor, get_key) : make_js_undefined();
-            // ES §6.2.5.4 ToPropertyDescriptor: explicit `get` key (any value) makes this an
-            // accessor descriptor. Record marker even when value is undefined so that the
-            // accessor identity is preserved and assignments via the setter dispatch path
-            // can detect a "no setter" accessor.
-            if (it2b(has_get)) {
-                if (get_type_id(getter) != LMD_TYPE_FUNC && get_type_id(getter) != LMD_TYPE_UNDEFINED) {
-                    // already validated above; defensive
-                    getter = make_js_undefined();
-                }
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
-                Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, gk, getter);
-            }
-            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
-            Item has_set = js_in(set_key, descriptor);
-            Item setter = it2b(has_set) ? js_property_get(descriptor, set_key) : make_js_undefined();
-            if (it2b(has_set)) {
-                if (get_type_id(setter) != LMD_TYPE_FUNC && get_type_id(setter) != LMD_TYPE_UNDEFINED) {
-                    setter = make_js_undefined();
-                }
-                is_accessor = true;
-                snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)ns->len, ns->chars);
-                Item sk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                js_defprop_set_marker(obj, sk, setter);
-            }
-            if (is_accessor) {
-                snprintf(key_buf, sizeof(key_buf), "__nw_%.*s", (int)ns->len, ns->chars);
-                Item nw_k = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
-                if (js_defprop_has_marker(obj, nw_k)) {
-                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
-                }
-                if (get_type_id(obj) == LMD_TYPE_MAP) {
-                    bool data_found = false;
-                    js_map_get_fast_ext(obj.map, ns->chars, (int)ns->len, &data_found);
-                    if (data_found) {
-                        // Phase 4: if the slot already holds our JsAccessorPair*
-                        // (IS_ACCESSOR shape flag set by js_define_accessor_partial),
-                        // do NOT tombstone it — the pair IS the canonical value now.
-                        ShapeEntry* _se_chk = js_find_shape_entry(obj, ns->chars, (int)ns->len);
-                        if (!(_se_chk && jspd_is_accessor(_se_chk))) {
-                            js_property_set(obj, name, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                        }
-                    }
-                }
-                // ES5 §15.4.5.1: if obj is an Array and name is a valid array index >= length,
-                // update length to index+1 and grow items array with hole sentinels.
-                if (get_type_id(obj) == LMD_TYPE_ARRAY && ns && ns->len > 0 && ns->len <= 10) {
-                    bool is_idx = true;
-                    int64_t idx = 0;
-                    for (size_t ci = 0; ci < ns->len; ci++) {
-                        char ch = ns->chars[ci];
-                        if (ch < '0' || ch > '9') { is_idx = false; break; }
-                        idx = idx * 10 + (ch - '0');
-                    }
-                    if (is_idx && (ns->len == 1 || ns->chars[0] != '0') && idx >= 0) {
-                        Array* arr = obj.array;
-                        int64_t gap = idx - (int64_t)arr->length;
-                        if (gap >= 0 && gap < 100000) {
-                            // Grow items array with hole sentinels up to and including idx
-                            extern void js_array_push_item_direct(Array* arr, Item value);
-                            Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
-                            while ((int64_t)arr->length <= idx) {
-                                js_array_push_item_direct(arr, hole);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (!it2b(js_in(value_key, descriptor)) && !is_accessor) {
-        if (!it2b(js_has_own_property(obj, name))) {
-            js_property_set(obj, name, (Item){.item = ITEM_JS_UNDEFINED});
-        }
-    }
-    name = js_to_string(name);
-    if (get_type_id(name) == LMD_TYPE_STRING) {
-        String* name_str = it2s(name);
-        if (name_str && name_str->len > 0 && name_str->len < 200) {
-            char attr_key[256];
-            if (!is_accessor) {
-                Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
-                Item has_writable = js_in(writable_key, descriptor);
-                if (it2b(has_writable)) {
-                    Item writable_val = js_property_get(descriptor, writable_key);
-                    if (!js_is_truthy(writable_val)) {
-                        snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
-                        Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
-                    } else {
-                        snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
-                        Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                        js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(false)});
-                    }
-                } else if (is_new_property || was_accessor) {
-                    snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
-                    Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                    js_defprop_set_marker(obj, nw_k, (Item){.item = b2it(true)});
-                }
-            }
-            Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-            Item has_configurable = js_in(configurable_key, descriptor);
-            if (it2b(has_configurable)) {
-                Item configurable_val = js_property_get(descriptor, configurable_key);
-                if (!js_is_truthy(configurable_val)) {
-                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                    js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(true)});
-                } else {
-                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                    js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(false)});
-                }
-            } else if (is_new_property) {
-                snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
-                Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                js_defprop_set_marker(obj, nc_k, (Item){.item = b2it(true)});
-            }
-            Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-            Item has_enumerable = js_in(enumerable_key, descriptor);
-            if (it2b(has_enumerable)) {
-                Item enumerable_val = js_property_get(descriptor, enumerable_key);
-                if (!js_is_truthy(enumerable_val)) {
-                    snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                    Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                    js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(true)});
-                } else {
-                    snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                    Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                    js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(false)});
-                }
-            } else if (is_new_property) {
-                snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
-                Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
-                js_defprop_set_marker(obj, ne_k, (Item){.item = b2it(true)});
             }
         }
     }
@@ -6157,7 +5967,7 @@ static Map* js_array_ensure_props_map(Array* arr) {
 // Phase 2a: ShapeEntry::flags dual-write is now handled centrally by
 // `js_dual_write_marker_flags` invoked at the top of `js_property_set` —
 // no per-callsite mirroring needed here.
-static void js_defprop_set_marker(Item obj, Item key, Item value) {
+extern "C" void js_defprop_set_marker(Item obj, Item key, Item value) {
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Map* m = js_array_ensure_props_map(obj.array);
         Item map_item = (Item){.map = m};
@@ -6168,7 +5978,7 @@ static void js_defprop_set_marker(Item obj, Item key, Item value) {
 }
 
 // check if a marker exists on an object (for arrays, checks companion map)
-static bool js_defprop_has_marker(Item obj, Item key) {
+extern "C" bool js_defprop_has_marker(Item obj, Item key) {
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Map* m = js_array_props_map(obj.array);
         if (!m) return false;
