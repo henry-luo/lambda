@@ -338,8 +338,13 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            const char* href = span->get_attribute("href");
-            if (href) {
+            // §7 unification (U-2): skip default link navigation if a JS
+            // mousedown listener called event.preventDefault().
+            if (evcon->default_prevented) {
+                log_debug("anchor nav suppressed by preventDefault()");
+            } else {
+                const char* href = span->get_attribute("href");
+                if (href) {
                 log_debug("got anchor href: %s", href);
                 evcon->new_url = (char*)href;
                 const char* target = span->get_attribute("target");
@@ -349,6 +354,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
                 }
                 else {
                     log_debug("no anchor target found");
+                }
                 }
             }
         }
@@ -1196,6 +1202,34 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
     auto t_start = std::chrono::high_resolution_clock::now();
     Item ev = js_create_native_mouse_event(type, client_x, client_y,
         button, buttons, ctrl, shift, alt, meta, detail, ItemNull);
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    bool prevented = js_event_is_default_prevented(ev);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    return prevented;
+}
+
+/**
+ * §7 unification (U-3): dispatch a "keydown"/"keyup" event through the JS
+ * EventTarget pipeline at the given target view. Returns true if default
+ * action should be prevented.
+ */
+static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
+                                            const char* type, int key_code,
+                                            int mods, bool repeat)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    const char* key_name = key_code_to_name(key_code);
+    Item ev = js_create_native_keyboard_event(type, key_name, key_name,
+        (mods & RDT_MOD_CTRL) != 0,
+        (mods & RDT_MOD_SHIFT) != 0,
+        (mods & RDT_MOD_ALT) != 0,
+        (mods & RDT_MOD_SUPER) != 0,
+        repeat);
     Item target_item = js_dom_wrap_element(dom_target);
     js_dom_dispatch_event(target_item, ev);
     bool prevented = js_event_is_default_prevented(ev);
@@ -2939,7 +2973,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             update_active_state(&evcon, evcon.target, true);
 
             // Dispatch HTML onmousedown handler
-            dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
+            bool md_inline_fired = dispatch_html_event_handler(&evcon, evcon.target, "mousedown");
+            // §7 unification (U-2): if no inline handler exists, dispatch via JS
+            // EventTarget bridge so addEventListener("mousedown",...) listeners run.
+            // Track preventDefault so link navigation in fire_inline_event can be gated.
+            if (!md_inline_fired) {
+                bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                    "mousedown", btn_event->x, btn_event->y,
+                    btn_event->button, 1 << btn_event->button,
+                    (btn_event->mods & GLFW_MOD_CONTROL) != 0,
+                    (btn_event->mods & GLFW_MOD_SHIFT) != 0,
+                    (btn_event->mods & GLFW_MOD_ALT) != 0,
+                    (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                    1);
+                if (prevented) evcon.default_prevented = true;
+            }
 
             // Update focus if target is focusable (mouse-triggered focus)
             if (is_view_focusable(evcon.target)) {
@@ -3331,19 +3379,52 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Only process other click handlers if dropdown wasn't involved and not a drag
             if (!dropdown_handled && !drag_handled) {
+                // §7 unification (U-2): dispatch click via JS EventTarget bridge
+                // BEFORE built-in default actions, so addEventListener("click")
+                // listeners can call event.preventDefault() to suppress them.
+                // Gated by !inline-handler to preserve current inline-handler
+                // semantics (legacy inline path still runs at end of block).
+                bool click_inline_present = false;
+                if (evcon.target) {
+                    DomDocument* d = evcon.ui_context ? evcon.ui_context->document : nullptr;
+                    if (d && d->js_event_registry) {
+                        DomElement* del = radiant_view_to_dom_element(evcon.target);
+                        DomNode* n = (DomNode*)del; int depth = 0;
+                        while (n && depth < 100) {
+                            if (n->node_type == DOM_NODE_ELEMENT &&
+                                find_html_event_handler((JsEventRegistry*)d->js_event_registry,
+                                                        (DomElement*)n, "click")) {
+                                click_inline_present = true; break;
+                            }
+                            n = n->parent; depth++;
+                        }
+                    }
+                    if (!click_inline_present) {
+                        bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                            "click", mouse_x, mouse_y,
+                            btn_event->button, 0,
+                            (btn_event->mods & GLFW_MOD_CONTROL) != 0,
+                            (btn_event->mods & GLFW_MOD_SHIFT) != 0,
+                            (btn_event->mods & GLFW_MOD_ALT) != 0,
+                            (btn_event->mods & GLFW_MOD_SUPER) != 0,
+                            1);
+                        if (prevented) evcon.default_prevented = true;
+                    }
+                }
+
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
-                if (evcon.target) {
+                if (evcon.target && !evcon.default_prevented) {
                     handle_checkbox_radio_click(&evcon, evcon.target);
                 }
 
                 // Handle click on select element to toggle dropdown
-                if (evcon.target) {
+                if (evcon.target && !evcon.default_prevented) {
                     handle_select_click(&evcon, evcon.target);
                 }
 
                 // Handle click on <video> element — play/pause toggle + seek bar
-                if (evcon.target && state) {
+                if (evcon.target && state && !evcon.default_prevented) {
                     View* v = evcon.target;
                     // walk up to find a block with embed->video
                     while (v) {
@@ -3747,6 +3828,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (focused) {
             if (dispatch_html_event_handler(&evcon, focused, "keydown")) {
                 evcon.need_repaint = true;
+                focused = focus_get(state);
+            } else {
+                // §7 unification (U-3): dispatch via JS EventTarget bridge.
+                bool prevented = radiant_dispatch_keyboard_event(&evcon, focused,
+                    "keydown", key_event->key, key_event->mods, false);
+                if (prevented) evcon.default_prevented = true;
                 focused = focus_get(state);
             }
         }
@@ -4312,7 +4399,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         fblock->embed->webview->handle) {
                         webview_layer_platform_inject_key(fblock->embed->webview->handle,
                             1, event->key.key, event->key.mods);
+                        break;
                     }
+                }
+                // §7 unification (U-3): dispatch keyup via JS EventTarget bridge
+                // when no inline handler is present.
+                if (focused &&
+                    !dispatch_html_event_handler(&evcon, focused, "keyup")) {
+                    radiant_dispatch_keyboard_event(&evcon, focused,
+                        "keyup", event->key.key, event->key.mods, false);
                 }
             }
         }
