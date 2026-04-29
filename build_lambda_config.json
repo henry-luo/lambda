@@ -3083,6 +3083,18 @@
                         "icon": "🪝"
                     },
                     {
+                        "source": "test/wpt/test_wpt_form_gtest.cpp",
+                        "name": "WPT Form & FormData Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_form_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📝"
+                    },
+                    {
                         "source": "test/test_lambda_std_gtest.cpp",
                         "name": "Lambda Structured Tests",
                         "dependencies": [],

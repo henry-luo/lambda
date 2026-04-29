@@ -37,6 +37,9 @@
 
 #include <cstring>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <functional>
 #include "../../lib/mem.h"
 
 // JS undefined helpers (matching js_runtime.cpp encoding)
@@ -366,6 +369,9 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         }
         // install window.getSelection() global
         js_dom_selection_install_globals();
+        // install FormData constructor
+        extern void js_formdata_install_globals(void);
+        js_formdata_install_globals();
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -2765,6 +2771,355 @@ extern "C" String* js_dom_active_text_control_selected_text(void) {
     return heap_strcpy((char*)sel, (int64_t)blen);
 }
 
+// ============================================================================
+// F-4: Constraint Validation API helpers
+// ============================================================================
+
+// Returns true if this element is "barred from constraint validation":
+//   - type=hidden for input (submit/button/image/reset are NOT barred per WPT)
+//   - disabled
+//   - output, object, fieldset, datalist (not submittable)
+//   - readonly
+//   - element has a datalist ancestor
+static bool _elem_is_barred(DomElement* elem) {
+    if (!elem || !elem->tag_name) return true;
+    const char* tag = elem->tag_name;
+    if (strcasecmp(tag, "output") == 0 || strcasecmp(tag, "object") == 0 ||
+        strcasecmp(tag, "fieldset") == 0 || strcasecmp(tag, "datalist") == 0) {
+        return true;
+    }
+    // barred if disabled
+    if (dom_element_has_attribute(elem, "disabled")) return true;
+    // barred if readonly
+    if (dom_element_has_attribute(elem, "readonly")) return true;
+    if (strcasecmp(tag, "input") == 0) {
+        const char* type = js_dom_input_type_lower(elem);
+        // only type=hidden is barred (not submit/button/image/reset per WPT)
+        if (strcmp(type, "hidden") == 0) {
+            return true;
+        }
+    }
+    if (strcasecmp(tag, "input") == 0 || strcasecmp(tag, "button") == 0 ||
+        strcasecmp(tag, "select") == 0 || strcasecmp(tag, "textarea") == 0) {
+        // check for datalist ancestor
+        DomNode* p = elem->parent;
+        while (p) {
+            if (p->is_element()) {
+                DomElement* pe = p->as_element();
+                if (pe->tag_name && strcasecmp(pe->tag_name, "datalist") == 0) return true;
+            }
+            p = p->parent;
+        }
+        return false;
+    }
+    return true; // not a form-associated submittable element
+}
+
+// Get the current value of a form element as a C-string (UTF-8).
+static const char* _elem_current_value(DomElement* elem) {
+    if (!elem || !elem->tag_name) return "";
+    const char* tag = elem->tag_name;
+    if (strcasecmp(tag, "input") == 0) {
+        if (tc_is_text_control(elem)) {
+            tc_ensure_init(elem);
+            return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
+        }
+        const char* v = dom_element_get_attribute(elem, "value");
+        return v ? v : "";
+    }
+    if (strcasecmp(tag, "textarea") == 0) {
+        tc_ensure_init(elem);
+        return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
+    }
+    return "";
+}
+
+// Check if the element's value is empty for constraint validation purposes.
+static bool _elem_value_is_empty(DomElement* elem) {
+    return _elem_current_value(elem)[0] == '\0';
+}
+
+// Build and return a ValidityState plain JS object for the given element.
+// --- date/time helpers for constraint validation ---
+
+// Parse "HH:MM[:SS[.mmm]]" to milliseconds since midnight (-1 on error)
+static long long _time_to_ms(const char* t) {
+    if (!t || !*t) return -1;
+    int h = 0, m = 0, s = 0;
+    int parsed = sscanf(t, "%d:%d:%d", &h, &m, &s);
+    if (parsed < 2) return -1;
+    return (long long)h * 3600000 + m * 60000 + s * 1000;
+}
+
+// Parse "YYYY-MM-DD" to days since 1970-01-01 (-9999999 on error)
+static long long _date_to_days(int year, int mon, int day) {
+    int y = year - 1;
+    long long days = 365LL * y + y/4 - y/100 + y/400;
+    static const int dm[] = {0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    days += dm[mon];
+    if (mon > 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)) days++;
+    days += day - 1;
+    return days - 719162LL;  // subtract days before 1970-01-01
+}
+
+static long long _parse_date(const char* s) {
+    if (!s || !*s) return -(1LL<<62);
+    int year = 0, mon = 0, day = 0;
+    if (sscanf(s, "%d-%d-%d", &year, &mon, &day) != 3) return -(1LL<<62);
+    return _date_to_days(year, mon, day);
+}
+
+// Parse "YYYY-MM" to months since 1970-01 (0-based)
+static long long _parse_month(const char* s) {
+    if (!s || !*s) return -(1LL<<62);
+    int year = 0, mon = 0;
+    if (sscanf(s, "%d-%d", &year, &mon) != 2) return -(1LL<<62);
+    return (long long)(year - 1970) * 12 + (mon - 1);
+}
+
+// Parse "YYYY-Www" to a monotonically increasing week index
+static long long _parse_week(const char* s) {
+    if (!s || !*s) return -(1LL<<62);
+    int year = 0, week = 0;
+    if (sscanf(s, "%d-W%d", &year, &week) != 2) return -(1LL<<62);
+    return (long long)(year - 1970) * 53 + (week - 1);
+}
+
+// Parse "YYYY-MM-DDTHH:MM[:SS]" to ms since epoch
+static long long _parse_datetime(const char* s) {
+    if (!s || !*s) return -(1LL<<62);
+    int year = 0, mon = 0, day = 0, h = 0, m = 0, sec = 0;
+    if (sscanf(s, "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &h, &m, &sec) < 5) return -(1LL<<62);
+    long long days = _date_to_days(year, mon, day);
+    return days * 86400000LL + (long long)h * 3600000 + m * 60000 + sec * 1000;
+}
+
+static Item _build_validity_state(DomElement* elem) {
+    Item vs = js_new_object();
+    bool value_missing   = false;
+    bool type_mismatch   = false;
+    bool pattern_mismatch = false;
+    bool too_long        = false; // always false: requires interactive editing
+    bool too_short       = false; // always false: requires interactive editing
+    bool range_overflow  = false;
+    bool range_underflow = false;
+    bool step_mismatch   = false;
+    bool bad_input       = false; // always false in headless
+    bool custom_error    = false;
+
+    if (elem) {
+        // customError
+        if (elem->form && elem->form->custom_validity_msg &&
+            elem->form->custom_validity_msg[0] != '\0') {
+            custom_error = true;
+        }
+
+        const char* tag = elem->tag_name ? elem->tag_name : "";
+        const char* val = _elem_current_value(elem);
+        bool val_empty  = (val[0] == '\0');
+
+        // valueMissing
+        if (dom_element_has_attribute(elem, "required")) {
+            if (strcasecmp(tag, "input") == 0) {
+                const char* itype = js_dom_input_type_lower(elem);
+                if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
+                    value_missing = !js_dom_get_checkedness(elem);
+                } else {
+                    value_missing = val_empty;
+                }
+            } else {
+                value_missing = val_empty;
+            }
+        }
+
+        // typeMismatch: email / url with non-empty invalid value
+        if (!val_empty && strcasecmp(tag, "input") == 0) {
+            const char* itype = js_dom_input_type_lower(elem);
+            if (strcmp(itype, "email") == 0) {
+                // simple email check: must contain @
+                type_mismatch = (strchr(val, '@') == nullptr);
+            } else if (strcmp(itype, "url") == 0) {
+                // simple url check: must start with a scheme like https:// or http://
+                type_mismatch = !(strncmp(val, "http://", 7) == 0 ||
+                                  strncmp(val, "https://", 8) == 0 ||
+                                  strncmp(val, "ftp://", 6) == 0 ||
+                                  strncmp(val, "ftps://", 7) == 0 ||
+                                  strncmp(val, "file://", 7) == 0 ||
+                                  strncmp(val, "blob:", 5) == 0 ||
+                                  strncmp(val, "data:", 5) == 0);
+            }
+        }
+
+        // patternMismatch: pattern attr + non-empty value + regex doesn't match
+        if (!val_empty && !type_mismatch && strcasecmp(tag, "input") == 0) {
+            const char* pattern = dom_element_get_attribute(elem, "pattern");
+            if (pattern && *pattern) {
+                // HTML pattern anchors the whole value (^(?:pattern)$)
+                // Build anchored pattern
+                size_t plen = strlen(pattern);
+                char* full_pattern = (char*)malloc(plen + 8);
+                if (full_pattern) {
+                    snprintf(full_pattern, plen + 8, "^(?:%s)$", pattern);
+                    Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
+                    free(full_pattern);
+                    Item val_item = (Item){.item = s2it(heap_create_name(val))};
+                    Item result = js_regex_test(re, val_item);
+                    // pattern mismatch if regex does NOT match
+                    pattern_mismatch = !((result.item & 0xFF) != 0 && result.item != ITEM_NULL);
+                }
+            }
+        }
+
+        // rangeOverflow / rangeUnderflow: number input type only (simplified)
+        if (!val_empty && strcasecmp(tag, "input") == 0) {
+            const char* itype = js_dom_input_type_lower(elem);
+            if (strcmp(itype, "number") == 0 || strcmp(itype, "range") == 0) {
+                char* end_ptr = nullptr;
+                double dval = strtod(val, &end_ptr);
+                if (end_ptr != val && *end_ptr == '\0') { // valid number
+                    const char* max_attr = dom_element_get_attribute(elem, "max");
+                    if (max_attr && *max_attr) {
+                        double dmax = strtod(max_attr, &end_ptr);
+                        if (end_ptr != max_attr) range_overflow = (dval > dmax);
+                    }
+                    const char* min_attr = dom_element_get_attribute(elem, "min");
+                    if (min_attr && *min_attr) {
+                        double dmin = strtod(min_attr, &end_ptr);
+                        if (end_ptr != min_attr) range_underflow = (dval < dmin);
+                    }
+                    // stepMismatch: if step attr set and value doesn't align
+                    const char* step_attr = dom_element_get_attribute(elem, "step");
+                    if (step_attr && strcmp(step_attr, "any") != 0 && *step_attr) {
+                        double dstep = strtod(step_attr, &end_ptr);
+                        if (end_ptr != step_attr && dstep > 0) {
+                            const char* min_attr2 = dom_element_get_attribute(elem, "min");
+                            double base = (min_attr2 && *min_attr2) ? strtod(min_attr2, nullptr) : 0.0;
+                            double remainder = fmod(dval - base, dstep);
+                            if (remainder < 0) remainder += dstep;
+                            step_mismatch = (remainder > 1e-10 && (dstep - remainder) > 1e-10);
+                        }
+                    }
+                }
+            } else if (strcmp(itype, "date") == 0) {
+                // ISO date strings are lexicographically ordered, so string compare works
+                const char* max_a = dom_element_get_attribute(elem, "max");
+                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
+                const char* min_a = dom_element_get_attribute(elem, "min");
+                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
+                const char* step_a = dom_element_get_attribute(elem, "step");
+                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
+                    char* ep = nullptr;
+                    long long step_days = (long long)strtod(step_a, &ep);
+                    if (ep != step_a && step_days > 0) {
+                        long long vdays = _parse_date(val);
+                        long long base_days = min_a && *min_a ? _parse_date(min_a) : 0LL;
+                        if (vdays != -(1LL<<62) && base_days != -(1LL<<62)) {
+                            long long rem = (vdays - base_days) % step_days;
+                            if (rem < 0) rem += step_days;
+                            step_mismatch = (rem != 0);
+                        }
+                    }
+                }
+            } else if (strcmp(itype, "month") == 0) {
+                const char* max_a = dom_element_get_attribute(elem, "max");
+                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
+                const char* min_a = dom_element_get_attribute(elem, "min");
+                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
+                const char* step_a = dom_element_get_attribute(elem, "step");
+                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
+                    char* ep = nullptr;
+                    long long step_mon = (long long)strtod(step_a, &ep);
+                    if (ep != step_a && step_mon > 0) {
+                        long long vmon = _parse_month(val);
+                        long long base_mon = min_a && *min_a ? _parse_month(min_a) : 0LL;
+                        if (vmon != -(1LL<<62) && base_mon != -(1LL<<62)) {
+                            long long rem = (vmon - base_mon) % step_mon;
+                            if (rem < 0) rem += step_mon;
+                            step_mismatch = (rem != 0);
+                        }
+                    }
+                }
+            } else if (strcmp(itype, "week") == 0) {
+                const char* max_a = dom_element_get_attribute(elem, "max");
+                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
+                const char* min_a = dom_element_get_attribute(elem, "min");
+                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
+                const char* step_a = dom_element_get_attribute(elem, "step");
+                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
+                    char* ep = nullptr;
+                    long long step_wk = (long long)strtod(step_a, &ep);
+                    if (ep != step_a && step_wk > 0) {
+                        long long vwk = _parse_week(val);
+                        long long base_wk = min_a && *min_a ? _parse_week(min_a) : 0LL;
+                        if (vwk != -(1LL<<62) && base_wk != -(1LL<<62)) {
+                            long long rem = (vwk - base_wk) % step_wk;
+                            if (rem < 0) rem += step_wk;
+                            step_mismatch = (rem != 0);
+                        }
+                    }
+                }
+            } else if (strcmp(itype, "time") == 0) {
+                // lexicographic compare works for HH:MM:SS format
+                const char* max_a = dom_element_get_attribute(elem, "max");
+                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
+                const char* min_a = dom_element_get_attribute(elem, "min");
+                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
+                const char* step_a = dom_element_get_attribute(elem, "step");
+                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
+                    char* ep = nullptr;
+                    long long step_ms = (long long)strtod(step_a, &ep);
+                    if (ep != step_a && step_ms > 0) {
+                        long long vms = _time_to_ms(val);
+                        long long base_ms = min_a && *min_a ? _time_to_ms(min_a) : 0LL;
+                        if (vms >= 0 && base_ms >= 0) {
+                            long long rem = (vms - base_ms) % step_ms;
+                            if (rem < 0) rem += step_ms;
+                            step_mismatch = (rem != 0);
+                        }
+                    }
+                }
+            } else if (strcmp(itype, "datetime-local") == 0) {
+                const char* max_a = dom_element_get_attribute(elem, "max");
+                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
+                const char* min_a = dom_element_get_attribute(elem, "min");
+                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
+                const char* step_a = dom_element_get_attribute(elem, "step");
+                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
+                    char* ep = nullptr;
+                    long long step_ms = (long long)strtod(step_a, &ep);
+                    if (ep != step_a && step_ms > 0) {
+                        long long vms = _parse_datetime(val);
+                        long long base_ms = min_a && *min_a ? _parse_datetime(min_a) : 0LL;
+                        if (vms != -(1LL<<62) && base_ms != -(1LL<<62)) {
+                            long long rem = (vms - base_ms) % step_ms;
+                            if (rem < 0) rem += step_ms;
+                            step_mismatch = (rem != 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    bool valid = !(value_missing || type_mismatch || pattern_mismatch || too_long ||
+                   too_short || range_overflow || range_underflow || step_mismatch ||
+                   bad_input || custom_error);
+
+    auto _b = [](bool v) -> Item { return (Item){.item = b2it(v)}; };
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("valueMissing"))},    _b(value_missing));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("typeMismatch"))},    _b(type_mismatch));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("patternMismatch"))}, _b(pattern_mismatch));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("tooLong"))},         _b(too_long));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("tooShort"))},        _b(too_short));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("rangeOverflow"))},   _b(range_overflow));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("rangeUnderflow"))},  _b(range_underflow));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("stepMismatch"))},    _b(step_mismatch));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("badInput"))},        _b(bad_input));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("customError"))},     _b(custom_error));
+    js_property_set(vs, (Item){.item = s2it(heap_create_name("valid"))},           _b(valid));
+    return vs;
+}
+
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under MAP_KIND_DOM and route here.
     if (js_dom_item_is_range(elem_item))
@@ -3339,6 +3694,221 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         }
     }
 
+    // ------------------------------------------------------------------
+    // F-0: IDL attribute reflection for form elements
+    // ------------------------------------------------------------------
+
+    // F-1: HTMLFormElement.elements — snapshot array of listed form controls
+    if (_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
+        Item arr = js_array_new(0);
+        // Walk descendants collecting listed controls
+        std::function<void(DomNode*)> collect = [&](DomNode* node) {
+            while (node) {
+                if (node->is_element()) {
+                    DomElement* ce = (DomElement*)node;
+                    const char* ctag = ce->tag_name ? ce->tag_name : "";
+                    if (strcasecmp(ctag, "input") == 0 || strcasecmp(ctag, "button") == 0 ||
+                        strcasecmp(ctag, "select") == 0 || strcasecmp(ctag, "textarea") == 0 ||
+                        strcasecmp(ctag, "object") == 0) {
+                        js_array_push(arr, js_dom_wrap_element(ce));
+                    }
+                    collect(ce->first_child);
+                }
+                node = node->next_sibling;
+            }
+        };
+        collect(elem->first_child);
+        return arr;
+    }
+    // F-1: HTMLFormElement.length → number of listed controls
+    if (_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
+        int count = 0;
+        std::function<void(DomNode*)> count_ctrl = [&](DomNode* node) {
+            while (node) {
+                if (node->is_element()) {
+                    DomElement* ce = (DomElement*)node;
+                    const char* ctag = ce->tag_name ? ce->tag_name : "";
+                    if (strcasecmp(ctag, "input") == 0 || strcasecmp(ctag, "button") == 0 ||
+                        strcasecmp(ctag, "select") == 0 || strcasecmp(ctag, "textarea") == 0) {
+                        count++;
+                    }
+                    count_ctrl(ce->first_child);
+                }
+                node = node->next_sibling;
+            }
+        };
+        count_ctrl(elem->first_child);
+        return (Item){.item = i2it((int64_t)count)};
+    }
+
+    // Helper: read a non-negative integer attr; return default_val if absent/invalid
+    auto _reflect_int_attr = [&](const char* attr_name, int default_val) -> int {
+        const char* v = dom_element_get_attribute(elem, attr_name);
+        if (!v) return default_val;
+        char* end = nullptr;
+        long n = strtol(v, &end, 10);
+        return (end != v && n >= 0) ? (int)n : default_val; // INT_CAST_OK: attribute integer value
+    };
+
+    // Boolean reflection: required, multiple, readOnly/readonly, noValidate
+    if (strcmp(prop, "required") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "required"))};
+    }
+    if (strcmp(prop, "multiple") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "select"))) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "multiple"))};
+    }
+    if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
+        (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "readonly"))};
+    }
+    if (strcmp(prop, "noValidate") == 0 && _is_tag(elem, "form")) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "novalidate"))};
+    }
+    // name attribute (all listed form controls and form/fieldset)
+    if (strcmp(prop, "name") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "button") || _is_tag(elem, "select") ||
+         _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
+         _is_tag(elem, "output") || _is_tag(elem, "object"))) {
+        const char* v = dom_element_get_attribute(elem, "name");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // type for button (default "submit"; only valid values: "submit","reset","button")
+    if (strcmp(prop, "type") == 0 && _is_tag(elem, "button")) {
+        const char* v = dom_element_get_attribute(elem, "type");
+        if (v && (strcasecmp(v, "submit") == 0 || strcasecmp(v, "reset") == 0 || strcasecmp(v, "button") == 0)) {
+            char buf[8];
+            for (int i = 0; v[i] && i < 7; i++) buf[i] = (char)tolower((unsigned char)v[i]), buf[i+1] = '\0';
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+        return (Item){.item = s2it(heap_create_name("submit"))};
+    }
+    // placeholder (input, textarea)
+    if (strcmp(prop, "placeholder") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
+        const char* v = dom_element_get_attribute(elem, "placeholder");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // autocomplete (form, input, select, textarea)
+    if (strcmp(prop, "autocomplete") == 0 &&
+        (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
+        const char* v = dom_element_get_attribute(elem, "autocomplete");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // pattern, min, max, step, accept (input only — simple string reflection)
+    if (_is_tag(elem, "input") &&
+        (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 || strcmp(prop, "max") == 0 ||
+         strcmp(prop, "step") == 0 || strcmp(prop, "accept") == 0)) {
+        const char* v = dom_element_get_attribute(elem, prop);
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
+    if (_is_tag(elem, "form")) {
+        if (strcmp(prop, "action") == 0 || strcmp(prop, "target") == 0) {
+            const char* v = dom_element_get_attribute(elem, prop);
+            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        }
+        if (strcmp(prop, "method") == 0) {
+            const char* v = dom_element_get_attribute(elem, "method");
+            if (v) {
+                if (strcasecmp(v, "post") == 0) return (Item){.item = s2it(heap_create_name("post"))};
+                if (strcasecmp(v, "dialog") == 0) return (Item){.item = s2it(heap_create_name("dialog"))};
+            }
+            return (Item){.item = s2it(heap_create_name("get"))};
+        }
+        if (strcmp(prop, "enctype") == 0 || strcmp(prop, "encoding") == 0) {
+            const char* v = dom_element_get_attribute(elem, "enctype");
+            if (v) {
+                if (strcasecmp(v, "multipart/form-data") == 0)
+                    return (Item){.item = s2it(heap_create_name("multipart/form-data"))};
+                if (strcasecmp(v, "text/plain") == 0)
+                    return (Item){.item = s2it(heap_create_name("text/plain"))};
+            }
+            return (Item){.item = s2it(heap_create_name("application/x-www-form-urlencoded"))};
+        }
+        if (strcmp(prop, "acceptCharset") == 0) {
+            const char* v = dom_element_get_attribute(elem, "accept-charset");
+            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        }
+    }
+    // HTMLTextAreaElement: wrap (default "soft"), rows (default 2), cols (default 20)
+    if (_is_tag(elem, "textarea")) {
+        if (strcmp(prop, "wrap") == 0) {
+            const char* v = dom_element_get_attribute(elem, "wrap");
+            return (Item){.item = s2it(heap_create_name(v ? v : "soft"))};
+        }
+        if (strcmp(prop, "rows") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("rows", 2))};
+        }
+        if (strcmp(prop, "cols") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("cols", 20))};
+        }
+        if (strcmp(prop, "maxLength") == 0) {
+            const char* v = dom_element_get_attribute(elem, "maxlength");
+            if (!v) return (Item){.item = i2it(-1)};
+            char* end = nullptr; long n = strtol(v, &end, 10);
+            return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
+        }
+        if (strcmp(prop, "minLength") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("minlength", 0))};
+        }
+    }
+    // HTMLInputElement: maxLength (default -1), minLength (default 0), size (default 20)
+    if (_is_tag(elem, "input")) {
+        if (strcmp(prop, "maxLength") == 0) {
+            const char* v = dom_element_get_attribute(elem, "maxlength");
+            if (!v) return (Item){.item = i2it(-1)};
+            char* end = nullptr; long n = strtol(v, &end, 10);
+            return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
+        }
+        if (strcmp(prop, "minLength") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("minlength", 0))};
+        }
+        if (strcmp(prop, "size") == 0) {
+            return (Item){.item = i2it(_reflect_int_attr("size", 20))};
+        }
+    }
+    // HTMLSelectElement: size (default 0 unless multiple, but 0 is spec default)
+    if (_is_tag(elem, "select") && strcmp(prop, "size") == 0) {
+        return (Item){.item = i2it(_reflect_int_attr("size", 0))};
+    }
+
+    // ------------------------------------------------------------------
+    // F-4: Constraint Validation API property getters
+    // ------------------------------------------------------------------
+    // willValidate: true if element is a candidate for constraint validation
+    if (strcmp(prop, "willValidate") == 0) {
+        bool is_form_ctrl = elem->tag_name && (
+            strcasecmp(elem->tag_name, "input") == 0 ||
+            strcasecmp(elem->tag_name, "select") == 0 ||
+            strcasecmp(elem->tag_name, "textarea") == 0 ||
+            strcasecmp(elem->tag_name, "button") == 0);
+        if (!is_form_ctrl) return (Item){.item = ITEM_FALSE};
+        return (Item){.item = b2it(!_elem_is_barred(elem))};
+    }
+    // validity: returns a ValidityState object
+    if (strcmp(prop, "validity") == 0) {
+        return _build_validity_state(elem);
+    }
+    // validationMessage: custom validity message or empty string
+    if (strcmp(prop, "validationMessage") == 0) {
+        // Barred elements (disabled, readonly, etc.) always have empty validationMessage
+        bool is_form_ctrl = elem->tag_name && (
+            strcasecmp(elem->tag_name, "input") == 0 ||
+            strcasecmp(elem->tag_name, "select") == 0 ||
+            strcasecmp(elem->tag_name, "textarea") == 0 ||
+            strcasecmp(elem->tag_name, "button") == 0);
+        if (!is_form_ctrl || _elem_is_barred(elem)) {
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
+        if (elem->form && elem->form->custom_validity_msg &&
+            elem->form->custom_validity_msg[0] != '\0') {
+            return (Item){.item = s2it(heap_create_name(elem->form->custom_validity_msg))};
+        }
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
     // fall back to native element attribute access
     if (elem->native_element) {
         const char* attr_val = dom_element_get_attribute(elem, prop);
@@ -3362,6 +3932,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "append", "prepend", "getClientRects", "focus", "blur",
         "toString",
         "setSelectionRange", "select",
+        "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
+        "setCustomValidity",
         NULL
     };
     for (int i = 0; dom_methods[i]; i++) {
@@ -3649,7 +4221,36 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         RadiantState* tc_st = js_dom_current_state();
         if (strcmp(prop, "value") == 0) {
             const char* s = fn_to_cstr(value);
-            tc_set_value(elem, s ? s : "", s ? strlen(s) : 0);
+            if (!s) s = "";
+            // Per HTML spec §4.10.6: for single-line text controls (not textarea),
+            // strip CR and LF from the value before storing.
+            if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
+                const char* itype = _input_type_lower(elem);
+                bool single_line = strcmp(itype, "text") == 0 || strcmp(itype, "search") == 0 ||
+                                   strcmp(itype, "tel") == 0 || strcmp(itype, "url") == 0 ||
+                                   strcmp(itype, "email") == 0 || strcmp(itype, "password") == 0;
+                if (single_line) {
+                    // strip CR and LF
+                    size_t slen = strlen(s);
+                    bool has_newline = false;
+                    for (size_t k = 0; k < slen; k++) { if (s[k] == '\r' || s[k] == '\n') { has_newline = true; break; } }
+                    if (has_newline) {
+                        char* stripped = (char*)malloc(slen + 1);
+                        if (stripped) {
+                            size_t out = 0;
+                            for (size_t k = 0; k < slen; k++) {
+                                if (s[k] != '\r' && s[k] != '\n') stripped[out++] = s[k];
+                            }
+                            stripped[out] = '\0';
+                            tc_set_value(elem, stripped, out);
+                            free(stripped);
+                            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+                            return value;
+                        }
+                    }
+                }
+            }
+            tc_set_value(elem, s, strlen(s));
             if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
@@ -3711,7 +4312,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         }
     }
 
-    // also reflect to HTML attributes for string/bool values
+    // also reflect to HTML attributes for string/bool/number values
     if (val_type == LMD_TYPE_BOOL) {
         bool is_true = (value.item & 0xFF) != 0;
         if (is_true) {
@@ -3722,8 +4323,21 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         js_dom_mutation_notify();
         return value;
     }
-    const char* val_str = fn_to_cstr(value);
-    if (val_str) {
+    char nbuf[64];
+    const char* val_str = nullptr;
+    if (val_type == LMD_TYPE_INT) {
+        snprintf(nbuf, sizeof(nbuf), "%lld", (long long)it2i(value));
+        val_str = nbuf;
+    } else if (val_type == LMD_TYPE_FLOAT) {
+        double dv = it2d(value);
+        long long iv = (long long)dv;
+        if ((double)iv == dv) snprintf(nbuf, sizeof(nbuf), "%lld", iv);
+        else snprintf(nbuf, sizeof(nbuf), "%g", dv);
+        val_str = nbuf;
+    } else {
+        val_str = fn_to_cstr(value);
+    }
+    if (val_str && *val_str) {
         dom_element_set_attribute(elem, prop, val_str);
         js_dom_mutation_notify();
     }
@@ -4249,15 +4863,59 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     // cloneNode(deep) — clone element (and optionally children)
     if (strcmp(method, "cloneNode") == 0) {
         bool deep = (argc > 0) ? js_is_truthy(args[0]) : false;
-        // create a new element with same tag
-        DomElement* clone = dom_element_create(elem->doc, elem->tag_name, elem->native_element);
+        // create a new element with its own independent native_element.
+        // Passing elem->native_element causes a shallow copy that shares the
+        // data buffer; a subsequent removeAttribute on the clone would free
+        // that shared buffer and leave the original with a dangling pointer.
+        // Instead, create a clean element via MarkBuilder (same approach as
+        // createElement) and then copy each content attribute individually.
+        MarkBuilder _clone_builder(elem->doc->input);
+        Item _clean_elem = _clone_builder.element(elem->tag_name).final();
+        DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
         if (!clone) return ItemNull;
+        // copy all content attributes from original to clone (per DOM spec §4.6)
+        if (elem->native_element) {
+            int attr_count = 0;
+            const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+            for (int _ai = 0; _ai < attr_count; _ai++) {
+                const char* aname = attr_names[_ai];
+                const char* aval  = dom_element_get_attribute(elem, aname);
+                if (aval) dom_element_set_attribute(clone, aname, aval);
+            }
+        }
+        // also copy IDL-set attributes stored in expando that may not be in
+        // native_element yet (e.g. ele.type="url" on a fresh createElement)
+        {
+            Item orig_expando = expando_get_map((DomNode*)elem);
+            if (orig_expando.item != ITEM_NULL) {
+                Item clone_expando = expando_get_or_create_map((DomNode*)clone);
+                if (clone_expando.item != ITEM_NULL) {
+                    // walk the expando map's shape to copy string/scalar entries
+                    Map* em = orig_expando.map;
+                    if (em && em->type) {
+                        TypeMap* em_type = (TypeMap*)em->type;
+                        ShapeEntry* se = em_type->shape;
+                        while (se) {
+                            if (se->name && se->name->str) {
+                                const char* ek = se->name->str;
+                                Item ev = js_property_get(orig_expando,
+                                    (Item){.item = s2it(heap_create_name(ek))});
+                                if (ev.item != ITEM_NULL && !is_js_undefined(ev)) {
+                                    js_property_set(clone_expando,
+                                        (Item){.item = s2it(heap_create_name(ek))}, ev);
+                                }
+                            }
+                            se = se->next;
+                        }
+                    }
+                }
+            }
+        }
         // copy id and class
         clone->id = elem->id;
         clone->class_names = elem->class_names;
         clone->class_count = elem->class_count;
         clone->tag_id = elem->tag_id;
-        // copy attributes via native element
         // deep clone: recursively clone children
         if (deep) {
             DomNode* child = elem->first_child;
@@ -4729,7 +5387,96 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return make_js_undefined();
     }
 
+    // ----------------------------------------------------------------
+    // F-4: Constraint Validation methods
+    // ----------------------------------------------------------------
+
+    // setCustomValidity(message): store custom validity message
+    if (strcmp(method, "setCustomValidity") == 0) {
+        FormControlProp* f = tc_get_or_create_form(elem);
+        const char* msg = (argc > 0) ? fn_to_cstr(args[0]) : "";
+        if (!msg) msg = "";
+        if (f->custom_validity_msg) { free(f->custom_validity_msg); }
+        f->custom_validity_msg = strdup(msg);
+        return make_js_undefined();
+    }
+
+    // checkValidity(): fire invalid event if not valid, return bool
+    if (strcmp(method, "checkValidity") == 0) {
+        // form.checkValidity(): check all listed form controls
+        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+            bool all_valid = true;
+            std::function<void(DomNode*)> check_all = [&](DomNode* node) {
+                while (node) {
+                    if (node->is_element()) {
+                        DomElement* ce = (DomElement*)node;
+                        if (ce->tag_name && !_elem_is_barred(ce) &&
+                            (strcasecmp(ce->tag_name, "input") == 0 ||
+                             strcasecmp(ce->tag_name, "select") == 0 ||
+                             strcasecmp(ce->tag_name, "textarea") == 0 ||
+                             strcasecmp(ce->tag_name, "button") == 0)) {
+                            Item vs = _build_validity_state(ce);
+                            Item vf = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+                            if (!((vf.item & 0xFF) != 0 && vf.item != ITEM_NULL)) {
+                                all_valid = false;
+                                Item cev = js_new_object();
+                                js_property_set(cev, (Item){.item = s2it(heap_create_name("type"))},
+                                                (Item){.item = s2it(heap_create_name("invalid"))});
+                                js_dom_dispatch_event(js_dom_wrap_element(ce), cev);
+                            }
+                        }
+                        check_all(ce->first_child);
+                    }
+                    node = node->next_sibling;
+                }
+            };
+            check_all(elem->first_child);
+            return (Item){.item = b2it(all_valid)};
+        }
+        // barred elements are always valid
+        if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
+        Item vs = _build_validity_state(elem);
+        Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+        bool is_valid = ((valid_flag.item & 0xFF) != 0 && valid_flag.item != ITEM_NULL);
+        if (!is_valid) {
+            // fire "invalid" event (not bubbles, not cancelable)
+            Item ev_obj = js_new_object();
+            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
+                            (Item){.item = s2it(heap_create_name("invalid"))});
+            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("bubbles"))},
+                            (Item){.item = ITEM_FALSE});
+            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
+                            (Item){.item = ITEM_FALSE});
+            js_dom_dispatch_event(elem_item, ev_obj);
+        }
+        return (Item){.item = b2it(is_valid)};
+    }
+
+    // reportValidity(): same as checkValidity() in headless (no UI feedback)
+    if (strcmp(method, "reportValidity") == 0) {
+        if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+            // delegate to checkValidity for forms
+            Item check_args[0];
+            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, check_args, 0);
+        }
+        if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
+        Item vs = _build_validity_state(elem);
+        Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
+        bool is_valid = ((valid_flag.item & 0xFF) != 0 && valid_flag.item != ITEM_NULL);
+        if (!is_valid) {
+            Item ev_obj = js_new_object();
+            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
+                            (Item){.item = s2it(heap_create_name("invalid"))});
+            js_dom_dispatch_event(elem_item, ev_obj);
+        }
+        return (Item){.item = b2it(is_valid)};
+    }
+
     log_debug("js_dom_element_method: unknown method '%s'", method);
+    // HTMLSelectElement.add(option) — silently accept and ignore (options not tracked)
+    if (strcmp(method, "add") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        return ItemNull;
+    }
     return ItemNull;
 }
 
