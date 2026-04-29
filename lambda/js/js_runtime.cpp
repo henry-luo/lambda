@@ -15705,6 +15705,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
 
     // Fallback: property access + call
+    // DOM element methods: dispatch to js_dom_element_method before property fallback
+    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
+        (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
+        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
+        return js_dom_element_method(obj, method_name, args, argc);
+    }
     Item fn = js_property_access(obj, method_name);
     // v37: Check for pending exception (e.g., private brand check TypeError)
     if (js_check_exception()) return ItemNull;

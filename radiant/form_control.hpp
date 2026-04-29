@@ -179,6 +179,11 @@ struct FormControlProp {
     // list; nullptr otherwise.
     DomElement* tc_sc_next_pending;
 
+    // Constraint Validation API (§4.10.20)
+    // Custom validity error message set via setCustomValidity(msg).
+    // nullptr or "" means no custom error.
+    char* custom_validity_msg;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -192,10 +197,12 @@ struct FormControlProp {
         current_value(nullptr), current_value_len(0), current_value_u16_len(0),
         selection_start(0), selection_end(0), selection_direction(0),
         tc_initialized(0), tc_sc_pending(0),
-        tc_sc_next_pending(nullptr) {}
+        tc_sc_next_pending(nullptr),
+        custom_validity_msg(nullptr) {}
 
     ~FormControlProp() {
         if (current_value) { free(current_value); current_value = nullptr; }
+        if (custom_validity_msg) { free(custom_validity_msg); custom_validity_msg = nullptr; }
     }
 };
 

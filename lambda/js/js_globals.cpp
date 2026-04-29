@@ -10294,6 +10294,17 @@ extern "C" Item js_stub_constructor(Item arg) {
     return js_new_object();
 }
 
+// Option(text, value, defaultSelected, selected) — HTMLOptionElement constructor stub
+extern "C" Item js_option_new(Item text_arg, Item value_arg) {
+    // create a minimal option object
+    Item obj = js_new_object();
+    const char* text = fn_to_cstr(text_arg);
+    const char* val  = fn_to_cstr(value_arg);
+    if (text) js_property_set(obj, make_string_item("text"),  make_string_item(text));
+    if (val)  js_property_set(obj, make_string_item("value"), make_string_item(val));
+    return obj;
+}
+
 // DOMException(message, nameOrOptions) constructor
 extern "C" Item js_domexception_new(Item message, Item name_arg) {
     Item obj = js_new_object();
@@ -10767,6 +10778,14 @@ extern "C" Item js_get_global_this() {
             js_property_set(ctor, make_string_item("prototype"), proto);
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("DOMException", 12))}, ctor);
+        }
+
+        // globalThis.Option constructor (HTMLOptionElement)
+        {
+            extern Item js_option_new(Item text, Item value);
+            js_property_set(js_global_this_obj,
+                (Item){.item = s2it(heap_create_name("Option", 6))},
+                js_new_function((void*)js_option_new, 2));
         }
 
         // Web Clipboard / Blob / File / ClipboardItem / ClipboardEvent /
