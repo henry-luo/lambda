@@ -1237,6 +1237,58 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     return prevented;
 }
 
+/**
+ * §7 unification (U-4): dispatch focus/blur/focusin/focusout via the JS
+ * EventTarget pipeline. Per spec, focus and blur do not bubble; focusin
+ * and focusout do — `js_create_native_focus_event` sets bubbles accordingly.
+ */
+static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
+                                         const char* type, View* related)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item rel = ItemNull;
+    if (related) {
+        DomElement* rel_el = radiant_view_to_dom_element(related);
+        if (rel_el) rel = js_dom_wrap_element(rel_el);
+    }
+    Item ev = js_create_native_focus_event(type, rel);
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+}
+
+/**
+ * §7 unification (U-5): dispatch a "wheel" event via the JS EventTarget
+ * pipeline. Returns true if default action (native scroll) should be
+ * suppressed (event.preventDefault()).
+ */
+static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
+                                         int client_x, int client_y,
+                                         double delta_x, double delta_y,
+                                         int mods)
+{
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return false;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item ev = js_create_native_wheel_event("wheel", client_x, client_y,
+        delta_x, delta_y, 0,
+        (mods & RDT_MOD_CTRL) != 0,
+        (mods & RDT_MOD_SHIFT) != 0,
+        (mods & RDT_MOD_ALT) != 0,
+        (mods & RDT_MOD_SUPER) != 0);
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    bool prevented = js_event_is_default_prevented(ev);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
+    return prevented;
+}
+
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
@@ -2102,7 +2154,13 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
-            dispatch_html_event_handler(evcon, prev_focus, "blur");
+            bool blur_inline_fired = dispatch_html_event_handler(evcon, prev_focus, "blur");
+            // §7 unification (U-4): bridge dispatch when no inline handler.
+            if (!blur_inline_fired) {
+                radiant_dispatch_focus_event(evcon, prev_focus, "blur", new_focus);
+            }
+            // focusout always bubbles via JS bridge (not legacy inline)
+            radiant_dispatch_focus_event(evcon, prev_focus, "focusout", new_focus);
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
@@ -2114,7 +2172,13 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         sync_pseudo_state(new_focus, PSEUDO_STATE_FOCUS, true);
 
         // Dispatch HTML onfocus handler if registered
-        dispatch_html_event_handler(evcon, new_focus, "focus");
+        bool focus_inline_fired = dispatch_html_event_handler(evcon, new_focus, "focus");
+        // §7 unification (U-4): bridge dispatch when no inline handler.
+        if (!focus_inline_fired) {
+            radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
+        }
+        // focusin always bubbles via JS bridge
+        radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
 
         // Set :focus-visible only for keyboard navigation
         if (from_keyboard) {
@@ -2132,7 +2196,12 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         if (prev_focus) {
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
-            dispatch_html_event_handler(evcon, prev_focus, "blur");
+            bool blur_inline_fired = dispatch_html_event_handler(evcon, prev_focus, "blur");
+            // §7 unification (U-4): bridge dispatch when no inline handler.
+            if (!blur_inline_fired) {
+                radiant_dispatch_focus_event(evcon, prev_focus, "blur", nullptr);
+            }
+            radiant_dispatch_focus_event(evcon, prev_focus, "focusout", nullptr);
 
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
@@ -3746,6 +3815,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            // §7 unification (U-5): dispatch "wheel" via JS bridge before
+            // native scroll. preventDefault() suppresses the native scroll.
+            bool wheel_prevented = false;
+            if (!dispatch_html_event_handler(&evcon, evcon.target, "wheel")) {
+                wheel_prevented = radiant_dispatch_wheel_event(&evcon, evcon.target,
+                    mouse_x, mouse_y,
+                    -(double)scroll->xoffset * 100.0,
+                    -(double)scroll->yoffset * 100.0,
+                    0);
+            }
+            if (wheel_prevented) {
+                log_debug("wheel default suppressed by preventDefault()");
+                break;
+            }
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
