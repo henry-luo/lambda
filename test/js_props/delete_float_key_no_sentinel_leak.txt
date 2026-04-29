@@ -1,0 +1,4 @@
+99
+undefined
+42
+OK

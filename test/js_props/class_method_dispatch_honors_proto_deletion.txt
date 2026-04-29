@@ -1,0 +1,4 @@
+hello-animal
+true
+hello-object
+OK

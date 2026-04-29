@@ -20182,6 +20182,23 @@ extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
 extern "C" Item js_get_prototype(Item object) {
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
     Map* m = object.map;
+    // ES [[GetPrototypeOf]] is an internal slot — independent of any user-
+    // defined __proto__ accessor on Object.prototype. If the own __proto__
+    // slot has been redefined via Object.defineProperty as an accessor (e.g.
+    // `Object.defineProperty(Object.prototype, '__proto__', { set: ... })`),
+    // the slot now holds a `JsAccessorPair*` raw pointer; treating it as a
+    // prototype Item causes a bus error during chain walks. Detect this and
+    // skip — the [[Prototype]] internal slot is conceptually unaffected by
+    // the user's accessor redefinition. See test/js_props/proto_accessor_redef_safe.js.
+    ShapeEntry* proto_se = js_find_shape_entry(object, PROTO_KEY, PROTO_KEY_LEN);
+    if (proto_se && jspd_is_accessor(proto_se)) {
+        // Accessor on __proto__ — internal [[Prototype]] is unknown via this
+        // slot. For the special case of Object.prototype itself, the parent
+        // is null (top of chain). For other objects we can't recover the
+        // hidden prototype; returning ItemNull is the safe fallback that
+        // preserves [[GetPrototypeOf]] semantics for the proto-walk consumers.
+        return ItemNull;
+    }
     // P10f+P10d: direct first-match lookup with interned key
     Item proto = js_map_get_fast(m, PROTO_KEY, PROTO_KEY_LEN);
     // TypedArray instances don't store __proto__; use per-type prototype
