@@ -4356,19 +4356,9 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // check accessor markers (__get_ / __set_) — either presence means own accessor property
-            char getter_key[64];
-            snprintf(getter_key, sizeof(getter_key), "__get_%s", sym_buf);
-            int gk_len = (int)strlen(getter_key);
-            bool getter_found = false;
-            js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
-            if (getter_found) return (Item){.item = b2it(true)};
-            char setter_key[64];
-            snprintf(setter_key, sizeof(setter_key), "__set_%s", sym_buf);
-            int sk_len = (int)strlen(setter_key);
-            bool setter_found = false;
-            js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
-            if (setter_found) return (Item){.item = b2it(true)};
+            // Phase-5D: legacy __get_/__set_ symbol-key probes removed.
+            // Bare-name shape entry with IS_ACCESSOR flag is detected by the
+            // own data probe above (own_val is the JsAccessorPair, found=true).
             // walk prototype chain
             Item proto = js_get_prototype(object);
             int depth = 0;
@@ -4379,12 +4369,6 @@ extern "C" Item js_in(Item key, Item object) {
                 bool found = false;
                 Item pval = js_map_get_fast_ext(proto.map, sym_buf, sym_len, &found);
                 if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-                bool gfound = false;
-                js_map_get_fast_ext(proto.map, getter_key, gk_len, &gfound);
-                if (gfound) return (Item){.item = b2it(true)};
-                bool sfound = false;
-                js_map_get_fast_ext(proto.map, setter_key, sk_len, &sfound);
-                if (sfound) return (Item){.item = b2it(true)};
                 proto = js_get_prototype(proto);
                 depth++;
             }
@@ -4419,21 +4403,9 @@ extern "C" Item js_in(Item key, Item object) {
             bool own_found = false;
             Item own_val = js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
             if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            // 2. check accessor markers (__get_<key> / __set_<key>) — setter-only accessors count too
-            if (key_len < 200 && key_len > 0) {
-                char getter_key[256];
-                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
-                int gk_len = key_len + 6;
-                bool getter_found = false;
-                js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
-                if (getter_found) return (Item){.item = b2it(true)};
-                char setter_key[256];
-                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
-                int sk_len = key_len + 6;
-                bool setter_found = false;
-                js_map_get_fast_ext(object.map, setter_key, sk_len, &setter_found);
-                if (setter_found) return (Item){.item = b2it(true)};
-            }
+            // 2. Phase-5D: legacy __get_/__set_ probes removed. Bare-name shape
+            //    entry with IS_ACCESSOR flag is detected by step 1 (own data probe
+            //    finds the JsAccessorPair slot under the bare key).
             // 3. walk prototype chain (data properties + accessors).
             // Use js_get_prototype_of so plain MAPs without explicit __proto__
             // still walk the implicit Object.prototype chain.
@@ -4447,20 +4419,8 @@ extern "C" Item js_in(Item key, Item object) {
                 bool found = false;
                 Item pval = js_map_get_fast_ext(proto.map, key_str, key_len, &found);
                 if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-                if (key_len < 200 && key_len > 0) {
-                    char getter_key[256];
-                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
-                    int gk_len = key_len + 6;
-                    bool getter_found = false;
-                    js_map_get_fast_ext(proto.map, getter_key, gk_len, &getter_found);
-                    if (getter_found) return (Item){.item = b2it(true)};
-                    char setter_key[256];
-                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", key_len, key_str);
-                    int sk_len = key_len + 6;
-                    bool setter_found = false;
-                    js_map_get_fast_ext(proto.map, setter_key, sk_len, &setter_found);
-                    if (setter_found) return (Item){.item = b2it(true)};
-                }
+                // Phase-5D: legacy __get_/__set_ proto-chain probes removed.
+                // IS_ACCESSOR shape entries on protos are found by the data probe above.
                 proto = js_get_prototype_of(proto);
                 depth++;
             }
@@ -5974,21 +5934,12 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             Item check_name = js_to_property_key(name);
             Item has = js_has_own_property(obj, check_name);
             if (!it2b(has)) {
-                // also check accessor properties
-                bool has_accessor = false;
-                if (get_type_id(check_name) == LMD_TYPE_STRING) {
-                    String* ns = it2s(check_name);
-                    char gk[256];
-                    snprintf(gk, sizeof(gk), "__get_%.*s", (int)ns->len, ns->chars);
-                    Item gk_item = (Item){.item = s2it(heap_create_name(gk, strlen(gk)))};
-                    if (it2b(js_has_own_property(obj, gk_item))) has_accessor = true;
-                }
-                if (!has_accessor) {
-                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
-                    Item msg = (Item){.item = s2it(heap_create_name("Cannot define property, object is not extensible"))};
-                    js_throw_value(js_new_error_with_name(tn, msg));
-                    return obj;
-                }
+                // Phase-5D: legacy __get_<name> probe removed. js_has_own_property
+                // already returns true for IS_ACCESSOR shape entries.
+                Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg = (Item){.item = s2it(heap_create_name("Cannot define property, object is not extensible"))};
+                js_throw_value(js_new_error_with_name(tn, msg));
+                return obj;
             }
         }
     }
@@ -8105,18 +8056,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     bool found = false;
     Item val = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &found);
     if (!found) {
-        // v24: Also check for accessor properties (__get_key / __set_key)
-        if (ks->len > 0 && ks->len < 200) {
-            char accessor_key[256];
-            snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
-            bool has_get = false;
-            Item get_val = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_get);
-            if (has_get && get_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
-            bool has_set = false;
-            Item set_val = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_set);
-            if (has_set && set_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-        }
+        // Phase-5D: legacy __get_/__set_ accessor-key probes removed.
+        // IS_ACCESSOR shape entries store under the bare name; the bare-name
+        // probe above returns found=true with a JsAccessorPair-tagged value.
         // v26: check if this is a prototype Map with builtin methods
         if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
         // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
@@ -8146,19 +8088,11 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         return (Item){.item = b2it(false)};
     }
     if (val.item == JS_DELETED_SENTINEL_VAL) {
-        // data slot tombstoned — but an accessor marker may have replaced it
-        // (defineProperty(map, key, {get,set}) sentinels the existing data slot).
-        if (ks->len > 0 && ks->len < 200) {
-            char accessor_key[256];
-            snprintf(accessor_key, sizeof(accessor_key), "__get_%.*s", (int)ks->len, ks->chars);
-            bool has_get = false;
-            Item gv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_get);
-            if (has_get && gv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-            snprintf(accessor_key, sizeof(accessor_key), "__set_%.*s", (int)ks->len, ks->chars);
-            bool has_set = false;
-            Item sv = js_map_get_fast_ext(m, accessor_key, (int)strlen(accessor_key), &has_set);
-            if (has_set && sv.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
-        }
+        // Phase-5D: data slot tombstoned. Legacy __get_/__set_ accessor-marker
+        // probes removed: js_define_accessor_partial replaces the sentinel
+        // with a JsAccessorPair item under the bare name (and sets
+        // IS_ACCESSOR shape flag), so a re-defined accessor would have made
+        // the bare-name fast probe above return found=true with non-sentinel val.
         return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};
@@ -9133,8 +9067,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len > 0 && sk->len < 200) {
-                const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
-                for (int pi = 0; pi < 5; pi++) {
+                const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
+                for (int pi = 0; pi < 3; pi++) {
                     char mk[256];
                     snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)sk->len, sk->chars);
                     Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
