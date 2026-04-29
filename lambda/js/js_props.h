@@ -255,6 +255,64 @@ bool js_get_own_property_descriptor(Item object,
                                      int name_len,
                                      JsPropertyDescriptor* out);
 
+// ---------------------------------------------------------------------------
+// PropertyDescriptor (Stage A2.3 — write-side kernel)
+// ---------------------------------------------------------------------------
+//
+// ES §6.2.5.5 ToPropertyDescriptor — coerce a JS descriptor object into a
+// canonical JsPropertyDescriptor record. Performs the standard validation:
+//   - rejects non-object descriptors (TypeError)
+//   - rejects mixed accessor + data descriptors (TypeError)
+//   - rejects non-callable getter / setter (TypeError)
+// On any TypeError, throws via `js_throw_value` and returns false; *out is
+// left in an unspecified state. On success, returns true with *out
+// populated; HAS_* bits indicate which fields the JS object carried.
+//
+// HAS_WRITABLE / HAS_ENUMERABLE / HAS_CONFIGURABLE are set whenever the key
+// is present in the descriptor object, regardless of value (consistent with
+// `HasProperty(Desc, "writable")` etc. in the spec). The corresponding
+// boolean payload (JS_PD_WRITABLE, JS_PD_ENUMERABLE, configurable bit in
+// flags2) reflects the coerced value.
+//
+// HAS_GET / HAS_SET are set whenever the key is present, even if the value
+// is `undefined` — matching ES2020 ToPropertyDescriptor semantics where an
+// explicit `{get: undefined}` makes the descriptor an accessor descriptor
+// with no getter.
+bool js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
+
+// ES §10.1.6.3 ValidateAndApplyPropertyDescriptor (apply-only).
+//
+// Apply descriptor `pd` to own property (`name`, `name_len`) on `object`.
+// `object` must be LMD_TYPE_MAP, LMD_TYPE_ARRAY, LMD_TYPE_FUNC, or
+// LMD_TYPE_ELEMENT. The kernel performs storage writes only — the caller
+// is responsible for validation (mixed accessor/data, non-configurable
+// invariants, etc.). `is_new_property` controls whether absent attribute
+// fields default to "non-X" (true: set non-* markers for new properties)
+// or are left untouched (false: existing markers preserved per ES spec).
+//
+// Behavior summary:
+//   - HAS_GET | HAS_SET → routes through `js_define_accessor_partial`
+//     (allocates / merges JsAccessorPair, sets IS_ACCESSOR shape flag).
+//   - HAS_VALUE → writes data slot via js_property_set / js_func_init_property,
+//     clears IS_ACCESSOR if the slot was previously an accessor (was_accessor),
+//     and removes legacy __get_/__set_ markers.
+//   - HAS_WRITABLE / HAS_ENUMERABLE / HAS_CONFIGURABLE → write the
+//     corresponding `__nw_X` / `__ne_X` / `__nc_X` markers (set when the
+//     attribute is FALSE, clear when TRUE). For new properties, absent
+//     attributes default to non-* (writable=false, enumerable=false,
+//     configurable=false per ES2020 default descriptor).
+//
+// This is the centralized write kernel for Object.defineProperty,
+// Object.defineProperties, Reflect.defineProperty, and the accessor-install
+// paths. Stage A2.4 will route ValidateAndApplyPropertyDescriptor's storage
+// tail through this; storage layout (legacy markers + JsAccessorPair slots)
+// is unchanged so unmigrated readers continue to work.
+void js_define_own_property_from_descriptor(Item object,
+                                             const char* name,
+                                             int name_len,
+                                             const JsPropertyDescriptor* pd,
+                                             bool is_new_property);
+
 // ES §10.1.9 OrdinarySet (O, P, V, Receiver)
 // int  js_ordinary_set(Item O, Item P, Item V, Item Receiver);
 
