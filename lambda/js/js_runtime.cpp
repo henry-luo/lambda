@@ -12,6 +12,7 @@
 #include "js_event_loop.h"
 #include "js_error_codes.h"
 #include "js_property_attrs.h"
+#include "js_props.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
@@ -5412,46 +5413,29 @@ extern "C" Item js_property_get(Item object, Item key) {
         } else if (kt == LMD_TYPE_UNDEFINED) {
             key = (Item){.item = s2it(heap_create_name("undefined", 9))};
         }
+        // Stage A1.3a: own-property lookup + IS_ACCESSOR getter dispatch is
+        // now centralized in js_ordinary_get_own (lambda/js/js_props.cpp).
+        // The kernel handles deleted-sentinel detection, accessor pair
+        // dispatch with Receiver fallback, setter-only undefined, and the
+        // private-field setter-only TypeError. We track own_found /
+        // own_was_deleted_sentinel separately because the post-own-found
+        // string-wrapper-index probe and the top-of-Object.prototype
+        // deletion semantics below depend on those flags.
         Item result = ItemNull;
         bool own_found = false;
-        if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-            const char* key_str = key.get_chars();
-            int key_len = (int)key.get_len();
-            result = js_map_get_fast(object.map, key_str, key_len, &own_found);
-        } else {
-            result = map_get(object.map, key);  // fallback for non-string keys
-            own_found = (result.item != ItemNull.item);
-        }
         bool own_was_deleted_sentinel = false;
-        if (own_found) {
-            // If property was deleted (sentinel), fall through to getter/prototype
-            if (js_is_deleted_sentinel(result)) { own_was_deleted_sentinel = true; /* deleted — check getter first */ }
-            else {
-                // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot holds
-                // a JsAccessorPair*; dispatch via pair->getter instead of returning slot raw.
-                if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-                    ShapeEntry* _se = js_find_shape_entry(object, key.get_chars(), (int)key.get_len());
-                    if (_se && jspd_is_accessor(_se)) {
-                        JsAccessorPair* pair = js_item_to_accessor_pair(result);
-                        if (pair && pair->getter.item != ItemNull.item) {
-                            Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                            return js_call_function(pair->getter, this_val, NULL, 0);
-                        }
-                        // ES §PrivateFieldGet: setter-only private accessor throws TypeError.
-                        // Public setter-only accessor returns undefined per §9.1.8.1.
-                        const char* kc = key.get_chars();
-                        int kl = (int)key.get_len();
-                        if (kl > 10 && strncmp(kc, "__private_", 10) == 0) {
-                            char msg[256];
-                            snprintf(msg, sizeof(msg), "'#%.*s' was defined without a getter", kl - 10, kc + 10);
-                            return js_throw_type_error(msg);
-                        }
-                        return make_js_undefined();
-                    }
-                }
-                return result;
+        {
+            Item ord_val = ItemNull;
+            Item recv = js_proxy_receiver;
+            JsOwnGetStatus st = js_ordinary_get_own(object, key, recv, &ord_val);
+            if (st == JS_OWN_READY) return ord_val;
+            if (st == JS_OWN_DELETED) {
+                own_found = true;
+                own_was_deleted_sentinel = true;
             }
+            // JS_OWN_NOT_FOUND: own_found stays false; result stays ItemNull.
         }
+
         // String wrapper indexed character access: new String("abc")[0] → "a"
         if (!own_found && key._type_id == LMD_TYPE_STRING) {
             String* sk = it2s(key);
@@ -7135,23 +7119,20 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         }
                     }
                 }
-                // Phase 4: IS_ACCESSOR setter fast-path. Check own + proto chain
-                // for a JsAccessorPair under name X via shape flags. Dispatch
-                // through pair->setter, or throw if accessor has no setter.
-                JsAccessorPair* _ap = js_find_accessor_pair_inheritable(object,
-                                            str_key->chars, (int)str_key->len);
-                if (_ap) {
-                    if (_ap->setter.item != ItemNull.item &&
-                        get_type_id(_ap->setter) == LMD_TYPE_FUNC) {
-                        Item args[1] = { value };
-                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                        js_call_function(_ap->setter, this_val, args, 1);
+                // Stage A1.4: IS_ACCESSOR setter dispatch on own + proto chain
+                // routed through js_ordinary_set_via_accessor.
+                {
+                    Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
+                    JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                        object, str_key->chars, (int)str_key->len, value, recv);
+                    if (st == JS_SET_DISPATCHED) return value;
+                    if (st == JS_SET_NO_SETTER) {
+                        // Accessor with no callable setter: strict TypeError, sloppy no-op.
+                        js_strict_throw_property_error("set property which has only a getter on",
+                                                       str_key->chars, (int)str_key->len);
                         return value;
                     }
-                    // Accessor with no callable setter \u2014 strict TypeError, sloppy no-op.
-                    js_strict_throw_property_error("set property which has only a getter on",
-                                                   str_key->chars, (int)str_key->len);
-                    return value;
+                    // JS_SET_NOT_FOUND: fall through to normal data write below.
                 }
                 // Phase 5: legacy __get_X / __set_X probe block removed. Phase 4
                 // intercept routes all transpiled accessor writes through
@@ -7475,31 +7456,19 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
 
     // Phase 5: if proto has an own accessor at `key` (IS_ACCESSOR flag),
-    // dispatch the getter with `receiver` as this. Must check BEFORE map_get
-    // since map_get returns the raw JsAccessorPair* slot value as Item.
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
-            if (_se && jspd_is_accessor(_se)) {
-                bool sf = false;
-                Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
-                if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        return js_call_function(pair->getter, receiver, NULL, 0);
-                    }
-                    return make_js_undefined();
-                }
-            }
-        }
+    // Stage A1.3c: own-property + IS_ACCESSOR dispatch on proto routed
+    // through js_ordinary_get_own with explicit `receiver`. Handles data,
+    // accessor, deleted-sentinel, and setter-only cases uniformly.
+    {
+        Item ord_val = ItemNull;
+        JsOwnGetStatus st = js_ordinary_get_own(proto, key, receiver, &ord_val);
+        if (st == JS_OWN_READY) return ord_val;
+        // NOT_FOUND or DELETED: fall through to inherited-accessor walk + chain.
     }
 
-    // check data property on proto
-    Item result = map_get(proto.map, key);
-    if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
-
-    // check getter on proto — call with receiver as this
+    // check inherited accessor on proto's __proto__ chain (legacy __get_X
+    // marker still consulted on `proto` itself for back-compat with companion
+    // maps that pre-date IS_ACCESSOR shape flags).
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len < 128 && str_key->len > 0) {
@@ -7515,17 +7484,16 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
             if (p.item == ItemNull.item) p = js_get_prototype_of(proto);
             int depth = 0;
             while (p.item != ItemNull.item && get_type_id(p) == LMD_TYPE_MAP && depth++ < 64) {
-                ShapeEntry* _se2 = js_find_shape_entry(p, str_key->chars, (int)str_key->len);
-                if (_se2 && jspd_is_accessor(_se2)) {
-                    bool sf2 = false;
-                    Item slot2 = js_map_get_fast_ext(p.map, str_key->chars, (int)str_key->len, &sf2);
-                    if (sf2 && slot2.item != JS_DELETED_SENTINEL_VAL) {
-                        JsAccessorPair* pair2 = js_item_to_accessor_pair(slot2);
-                        if (pair2 && pair2->getter.item != ItemNull.item) {
-                            return js_call_function(pair2->getter, receiver, NULL, 0);
-                        }
-                        return make_js_undefined();
-                    }
+                Item ord_val2 = ItemNull;
+                JsOwnGetStatus st2 = js_ordinary_get_own(p, key, receiver, &ord_val2);
+                if (st2 == JS_OWN_READY) {
+                    // ord_val2 is either a data value, getter result, or
+                    // setter-only undefined. For super-property walk we only
+                    // want IS_ACCESSOR results — but JS_OWN_READY for a data
+                    // value matches the original code's intent (which fell
+                    // through to js_prototype_lookup that would also return
+                    // it). Preserve that.
+                    return ord_val2;
                 }
                 Item next = js_get_prototype(p);
                 if (next.item == ItemNull.item) next = js_get_prototype_of(p);
@@ -7535,7 +7503,7 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     }
 
     // prototype chain data property
-    result = js_prototype_lookup(proto, key);
+    Item result = js_prototype_lookup(proto, key);
     if (result.item != ItemNull.item) return result;
 
     // builtin fallback
@@ -7560,28 +7528,15 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
 
-    // Phase 5: check own accessor at `key` on proto first.
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
-            ShapeEntry* _se = js_find_shape_entry(proto, str_key->chars, (int)str_key->len);
-            if (_se && jspd_is_accessor(_se)) {
-                bool sf = false;
-                Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
-                if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        return js_call_function(pair->getter, receiver, NULL, 0);
-                    }
-                    return make_js_undefined();
-                }
-            }
-        }
+    // Stage A1.3c: own-property + IS_ACCESSOR on proto via shared kernel.
+    {
+        Item ord_val = ItemNull;
+        JsOwnGetStatus st = js_ordinary_get_own(proto, key, receiver, &ord_val);
+        if (st == JS_OWN_READY) return ord_val;
+        // NOT_FOUND / DELETED: fall through to legacy __get_X probe + chain.
     }
 
-    Item result = map_get(proto.map, key);
-    if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) return result;
-
+    Item result;
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len < 128 && str_key->len > 0) {
@@ -7622,14 +7577,18 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0) {
-            // Phase 4 accessor lookup via JsAccessorPair on proto chain
-            JsAccessorPair* ap = js_find_accessor_pair_inheritable(
-                proto, str_key->chars, (int)str_key->len);
-            if (ap && ap->setter.item != ItemNull.item &&
-                get_type_id(ap->setter) == LMD_TYPE_FUNC) {
-                Item args[1] = { value };
-                js_call_function(ap->setter, receiver, args, 1);
-                return value;
+            // Stage A1.4: IS_ACCESSOR setter dispatch on proto chain routed
+            // through js_ordinary_set_via_accessor with explicit `receiver`.
+            // Note: super.x= passes `proto` as the lookup root (not `receiver`)
+            // because we explicitly want to skip the receiver's own slot.
+            {
+                JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
+                    proto, str_key->chars, (int)str_key->len, value, receiver);
+                if (st == JS_SET_DISPATCHED) return value;
+                // JS_SET_NO_SETTER: per ES super.x= semantics, fall through to
+                // legacy __set_X probe + receiver data set. (Strict-throw
+                // behavior is the caller's responsibility for super-set.)
+                // JS_SET_NOT_FOUND: same fall-through.
             }
             // Legacy __set_X marker lookup (for builtins not yet migrated)
             if (str_key->len < 64) {
@@ -9452,20 +9411,15 @@ static Item js_array_like_to_array(Item obj) {
         bool plain_map = (get_type_id(obj) == LMD_TYPE_MAP && obj.map->map_kind == MAP_KIND_PLAIN);
         bool is_own_setter_only = false;
         if (plain_map) {
-            // Phase 5: accessors are stored as JsAccessorPair with the
-            // JSPD_IS_ACCESSOR flag on the shape entry. A setter-only accessor
-            // (getter == ItemNull) shadows any inherited property and must
-            // produce undefined here, never fall through to Object.prototype.
-            ShapeEntry* _se_acc = js_find_shape_entry(obj, buf, blen);
-            if (_se_acc && jspd_is_accessor(_se_acc)) {
-                bool slot_found = false;
-                Item slot_val = js_map_get_fast_ext(obj.map, buf, blen, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
-                    if (pair && pair->getter.item == ItemNull.item) {
-                        is_own_setter_only = true;
-                    }
-                }
+            // Stage A1.5: a setter-only accessor (getter == ItemNull) shadows
+            // any inherited property and must produce undefined here, never
+            // fall through to Object.prototype. Detect via descriptor kernel.
+            JsAccessorPair* _pair = NULL;
+            JsOwnDescKind _dk = js_ordinary_get_own_descriptor(
+                obj, buf, blen, &_pair, NULL);
+            if (_dk == JS_DESC_ACCESSOR && _pair &&
+                _pair->getter.item == ItemNull.item) {
+                is_own_setter_only = true;
             }
         }
         if (has) {
@@ -18708,18 +18662,15 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             int insert_count = argc > 2 ? argc - 2 : 0;
             double new_len = old_len + (double)insert_count - dc_d;
             // Check if length is getter-only accessor → Set throws TypeError per ES spec.
-            // Phase 5: prefer IS_ACCESSOR shape flag; fall back to legacy markers.
+            // Stage A1.5: route IS_ACCESSOR detection through js_ordinary_get_own_descriptor.
             {
-                ShapeEntry* _se = js_find_shape_entry(cb_this, "length", 6);
-                if (_se && jspd_is_accessor(_se)) {
-                    bool sf = false;
-                    Item slot = js_map_get_fast_ext(cb_this.map, "length", 6, &sf);
-                    if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
-                        JsAccessorPair* pair = js_item_to_accessor_pair(slot);
-                        if (pair && pair->setter.item == ItemNull.item) {
-                            js_throw_type_error("Cannot set property length of object which has only a getter");
-                            return make_js_undefined();
-                        }
+                JsAccessorPair* pair = NULL;
+                JsOwnDescKind dk = js_ordinary_get_own_descriptor(
+                    cb_this, "length", 6, &pair, NULL);
+                if (dk == JS_DESC_ACCESSOR) {
+                    if (pair && pair->setter.item == ItemNull.item) {
+                        js_throw_type_error("Cannot set property length of object which has only a getter");
+                        return make_js_undefined();
                     }
                 } else {
                     Item getter_key = (Item){.item = s2it(heap_create_name("__get_length", 12))};
@@ -20478,31 +20429,24 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
         } else {
             result = map_get(proto.map, property);
         }
+        // Stage A1.3b: own-property + IS_ACCESSOR dispatch on this proto
+        // level routed through js_ordinary_get_own. Receiver is the original
+        // object (or the active proxy_receiver) — NOT the proto. We still
+        // need `result` below to drive the deleted-sentinel branch for the
+        // class-method-dispatch skip.
         if (result.item != ItemNull.item && !js_is_deleted_sentinel(result)) {
-            // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot holds
-            // a JsAccessorPair*; dispatch via pair->getter with `object` as `this`.
-            if (key_str) {
-                ShapeEntry* _se = js_find_shape_entry(proto, key_str, key_len);
-                if (_se && jspd_is_accessor(_se)) {
-                    if (out_found) *out_found = true;
-                    JsAccessorPair* pair = js_item_to_accessor_pair(result);
-                    if (pair && pair->getter.item != ItemNull.item) {
-                        Item this_val = js_proxy_receiver.item ? js_proxy_receiver : object;
-                        return js_call_function(pair->getter, this_val, NULL, 0);
-                    }
-                    // ES §PrivateFieldGet: setter-only private accessor throws TypeError.
-                    // Public setter-only accessor returns undefined per §9.1.8.1.
-                    if (key_len > 10 && strncmp(key_str, "__private_", 10) == 0) {
-                        char msg[256];
-                        snprintf(msg, sizeof(msg), "'#%.*s' was defined without a getter", key_len - 10, key_str + 10);
-                        return js_throw_type_error(msg);
-                    }
-                    return make_js_undefined();
-                }
+            Item recv = js_proxy_receiver.item ? js_proxy_receiver : object;
+            Item ord_val = ItemNull;
+            JsOwnGetStatus st = js_ordinary_get_own(proto, property, recv, &ord_val);
+            if (st == JS_OWN_READY) {
+                if (out_found) *out_found = true;
+                return ord_val;
             }
-            if (out_found) *out_found = true;
-            return result;
+            // st == NOT_FOUND should be unreachable here (we just confirmed
+            // a non-sentinel slot exists for this key); st == DELETED falls
+            // through. Either way, continue to class-method dispatch below.
         }
+
         // Phase 5: legacy __get_<key> proto-level probe removed. The IS_ACCESSOR
         // fast-path above handles all accessor dispatch on each proto level.
         // Class-specific built-in method dispatch: if `proto` is a built-in

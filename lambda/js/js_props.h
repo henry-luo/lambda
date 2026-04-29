@@ -67,8 +67,193 @@ int64_t js_key_is_symbol_c(Item key);
 // Abstract operations (Stage A1 — to be implemented incrementally)
 // ---------------------------------------------------------------------------
 
-// ES §10.1.5 OrdinaryGet (O, P, Receiver)
+// Outcome of `js_ordinary_get_own` (own-property lookup with IS_ACCESSOR
+// dispatch). The kernel of the `[[Get]]` algorithm — extracted here so it
+// can be shared by all property-read paths and tested directly in the
+// Stage B harness.
+typedef enum {
+    JS_OWN_NOT_FOUND = 0,  // no own slot; caller should walk prototype chain
+    JS_OWN_DELETED   = 1,  // own slot held the deleted-sentinel; caller should
+                           // walk prototype chain but record the deletion
+                           // (Object.prototype top-of-chain semantics)
+    JS_OWN_READY     = 2,  // *out_value is the resolved [[Get]] result
+                           // (data value, getter return, setter-only undefined,
+                           //  or a thrown private-field error). Caller MUST
+                           // return *out_value verbatim and NOT walk further.
+} JsOwnGetStatus;
+
+// Look up own property `key` on `object` (must be LMD_TYPE_MAP). If the slot
+// carries IS_ACCESSOR, dispatch the getter using `Receiver` as `this` (or
+// fall back to `object` when `Receiver.item == 0`). Does NOT walk the
+// prototype chain.
+//
+// `key` must already be a canonical property key (string or interned symbol
+// key); call `js_to_property_key` first if the caller has a raw Item.
+//
+// On JS_OWN_READY, *out_value is set. On JS_OWN_NOT_FOUND / JS_OWN_DELETED,
+// *out_value is unspecified.
+JsOwnGetStatus js_ordinary_get_own(Item object, Item key, Item Receiver,
+                                    Item* out_value);
+
+// ES §10.1.5 OrdinaryGet (O, P, Receiver) — Stage A1: not yet implemented.
 // Item js_ordinary_get(Item O, Item P, Item Receiver);
+
+// Outcome of `js_ordinary_set_via_accessor` (Stage A1.4) — the inherited-
+// accessor-setter dispatch kernel.
+typedef enum {
+    JS_SET_NOT_FOUND   = 0,  // no IS_ACCESSOR pair found on the chain; caller
+                             // should proceed with the normal data write path
+    JS_SET_DISPATCHED  = 1,  // pair->setter was called with Receiver as `this`;
+                             // caller MUST return value verbatim
+    JS_SET_NO_SETTER   = 2,  // pair found but pair->setter == ItemNull;
+                             // caller decides strict-throw vs sloppy no-op
+} JsSetterDispatchStatus;
+
+// Walk own + proto chain for an IS_ACCESSOR pair under (`name`, `name_len`).
+// If found and the pair has a callable setter, dispatch with `Receiver` as
+// `this` (or `object` if Receiver.item == 0) and return JS_SET_DISPATCHED.
+// If found without a setter, return JS_SET_NO_SETTER. Otherwise return
+// JS_SET_NOT_FOUND.
+//
+// This is the centralized kernel for the inherited-accessor branch of
+// `js_property_set` and `js_super_property_set`. It replaces inline
+// `js_find_accessor_pair_inheritable` + dispatch sequences.
+JsSetterDispatchStatus js_ordinary_set_via_accessor(Item object,
+                                                     const char* name,
+                                                     int name_len,
+                                                     Item value,
+                                                     Item Receiver);
+
+// Outcome of `js_ordinary_get_own_descriptor` (Stage A1.5) — read-only
+// inspector for own slots. Does NOT dispatch the getter; reports the
+// descriptor kind so callers can branch on accessor-vs-data without
+// touching shape-entry / slot internals.
+typedef enum {
+    JS_DESC_NONE     = 0,  // no own slot under this name
+    JS_DESC_DELETED  = 1,  // own slot held the deleted sentinel
+    JS_DESC_DATA     = 2,  // own data slot; *out_value set, *out_pair NULL
+    JS_DESC_ACCESSOR = 3,  // own IS_ACCESSOR slot; *out_pair set, *out_value
+                           // unspecified. Either getter or setter (or both)
+                           // may be ItemNull — caller checks.
+} JsOwnDescKind;
+
+// Inspect own property descriptor for (`object`, `name`, `name_len`).
+// `object` must be LMD_TYPE_MAP. Returns descriptor kind and populates
+// the relevant out-param. Either out-param may be NULL if the caller does
+// not need that information for that descriptor kind.
+//
+// This is the read-only counterpart to `js_ordinary_get_own`: callers that
+// need to *detect* a setter-only / getter-only accessor (e.g. splice
+// length-getter check, object-rest setter-only shadowing) use this, while
+// callers that need to *resolve* a property value use `js_ordinary_get_own`.
+JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
+                                              const char* name,
+                                              int name_len,
+                                              JsAccessorPair** out_pair,
+                                              Item* out_value);
+
+// Outcome of `js_ordinary_resolve_shape_value` (Stage A1.7) — the
+// shape-iteration value-resolution kernel.
+typedef enum {
+    JS_RESOLVE_DELETED = 0,  // slot held the deleted sentinel; caller should
+                             // skip this entry
+    JS_RESOLVE_VALUE   = 1,  // *out_value populated (data slot or getter
+                             // return); caller proceeds normally
+    JS_RESOLVE_THREW   = 2,  // accessor getter threw; caller MUST propagate
+                             // by checking js_check_exception() and bailing
+} JsResolveFieldStatus;
+
+// Resolve the value carried by shape-entry `e` belonging to map `m`. If the
+// entry is IS_ACCESSOR, dispatches the getter using `receiver` as `this`.
+// Returns JS_RESOLVE_DELETED for sentinel slots, JS_RESOLVE_VALUE on success
+// (with *out_value set), or JS_RESOLVE_THREW if the getter raised.
+//
+// This is the kernel used by shape-iteration loops (object spread,
+// Object.assign, CopyDataProperties) — replaces inline `_map_read_field`
+// + sentinel-check + IS_ACCESSOR + pair-cast + getter-dispatch sequences.
+//
+// Setter-only accessors (getter == ItemNull) resolve to JS undefined per
+// ES §CopyDataProperties and §Object.assign.
+JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
+                                                      Map* m,
+                                                      Item receiver,
+                                                      Item* out_value);
+
+// ---------------------------------------------------------------------------
+// PropertyDescriptor (Stage A2 — read-side facade)
+// ---------------------------------------------------------------------------
+//
+// Unified property-descriptor record. ES §6.2.5 defines six fields; we
+// represent them with a flags byte + value/getter/setter. The `present`
+// bits indicate which fields are populated (mirrors ES IsAccessorDescriptor
+// / IsDataDescriptor / IsGenericDescriptor logic).
+//
+// Stage A2.1 INTRODUCES the inspector kernel that synthesizes a descriptor
+// from current storage (shape flags + slot + legacy `__nc_`/`__ne_`/`__nw_`
+// markers + `__get_`/`__set_` markers). Storage layout is unchanged; this
+// is a read-side consolidation.
+//
+// Stage A2.2+ will introduce the write-side kernel, route all
+// Object.defineProperty / accessor-install paths through it, and finally
+// collapse storage to a dense PropertyDescriptor table — eliminating the
+// JSPD_IS_ACCESSOR + JS_DELETED_SENTINEL_VAL + legacy-marker triplets.
+
+#define JS_PD_HAS_VALUE        0x01u  // descriptor carries [[Value]]
+#define JS_PD_HAS_GET          0x02u  // descriptor carries [[Get]]
+#define JS_PD_HAS_SET          0x04u  // descriptor carries [[Set]]
+#define JS_PD_HAS_WRITABLE     0x08u  // descriptor carries [[Writable]]
+#define JS_PD_HAS_ENUMERABLE   0x10u  // descriptor carries [[Enumerable]]
+#define JS_PD_HAS_CONFIGURABLE 0x20u  // descriptor carries [[Configurable]]
+
+#define JS_PD_WRITABLE         0x40u  // [[Writable]] bit (when HAS_WRITABLE set)
+#define JS_PD_ENUMERABLE       0x80u  // [[Enumerable]] bit (when HAS_ENUMERABLE)
+// [[Configurable]] uses bit in `flags2` to keep this a single byte. Use
+// helper functions below.
+
+typedef struct JsPropertyDescriptor {
+    uint8_t flags;     // JS_PD_HAS_* + JS_PD_WRITABLE / JS_PD_ENUMERABLE
+    uint8_t flags2;    // bit0: configurable; bits1-7 reserved
+    uint8_t reserved[6];
+    Item value;        // [[Value]] — valid iff JS_PD_HAS_VALUE
+    Item getter;       // [[Get]]   — valid iff JS_PD_HAS_GET
+    Item setter;       // [[Set]]   — valid iff JS_PD_HAS_SET
+} JsPropertyDescriptor;
+
+static inline bool js_pd_is_accessor(const JsPropertyDescriptor* d) {
+    return (d->flags & (JS_PD_HAS_GET | JS_PD_HAS_SET)) != 0;
+}
+static inline bool js_pd_is_data(const JsPropertyDescriptor* d) {
+    return (d->flags & (JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE)) != 0;
+}
+static inline bool js_pd_is_configurable(const JsPropertyDescriptor* d) {
+    return (d->flags2 & 0x01u) != 0;
+}
+static inline void js_pd_set_configurable(JsPropertyDescriptor* d, bool b) {
+    if (b) d->flags2 |= 0x01u; else d->flags2 &= (uint8_t)~0x01u;
+}
+
+// Synthesize the full property descriptor for own property (`name`,
+// `name_len`) on `object`. `object` must be LMD_TYPE_MAP or LMD_TYPE_FUNC.
+//
+// Returns true if an own property is present (descriptor populated).
+// Returns false if no own property exists (or slot held the deleted
+// sentinel). On false, *out is left in an unspecified state.
+//
+// This is the unified read kernel. It folds together:
+//   - shape flag inspection (JSPD_IS_ACCESSOR / writable / enum / config),
+//   - slot read with deleted-sentinel awareness,
+//   - JsAccessorPair extraction for accessor descriptors,
+//   - legacy `__get_X` / `__set_X` marker fallback for native bindings
+//     that have not yet been migrated to the IS_ACCESSOR scheme,
+//   - legacy `__nc_X` / `__ne_X` / `__nw_X` flag-marker fallback.
+//
+// All Object.getOwnPropertyDescriptor / Reflect.getOwnPropertyDescriptor /
+// Object.{is,seal,freeze} / Object.assign read-side paths should route
+// through this — collapsing the 5+ parallel descriptor-synthesis sites.
+bool js_get_own_property_descriptor(Item object,
+                                     const char* name,
+                                     int name_len,
+                                     JsPropertyDescriptor* out);
 
 // ES §10.1.9 OrdinarySet (O, P, V, Receiver)
 // int  js_ordinary_set(Item O, Item P, Item V, Item Receiver);
