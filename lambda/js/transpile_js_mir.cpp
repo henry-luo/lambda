@@ -2362,6 +2362,17 @@ static void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
         MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3, a4));
 }
 
+static void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
+    MIR_type_t a5t, MIR_op_t a5) {
+    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 5, args, 0);
+    jm_emit(mt, MIR_new_call_insn(mt->ctx, 7,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import), a1, a2, a3, a4, a5));
+}
+
 // ============================================================================
 // Constants
 // ============================================================================

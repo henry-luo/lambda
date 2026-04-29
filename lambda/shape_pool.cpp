@@ -362,7 +362,12 @@ bool shape_pool_shapes_equal(ShapeEntry* shape1, ShapeEntry* shape2) {
         
         // Compare byte offset
         if (e1->byte_offset != e2->byte_offset) return false;
-        
+
+        // Compare JS property attribute flags (writable/enumerable/configurable/accessor).
+        // Lambda input parsers always leave flags = 0, so this is a no-op for non-JS shapes.
+        // For JS shapes that flow into the pool, two entries with different attrs must not dedup.
+        if (e1->flags != e2->flags) return false;
+
         e1 = e1->next;
         e2 = e2->next;
     }

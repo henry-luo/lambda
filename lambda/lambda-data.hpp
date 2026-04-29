@@ -191,6 +191,29 @@ typedef struct TypeArray : Type {
 
 typedef TypeArray TypeList;
 
+// JS property descriptor attribute flags carried inline on ShapeEntry.
+// Inverse-bit encoding: 0 = JS default (writable/enumerable/configurable, data property).
+// This way pool_calloc'd entries auto-default to JS-conformant attrs without explicit init.
+#define JSPD_NON_WRITABLE     0x01u  // 1 = property is read-only
+#define JSPD_NON_ENUMERABLE   0x02u  // 1 = property hidden from for-in / Object.keys
+#define JSPD_NON_CONFIGURABLE 0x04u  // 1 = property cannot be deleted/redefined
+#define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorPair*, not data value
+
+// First-class accessor pair stored in the map data slot when ShapeEntry::flags has
+// JSPD_IS_ACCESSOR set. Replaces the legacy `__get_X`/`__set_X` magic-key scheme.
+//
+// Layout starts with type_id = LMD_TYPE_FUNC so that `Item.type_id()` returns
+// LMD_TYPE_FUNC for slot values pointing here (Option 2 storage scheme). This is
+// safe ONLY because consumers consult `ShapeEntry::flags & JSPD_IS_ACCESSOR` BEFORE
+// invoking any function operation. Any code path that calls `.function->ptr` on
+// an Item from a property slot without first checking IS_ACCESSOR will misbehave.
+typedef struct JsAccessorPair {
+    uint8_t type_id;   // = LMD_TYPE_FUNC (matches Function layout for tag compat)
+    uint8_t _pad[7];   // align getter to 8-byte boundary
+    Item getter;       // ItemNull or LMD_TYPE_FUNC
+    Item setter;       // ItemNull or LMD_TYPE_FUNC
+} JsAccessorPair;
+
 typedef struct ShapeEntry {
     StrView* name;
     Type* type;  // type of the field
@@ -198,6 +221,7 @@ typedef struct ShapeEntry {
     struct ShapeEntry* next;
     Target* ns;  // namespace target (NULL for unqualified fields)
     struct AstNode* default_value;  // default value expression (NULL if none)
+    uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
 // A1: Property hash table — inline open-addressing table for O(1) property lookup.
