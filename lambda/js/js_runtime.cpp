@@ -94,6 +94,24 @@ extern "C" Item js_get_current_this(void) { return js_current_this; }
 // Proxy receiver: when proxy get/set forwarding to target, the receiver (proxy) is saved here.
 // Getter/setter invocations check this to use the proxy as 'this' instead of the target.
 static Item js_proxy_receiver = {0};
+
+// Stage D: RAII guard for js_proxy_receiver. Sets it to `recv` only if not
+// already set (matches the existing "first proxy frame wins" convention),
+// and unconditionally restores the prior value on scope exit. Use at every
+// site that previously wrote `prev = js_proxy_receiver; ...; js_proxy_receiver = prev;`.
+namespace {
+class ScopedProxyReceiver {
+public:
+    explicit ScopedProxyReceiver(Item recv) : prev_(js_proxy_receiver) {
+        if (!js_proxy_receiver.item) js_proxy_receiver = recv;
+    }
+    ~ScopedProxyReceiver() { js_proxy_receiver = prev_; }
+    ScopedProxyReceiver(const ScopedProxyReceiver&) = delete;
+    ScopedProxyReceiver& operator=(const ScopedProxyReceiver&) = delete;
+private:
+    Item prev_;
+};
+} // namespace
 // TRACE: track last called function name for debugging
 static const char* _trace_last_fn = "(none)";
 static int _trace_last_fn_len = 6;
@@ -3565,16 +3583,11 @@ static Item js_proxy_trap_get(Item proxy, Item key) {
     Item trap = js_proxy_get_trap(pd, "get", 3);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        // no trap — forward to target with receiver for getter this-binding
-        // If js_proxy_receiver is already set (e.g. from prototype chain lookup),
-        // preserve it as the correct receiver; otherwise use the proxy itself
-        Item prev_receiver = js_proxy_receiver;
-        if (!js_proxy_receiver.item) {
-            js_proxy_receiver = proxy;
-        }
-        Item result = js_property_get(PD_TARGET(pd), key);
-        js_proxy_receiver = prev_receiver;
-        return result;
+        // no trap — forward to target with receiver for getter this-binding.
+        // Stage D: RAII guard preserves any pre-existing receiver (e.g. from
+        // prototype chain lookup) or sets the proxy as receiver if absent.
+        ScopedProxyReceiver _recv_guard(proxy);
+        return js_property_get(PD_TARGET(pd), key);
     }
     // call trap(target, property, receiver)
     Item args[3] = { PD_TARGET(pd), key, proxy };
@@ -3622,16 +3635,11 @@ static Item js_proxy_trap_set(Item proxy, Item key, Item value) {
     Item trap = js_proxy_get_trap(pd, "set", 3);
     if (js_exception_pending) return ItemNull;
     if (trap.item == ItemNull.item) {
-        // no trap — forward to target with receiver for setter this-binding
-        // If js_proxy_receiver is already set (e.g. from prototype chain lookup),
-        // preserve it as the correct receiver; otherwise use the proxy itself
-        Item prev_receiver = js_proxy_receiver;
-        if (!js_proxy_receiver.item) {
-            js_proxy_receiver = proxy;
-        }
-        Item result = js_property_set(PD_TARGET(pd), key, value);
-        js_proxy_receiver = prev_receiver;
-        return result;
+        // no trap — forward to target with receiver for setter this-binding.
+        // Stage D: RAII guard preserves any pre-existing receiver (e.g. from
+        // prototype chain lookup) or sets the proxy as receiver if absent.
+        ScopedProxyReceiver _recv_guard(proxy);
+        return js_property_set(PD_TARGET(pd), key, value);
     }
     // call trap(target, property, value, receiver)
     Item args[4] = { PD_TARGET(pd), key, value, proxy };
@@ -7081,10 +7089,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         while (_proto.item != ItemNull.item &&
                                get_type_id(_proto) == LMD_TYPE_MAP && _depth < 16) {
                             if (js_is_proxy(_proto)) {
-                                Item prev_recv = js_proxy_receiver;
-                                if (!js_proxy_receiver.item) js_proxy_receiver = object;
+                                // Stage D: RAII guard ensures js_proxy_receiver
+                                // restores even if js_proxy_trap_set throws.
+                                ScopedProxyReceiver _recv_guard(object);
                                 js_proxy_trap_set(_proto, key, value);
-                                js_proxy_receiver = prev_recv;
                                 return value;
                             }
                             // Stop walking when we find an own entry on this proto:

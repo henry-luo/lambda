@@ -9068,6 +9068,15 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         // so the slot is no longer treated as own/non-configurable after delete.
         // Tombstone markers FIRST so __nw_<key> doesn't block the sentinel write
         // for the data slot in js_property_set's non-writable guard.
+        //
+        // R5 WONTFIX: Stage A1.12 `js_ordinary_delete` cannot be routed here.
+        // The kernel is spec-pure for OrdinaryDelete and short-circuits when
+        // the slot is absent (correct for ordinary MAP objects). But FUNC's
+        // virtual properties (length, name, prototype) are computed from
+        // struct fields and never materialized in properties_map's shape —
+        // the deletion mechanism is a sentinel write into properties_map
+        // (intercepted by js_property_get FUNC branch). Routing regressed
+        // 35 S15_*_A9 tests around `delete fn.length`. Keep legacy inline.
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len > 0 && sk->len < 200) {
@@ -9151,40 +9160,25 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             }
             return (Item){.item = b2it(true)};
         }
-        // Non-numeric or out-of-range key: check companion map
+        // Non-numeric or out-of-range key: route through Stage A1.12 kernel
+        // on the array's companion map. Kernel performs the same configurable
+        // check (via js_props_query_configurable), tombstones the 5 marker
+        // prefixes, clears IS_ACCESSOR shape-flag, and writes the bare-key
+        // sentinel — superset of what the legacy code did inline.
         if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
+            Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
             // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
             // are canonicalized identically to define-property time.
             Item k = js_to_property_key(key);
-            // Honor __nc_<key> non-configurable marker on companion map.
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
                 if (ks && ks->len > 0 && ks->len < 200) {
-                    // Stage A3.2: shape-flag-first non-configurable check.
-                    ShapeEntry* _se = js_find_shape_entry(obj, ks->chars, (int)ks->len);
-                    if (!js_props_query_configurable(pm, _se, ks->chars, (int)ks->len)) {
+                    if (!js_ordinary_delete(pm_item, ks->chars, (int)ks->len)) {
                         return (Item){.item = b2it(false)};
                     }
                 }
             }
-            // Tombstone descriptor markers FIRST. Clearing __nw_<key> in particular
-            // is required so the subsequent sentinel-write to the value slot is not
-            // rejected by the non-writable guard in js_property_set.
-            Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
-            if (get_type_id(k) == LMD_TYPE_STRING) {
-                String* ks = it2s(k);
-                if (ks && ks->len > 0 && ks->len < 200) {
-                    const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
-                    for (int pi = 0; pi < 5; pi++) {
-                        char mk[256];
-                        snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)ks->len, ks->chars);
-                        Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
-                        js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                    }
-                }
-            }
-            js_property_set(pm_item, k, (Item){.item = JS_DELETED_SENTINEL_VAL});
         }
         return (Item){.item = b2it(true)};
     }

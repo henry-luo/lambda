@@ -15,6 +15,7 @@
 #include "js_props.h"
 #include "js_runtime.h"
 #include "js_property_attrs.h"
+#include "js_state_guards.h"
 #include "../lambda-data.hpp"
 
 // js_runtime.cpp internals we need. Public header counterparts:
@@ -42,6 +43,31 @@ static inline Item js_props_undefined() {
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
 extern "C++" String* heap_create_name(const char* name, size_t len);
+
+// Stage E: debug-only invariant assertions. Compiled out under NDEBUG.
+// Three classes of invariants the property-model kernels enforce:
+//   (E1) Key well-formedness: callers must pass a non-NULL name buffer
+//        with non-negative length. Empty-string keys ARE legal in JS
+//        (`obj[""]`), so we only forbid NULL/negative-length.
+//   (E2) Sentinel exclusivity: if the slot is the deleted sentinel, the
+//        shape entry must NOT also be marked IS_ACCESSOR. The two states
+//        are mutually exclusive — IS_ACCESSOR clearance is part of delete.
+//   (E3) Accessor slot consistency: if shape says IS_ACCESSOR, the slot
+//        value must decode to a non-null JsAccessorPair*.
+#ifndef NDEBUG
+#  include <cassert>
+#  define JS_PROPS_ASSERT_KEY(name, len) \
+       assert((name) != NULL && (len) >= 0)
+#  define JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se) \
+       assert(!(js_props_is_deleted_sentinel(slot) && (se) && jspd_is_accessor(se)))
+#  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se) \
+       assert(!((se) && jspd_is_accessor(se)) || \
+              js_item_to_accessor_pair(slot) != NULL)
+#else
+#  define JS_PROPS_ASSERT_KEY(name, len)            ((void)0)
+#  define JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se) ((void)0)
+#  define JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se)    ((void)0)
+#endif
 
 extern "C" JsOwnGetStatus js_ordinary_get_own(Item object, Item key,
                                               Item Receiver, Item* out_value) {
@@ -132,6 +158,7 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
                                                          int name_len,
                                                          JsAccessorPair** out_pair,
                                                          Item* out_value) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     if (out_pair) *out_pair = NULL;
     if (get_type_id(object) != LMD_TYPE_MAP) return JS_DESC_NONE;
 
@@ -141,6 +168,8 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
     if (js_props_is_deleted_sentinel(slot)) return JS_DESC_DELETED;
 
     ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se);
+    JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (se && jspd_is_accessor(se)) {
         JsAccessorPair* pair = js_item_to_accessor_pair(slot);
         if (pair) {
@@ -165,6 +194,7 @@ extern "C" JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
 // AND the slot is not the deleted sentinel. IS_ACCESSOR slots count as
 // present (the pair itself is the descriptor).
 extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     if (get_type_id(object) != LMD_TYPE_MAP) return false;
     bool found = false;
     Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
@@ -175,6 +205,7 @@ extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len)
 
 // Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     Item cur = object;
     int depth = 0;
     while (cur.item != ItemNull.item && get_type_id(cur) == LMD_TYPE_MAP && depth < 32) {
@@ -188,6 +219,7 @@ extern "C" bool js_ordinary_has_property(Item object, const char* name, int name
 // Stage A1.10: OrdinaryGet — own + proto chain MAP-only kernel.
 extern "C" bool js_ordinary_get(Item object, const char* name, int name_len,
                                  Item Receiver, Item* out_value) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     if (!out_value) return false;
     Item key = (Item){.item = s2it(heap_create_name(name, name_len))};
     Item cur = object;
@@ -206,6 +238,7 @@ extern "C" bool js_ordinary_get(Item object, const char* name, int name_len,
 // Stage A1.11: OrdinarySet — inherited-setter dispatch + own data write.
 extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name, int name_len,
                                                     Item value, Item Receiver) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     JsSetterDispatchStatus st = js_ordinary_set_via_accessor(object, name, name_len, value, Receiver);
     if (st != JS_SET_NOT_FOUND) return st;
     // No inherited accessor — perform own data write on Receiver.
@@ -218,6 +251,7 @@ extern "C" JsSetterDispatchStatus js_ordinary_set(Item object, const char* name,
 
 // Stage A1.12: OrdinaryDelete — own-property delete on LMD_TYPE_MAP.
 extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
     if (get_type_id(object) != LMD_TYPE_MAP) return true;
     Map* m = object.map;
     bool slot_found = false;
@@ -227,6 +261,8 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
 
     // Non-configurable check (shape-flag-first via existing helper).
     ShapeEntry* se = js_find_shape_entry(object, name, name_len);
+    JS_PROPS_ASSERT_NOT_DEL_ACCESSOR(slot, se);
+    JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (!js_props_query_configurable(m, se, name, name_len)) return false;
 
     // Clear IS_ACCESSOR shape flag so future reads don't dispatch the
@@ -506,9 +542,8 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
     Item name_item = js_props_str(name, name_len);
 
     // [[DefineOwnProperty]] — must NOT trigger inherited accessor logic.
-    extern bool js_skip_accessor_dispatch;
-    bool _prev_skip = js_skip_accessor_dispatch;
-    js_skip_accessor_dispatch = true;
+    // Stage D: RAII guard restores js_skip_accessor_dispatch on every exit.
+    ScopedSkipAccessorDispatch _skip_guard;
 
     bool is_accessor_desc = js_pd_is_accessor(pd);
     bool was_accessor = false;  // accessor→data conversion track
@@ -713,6 +748,4 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
         js_defprop_set_marker(object, k, (Item){.item = b2it(true)});
     }
-
-    js_skip_accessor_dispatch = _prev_skip;
 }
