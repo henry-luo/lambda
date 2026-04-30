@@ -2597,7 +2597,22 @@ extern "C" Item js_document_get_property(Item prop_name) {
                     if (n->is_element()) {
                         DomElement* ce = (DomElement*)n;
                         if (ce->tag_name && strcasecmp(ce->tag_name, "form") == 0) {
-                            js_array_push(arr, js_dom_wrap_element(ce));
+                            Item fitem = js_dom_wrap_element(ce);
+                            js_array_push(arr, fitem);
+                            // Named access: forms[name] / forms[id] per HTML
+                            // §HTMLCollection-namedItem semantics.
+                            const char* nm = dom_element_get_attribute(ce, "name");
+                            if (nm && *nm) {
+                                js_property_set(arr,
+                                    (Item){.item = s2it(heap_create_name(nm))},
+                                    fitem);
+                            }
+                            const char* id = dom_element_get_attribute(ce, "id");
+                            if (id && *id && (!nm || strcmp(id, nm) != 0)) {
+                                js_property_set(arr,
+                                    (Item){.item = s2it(heap_create_name(id))},
+                                    fitem);
+                            }
                         }
                         walk(ce->first_child);
                     }
@@ -3202,6 +3217,120 @@ static bool _select_value_missing(DomElement* sel) {
         }
     }
     return !any_non_placeholder_selected;
+}
+
+// ----------------------------------------------------------------------
+// F-3: Form reset algorithm
+// ----------------------------------------------------------------------
+
+// Reset a single form-control element to its default state, per HTML
+// spec §4.10.21.4 "Form reset" + each control's reset algorithm.
+static void _reset_form_control(DomElement* elem) {
+    if (!elem || !elem->tag_name) return;
+    const char* tag = elem->tag_name;
+    if (strcasecmp(tag, "input") == 0) {
+        const char* itype = _input_type_lower(elem);
+        if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
+            // checked := defaultChecked (presence of "checked" content attr)
+            _set_checkedness(elem, dom_element_has_attribute(elem, "checked"));
+            return;
+        }
+        if (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
+            strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0 ||
+            strcmp(itype, "hidden") == 0 || strcmp(itype, "file") == 0) {
+            // Buttons/hidden/image/file: skip (file resets selection only).
+            if (strcmp(itype, "file") == 0 && tc_is_text_control_elem(elem)) {
+                tc_ensure_init(elem);
+                tc_set_value(elem, "", 0);
+            }
+            return;
+        }
+        // Text-like input: value := defaultValue (= value attribute)
+        if (tc_is_text_control_elem(elem)) {
+            tc_ensure_init(elem);
+            const char* dv = dom_element_get_attribute(elem, "value");
+            if (!dv) dv = "";
+            tc_set_value(elem, dv, strlen(dv));
+            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "textarea") == 0) {
+        if (tc_is_text_control_elem(elem)) {
+            tc_ensure_init(elem);
+            // textarea defaultValue = descendant text content of original markup
+            StrBuf* sb = strbuf_new_cap(64);
+            collect_text_content((DomNode*)elem, sb);
+            const char* s = sb->str ? sb->str : "";
+            tc_set_value(elem, s, sb->length);
+            strbuf_free(sb);
+            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "select") == 0) {
+        // Reset selectedness of all options to their defaults, then run
+        // ask-for-reset for non-multiple selects.
+        Item arr = js_array_new(0);
+        _collect_options(elem->first_child, arr);
+        int64_t n = js_array_length(arr);
+        for (int64_t i = 0; i < n; i++) {
+            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+            if (!opt) continue;
+            // Default selectedness = presence of "selected" content attribute
+            _set_selectedness(opt, dom_element_has_attribute(opt, "selected"));
+        }
+        // Clear the dirty flag so default-reset rules apply again.
+        Item exp = expando_get_map((DomNode*)elem);
+        if (exp.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name("__selDirty"))};
+            js_property_set(exp, key, (Item){.item = ITEM_NULL});
+        }
+        if (!dom_element_has_attribute(elem, "multiple")) {
+            _select_ask_for_reset(elem);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "output") == 0) {
+        // For <output>: textContent := defaultValue. We do not track an
+        // explicit "default value override" (defaultValue setter); without
+        // an override, defaultValue == descendant text content, so reset
+        // is effectively a no-op. This matches WPT reset-form expectations.
+        return;
+    }
+}
+
+// Run the HTML form reset algorithm on a form element. Walks all listed
+// controls (excluding nested forms / shadow trees) and resets each.
+// Caller is responsible for dispatching the "reset" event before invoking;
+// this just runs the per-control reset steps.
+static void _run_form_reset(DomElement* form_elem) {
+    if (!form_elem) return;
+    std::function<void(DomNode*)> walk = [&](DomNode* node) {
+        while (node) {
+            if (node->is_element()) {
+                DomElement* ce = (DomElement*)node;
+                if (ce->tag_name) {
+                    // Don't descend into nested forms.
+                    if (strcasecmp(ce->tag_name, "form") != 0) {
+                        if (strcasecmp(ce->tag_name, "input") == 0 ||
+                            strcasecmp(ce->tag_name, "textarea") == 0 ||
+                            strcasecmp(ce->tag_name, "select") == 0 ||
+                            strcasecmp(ce->tag_name, "output") == 0) {
+                            _reset_form_control(ce);
+                        }
+                        walk(ce->first_child);
+                    }
+                }
+            }
+            node = node->next_sibling;
+        }
+    };
+    walk(form_elem->first_child);
+}
+
+extern "C" void js_dom_run_form_reset(void* form_elem) {
+    _run_form_reset((DomElement*)form_elem);
 }
 
 static Item _build_validity_state(DomElement* elem) {
@@ -4737,6 +4866,26 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
         const char* v = dom_element_get_attribute(elem, "for");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // HTMLOutputElement.defaultValue — descendant text content if no override
+    // has been set. We do not yet track an explicit override (defaultValue
+    // setter), so this always returns current descendant text content. That
+    // matches WPT reset-form-html behavior where defaultValue tracks textContent.
+    if (strcmp(prop, "defaultValue") == 0 && _is_tag(elem, "output")) {
+        StrBuf* sb = strbuf_new_cap(32);
+        collect_text_content((DomNode*)elem, sb);
+        String* s = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(s)};
+    }
+    // HTMLOutputElement.value — descendant text content (getter); we do not
+    // track an explicit value override yet.
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "output")) {
+        StrBuf* sb = strbuf_new_cap(32);
+        collect_text_content((DomNode*)elem, sb);
+        String* s = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(s)};
     }
     // tabIndex — reflects `tabindex` as integer (default 0 for elements that
     // are normally focusable; we use 0 unconditionally — spec-conformant for
@@ -6605,6 +6754,27 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (!msg) msg = "";
         if (f->custom_validity_msg) { free(f->custom_validity_msg); }
         f->custom_validity_msg = strdup(msg);
+        return make_js_undefined();
+    }
+
+    // ----------------------------------------------------------------
+    // F-3: form.reset() — fire `reset` event (cancelable), then run reset
+    // algorithm on all listed form controls.
+    // ----------------------------------------------------------------
+    if (strcmp(method, "reset") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+        // Per HTML §4.10.21.4: fire `reset` event (bubbles, cancelable);
+        // if not cancelled, run reset algorithm on each listed control.
+        Item ev = js_new_object();
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("type"))},
+                        (Item){.item = s2it(heap_create_name("reset"))});
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("bubbles"))},
+                        (Item){.item = ITEM_TRUE});
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("cancelable"))},
+                        (Item){.item = ITEM_TRUE});
+        Item dispatched = js_dom_dispatch_event(elem_item, ev);
+        // dispatchEvent returns false when default was prevented.
+        if (dispatched.item == ITEM_FALSE) return make_js_undefined();
+        _run_form_reset(elem);
         return make_js_undefined();
     }
 
