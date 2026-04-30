@@ -5738,23 +5738,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                     return make_js_undefined();
                 }
             }
-            // Legacy __get_<idx>/__set_<idx> markers (back-compat for paths
-            // that haven't been migrated yet — e.g. companion-map writes
-            // outside js_props.cpp's defineProperty path).
-            char gk[64];
-            snprintf(gk, sizeof(gk), "__get_%d", idx);
-            bool gk_found = false;
-            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, object, NULL, 0);
-            }
-            // v37: setter-only accessor shadows inherited properties (ES spec §9.1.8)
-            if (!gk_found) {
-                snprintf(gk, sizeof(gk), "__set_%d", idx);
-                bool sk_found = false;
-                js_map_get_fast(props, gk, (int)strlen(gk), &sk_found);
-                if (sk_found) return make_js_undefined();
-            }
+            // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired.
+            // Post-AT-1 the intercept routes companion-map accessor writes
+            // through JsAccessorPair under the digit-string name with
+            // IS_ACCESSOR shape flag, which the probe above already finds.
         }
         if (idx >= 0 && idx < object.array->length) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
@@ -6819,16 +6806,9 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         return value;
                     }
                 }
-                // Legacy __set_<idx> marker (back-compat).
-                char sk_buf[64];
-                snprintf(sk_buf, sizeof(sk_buf), "__set_%d", idx);
-                bool sk_found = false;
-                Item setter = js_map_get_fast(props, sk_buf, (int)strlen(sk_buf), &sk_found);
-                if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
-                    Item args[1] = { value };
-                    js_call_function(setter, object, args, 1);
-                    return value;
-                }
+                // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1
+                // intercept routes companion-map accessor writes through the
+                // IS_ACCESSOR shape path probed above).
                 // check non-writable for data property with accessor
                 char nw_buf[64];
                 snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", idx);
@@ -7453,20 +7433,12 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
         // NOT_FOUND or DELETED: fall through to inherited-accessor walk + chain.
     }
 
-    // check inherited accessor on proto's __proto__ chain (legacy __get_X
-    // marker still consulted on `proto` itself for back-compat with companion
-    // maps that pre-date IS_ACCESSOR shape flags).
+    // A2-T7: legacy __get_X marker fallback retired. Modern shape+slot probe
+    // (js_ordinary_get_own above) already handles IS_ACCESSOR on `proto`.
+    // Walk proto's chain for inherited accessors via the same shape-aware path.
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len < 128 && str_key->len > 0) {
-            char getter_key[256];
-            snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-            bool gk_found = false;
-            Item getter = js_map_get_fast(proto.map, getter_key, (int)strlen(getter_key), &gk_found);
-            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, receiver, NULL, 0);
-            }
-            // walk prototype chain of proto looking for an inherited accessor
             Item p = js_get_prototype(proto);
             if (p.item == ItemNull.item) p = js_get_prototype_of(proto);
             int depth = 0;
@@ -7474,12 +7446,6 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
                 Item ord_val2 = ItemNull;
                 JsOwnGetStatus st2 = js_ordinary_get_own(p, key, receiver, &ord_val2);
                 if (st2 == JS_OWN_READY) {
-                    // ord_val2 is either a data value, getter result, or
-                    // setter-only undefined. For super-property walk we only
-                    // want IS_ACCESSOR results — but JS_OWN_READY for a data
-                    // value matches the original code's intent (which fell
-                    // through to js_prototype_lookup that would also return
-                    // it). Preserve that.
                     return ord_val2;
                 }
                 Item next = js_get_prototype(p);
@@ -7523,20 +7489,9 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
         // NOT_FOUND / DELETED: fall through to legacy __get_X probe + chain.
     }
 
+    // A2-T7: legacy __get_X marker fallback retired. js_ordinary_get_own above
+    // already handles IS_ACCESSOR on `proto` via the modern shape+slot path.
     Item result;
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len < 128 && str_key->len > 0) {
-            char getter_key[256];
-            snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
-            bool gk_found = false;
-            Item getter = js_map_get_fast(proto.map, getter_key, (int)strlen(getter_key), &gk_found);
-            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, receiver, NULL, 0);
-            }
-        }
-    }
-
     result = js_prototype_lookup(proto, key);
     if (result.item != ItemNull.item) return result;
 
@@ -7577,24 +7532,9 @@ extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
                 // behavior is the caller's responsibility for super-set.)
                 // JS_SET_NOT_FOUND: same fall-through.
             }
-            // Legacy __set_X marker lookup (for builtins not yet migrated)
-            if (str_key->len < 64) {
-                char setter_key[256];
-                snprintf(setter_key, sizeof(setter_key), "__set_%.*s",
-                         (int)str_key->len, str_key->chars);
-                bool sk_found = false;
-                Item setter = js_map_get_fast(proto.map, setter_key,
-                                              (int)strlen(setter_key), &sk_found);
-                if (!sk_found || get_type_id(setter) != LMD_TYPE_FUNC) {
-                    Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
-                    setter = js_prototype_lookup(proto, sk);
-                }
-                if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
-                    Item args[1] = { value };
-                    js_call_function(setter, receiver, args, 1);
-                    return value;
-                }
-            }
+            // A2-T7: legacy __set_X marker fallback retired.
+            // js_ordinary_set_via_accessor above already dispatches to setters
+            // via the modern shape+slot path on the full proto chain.
         }
     }
 
@@ -7960,13 +7900,23 @@ extern "C" Item js_array_get(Item array, Item index) {
     if (idx >= 0 && idx < arr->length) {
         // check for accessor (getter) on companion map
         if (arr->extra != 0) {
-            char gk[64];
-            snprintf(gk, sizeof(gk), "__get_%d", idx);
+            // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
+            // (post-AT-1 the intercept routes accessor writes here).
+            char idx_buf[32];
+            int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
             Map* props = (Map*)(uintptr_t)arr->extra;
-            bool gk_found = false;
-            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, array, NULL, 0);
+            Item pm_item = (Item){.map = props};
+            ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
+            if (_se_idx && jspd_is_accessor(_se_idx)) {
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
+                    if (pair && pair->getter.item != ItemNull.item) {
+                        return js_call_function(pair->getter, array, NULL, 0);
+                    }
+                    return make_js_undefined();
+                }
             }
         }
         // return undefined for holes (deleted sentinel)
@@ -8001,14 +7951,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
                     return make_js_undefined();
                 }
             }
-            // Legacy __get_<idx> marker (back-compat).
-            char gk[64];
-            snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
-            bool gk_found = false;
-            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-                return js_call_function(getter, array, NULL, 0);
-            }
+            // AT-3: legacy __get_<idx> marker fallback retired.
         }
         if (index >= 0 && index < arr->length) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
@@ -8077,15 +8020,9 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
                 return value;
             }
         }
-        // check setter accessor
-        char sk[64];
-        snprintf(sk, sizeof(sk), "__set_%lld", (long long)index);
-        bool sk_found = false;
-        Item setter = js_map_get_fast_ext(pm, sk, (int)strlen(sk), &sk_found);
-        if (sk_found && get_type_id(setter) == LMD_TYPE_FUNC) {
-            js_call_function(setter, array, &value, 1);
-            return value;
-        }
+        // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1 the
+        // intercept routes companion-map accessor writes through the
+        // IS_ACCESSOR shape path above).
         // check non-writable
         char nw_buf[32];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
@@ -9573,21 +9510,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         }
                         e = e->next;
                     }
-                    // Also check for accessor properties (__get_<name> or __set_<name>)
-                    if (!found_in_shape && ks->len > 0 && ks->len < 200) {
-                        char get_key[256];
-                        snprintf(get_key, sizeof(get_key), "__get_%.*s", (int)ks->len, ks->chars);
-                        bool get_found = false;
-                        js_map_get_fast_ext(m, get_key, (int)strlen(get_key), &get_found);
-                        if (get_found) found_in_shape = true;
-                        if (!found_in_shape) {
-                            char set_key[256];
-                            snprintf(set_key, sizeof(set_key), "__set_%.*s", (int)ks->len, ks->chars);
-                            bool set_found = false;
-                            js_map_get_fast_ext(m, set_key, (int)strlen(set_key), &set_found);
-                            if (set_found) found_in_shape = true;
-                        }
-                    }
+                    // A2-T7: legacy __get_X/__set_X marker fallback retired.
+                    // Accessor writes are intercepted into JsAccessorPair storage
+                    // with an IS_ACCESSOR shape entry on non-companion maps, so
+                    // the shape walk above already finds them. Companion maps
+                    // (MAP_KIND_ARRAY_PROPS) bypass intercept and still use markers,
+                    // but propertyIsEnumerable on those goes through a different path.
                     if (!found_in_shape) return (Item){.item = ITEM_FALSE};
                     // Phase 2c fast path: consult ShapeEntry::flags first.
                     int fp = js_prop_attrs_fast_path(this_val, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
@@ -17566,14 +17494,7 @@ static inline Item js_array_element(Item arr_item, int idx) {
                 return make_js_undefined();
             }
         }
-        // Legacy __get_<idx> marker (back-compat).
-        char gk[64];
-        snprintf(gk, sizeof(gk), "__get_%d", idx);
-        bool gk_found = false;
-        Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-        if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
-            return js_call_function(getter, arr_item, NULL, 0);
-        }
+        // AT-3: legacy __get_<idx> marker fallback retired.
     }
     // v25: check for deleted sentinel (array hole) — return undefined
     if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
@@ -17798,23 +17719,9 @@ static bool js_array_has_element(Item arr, Array* a, int idx, Item* out, bool ch
                 return true;
             }
         }
-        // Legacy __get_<idx>/__set_<idx> markers (back-compat).
-        char gk[64];
-        snprintf(gk, sizeof(gk), "__get_%d", idx);
-        bool gk_found = false;
-        Item gv = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
-        if (gk_found && gv.item != JS_DELETED_SENTINEL_VAL) {
-            *out = js_array_element(arr, idx);
-            return true;
-        }
-        snprintf(gk, sizeof(gk), "__set_%d", idx);
-        bool sk_found = false;
-        Item sv = js_map_get_fast(props, gk, (int)strlen(gk), &sk_found);
-        if (sk_found && sv.item != JS_DELETED_SENTINEL_VAL) {
-            // setter-only accessor: shadows inherited, value is undefined
-            *out = make_js_undefined();
-            return true;
-        }
+        // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired (post-AT-1
+        // the intercept routes companion-map accessor writes through IS_ACCESSOR
+        // shape entry probed above).
     }
     // Only walk prototype chain if prototype has numeric-index properties
     if (!check_proto) return false;
