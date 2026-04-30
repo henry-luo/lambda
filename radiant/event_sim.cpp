@@ -873,6 +873,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->y = reader.get("y").asInt32();
         ev->button = reader.get("button").asInt32();
         ev->mods = reader.get("mods").asInt32();
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;

@@ -1,0 +1,14 @@
+{
+  "name": "Arrow Down preserves visual column across LIs",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "log", "message": "Anchor mid-line in li[0] (after 'navigate ')"},
+    {"type": "mouse_down", "target": {"text": "between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "between focusable"}, "button": 0},
+    {"type": "key_press", "key": "Down"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_caret", "expected_view_type": 1}
+  ]
+}

@@ -417,7 +417,7 @@ void caret_move_to(RadiantState* state, int where);  // 0=line start, 1=line end
 /**
  * Move caret up/down by lines
  */
-void caret_move_line(RadiantState* state, int delta);
+void caret_move_line(RadiantState* state, int delta, struct UiContext* uicon);
 
 /**
  * Calculate UTF-8 aware byte offset by moving delta characters

@@ -1,0 +1,24 @@
+{
+  "name": "Drag across multiple list items in Testing Instructions",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "log", "message": "Anchor on first li text"},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "log", "message": "Drag to 2nd li"},
+    {"type": "mouse_move", "target": {"text": "move the caret"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Drag to 3rd li"},
+    {"type": "mouse_move", "target": {"text": "extend selection"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Drag to 4th li"},
+    {"type": "mouse_move", "target": {"text": "select all text"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "render", "file": "./temp/form_state_li_drag.png"},
+    {"type": "mouse_up", "target": {"text": "select all text"}, "button": 0}
+  ]
+}

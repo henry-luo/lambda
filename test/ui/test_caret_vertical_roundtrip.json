@@ -1,0 +1,21 @@
+{
+  "name": "Caret remains on text after Up then Down (round-trip)",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "mouse_down", "target": {"text": "move the caret"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "move the caret"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "key_press", "key": "Up"},
+    {"type": "wait", "ms": 10},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "key_press", "key": "Down"},
+    {"type": "wait", "ms": 10},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "key_press", "key": "Down"},
+    {"type": "wait", "ms": 10},
+    {"type": "assert_caret", "view_type": 1}
+  ]
+}
