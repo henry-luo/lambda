@@ -241,16 +241,37 @@ extern "C" void js_shape_entry_set_deleted(Item obj, const char* name, int name_
 // Prefer ShapeEntry::flags (kept in sync with legacy markers via dual-write).
 // Fall back to a __ne_X / __nw_X / __nc_X marker probe only when no shape entry
 // exists for X (e.g. companion-map indexed properties on arrays).
+//
+// AT-4 (Option B): the marker-fallback probe is now scoped to **digit-string
+// names only**. Rationale: every js_attr_set_* write site for a named property
+// in current code first writes the data slot (via js_property_set or via the
+// descriptor kernel before reaching the attribute-write tail), so the shape
+// entry exists by the time the attribute write happens. Therefore, for a
+// named property, if the shape flag is unset, the property's attribute is the
+// default (writable/enumerable/configurable). For digit-string names on
+// MAP_KIND_ARRAY_PROPS companion maps, indexed values live in arr->items[idx]
+// and the companion map has no shape entry for "5" — the legacy
+// __nw_<idx>/__ne_<idx>/__nc_<idx> marker scheme remains the source of truth
+// for indexed-property attributes (full migration would require AT-4 Option A:
+// placeholder-sentinel scheme on companion-map digit-string slots).
+static inline bool js_attrs_name_is_digits(const char* name, int name_len) {
+    if (!name || name_len <= 0 || name_len > 10) return false;
+    // Reject leading-zero numerics (per ES CanonicalNumericIndexString).
+    if (name_len > 1 && name[0] == '0') return false;
+    for (int i = 0; i < name_len; i++) {
+        if (name[i] < '0' || name[i] > '9') return false;
+    }
+    return true;
+}
 
 extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
                                           const char* name, int name_len) {
     // Shape flag is authoritative when it indicates non-enumerable.
     if (se && !jspd_is_enumerable(se)) return false;
-    // Otherwise fall back to legacy marker probe — covers cases where a shared
-    // (pool-deduplicated) shape entry could not be safely mutated by
-    // dual-write, leaving the JSPD_NON_ENUMERABLE bit unset on this map's view
-    // even though the __ne_X marker is present.
-    if (!m || name_len <= 0 || name_len >= 240) return true;
+    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
+    // Named properties: shape is authoritative; default is enumerable.
+    if (!js_attrs_name_is_digits(name, name_len)) return true;
+    if (!m || name_len >= 240) return true;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
     if (n <= 0 || n >= (int)sizeof(buf)) return true;
@@ -263,7 +284,9 @@ extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
 extern "C" bool js_props_query_writable(Map* m, ShapeEntry* se,
                                         const char* name, int name_len) {
     if (se && !jspd_is_writable(se)) return false;
-    if (!m || name_len <= 0 || name_len >= 240) return true;
+    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
+    if (!js_attrs_name_is_digits(name, name_len)) return true;
+    if (!m || name_len >= 240) return true;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "__nw_%.*s", name_len, name);
     if (n <= 0 || n >= (int)sizeof(buf)) return true;
@@ -276,7 +299,9 @@ extern "C" bool js_props_query_writable(Map* m, ShapeEntry* se,
 extern "C" bool js_props_query_configurable(Map* m, ShapeEntry* se,
                                             const char* name, int name_len) {
     if (se && !jspd_is_configurable(se)) return false;
-    if (!m || name_len <= 0 || name_len >= 240) return true;
+    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
+    if (!js_attrs_name_is_digits(name, name_len)) return true;
+    if (!m || name_len >= 240) return true;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
     if (n <= 0 || n >= (int)sizeof(buf)) return true;

@@ -7204,12 +7204,16 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         TypeId key_type = get_type_id(key);
         if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
         if (str_key && str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
-            // check __nw_prototype marker — set on built-in constructors
-            // (TypedArray, Error subclasses, etc.) whose prototype is non-writable.
+            // A2-T9 (post AT-4 Option B): consult the shape-aware writability
+            // helper instead of probing `__nw_prototype` directly. Built-in
+            // constructors (TypedArray, Error subclasses, etc.) whose
+            // prototype is non-writable have JSPD_NON_WRITABLE stamped on the
+            // properties_map shape entry by `js_attr_set_writable`.
             if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                bool nw_found = false;
-                Item nw_val = js_map_get_fast_ext(fn->properties_map.map, "__nw_prototype", 14, &nw_found);
-                if (nw_found && js_is_truthy(nw_val)) return value; // non-writable, silently reject
+                ShapeEntry* _se_p = js_find_shape_entry(fn->properties_map, "prototype", 9);
+                if (!js_props_query_writable(fn->properties_map.map, _se_p, "prototype", 9)) {
+                    return value; // non-writable, silently reject
+                }
             }
             // ES spec: built-in constructor .prototype is non-writable. Mirrors the
             // descriptor synthesis in js_object_get_own_property_descriptor.
@@ -7234,6 +7238,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                     Item del = (Item){.item = JS_DELETED_SENTINEL_VAL};
                     js_property_set(fn->properties_map, key, del);
+                    // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry
+                    // so readers can detect tombstones via shape (independent
+                    // of the slot-value sentinel).
+                    if (get_type_id(key) == LMD_TYPE_STRING) {
+                        String* sk = it2s(key);
+                        if (sk && sk->len > 0) {
+                            js_shape_entry_set_deleted(fn->properties_map, sk->chars, (int)sk->len, /*is_deleted=*/true);
+                        }
+                    }
                 }
             }
             return value;
@@ -7252,21 +7265,17 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 js_map_get_fast_ext(fn->properties_map.map, str_key->chars, (int)str_key->len, &has_key);
                 if (has_key) {
                     // Property was explicitly set (class init or defineProperty).
-                    // Phase 2b fast path: consult ShapeEntry::flags first.
-                    int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
-                    if (fp == 0) return value; // non-writable, silently reject
-                    if (fp == 1) {} // writable, fall through to store
-                    else {
-                        // Legacy probe — but use truthiness, not just presence,
-                        // to handle V&A's `__nw_X = false` write correctly.
-                        char nw_key[32];
-                        snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
-                        bool nw_found = false;
-                        Item nw_val = js_map_get_fast_ext(fn->properties_map.map, nw_key, (int)strlen(nw_key), &nw_found);
-                        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-                        if (nw_found && js_is_truthy(nw_val)) return value;
-                        // writable, fall through to store
+                    // A2-T9 (post AT-4 Option B): the shape-aware helper is
+                    // authoritative for named-property writability — when a
+                    // slot exists, the dual-write path guarantees a shape
+                    // entry exists too, so the legacy `__nw_<name>` marker
+                    // probe that used to follow the fast path is dead and
+                    // has been removed.
+                    ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
+                    if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
+                        return value; // non-writable, silently reject
                     }
+                    // writable, fall through to store
                 } else {
                     // Virtual .name/.length — non-writable by default
                     return value;
@@ -7282,24 +7291,16 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             heap_register_gc_root(&fn->properties_map.item);
         }
         if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            // honor __nw_<name> non-writable marker for arbitrary properties
+            // A2-T9 (post AT-4 Option B): consult shape-aware writability
+            // helper. It returns the JS default (writable) for named props
+            // when the shape entry is absent (property hasn't been added
+            // yet) — the legacy `__nw_<name>` marker fallback is dead for
+            // named keys post AT-4 and has been removed.
             if (str_key && str_key->len > 0 && str_key->len < 200) {
-                // Phase 2b fast path on function's properties_map.
-                int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
-                if (fp == 0) {
+                ShapeEntry* _se = js_find_shape_entry(fn->properties_map, str_key->chars, (int)str_key->len);
+                if (!js_props_query_writable(fn->properties_map.map, _se, str_key->chars, (int)str_key->len)) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
-                }
-                if (fp == -1) {
-                    char nw_buf[256];
-                    snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", (int)str_key->len, str_key->chars);
-                    bool nw_found = false;
-                    Item nw_val = js_map_get_fast_ext(fn->properties_map.map, nw_buf, (int)strlen(nw_buf), &nw_found);
-                    if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-                    if (nw_found && js_is_truthy(nw_val)) {
-                        js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                        return value;
-                    }
                 }
             }
             js_property_set(fn->properties_map, key, value);

@@ -9018,32 +9018,35 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 }
             }
         }
-        // Mark as deleted in properties_map; also tombstone any descriptor markers
-        // so the slot is no longer treated as own/non-configurable after delete.
-        // Tombstone markers FIRST so __nw_<key> doesn't block the sentinel write
-        // for the data slot in js_property_set's non-writable guard.
+        // Mark as deleted in properties_map. The bare-key sentinel write
+        // below is load-bearing for FUNC's virtual properties (length,
+        // name, prototype): they're computed from struct fields and never
+        // materialized in properties_map's shape, so the FUNC `get` branch
+        // intercepts the sentinel slot to shadow the virtual property.
         //
-        // R5 WONTFIX: Stage A1.12 `js_ordinary_delete` cannot be routed here.
-        // The kernel is spec-pure for OrdinaryDelete and short-circuits when
-        // the slot is absent (correct for ordinary MAP objects). But FUNC's
-        // virtual properties (length, name, prototype) are computed from
-        // struct fields and never materialized in properties_map's shape —
-        // the deletion mechanism is a sentinel write into properties_map
-        // (intercepted by js_property_get FUNC branch). Routing regressed
-        // 35 S15_*_A9 tests around `delete fn.length`. Keep legacy inline.
+        // A2-T9 (post AT-4 Option B): the legacy `__nw_/__ne_/__nc_<key>`
+        // marker-tombstone loop that used to follow has been removed. With
+        // AT-4 Option B, named-property reads via `js_props_query_*` no
+        // longer consult those markers — the shape flag is authoritative —
+        // so tombstoning them was dead work. The shape-aware
+        // non-configurable check above (via `js_props_query_configurable`)
+        // is the spec-correct gate; if it returns true we proceed with the
+        // sentinel write. The original WONTFIX (routing through
+        // `js_ordinary_delete` regressed 35 S15_*_A9 tests because the
+        // kernel short-circuits when the slot is absent) still applies —
+        // FUNC virtual-shadow needs the unconditional sentinel write that
+        // the spec-pure kernel won't emit. Keep the inline write.
+        js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+        // A2-T8c dual-write: stamp JSPD_DELETED on the properties_map shape
+        // entry so readers can detect tombstones via shape (in addition to
+        // the slot-value sentinel that this branch writes for FUNC virtual
+        // properties).
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
-            if (sk && sk->len > 0 && sk->len < 200) {
-                const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
-                for (int pi = 0; pi < 3; pi++) {
-                    char mk[256];
-                    snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)sk->len, sk->chars);
-                    Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
-                    js_property_set(fn->properties_map, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                }
+            if (sk && sk->len > 0) {
+                js_shape_entry_set_deleted(fn->properties_map, sk->chars, (int)sk->len, /*is_deleted=*/true);
             }
         }
-        js_property_set(fn->properties_map, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
         return (Item){.item = b2it(true)};
     }
     // v25: Handle array element deletion — set element to sentinel to create "hole"
@@ -9112,6 +9115,12 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                         }
                         Item bare_k = (Item){.item = s2it(heap_create_name(ks->chars, ks->len))};
                         js_property_set(pm_item, bare_k, (Item){.item = JS_DELETED_SENTINEL_VAL});
+                        // A2-T8c dual-write: stamp JSPD_DELETED on the
+                        // companion-map shape entry under the digit-string
+                        // name (post-AT-1 the entry exists for accessors
+                        // installed via intercept; no-op otherwise, which
+                        // is fine — the slot-value sentinel still applies).
+                        js_shape_entry_set_deleted(pm_item, ks->chars, (int)ks->len, /*is_deleted=*/true);
                     }
                 }
             }

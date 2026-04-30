@@ -111,16 +111,15 @@ the gate is `regressions=0`, met).
      branch of `js_props_query_*` (latent bug exposed by T5: prior code
      always overwrote stale tombstones, masking the truthy-sentinel
      misread). Verified `0 regressions / 28853 baseline passing` after T5.
-   - **Phase A2-T6 — Retire marker reads. — BLOCKED on indexed-property
-     storage.** Survey shows the `js_props_query_*` reader fallback for
-     `__nw_X`/`__ne_X`/`__nc_X` is *load-bearing for indexed properties on
-     arrays* (companion-map markers like `__nw_5` have no ShapeEntry to carry
-     the bit). Cannot delete the fallback without first introducing either
-     (a) ShapeEntry tracking for indexed positions on companion maps, or
-     (b) a separate index-attribute table. The ~15 string-key direct writers
-     (`snprintf("__nw_%.*s")+js_property_set`) could be migrated to
-     `js_attr_set_*` first as a safe partial step, but it does not unblock
-     the reader retirement.
+   - **Phase A2-T6 — Retire marker reads (named-property scope). — DONE
+     (via AT-4 Option B; 0 regressions / 28853 / Props 20/20).**
+     `js_props_query_*` marker-fallback path is now scoped to
+     digit-string (indexed) names only. Named-property reads consult
+     the shape flag exclusively. The fallback codepath is preserved
+     for indexed properties on `MAP_KIND_ARRAY_PROPS` companion maps
+     (still load-bearing — `arr->items[idx]` storage has no ShapeEntry
+     to carry the bit). Full marker-scheme retirement (covering
+     indexed properties too) is deferred as AT-4 Option A.
    - **Phase A2-T7 — Retire `__get_X`/`__set_X` accessor markers. — DONE
      (via AT-1 + AT-3).** See "AT-Phase" subsection below for the
      full retirement story. All `__get_%d` / `__set_%d` /
@@ -128,40 +127,73 @@ the gate is `regressions=0`, met).
      `lambda/js/*.cpp` are retired (string-grep returns 0 matches).
      Verified `0 regressions / 28853 baseline passing` and Props 19/19
      after each batch.
-   - **Phase A2-T8 — `JSPD_DELETED` shape bit; retire `JS_DELETED_SENTINEL_VAL`
-     overlap with `LMD_TYPE_INT`. — FOUNDATION DONE (T8a).** Bit `0x10` added
-     to the `JSPD_*` set in `lambda/lambda-data.hpp`; `jspd_is_deleted` /
-     `jspd_set_deleted` predicates added to `lambda/js/js_property_attrs.h`;
-     per-Map clone-safe mutator `js_shape_entry_set_deleted` added in
-     `lambda/js/js_property_attrs.cpp` (wraps the existing
-     `js_shape_entry_update_flags` primitive). Central `js_delete_property`
-     site in `js_globals.cpp` (~L9295) now dual-writes — slot sentinel +
-     shape bit — so the bit propagates through the most common delete path.
-     Props gtest #20 `Tombstone_DeletePropagatesAcrossReaders` added as the
-     reader-agreement gate (covers `in` / `hasOwnProperty` /
-     `getOwnPropertyDescriptor` / `Object.keys` / `for-in` / re-define after
-     delete). Verified `0 regressions / 28853 baseline passing` and Props
-     20/20 PASS after T8a. Remaining T8 work (T8b–T8d) is mechanical but
-     spans 90+ sites and is its own multi-session refactor:
-     - **T8b**: at every reader site that does
-       `slot.item == JS_DELETED_SENTINEL_VAL` on a map slot, add an OR check
-       for `jspd_is_deleted(se)` (or replace the sentinel probe entirely
-       where the ShapeEntry is already in scope). ~80+ sites across
-       `js_runtime.cpp` / `js_globals.cpp` / `js_props.cpp`.
-     - **T8c**: at every other writer site that writes the sentinel to a map
-       slot, also call `js_shape_entry_set_deleted(...)`. ~10 sites.
-     - **T8d**: drop sentinel writes; bit becomes the single source of
-       truth. Drops the `JS_DELETED_SENTINEL_VAL` macro and the FLOAT-key
-       sentinel-misread bug class structurally.
-     **Out of scope for T8** (separate problem): array-hole sentinel writes
-     to `arr->items[idx]` (positional storage, no ShapeEntry to carry the
-     bit). These either stay as slot sentinels or wait for AT-4 to give
-     companion-map digit-string ShapeEntries the same parity.
-   - **Phase A2-T9 — FUNC virtual-property unification.** R5 (FUNC delete) and
-     R2-FUNC (FUNC set) WONTFIX comments come down; `js_ordinary_*` kernels
-     absorb FUNC writes since `__nw_X` is now uniform shape state on
-     `properties_map`. Largest of the four — expects T6/T7/T8 unification
-     of attribute storage as a precondition.
+   - **Phase A2-T8 — `JSPD_DELETED` shape bit. — DONE (T8a + T8c). T8b/T8d
+     CANCELLED.** What landed:
+     - **T8a**: bit `0x10` added to the `JSPD_*` set in
+       `lambda/lambda-data.hpp`; `jspd_is_deleted` / `jspd_set_deleted`
+       predicates in `lambda/js/js_property_attrs.h`; per-Map clone-safe
+       mutator `js_shape_entry_set_deleted` in
+       `lambda/js/js_property_attrs.cpp` (wraps the existing
+       `js_shape_entry_update_flags` primitive). Central
+       `js_delete_property` site in `js_globals.cpp` (~L9295) dual-writes —
+       slot sentinel + shape bit. Props gtest #20
+       `Tombstone_DeletePropagatesAcrossReaders` added as reader-agreement
+       gate.
+     - **T8c**: writer dual-write at the remaining bare-key sentinel-write
+       sites — `js_props.cpp` `js_ordinary_delete` (~L298),
+       `js_globals.cpp` FUNC delete bare-key (~L9046), `js_globals.cpp`
+       array companion-map bare-key (~L9114), `js_runtime.cpp` `__proto__`
+       MAP→non-MAP transition (~L7235). Skipped on principle:
+       `js_define_own_property_from_descriptor` data→accessor transient
+       (would need paired clear at accessor install — risk of stale
+       DELETED bit over a live accessor); marker keys (separate keyspace,
+       no ShapeEntry); `arr->items[idx]` positional storage.
+     - Verified `0 regressions / 28853 baseline passing` / Props 20/20
+       PASS after each batch.
+
+     **T8b/T8d cancellation rationale.** Detailed scope analysis after
+     T8c surfaced two structural issues:
+     1. **T8d cannot drop the macro.** Of 95 `JS_DELETED_SENTINEL_VAL`
+        references, ~25 are array-position writes/reads
+        (`arr->items[idx]`) and ~16 are marker-key reads/writes
+        (`__nw_X`/`__ne_X`/`__nc_X` tombstone filters). Both categories
+        are out of scope for T8 (no ShapeEntry to carry the bit). The
+        macro and array/marker usage stay, contradicting T8d's stated
+        goal of dropping it.
+     2. **T8b adds runtime cost without correctness benefit.** The bug
+        class T8 was meant to fix (FLOAT-key sentinel-misread) is a
+        key-canonicalization issue already eliminated by A1's
+        `ToPropertyKey`. Migrating ~30 map-slot reader sites to consult
+        `jspd_is_deleted(se)` adds a `js_find_shape_entry` hash lookup
+        per read in exchange for no observable behavior change. Most
+        sites don't have `se` in scope today.
+
+     The T8a+T8c foundation is preserved as a building block for any
+     future feature that wants to query "deleted" via shape (e.g. the
+     dense `PropertyDescriptor` table in §A2). It is NOT a precursor to
+     dropping the sentinel macro — that would require AT-4 first
+     (companion-map digit-string ShapeEntries) and even then array-hole
+     positional storage keeps the sentinel.
+   - **Phase A2-T9 — FUNC virtual-property unification — DONE (0 regressions / 28853, Props 20/20).**
+     Both R5 (FUNC delete in `js_globals.cpp`) and R2-FUNC (FUNC set
+     prototype/.name/.length/arbitrary in `js_runtime.cpp`) cleaned up
+     post AT-4 Option B. Approach was **dead-code removal**, not kernel
+     routing — the original WONTFIX root cause (kernel `js_ordinary_delete`
+     short-circuits on absent slots, breaking FUNC's virtual-shadow
+     sentinel-write trick) still applies and would still regress 35
+     S15_*_A9 tests. Kept the inline FUNC `js_property_set(..., SENTINEL)`
+     write that shadows the virtual `length`/`name`/`prototype`. Removed:
+     (a) R5 marker-tombstone loop over `__nw_/__ne_/__nc_<key>` (now dead
+     for named keys — readers consult shape flag only post AT-4 B);
+     (b) R2-FUNC prototype branch's direct `__nw_prototype` probe →
+     replaced with `js_props_query_writable`;
+     (c) R2-FUNC `.name`/`.length` and arbitrary-prop branches' tri-state
+     `js_prop_attrs_fast_path` + legacy marker fallback → collapsed into
+     single `js_props_query_writable` call. Same safety contract as AT-4
+     Option B: when a FUNC property slot exists, dual-write guarantees a
+     shape entry exists, so the `fp == -1` legacy fallback was
+     unreachable in practice. Kernel routing of FUNC delete remains
+     deferred indefinitely (R5 root cause unchanged).
 
    **Non-goals during A2:** no `Map` header changes, no GC-tracer changes, no
    `shape_pool.cpp` changes, no `transpile_js_mir.cpp` changes. The single new
@@ -191,21 +223,35 @@ the gate is `regressions=0`, met).
      directly. Added `jspd_is_enumerable(_se_idx)` probe alongside the
      marker probe (`js_globals.cpp` ~L6325). Final string-grep for
      `__get_%`/`__set_%` in `lambda/js/*.cpp` returns zero matches.
-   - **AT-4 — TODO: marker attribute table for indexed positions.**
-     Blocker for T6 (marker reader fallback retirement):
-     `__nw_<idx>`/`__ne_<idx>`/`__nc_<idx>` writes can't migrate to
-     shape flags because writing `__nw_5` doesn't create "5" ShapeEntry
-     on companion map (indexed values live in `arr->items[5]`, not in
-     the map). `js_dual_write_marker_flags` →
-     `js_shape_entry_update_flags` bails on missing ShapeEntry. Design
-     options: (a) co-write a placeholder sentinel slot at digit-string
-     name when writing `__nw_<idx>` so a ShapeEntry exists to carry the
-     bit (sentinel signals "value is at `arr->items[idx]`, not here"),
-     or (b) separate index-attribute table on companion map (parallel
-     to ShapeEntry chain). Recommendation: (a) less invasive.
-   - **AT-5 — TODO.** After AT-4, retire `js_props_query_*` marker
-     fallback path (T6) and remaining marker write-path sites that
-     bypass intercept. Then T9 (FUNC virtual-property unification).
+   - **AT-4 — DONE (Option B; 0 regressions / 28853 / Props 20/20).**
+     Scoped the `js_props_query_*` marker-fallback path in
+     `lambda/js/js_property_attrs.cpp` to **digit-string (indexed) names
+     only** via a new `js_attrs_name_is_digits(name, len)` helper
+     (rejects leading-zero numerics per CanonicalNumericIndexString).
+     Named properties: shape flag is now authoritative; if unset, the
+     attribute is the default. Indexed properties: marker scheme remains
+     the source of truth (no structural change to `arr->items[idx]`
+     storage). Verified by analysis that every `js_attr_set_*` call site
+     for a named property in current code first writes the data slot
+     (in `js_define_own_property_from_descriptor` /
+     `js_create_data_property_or_throw` / the delete-property
+     marker-clear cluster), so the shape entry exists by the time the
+     attribute write happens — the named-property fallback path was
+     dead code in practice. **Unblocks T6 (named-property reader
+     migration is structurally complete) and T9 (FUNC virtual-property
+     unification — `properties_map` is a regular map, all named).**
+     Option A (full marker-scheme retirement via placeholder-sentinel
+     on companion-map digit-string slots) is deferred — its payoff is
+     deleting the marker scheme for indexed properties, which requires
+     auditing every companion-map digit-string read path; small win
+     relative to risk now that B unblocks the downstream work.
+   - **AT-5 — REVISED.** With AT-4 Option B done, what remains is:
+     (a) the marker-fallback codepath itself (still needed for indexed
+     properties), and (b) any direct marker write sites that bypass
+     `js_attr_set_*`. For T9 unblock specifically: nothing further from
+     AT-5 is required since FUNC `properties_map` is named-only. AT-5
+     can be retitled "deferred Option A work" and parked alongside
+     T8b/T8d as low-priority structural cleanup.
 
 2. **A3 — `JsClass` enum.** Add `JsClass klass` byte to `Map`/`TypeMap`. Replace `__class_name__` reads with the byte; route `js_proto_class_method_dispatch` through a switch.
 3. **D — extended hidden-state audit.** Builtin function caches keyed by enum, name-pool reuse across batches. Convert remaining bare set/restore patterns (if any surface during A2) to the existing RAII guards.
