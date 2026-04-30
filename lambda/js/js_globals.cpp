@@ -14,6 +14,7 @@
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_class.h"
+#include "js_coerce.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -688,48 +689,24 @@ extern "C" Item js_date_new_from(Item value) {
             double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
             store_time(ms);
         } else {
-            // Non-Date object: ToPrimitive(value) per ES spec §21.4.2
-            // 1. Check Symbol.toPrimitive
-            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
-            Item to_prim = js_property_get(value, sym_key);
-            Item prim;
-            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
-                Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
-                Item args[1] = { hint };
-                prim = js_call_function(to_prim, value, args, 1);
-                if (js_check_exception()) return ItemNull;
-                // If result is an object, throw TypeError
-                TypeId pt = get_type_id(prim);
-                if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
-                    js_throw_type_error("Cannot convert object to primitive value");
-                    return ItemNull;
-                }
-                // Symbol results → throw TypeError
-                if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
-                    js_throw_type_error("Cannot convert a Symbol value to a number");
-                    return ItemNull;
-                }
-            } else {
-                // No Symbol.toPrimitive: try valueOf/toString
-                prim = js_to_number(value);
-                if (js_check_exception()) return ItemNull;
-                TypeId pt = get_type_id(prim);
-                if (pt == LMD_TYPE_FLOAT)
-                    store_time(it2d(prim));
-                else if (pt == LMD_TYPE_INT || pt == LMD_TYPE_INT64)
-                    store_time((double)it2i(prim));
-                else
-                    store_time(NAN);
-                goto date_done;
+            // Non-Date object: ToPrimitive(value, default) per ES spec §21.4.2.
+            // J39-1b: route through unified js_to_primitive (ES §7.1.1).
+            Item prim = js_to_primitive(value, JS_HINT_DEFAULT);
+            if (js_check_exception()) return ItemNull;
+            TypeId pt = get_type_id(prim);
+            // Symbol results → throw TypeError
+            if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+                js_throw_type_error("Cannot convert a Symbol value to a number");
+                return ItemNull;
             }
             // Dispatch on ToPrimitive result type
-            TypeId pt = get_type_id(prim);
             if (pt == LMD_TYPE_STRING) {
                 // Re-enter Date constructor with the string
                 return js_date_new_from(prim);
             } else {
                 // ToNumber on the primitive
                 Item num = js_to_number(prim);
+                if (js_check_exception()) return ItemNull;
                 TypeId nt = get_type_id(num);
                 if (nt == LMD_TYPE_FLOAT)
                     store_time(it2d(num));
@@ -5565,9 +5542,17 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     // Array properties: length, numeric indices
     if (type == LMD_TYPE_ARRAY) {
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
+            // J39-7: honor __nw_length marker (set by defineProperty(arr, "length", {writable:false}))
+            bool writable = true;
+            if (obj.array && obj.array->extra != 0) {
+                Map* pm = (Map*)(uintptr_t)obj.array->extra;
+                bool nw_found = false;
+                Item nwv = js_map_get_fast_ext(pm, "__nw_length", 11, &nw_found);
+                if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) writable = false;
+            }
             Item desc = js_new_object();
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(obj.array->length)});
-            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(writable)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
             return desc;
@@ -8438,9 +8423,12 @@ extern "C" Item js_array_from(Item iterable) {
 extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
     extern Item js_throw_type_error(const char* msg);
     extern int js_check_exception(void);
-    // spec: if mapFn is not undefined and not callable, throw TypeError
+    // J39-7 / ES §22.1.2.1 step 3.a: if mapFn is undefined → mapping=false;
+    // otherwise, if IsCallable(mapFn) is false → throw TypeError. null,
+    // objects, strings, etc. all throw.
     TypeId mft = get_type_id(mapFn);
-    if (mft != LMD_TYPE_FUNC && mft != LMD_TYPE_NULL && mapFn.item != ITEM_JS_UNDEFINED) {
+    bool is_undef = (mapFn.item == ITEM_JS_UNDEFINED) || mft == LMD_TYPE_UNDEFINED;
+    if (!is_undef && mft != LMD_TYPE_FUNC) {
         js_throw_type_error("Array.from: mapFn is not a function");
         return js_array_new(0);
     }
@@ -8464,6 +8452,13 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
 extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item this_arg) {
     extern Item js_throw_type_error(const char* msg);
     extern int js_check_exception(void);
+    // J39-7 / ES §22.1.2.1 step 3.a: validate mapFn before consuming iterable.
+    TypeId mft = get_type_id(mapFn);
+    bool is_undef = (mapFn.item == ITEM_JS_UNDEFINED) || mft == LMD_TYPE_UNDEFINED;
+    if (!is_undef && mft != LMD_TYPE_FUNC) {
+        js_throw_type_error("Array.from: mapFn is not a function");
+        return js_array_new(0);
+    }
     Item arr = js_array_from(iterable);
     if (js_check_exception()) return js_array_new(0);
     int64_t len = js_array_length(arr);
