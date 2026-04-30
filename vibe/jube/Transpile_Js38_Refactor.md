@@ -1,5 +1,34 @@
 # Transpile_Js38 — Engine Refactor for Robustness, Modularity & Regression Safety
 
+## Progress snapshot (current)
+
+Verification gates throughout: `make build` (Errors: 0), `./test/test_js_props_gtest.exe`
+(16/16 PASS), test262 baseline batch
+(`ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --run-partial`):
+**28747 fully passing, 0 regressions, 0 improvements** vs the locked baseline.
+
+| Stage | Status | Notes |
+|---|---|---|
+| B — Property-model GTest harness | DONE | `test/test_js_props_gtest.cpp`, 16 tests in `Props.*` suite, ~600ms. Inner-loop gate for all Stage A work. |
+| A1 — `ToPropertyKey` extraction & sweep | DONE | `js_to_property_key` in `js_runtime.cpp`. 6 ad-hoc `js_to_string(key)` sites converted. URLSearchParams left as `js_to_string` (spec). |
+| A1 — `Ordinary*` kernels in `lambda/js/js_props.{h,cpp}` | DONE | 10 kernels: `js_ordinary_get_own`, `_get_own_descriptor`, `_set_via_accessor`, `_has_own`, `_has_property`, `_get`, `_set`, `_delete`, `_resolve_shape_value`, plus the `js_props_*` query helpers. MAP-only chokepoints; callers wrap with full ABI. |
+| A1 routing — call-site replacement | PARTIAL | Routed: Array companion-map delete branch in `js_globals.cpp` (~30 lines → ~12). Investigated/blocked: R3 `js_in` (proxy-on-proto walk per step), R5 FUNC delete (virtual `length`/`name`/`prototype` shadow-delete via `properties_map` — kernel is spec-pure and writes nothing → marked WONTFIX with source comment). R1/R2/R4/R7 deferred (large fns with side concerns). |
+| A2 — `PropertyDescriptor` table | NOT STARTED | Replaces `JSPD_IS_ACCESSOR` flag + `JS_DELETED_SENTINEL_VAL` + `__get_X`/`__set_X` markers. |
+| A3 — `JsClass` enum | NOT STARTED | Replaces `__class_name__` magic strings. |
+| C — Megafile splits | NOT STARTED | Mechanical, gated on A2. |
+| D — Hidden-state RAII | DONE | `lambda/js/js_state_guards.h` (`ScopedSkipAccessorDispatch`); anon-namespace `ScopedProxyReceiver` adjacent to file-static `js_proxy_receiver` in `js_runtime.cpp`. 5 manual save/restore sites converted (3 in `js_runtime.cpp`, 1 in `js_props.cpp`, 1 in `js_property_attrs.cpp` — last one drops a manual restore on early-return). Builtin caches and name-pool reuse audit still pending. |
+| E — Debug-only invariant assertions | DONE | 3 macros in `js_props.cpp`, NDEBUG-gated to `((void)0)`: `JS_PROPS_ASSERT_KEY` (non-NULL name + non-negative len), `JS_PROPS_ASSERT_NOT_DEL_ACCESSOR` (sentinel + IS_ACCESSOR mutually exclusive), `JS_PROPS_ASSERT_ACCESSOR_PAIR` (IS_ACCESSOR ⇒ slot decodes to non-null `JsAccessorPair*`). Inserted at all 6 `js_ordinary_*` kernel entries and at the joint slot+shape sites in `_get_own_descriptor` and `_delete`. No assertions trip on full baseline. |
+| F — Spec-driven change discipline | ONGOING | Adopted in commit notes. |
+
+### Outstanding tasks (priority order)
+
+1. **Finish A1 routing** (R1/R2/R4/R7 — `js_property_get` MAP branch, `js_property_set` MAP branch, `js_has_own_property` MAP branch, `js_super_property_set`). Each is a large function with proxy/builtin/exotic concerns; route under the gated harness one at a time.
+2. **A2 — `PropertyDescriptor` table.** Highest structural payoff remaining. Eliminates the IS_ACCESSOR/sentinel desync class entirely. Needs migration plan for legacy `__get_X`/`__set_X`/`__nw_X`/`__ne_X`/`__nc_X` markers (read-compat → refuse new writes → GC sweep).
+3. **A3 — `JsClass` enum.** Add `JsClass klass` byte to `Map`/`TypeMap`. Replace `__class_name__` reads with the byte; route `js_proto_class_method_dispatch` through a switch.
+4. **D — extended hidden-state audit.** Builtin function caches keyed by enum, name-pool reuse across batches. Convert remaining bare set/restore patterns (if any surface during routing) to the existing RAII guards.
+5. **C — megafile splits.** Mechanical once A2 lands. Do `js_runtime.cpp` first along the boundaries listed below.
+6. **Stage B harness expansion.** Add coverage rows for new kernels added during A2 (descriptor merge semantics, configurable→non-configurable transitions, accessor↔data conversions).
+
 ## Motivation
 
 After many rounds of test262 crash and regression triage we are not making net progress. Each fix tends to either:

@@ -5,6 +5,7 @@
 
 #include "js_property_attrs.h"
 #include "js_runtime.h"
+#include "js_state_guards.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include <string.h>
@@ -299,9 +300,9 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
     // Bypass setter accessor-dispatch in our own recursive js_property_set call:
     // we are storing the pair Item literally under name X, not invoking the
     // existing accessor (which would call pair->setter(pair_item) — wrong).
-    extern bool js_skip_accessor_dispatch;
-    bool _prev = js_skip_accessor_dispatch;
-    js_skip_accessor_dispatch = true;
+    // Stage D: RAII guard restores on all exits, including the early
+    // `if (!pair) return;` path below.
+    ScopedSkipAccessorDispatch _skip_guard;
 
     // Normalize "absent half" to ItemNull so read paths that gate on
     // `pair->getter.item != ItemNull.item` correctly treat an explicit-undefined
@@ -336,12 +337,10 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
         Item g = is_setter ? ItemNull : fn;
         Item s = is_setter ? fn       : ItemNull;
         pair = js_alloc_accessor_pair(g, s);
-        if (!pair) { js_skip_accessor_dispatch = _prev; return; }
+        if (!pair) return;
         Item pair_item = js_accessor_pair_to_item(pair);
         js_property_set(obj, name, pair_item);
     }
-
-    js_skip_accessor_dispatch = _prev;
 
     // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
     uint8_t set_mask = JSPD_IS_ACCESSOR;
