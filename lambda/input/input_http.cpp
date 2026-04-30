@@ -257,6 +257,137 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     return content;
 }
 
+// Cache-aware synchronous download (returns content + size). Checks disk cache first.
+char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir) {
+    if (!url) return NULL;
+    const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
+
+    // ensure cache directory exists
+    if (!create_dir(effective_cache_dir)) {
+        // fall back to direct download if cache unavailable
+        return download_http_content(url, content_size, NULL);
+    }
+
+    char* cache_filename = generate_cache_filename(url, effective_cache_dir);
+    if (cache_filename && file_exists(cache_filename)) {
+        size_t cached_size = 0;
+        char* content = read_binary_file(cache_filename, &cached_size);
+        if (content) {
+            log_debug("HTTP: cache hit for %s (%zu bytes)", url, cached_size);
+            if (content_size) *content_size = cached_size;
+            mem_free(cache_filename);
+            return content;
+        }
+    }
+
+    // download and populate cache
+    size_t size = 0;
+    char* content = download_http_content(url, &size, NULL);
+    if (content && cache_filename) {
+        if (write_binary_file(cache_filename, content, size) != 0) {
+            log_debug("HTTP: failed to write cache file %s", cache_filename);
+        }
+    }
+    if (cache_filename) mem_free(cache_filename);
+    if (content_size) *content_size = size;
+    return content;
+}
+
+// ----- Parallel prefetch implementation (pthread-based) -------------------
+#include <pthread.h>
+
+typedef struct {
+    const char* const* urls;
+    int count;
+    const char* cache_dir;
+    pthread_mutex_t* idx_mutex;
+    int* next_idx;
+    int* success_count;
+} PrefetchWorkerArg;
+
+static void* prefetch_worker(void* arg) {
+    PrefetchWorkerArg* w = (PrefetchWorkerArg*)arg;
+    while (true) {
+        int i;
+        pthread_mutex_lock(w->idx_mutex);
+        i = (*w->next_idx)++;
+        pthread_mutex_unlock(w->idx_mutex);
+        if (i >= w->count) break;
+
+        const char* url = w->urls[i];
+        if (!url) continue;
+
+        // skip non-HTTP urls
+        if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
+            continue;
+        }
+
+        char* cache_filename = generate_cache_filename(url, w->cache_dir);
+        if (cache_filename && file_exists(cache_filename)) {
+            // already cached
+            mem_free(cache_filename);
+            pthread_mutex_lock(w->idx_mutex);
+            (*w->success_count)++;
+            pthread_mutex_unlock(w->idx_mutex);
+            continue;
+        }
+
+        size_t sz = 0;
+        char* content = download_http_content(url, &sz, NULL);
+        if (content) {
+            if (cache_filename) {
+                write_binary_file(cache_filename, content, sz);
+            }
+            mem_free(content);
+            pthread_mutex_lock(w->idx_mutex);
+            (*w->success_count)++;
+            pthread_mutex_unlock(w->idx_mutex);
+        }
+        if (cache_filename) mem_free(cache_filename);
+    }
+    return NULL;
+}
+
+int http_prefetch_urls_parallel(const char* const* urls, int count, const char* cache_dir, int max_threads) {
+    if (!urls || count <= 0) return 0;
+    const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
+    if (!create_dir(effective_cache_dir)) return 0;
+    if (max_threads <= 0) max_threads = 8;
+    if (max_threads > count) max_threads = count;
+
+    pthread_mutex_t idx_mutex = PTHREAD_MUTEX_INITIALIZER;
+    int next_idx = 0;
+    int success_count = 0;
+
+    PrefetchWorkerArg arg;
+    arg.urls = urls;
+    arg.count = count;
+    arg.cache_dir = effective_cache_dir;
+    arg.idx_mutex = &idx_mutex;
+    arg.next_idx = &next_idx;
+    arg.success_count = &success_count;
+
+    log_debug("HTTP: prefetching %d urls with %d threads", count, max_threads);
+    double t0 = (double)clock() / CLOCKS_PER_SEC;
+
+    pthread_t threads[32];
+    if (max_threads > 32) max_threads = 32;
+    for (int i = 0; i < max_threads; i++) {
+        if (pthread_create(&threads[i], NULL, prefetch_worker, &arg) != 0) {
+            max_threads = i;
+            break;
+        }
+    }
+    for (int i = 0; i < max_threads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    pthread_mutex_destroy(&idx_mutex);
+
+    double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
+    log_debug("HTTP: prefetched %d/%d urls in %.3fs (cpu)", success_count, count, elapsed);
+    return success_count;
+}
+
 // Returns an Input* for HTTP/HTTPS URL, using memory and file cache
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir) {
     if (!url) {

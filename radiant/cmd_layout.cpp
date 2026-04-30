@@ -853,7 +853,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         bool is_http = (strncmp(import_path, "http://", 7) == 0 || strncmp(import_path, "https://", 8) == 0);
         if (is_http) {
             size_t content_size = 0;
-            css_content = download_http_content(import_path, &content_size, nullptr);
+            css_content = download_http_content_cached(import_path, &content_size, "./temp/cache");
         } else {
             css_content = read_text_file(import_path);
         }
@@ -1104,6 +1104,128 @@ static char* convert_css_to_utf8(const char* data, size_t len, const char* css_c
 }
 
 /**
+ * Resolve a possibly-relative href against a base URL/path. Returns mem_alloc'd
+ * absolute URL string (caller mem_free's), or nullptr if not HTTP/HTTPS.
+ */
+static char* resolve_http_href(const char* href, const char* base_path) {
+    if (!href || !*href) return nullptr;
+
+    // already absolute http(s) URL
+    if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) {
+        return mem_strdup(href, MEM_CAT_TEMP);
+    }
+    // protocol-relative //host/path
+    if (href[0] == '/' && href[1] == '/' && base_path) {
+        const char* scheme_end = strstr(base_path, "://");
+        if (scheme_end) {
+            size_t scheme_len = scheme_end - base_path;
+            size_t out_len = scheme_len + 1 /*':'*/ + strlen(href) + 1;
+            char* out = (char*)mem_alloc(out_len, MEM_CAT_TEMP);
+            snprintf(out, out_len, "%.*s:%s", (int)scheme_len, base_path, href);
+            return out;
+        }
+        return nullptr;
+    }
+    // relative — resolve against base_path if base is HTTP
+    if (!base_path) return nullptr;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) {
+        return nullptr;
+    }
+    Url* base_url = url_parse(base_path);
+    if (!base_url || !base_url->is_valid) {
+        if (base_url) url_destroy(base_url);
+        return nullptr;
+    }
+    Url* resolved = parse_url(base_url, href);
+    char* out = nullptr;
+    if (resolved && resolved->is_valid &&
+        (resolved->scheme == URL_SCHEME_HTTP || resolved->scheme == URL_SCHEME_HTTPS)) {
+        const char* s = url_get_href(resolved);
+        if (s) out = mem_strdup(s, MEM_CAT_TEMP);
+    }
+    if (resolved) url_destroy(resolved);
+    url_destroy(base_url);
+    return out;
+}
+
+/**
+ * Recursively collect HTTP(S) URLs from <link rel="stylesheet" href="...">
+ * and <script src="..."> elements. Appends absolute URL strings (mem_alloc'd)
+ * to *out_urls (realloc'd) and increments *out_count.
+ */
+static void collect_external_resource_urls(Element* elem, const char* base_path,
+                                            char*** out_urls, int* out_count, int* out_capacity,
+                                            int depth) {
+    if (!elem || depth > MAX_CSS_TREE_DEPTH) return;
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type || !type->name.str) goto recurse;
+
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
+        const char* rel = extract_element_attribute(elem, "rel", nullptr);
+        const char* href = extract_element_attribute(elem, "href", nullptr);
+        if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
+            char* abs = resolve_http_href(href, base_path);
+            if (abs) {
+                if (*out_count >= *out_capacity) {
+                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
+                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
+                    *out_capacity = new_cap;
+                }
+                (*out_urls)[(*out_count)++] = abs;
+            }
+        }
+    } else if (str_ieq_const(type->name.str, strlen(type->name.str), "script")) {
+        const char* src = extract_element_attribute(elem, "src", nullptr);
+        if (src) {
+            char* abs = resolve_http_href(src, base_path);
+            if (abs) {
+                if (*out_count >= *out_capacity) {
+                    int new_cap = (*out_capacity > 0) ? (*out_capacity * 2) : 16;
+                    *out_urls = (char**)mem_realloc(*out_urls, new_cap * sizeof(char*), MEM_CAT_TEMP);
+                    *out_capacity = new_cap;
+                }
+                (*out_urls)[(*out_count)++] = abs;
+            }
+        }
+    }
+
+recurse:
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            collect_external_resource_urls(child_item.element, base_path,
+                                            out_urls, out_count, out_capacity, depth + 1);
+        }
+    }
+}
+
+/**
+ * Pre-fetch all external HTTP(S) sub-resources (CSS links, script sources)
+ * referenced by the document in parallel. Populates the on-disk cache so the
+ * subsequent serial loaders find them already cached. No-op for local docs.
+ */
+static void prefetch_document_subresources(Element* html_root, const char* base_path) {
+    if (!html_root || !base_path) return;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return;
+
+    char** urls = nullptr;
+    int count = 0;
+    int capacity = 0;
+    collect_external_resource_urls(html_root, base_path, &urls, &count, &capacity, 0);
+
+    if (count > 0) {
+        log_info("[PREFETCH] downloading %d sub-resources in parallel", count);
+        double t0 = (double)clock() / CLOCKS_PER_SEC;
+        http_prefetch_urls_parallel((const char* const*)urls, count, "./temp/cache", 8);
+        double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
+        log_info("[PREFETCH] completed in %.3fs (cpu)", elapsed);
+    }
+
+    for (int i = 0; i < count; i++) mem_free(urls[i]);
+    if (urls) mem_free(urls);
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -1204,9 +1326,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             char* css_content = nullptr;
             size_t css_file_size = 0;
             if (is_http_css) {
-                // Download CSS from HTTP URL
+                // Download CSS from HTTP URL (uses on-disk cache populated by prefetch)
                 size_t content_size = 0;
-                css_content = download_http_content(css_path, &content_size, nullptr);
+                css_content = download_http_content_cached(css_path, &content_size, "./temp/cache");
                 if (css_content) {
                     css_file_size = content_size;
                     log_debug("[CSS] Downloaded stylesheet from URL: %s (%zu bytes)", css_path, content_size);
@@ -1502,6 +1624,10 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
+
+    // Step 0: Pre-fetch external HTTP sub-resources (CSS, scripts) in parallel
+    // so subsequent serial loaders find them already cached on disk.
+    prefetch_document_subresources(html_root, base_path);
 
     // Step 1: Collect and parse <link rel="stylesheet"> references
     log_debug("[CSS] Step 1: Collecting linked stylesheets...");
