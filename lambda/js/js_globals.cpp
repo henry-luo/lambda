@@ -13,6 +13,7 @@
 #include "js_dom_events.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -605,6 +606,7 @@ extern "C" Item js_date_new(void) {
     // mark as Date for instanceof
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
+    js_class_stamp(obj, JS_CLASS_DATE);  // A3-T3b
     return obj;
 }
 
@@ -9782,6 +9784,7 @@ static Item make_string_item(const char* str, int len) {
 static Item js_make_abort_signal() {
     Item signal = js_new_object();
     js_property_set(signal, make_string_item("__class_name__"), make_string_item("AbortSignal"));
+    js_class_stamp(signal, JS_CLASS_ABORT_SIGNAL);  // A3-T3b
     js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(false)});
     js_property_set(signal, make_string_item("reason"), make_js_undefined());
     js_property_set(signal, make_string_item("__listeners__"), js_array_new(0));
@@ -9835,6 +9838,7 @@ extern "C" Item js_abort_signal_abort(Item reason) {
     if (get_type_id(reason) == LMD_TYPE_UNDEFINED || get_type_id(reason) == LMD_TYPE_NULL) {
         Item err = js_new_object();
         js_property_set(err, make_string_item("__class_name__"), make_string_item("DOMException"));
+        js_class_stamp(err, JS_CLASS_DOM_EXCEPTION);  // A3-T3b
         js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
         js_property_set(err, make_string_item("message"), make_string_item("This operation was aborted"));
         js_property_set(err, make_string_item("code"), (Item){.item = i2it(20)});
@@ -9881,6 +9885,7 @@ extern "C" Item js_option_new(Item text_arg, Item value_arg) {
 extern "C" Item js_domexception_new(Item message, Item name_arg) {
     Item obj = js_new_object();
     js_property_set(obj, make_string_item("__class_name__"), make_string_item("DOMException"));
+    js_class_stamp(obj, JS_CLASS_DOM_EXCEPTION);  // A3-T3b
 
     // message (default: "")
     if (get_type_id(message) == LMD_TYPE_STRING) {
@@ -9960,6 +9965,7 @@ extern "C" Item js_abort_controller_abort(Item reason);
 extern "C" Item js_new_AbortController(void) {
     Item controller = js_new_object();
     js_property_set(controller, make_string_item("__class_name__"), make_string_item("AbortController"));
+    js_class_stamp(controller, JS_CLASS_ABORT_CONTROLLER);  // A3-T3b
 
     Item signal = js_make_abort_signal();
     // set signal methods
@@ -10036,6 +10042,7 @@ extern "C" Item js_abort_controller_abort(Item reason) {
                         Item timer_signal = js_property_get(entry, make_string_item("__timer_signal__"));
                         Item abort_err = js_new_object();
                         js_property_set(abort_err, make_string_item("__class_name__"), make_string_item("AbortError"));
+                        js_class_stamp(abort_err, JS_CLASS_ABORT_ERROR);  // A3-T3b
                         js_property_set(abort_err, make_string_item("name"), make_string_item("AbortError"));
                         js_property_set(abort_err, make_string_item("code"), make_string_item("ABORT_ERR"));
                         js_property_set(abort_err, make_string_item("message"), make_string_item("The operation was aborted"));
@@ -10088,6 +10095,7 @@ static Item js_message_port_close(void) {
 extern "C" Item js_message_port_new(void) {
     Item port = js_new_object();
     js_property_set(port, make_string_item("__class_name__"), make_string_item("MessagePort"));
+    js_class_stamp(port, JS_CLASS_MESSAGE_PORT);  // A3-T3b
     js_property_set(port, make_string_item("postMessage"),
         js_new_function((void*)js_message_port_postMessage, 1));
     js_property_set(port, make_string_item("close"),
@@ -10115,6 +10123,7 @@ extern "C" Item js_message_port_new(void) {
 extern "C" Item js_message_channel_new(void) {
     Item channel = js_new_object();
     js_property_set(channel, make_string_item("__class_name__"), make_string_item("MessageChannel"));
+    js_class_stamp(channel, JS_CLASS_MESSAGE_CHANNEL);  // A3-T3b
     Item port1 = js_message_port_new();
     Item port2 = js_message_port_new();
     js_property_set(channel, make_string_item("port1"), port1);
@@ -11051,6 +11060,8 @@ extern "C" Item js_get_typed_array_base_proto() {
     // Set __is_proto__ marker
     Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
     js_property_set(js_typed_array_base_proto, ipk, (Item){.item = b2it(true)});
+    // A3-T3a: dual-write JsClass byte alongside __class_name__.
+    js_class_stamp(js_typed_array_base_proto, JS_CLASS_TYPED_ARRAY);
     // Connect %TypedArray%.prototype to %TypedArray%
     Item base = js_get_typed_array_base();
     JsFunctionLayout* base_fn = (JsFunctionLayout*)base.function;
@@ -11751,6 +11762,7 @@ static Item js_url_to_object(Url* url) {
     // mark as URL for instanceof checks
     js_property_set(obj, (Item){.item = s2it(heap_create_name("__class_name__"))},
                     (Item){.item = s2it(heap_create_name("URL"))});
+    js_class_stamp(obj, JS_CLASS_URL);  // A3-T3b
 
     url_destroy(url);
     return obj;
@@ -11826,6 +11838,7 @@ extern "C" Item js_readable_stream_new(void) {
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     Item class_val = (Item){.item = s2it(heap_create_name("ReadableStream"))};
     js_property_set(obj, class_key, class_val);
+    js_class_stamp(obj, JS_CLASS_READABLE_STREAM);  // A3-T3b
     Item get_reader_key = (Item){.item = s2it(heap_create_name("getReader"))};
     Item get_reader_fn = js_new_function((void*)js_readable_stream_get_reader_stub, 0);
     js_property_set(obj, get_reader_key, get_reader_fn);
@@ -11842,6 +11855,7 @@ extern "C" Item js_writable_stream_new(void) {
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     Item class_val = (Item){.item = s2it(heap_create_name("WritableStream"))};
     js_property_set(obj, class_key, class_val);
+    js_class_stamp(obj, JS_CLASS_WRITABLE_STREAM);  // A3-T3b
     Item get_writer_key = (Item){.item = s2it(heap_create_name("getWriter"))};
     Item get_writer_fn = js_new_function((void*)js_writable_stream_get_writer_stub, 0);
     js_property_set(obj, get_writer_key, get_writer_fn);

@@ -10,6 +10,7 @@
  */
 
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/font/font.h"
@@ -207,6 +208,7 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
     Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     Item type_val = (Item){.item = s2it(heap_create_name("OffscreenCanvas"))};
     js_property_set(obj, type_key, type_val);
+    js_class_stamp(obj, JS_CLASS_OFFSCREEN_CANVAS);  // A3-T3b
 
     // store width/height
     int64_t w = (get_type_id(width_arg) == LMD_TYPE_INT) ? it2i(width_arg) : 300;
@@ -230,6 +232,7 @@ extern "C" Item js_canvas_get_context(Item canvas) {
     Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     Item type_val = (Item){.item = s2it(heap_create_name("CanvasRenderingContext2D"))};
     js_property_set(obj, type_key, type_val);
+    js_class_stamp(obj, JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);  // A3-T3b
 
     // store canvas reference
     Item canvas_key = (Item){.item = s2it(heap_create_name("canvas"))};

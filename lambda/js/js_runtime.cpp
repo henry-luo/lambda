@@ -712,6 +712,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, name_val);
+    js_class_stamp(obj, JS_CLASS_ERROR);  // A3-T3b — js_new_error always uses "Error"
     // Set __proto__ to Error.prototype so prototype methods (toString) are found
     {
         Item ctor_fn = js_get_constructor(name_val);
@@ -780,6 +781,15 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, error_name);
+    // A3-T3b: typed JsClass byte. Subtype-specific names (TypeError,
+    // RangeError, etc.) collapse to JS_CLASS_ERROR for now — they share
+    // the same prototype-chain dispatch.
+    {
+        String* en = (get_type_id(error_name) == LMD_TYPE_STRING) ? it2s(error_name) : NULL;
+        JsClass ec = (en && en->len == 14 && !strncmp(en->chars, "AggregateError", 14))
+            ? JS_CLASS_AGGREGATE_ERROR : JS_CLASS_ERROR;
+        js_class_stamp(obj, ec);
+    }
     // v18c: Set .constructor for assert.throws / constructor identity checks
     Item ctor_fn = js_get_constructor(error_name);
     if (ctor_fn.item != ITEM_JS_UNDEFINED && get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
@@ -5952,6 +5962,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                             // v26: mark as prototype object for builtin method enumeration
                             Item ipk = (Item){.item = s2it(heap_create_name("__is_proto__", 12))};
                             js_property_set(fn->prototype, ipk, (Item){.item = b2it(true)});
+                            // A3-T3a: dual-write the typed JsClass byte alongside the
+                            // legacy `__class_name__` string. The dispatch fast-path
+                            // (js_proto_class_method_dispatch) prefers the byte; legacy
+                            // readers continue to consult the string.
+                            JsClass cls = js_class_from_name(nm, nl);
+                            if (cls != JS_CLASS_NONE) js_class_stamp(fn->prototype, cls);
                         }
                         // Array.prototype.length = 0 (per spec, Array.prototype is an Array exotic object)
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
@@ -20186,23 +20202,12 @@ static Item js_get_implicit_proto(Item object) {
 // This is used so that, e.g., `(new Boolean()).toString()` finds Boolean's
 // toString on Boolean.prototype before the walk continues to Object.prototype
 // (which physically owns the generic Object.toString).
-static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int key_len) {
-    if (!key_str || key_len <= 0) return ItemNull;
-    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
-    Map* pm = proto.map;
-    bool ip_own = false;
-    js_map_get_fast_ext(pm, "__is_proto__", 12, &ip_own);
-    if (!ip_own) return ItemNull;
-
-    // A3-T2: fast path — if the proto's TypeMap carries a JsClass tag, use
-    // it to skip the `__class_name__` string lookup + strncmp chain. The
-    // legacy string path below remains as fallback for prototypes whose
-    // TypeMap hasn't been stamped yet (A3-T3+ writer migration). New
-    // classes added to the dispatch table here MUST also be reflected in
-    // the legacy `cn`/strncmp branches below until A3 is fully retired so
-    // both paths stay in sync; new classes only added via the byte path
-    // will silently miss for unstamped instances.
-    JsClass cls = js_class_get(proto);
+// A3-T3c: per-class dispatch helper, parameterized by JsClass. Called
+// from js_proto_class_method_dispatch after class identity is resolved
+// (either via the typed byte or the legacy `__class_name__` strncmp).
+// Returns ItemNull when the key doesn't match any class-specific method
+// or when the class has no dispatch table.
+static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, int key_len) {
     switch (cls) {
     case JS_CLASS_BOOLEAN:
         return js_lookup_builtin_method(LMD_TYPE_BOOL, key_str, key_len);
@@ -20214,27 +20219,7 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
         if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
             return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
         return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
-    // Number / Date / RegExp dispatch tables stay in the legacy path below
-    // until A3-T3+ stamps their prototypes — the per-method snprintf+lookup
-    // is the same code, no point duplicating it.
-    case JS_CLASS_NONE:
-    default:
-        break;  // fall through to legacy string path
-    }
-
-    bool cn_own = false;
-    Item cn = js_map_get_fast_ext(pm, "__class_name__", 14, &cn_own);
-    if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return ItemNull;
-    String* cn_str = it2s(cn);
-    if (!cn_str) return ItemNull;
-    int cl = (int)cn_str->len;
-    const char* cs = cn_str->chars;
-    // Class-name dispatch table — matches js_property_get's MAP fallback.
-    if (cl == 7 && strncmp(cs, "Boolean", 7) == 0) {
-        return js_lookup_builtin_method(LMD_TYPE_BOOL, key_str, key_len);
-    }
-    if (cl == 6 && strncmp(cs, "Number", 6) == 0) {
-        // Number prototype methods
+    case JS_CLASS_NUMBER:
         if (key_len == 8 && strncmp(key_str, "toString", 8) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
         if (key_len == 7 && strncmp(key_str, "valueOf", 7) == 0)
@@ -20246,20 +20231,9 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
         if (key_len == 13 && strncmp(key_str, "toExponential", 13) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
         return ItemNull;
-    }
-    if (cl == 6 && strncmp(cs, "String", 6) == 0) {
-        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
-            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
-        return js_lookup_builtin_method(LMD_TYPE_STRING, key_str, key_len);
-    }
-    if (cl == 5 && strncmp(cs, "Array", 5) == 0) {
-        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
-            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
-        return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
-    }
-    if (cl == 4 && strncmp(cs, "Date", 4) == 0) {
+    case JS_CLASS_DATE: {
         // Date.prototype methods table — mirrors js_property_get fallback at ~L5530.
-        struct { const char* name; int len; int id; int pc; } date_methods[] = {
+        static const struct { const char* name; int len; int id; int pc; } date_methods[] = {
             {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
             {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
             {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
@@ -20314,7 +20288,7 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
             return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
         return ItemNull;
     }
-    if (cl == 6 && strncmp(cs, "RegExp", 6) == 0) {
+    case JS_CLASS_REGEXP:
         if (key_len == 4 && strncmp(key_str, "exec", 4) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_EXEC, "exec", 1);
         if (key_len == 4 && strncmp(key_str, "test", 4) == 0)
@@ -20324,8 +20298,44 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
         if (key_len == 7 && strncmp(key_str, "compile", 7) == 0)
             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
         return ItemNull;
+    default:
+        return ItemNull;
     }
-    return ItemNull;
+}
+
+// Dispatch a class-specific built-in method on a prototype object during
+// proto-chain walking. Returns ItemNull if no class-specific method matches.
+// This is used so that, e.g., `(new Boolean()).toString()` finds Boolean's
+// toString on Boolean.prototype before the walk continues to Object.prototype
+// (which physically owns the generic Object.toString).
+//
+// A3-T3c: class identity is resolved once (typed byte first, legacy
+// `__class_name__` strncmp as fallback for unstamped prototypes), then
+// dispatched through the unified js_proto_class_dispatch_for_class table.
+// No more dual-table maintenance.
+static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int key_len) {
+    if (!key_str || key_len <= 0) return ItemNull;
+    if (get_type_id(proto) != LMD_TYPE_MAP) return ItemNull;
+    Map* pm = proto.map;
+    bool ip_own = false;
+    js_map_get_fast_ext(pm, "__is_proto__", 12, &ip_own);
+    if (!ip_own) return ItemNull;
+
+    // Fast path: typed JsClass byte stamped at prototype-creation time.
+    JsClass cls = js_class_get(proto);
+    if (cls == JS_CLASS_NONE) {
+        // Legacy fallback: read the `__class_name__` string property and
+        // map it to a JsClass tag. Kept for any prototype path that hasn't
+        // been stamped yet (full retirement at A3-T5).
+        bool cn_own = false;
+        Item cn = js_map_get_fast_ext(pm, "__class_name__", 14, &cn_own);
+        if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return ItemNull;
+        String* cn_str = it2s(cn);
+        if (!cn_str) return ItemNull;
+        cls = js_class_from_name(cn_str->chars, (int)cn_str->len);
+        if (cls == JS_CLASS_NONE) return ItemNull;
+    }
+    return js_proto_class_dispatch_for_class(cls, key_str, key_len);
 }
 
 // Walk the prototype chain to find a property
@@ -22094,6 +22104,7 @@ static Item js_any_reject_element(Item counter_obj, Item index_item, Item result
         // Mark as AggregateError for instanceof and constructor.name checks
         js_property_set(err, (Item){.item = s2it(heap_create_name("__class_name__", 14))},
             (Item){.item = s2it(heap_create_name("AggregateError", 14))});
+        js_class_stamp(err, JS_CLASS_AGGREGATE_ERROR);  // A3-T3b
         js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
             (Item){.item = s2it(heap_create_name("AggregateError", 14))});
         JsPromise* result = js_get_promise(result_item);

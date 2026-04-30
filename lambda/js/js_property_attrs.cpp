@@ -207,6 +207,13 @@ extern "C" void js_shape_entry_update_flags(Item obj, const char* name, int name
     se->flags = new_flags;
 }
 
+// Public wrapper around the file-static js_typemap_clone_for_mutation. Exposed
+// so js_class.h's inline writer (js_class_stamp) can clone the TypeMap before
+// stamping the JsClass byte without pulling in this whole TU's surface.
+extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj) {
+    return js_typemap_clone_for_mutation(obj);
+}
+
 extern "C" void js_shape_entry_set_accessor(Item obj, const char* name, int name_len,
                                             bool is_accessor) {
     // Same probe-first / clone / mutate pattern as js_shape_entry_update_flags,

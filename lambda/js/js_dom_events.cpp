@@ -11,6 +11,7 @@
 #include "js_dom_events.h"
 #include "js_dom.h"
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -760,6 +761,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     js_property_set(event,
         (Item){.item = s2it(heap_create_name("__class_name__"))},
         (Item){.item = s2it(heap_create_name("Event"))});
+    js_class_stamp(event, JS_CLASS_EVENT);  // A3-T3b
 
     return event;
 }
@@ -777,6 +779,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     js_property_set(event,
         (Item){.item = s2it(heap_create_name("__class_name__"))},
         (Item){.item = s2it(heap_create_name("CustomEvent"))});
+    js_class_stamp(event, JS_CLASS_CUSTOM_EVENT);  // A3-T3b
     return event;
 }
 
@@ -817,6 +820,7 @@ Item js_create_event_target(void) {
     js_property_set(et,
         (Item){.item = s2it(heap_create_name("__class_name__"))},
         (Item){.item = s2it(heap_create_name("EventTarget"))});
+    js_class_stamp(et, JS_CLASS_EVENT_TARGET);  // A3-T3b
     return et;
 }
 
@@ -886,6 +890,8 @@ static void stamp_class(Item ev, const char* name) {
     js_property_set(ev,
         (Item){.item = s2it(heap_create_name("__class_name__"))},
         (Item){.item = s2it(heap_create_name(name))});
+    // A3-T3b: also stamp typed JsClass byte (no-op for unknown subclass names).
+    js_class_stamp(ev, js_class_from_name(name, (int)strlen(name)));
 }
 
 // EventModifierInit dict members shared by Mouse/Keyboard.

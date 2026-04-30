@@ -29,6 +29,7 @@
  */
 #pragma once
 
+#include <string.h>
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 
@@ -111,19 +112,115 @@ static inline JsClass js_class_get(Item obj) {
 }
 
 // Forward declaration — defined in js_property_attrs.cpp (A2-T1).
-// We don't include that header here to keep js_class.h independent of the
-// shape-mutation surface; callers of js_class_set_for_map already include
-// js_property_attrs.h.
-struct Map;
-extern "C" void js_typemap_clone_for_mutation(struct Map* m);
+// Takes the user-facing Item (because shape mutation needs the wrapper-aware
+// underlying-map lookup) and returns the (possibly newly-cloned) TypeMap, or
+// nullptr if cloning is not possible. Exported via js_class.h so callers can
+// stamp typed class metadata without pulling in the broader property-attrs
+// surface.
+struct TypeMap;
+extern "C" struct TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 
 // Stamp a JsClass tag on a Map. Clones the Map's TypeMap for private
 // mutation first so sibling Maps sharing a callsite shape cache stay on the
 // original (untagged) blueprint. Idempotent within a single Map: subsequent
-// calls reuse the already-private clone.
-static inline void js_class_set_for_map(Map* m, JsClass cls) {
-    if (!m) return;
-    js_typemap_clone_for_mutation(m);
-    if (!m->type) return;  // clone failed (out of memory) — caller falls back to string write
-    ((TypeMap*)m->type)->js_class = (uint8_t)cls;
+// calls reuse the already-private clone. No-op for non-MAP items or when
+// the underlying clone fails (caller can still rely on the legacy
+// `__class_name__` string write).
+static inline void js_class_stamp(Item obj, JsClass cls) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return;
+    TypeMap* tm = js_typemap_clone_for_mutation_pub(obj);
+    if (!tm) return;
+    tm->js_class = (uint8_t)cls;
+}
+
+// Map a built-in class-name string (the value previously stored in
+// `__class_name__`) to its JsClass tag. Returns JS_CLASS_NONE for unknown
+// names. Centralized here so writers and the legacy reader path stay in
+// sync as we migrate.
+static inline JsClass js_class_from_name(const char* nm, int nl) {
+    if (!nm || nl <= 0) return JS_CLASS_NONE;
+    switch (nl) {
+        case 3:
+            if (!strncmp(nm, "URL", 3)) return JS_CLASS_URL;
+            break;
+        case 4:
+            if (!strncmp(nm, "Date", 4)) return JS_CLASS_DATE;
+            if (!strncmp(nm, "Blob", 4)) return JS_CLASS_BLOB;
+            if (!strncmp(nm, "File", 4)) return JS_CLASS_FILE;
+            break;
+        case 5:
+            if (!strncmp(nm, "Array", 5)) return JS_CLASS_ARRAY;
+            if (!strncmp(nm, "Error", 5)) return JS_CLASS_ERROR;
+            if (!strncmp(nm, "Range", 5)) return JS_CLASS_RANGE;
+            if (!strncmp(nm, "Agent", 5)) return JS_CLASS_AGENT;
+            if (!strncmp(nm, "Event", 5)) return JS_CLASS_EVENT;
+            break;
+        case 6:
+            if (!strncmp(nm, "Number", 6)) return JS_CLASS_NUMBER;
+            if (!strncmp(nm, "String", 6)) return JS_CLASS_STRING;
+            if (!strncmp(nm, "Object", 6)) return JS_CLASS_OBJECT;
+            if (!strncmp(nm, "Symbol", 6)) return JS_CLASS_SYMBOL;
+            if (!strncmp(nm, "BigInt", 6)) return JS_CLASS_BIGINT;
+            if (!strncmp(nm, "RegExp", 6)) return JS_CLASS_REGEXP;
+            if (!strncmp(nm, "Server", 6)) return JS_CLASS_SERVER;
+            if (!strncmp(nm, "Socket", 6)) return JS_CLASS_SOCKET;
+            break;
+        case 7:
+            if (!strncmp(nm, "Boolean", 7)) return JS_CLASS_BOOLEAN;
+            if (!strncmp(nm, "Promise", 7)) return JS_CLASS_PROMISE;
+            if (!strncmp(nm, "Timeout", 7)) return JS_CLASS_TIMEOUT;
+            break;
+        case 8:
+            if (!strncmp(nm, "DataView", 8)) return JS_CLASS_DATA_VIEW;
+            if (!strncmp(nm, "FormData", 8)) return JS_CLASS_FORM_DATA;
+            break;
+        case 9:
+            if (!strncmp(nm, "TLSServer", 9)) return JS_CLASS_TLS_SERVER;
+            if (!strncmp(nm, "TLSSocket", 9)) return JS_CLASS_TLS_SOCKET;
+            if (!strncmp(nm, "Selection", 9)) return JS_CLASS_SELECTION;
+            break;
+        case 10:
+            if (!strncmp(nm, "TypedArray", 10)) return JS_CLASS_TYPED_ARRAY;
+            if (!strncmp(nm, "AbortError", 10)) return JS_CLASS_ABORT_ERROR;
+            break;
+        case 11:
+            if (!strncmp(nm, "AbortSignal", 11)) return JS_CLASS_ABORT_SIGNAL;
+            if (!strncmp(nm, "ArrayBuffer", 11)) return JS_CLASS_ARRAY_BUFFER;
+            if (!strncmp(nm, "MessagePort", 11)) return JS_CLASS_MESSAGE_PORT;
+            if (!strncmp(nm, "CustomEvent", 11)) return JS_CLASS_CUSTOM_EVENT;
+            if (!strncmp(nm, "EventTarget", 11)) return JS_CLASS_EVENT_TARGET;
+            if (!strncmp(nm, "TextDecoder", 11)) return JS_CLASS_TEXT_DECODER;
+            if (!strncmp(nm, "TextEncoder", 11)) return JS_CLASS_TEXT_ENCODER;
+            break;
+        case 12:
+            if (!strncmp(nm, "DOMException", 12)) return JS_CLASS_DOM_EXCEPTION;
+            if (!strncmp(nm, "EventEmitter", 12)) return JS_CLASS_EVENT_EMITTER;
+            if (!strncmp(nm, "DataTransfer", 12)) return JS_CLASS_DATA_TRANSFER;
+            break;
+        case 13:
+            if (!strncmp(nm, "ClientRequest", 13)) return JS_CLASS_CLIENT_REQUEST;
+            if (!strncmp(nm, "StringDecoder", 13)) return JS_CLASS_STRING_DECODER;
+            if (!strncmp(nm, "SecureContext", 13)) return JS_CLASS_SECURE_CONTEXT;
+            break;
+        case 14:
+            if (!strncmp(nm, "AggregateError", 14)) return JS_CLASS_AGGREGATE_ERROR;
+            if (!strncmp(nm, "ReadableStream", 14)) return JS_CLASS_READABLE_STREAM;
+            if (!strncmp(nm, "WritableStream", 14)) return JS_CLASS_WRITABLE_STREAM;
+            if (!strncmp(nm, "MessageChannel", 14)) return JS_CLASS_MESSAGE_CHANNEL;
+            if (!strncmp(nm, "ServerResponse", 14)) return JS_CLASS_SERVER_RESPONSE;
+            break;
+        case 15:
+            if (!strncmp(nm, "URLSearchParams", 15)) return JS_CLASS_URL_SEARCH_PARAMS;
+            if (!strncmp(nm, "AbortController", 15)) return JS_CLASS_ABORT_CONTROLLER;
+            if (!strncmp(nm, "OffscreenCanvas", 15)) return JS_CLASS_OFFSCREEN_CANVAS;
+            if (!strncmp(nm, "IncomingMessage", 15)) return JS_CLASS_INCOMING_MESSAGE;
+            break;
+        case 21:
+            if (!strncmp(nm, "CSSNestedDeclarations", 21)) return JS_CLASS_CSS_NESTED_DECLARATIONS;
+            break;
+        case 24:
+            if (!strncmp(nm, "CanvasRenderingContext2D", 24)) return JS_CLASS_CANVAS_RENDERING_CONTEXT_2D;
+            break;
+    }
+    return JS_CLASS_NONE;
 }

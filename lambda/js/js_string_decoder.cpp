@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -45,6 +46,7 @@ extern "C" Item js_string_decoder_new(Item encoding_item) {
     Item decoder = js_new_object();
     js_property_set(decoder, make_string_item("__class_name__"),
                     make_string_item("StringDecoder"));
+    js_class_stamp(decoder, JS_CLASS_STRING_DECODER);  // A3-T3b
 
     // default encoding is utf8
     char enc[32] = "utf8";

@@ -8,6 +8,7 @@
  * which maps event names to arrays of listener functions.
  */
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -522,6 +523,7 @@ extern "C" Item js_ee_constructor(void) {
         if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
             // Called via 'new' — initialize the pre-built object
             js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+            js_class_stamp(this_val, JS_CLASS_EVENT_EMITTER);  // A3-T3b
             Item events_map = js_new_object();
             js_property_set(this_val, events_key, events_map);
             js_property_set(this_val, make_string_item("_events"), events_map);
@@ -533,6 +535,7 @@ extern "C" Item js_ee_constructor(void) {
     // Direct call (not via new) — create a new object with prototype
     Item emitter = js_new_object();
     js_property_set(emitter, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+    js_class_stamp(emitter, JS_CLASS_EVENT_EMITTER);  // A3-T3b
     Item events_map = js_new_object();
     js_property_set(emitter, events_key, events_map);
     js_property_set(emitter, make_string_item("_events"), events_map);
@@ -652,6 +655,7 @@ extern "C" Item js_get_events_namespace(void) {
 
     events_namespace = js_new_object();
     js_property_set(events_namespace, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+    js_class_stamp(events_namespace, JS_CLASS_EVENT_EMITTER);  // A3-T3b
 
     // Create prototype object with instance methods (this-based wrappers)
     ee_prototype = js_new_object();

@@ -25,6 +25,7 @@
 
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -63,9 +64,11 @@ static inline Item make_str_n(const char* s, size_t n) {
 }
 
 // Set __class_name__ marker so instanceof <Name> works via the name fallback
-// in js_instanceof_impl.
+// in js_instanceof_impl. A3-T3b: also stamp the typed JsClass byte (no-op
+// for class names not yet in the enum).
 static inline void mark_class(Item obj, const char* name) {
     js_property_set(obj, make_str("__class_name__"), make_str(name));
+    js_class_stamp(obj, js_class_from_name(name, (int)strlen(name)));
 }
 
 // Read a string property as a C string (returns NULL if missing/non-string).
