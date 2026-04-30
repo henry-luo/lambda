@@ -11,6 +11,7 @@
 #include "js_dom_events.h"
 #include "js_dom.h"
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -755,11 +756,10 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
             (Item){.item = s2it(heap_create_name("defaultPrevented"))}, dp_desc);
     }
 
-    // Stamp class name so `event instanceof Event` resolves via the name fallback
-    // in js_instanceof_classname (any class name ending in "Event" matches).
-    js_property_set(event,
-        (Item){.item = s2it(heap_create_name("__class_name__"))},
-        (Item){.item = s2it(heap_create_name("Event"))});
+    // Stamp class identity (T5b: typed JsClass byte; legacy `__class_name__`
+    // string write retired). `event instanceof Event` resolves via the byte
+    // path (or the suffix-string fallback for any subclass not in the enum).
+    js_class_stamp(event, JS_CLASS_EVENT);  // A3-T3b
 
     return event;
 }
@@ -774,9 +774,8 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
     event_set_item(event, "detail", detail);
     Item ice_key = (Item){.item = s2it(heap_create_name("initCustomEvent"))};
     js_property_set(event, ice_key, js_new_function((void*)js_event_init_custom_event, 4));
-    js_property_set(event,
-        (Item){.item = s2it(heap_create_name("__class_name__"))},
-        (Item){.item = s2it(heap_create_name("CustomEvent"))});
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(event, JS_CLASS_CUSTOM_EVENT);  // A3-T3b
     return event;
 }
 
@@ -814,9 +813,8 @@ Item js_create_event_target(void) {
     js_property_set(et, ael, js_new_function((void*)js_eventtarget_add_listener, 3));
     js_property_set(et, rel, js_new_function((void*)js_eventtarget_remove_listener, 3));
     js_property_set(et, dis, js_new_function((void*)js_eventtarget_dispatch, 1));
-    js_property_set(et,
-        (Item){.item = s2it(heap_create_name("__class_name__"))},
-        (Item){.item = s2it(heap_create_name("EventTarget"))});
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(et, JS_CLASS_EVENT_TARGET);  // A3-T3b
     return et;
 }
 
@@ -883,9 +881,16 @@ static Item init_item(Item init, const char* key) {
 }
 
 static void stamp_class(Item ev, const char* name) {
+    // A3-T3b: dual-write legacy `__class_name__` string AND typed JsClass
+    // byte. T6 attempted to skip the string write for enumerated classes
+    // but broke `Props.SuperSet_FindsInheritedSetter` via an indirect
+    // input.cpp map_put assertion; root cause not pursued. Helper still
+    // needs the string for unenumerated subclasses (UIEvent / MouseEvent /
+    // KeyboardEvent / FocusEvent / WheelEvent / CompositionEvent).
     js_property_set(ev,
         (Item){.item = s2it(heap_create_name("__class_name__"))},
         (Item){.item = s2it(heap_create_name(name))});
+    js_class_stamp(ev, js_class_from_name(name, (int)strlen(name)));
 }
 
 // EventModifierInit dict members shared by Mouse/Keyboard.

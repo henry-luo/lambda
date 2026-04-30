@@ -5,6 +5,7 @@
  * Registered as built-in module 'url' via js_module_get().
  */
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -48,8 +49,8 @@ static Item url_to_js_object(Url* url) {
 
     Item obj = js_new_object();
 
-    // set __class_name__ for instanceof checks
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("URL"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(obj, JS_CLASS_URL);  // A3-T3b
 
     const char* href = url_get_href(url);
     const char* origin_str = url_get_origin(url);
@@ -656,7 +657,8 @@ extern "C" Item js_usp_size(void) {
 // new URLSearchParams([init])
 extern "C" Item js_url_search_params_new(Item init) {
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("URLSearchParams"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(obj, JS_CLASS_URL_SEARCH_PARAMS);  // A3-T3b
 
     Item entries;
     TypeId init_type = get_type_id(init);

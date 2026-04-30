@@ -8,6 +8,7 @@
 #include "js_cssom.h"
 #include "js_dom.h"
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../../lib/log.h"
@@ -834,6 +835,7 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
                     Item class_key = make_string_item("__class_name__");
                     Item class_val = make_string_item("CSSNestedDeclarations");
                     js_property_set(nd_obj, class_key, class_val);
+                    js_class_stamp(nd_obj, JS_CLASS_CSS_NESTED_DECLARATIONS);  // A3-T3b
                     Item style_key = make_string_item("style");
                     js_property_set(nd_obj, style_key, style_decl);
                     array_push(arr, nd_obj);

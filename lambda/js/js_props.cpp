@@ -296,6 +296,9 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
     }
     Item bare = (Item){.item = s2it(heap_create_name(name, name_len))};
     js_property_set(object, bare, (Item){.item = JS_DELETED_SENTINEL_VAL});
+    // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry so readers can
+    // detect tombstones via shape (independent of the slot-value sentinel).
+    js_shape_entry_set_deleted(object, name, name_len, /*is_deleted=*/true);
     return true;
 }
 
@@ -600,6 +603,12 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
                 if (!(se && jspd_is_accessor(se))) {
                     Item del = (Item){.item = JS_DELETED_SENTINEL_VAL};
                     js_property_set(object, name_item, del);
+                    // A2-T8c: NOT dual-writing JSPD_DELETED here. This is a
+                    // transient data→accessor conversion; the accessor install
+                    // immediately below overwrites the slot with a JsAccessorPair*
+                    // and sets JSPD_IS_ACCESSOR. Stamping DELETED would require
+                    // a paired clear, and a missed clear would resurrect the
+                    // tombstone over a live accessor.
                 }
             }
         }

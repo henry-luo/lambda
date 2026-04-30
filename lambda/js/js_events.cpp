@@ -8,6 +8,7 @@
  * which maps event names to arrays of listener functions.
  */
 #include "js_runtime.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -230,7 +231,13 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                 }
                 // check if err_arg is an Error instance
                 bool is_error = false;
-                if (get_type_id(err_arg) == LMD_TYPE_MAP) {
+                JsClass ecls = js_class_id(err_arg);
+                if (ecls == JS_CLASS_ERROR || ecls == JS_CLASS_AGGREGATE_ERROR ||
+                    ecls == JS_CLASS_ABORT_ERROR || ecls == JS_CLASS_DOM_EXCEPTION) {
+                    is_error = true;
+                } else if (get_type_id(err_arg) == LMD_TYPE_MAP) {
+                    // Legacy duck-type fallback: any __class_name__ ending in "Error"
+                    // (covers user-defined Error subclasses + non-stamped variants).
                     Item cn = js_property_get(err_arg, make_string_item("__class_name__"));
                     if (get_type_id(cn) == LMD_TYPE_STRING) {
                         String* cns = it2s(cn);
@@ -521,7 +528,9 @@ extern "C" Item js_ee_constructor(void) {
         Item proto = js_get_prototype(this_val);
         if (proto.item == ee_prototype.item && ee_prototype.item != 0) {
             // Called via 'new' — initialize the pre-built object
-            js_property_set(this_val, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+            // T5b: typed JsClass byte is now the class identity; legacy
+            // `__class_name__` string write retired.
+            js_class_stamp(this_val, JS_CLASS_EVENT_EMITTER);  // A3-T3b
             Item events_map = js_new_object();
             js_property_set(this_val, events_key, events_map);
             js_property_set(this_val, make_string_item("_events"), events_map);
@@ -532,7 +541,8 @@ extern "C" Item js_ee_constructor(void) {
     }
     // Direct call (not via new) — create a new object with prototype
     Item emitter = js_new_object();
-    js_property_set(emitter, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(emitter, JS_CLASS_EVENT_EMITTER);  // A3-T3b
     Item events_map = js_new_object();
     js_property_set(emitter, events_key, events_map);
     js_property_set(emitter, make_string_item("_events"), events_map);
@@ -651,7 +661,8 @@ extern "C" Item js_get_events_namespace(void) {
     ensure_keys();
 
     events_namespace = js_new_object();
-    js_property_set(events_namespace, make_string_item("__class_name__"), make_string_item("EventEmitter"));
+    // T5b: legacy `__class_name__` string write retired.
+    js_class_stamp(events_namespace, JS_CLASS_EVENT_EMITTER);  // A3-T3b
 
     // Create prototype object with instance methods (this-based wrappers)
     ee_prototype = js_new_object();

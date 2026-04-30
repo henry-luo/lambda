@@ -46,6 +46,14 @@ static inline bool jspd_is_configurable(const ShapeEntry* se) {
 static inline bool jspd_is_accessor(const ShapeEntry* se) {
     return se && (se->flags & JSPD_IS_ACCESSOR);
 }
+// A2-T8: tombstone bit. Successor to the JS_DELETED_SENTINEL_VAL slot encoding
+// (which overlaps the LMD_TYPE_INT domain and forces every reader to canonicalise
+// the slot value before probing). The bit lives on the ShapeEntry so readers can
+// answer "is this property deleted?" with one shape-entry probe regardless of
+// the slot's stored type.
+static inline bool jspd_is_deleted(const ShapeEntry* se) {
+    return se && (se->flags & JSPD_DELETED);
+}
 
 // Mutators (must be called only on shapes that are NOT pool-deduplicated, i.e.
 // shapes private to a single map instance). For deduplicated shapes the caller
@@ -69,6 +77,15 @@ static inline void jspd_set_accessor(ShapeEntry* se, bool a) {
     if (!se) return;
     if (a) se->flags |= JSPD_IS_ACCESSOR;
     else   se->flags &= (uint8_t)~JSPD_IS_ACCESSOR;
+}
+// A2-T8: tombstone bit mutator. Must only be called on shapes private to a
+// single Map (post A2-T1 clone). Setting the bit logically deletes the property;
+// clearing the bit revives it (used when a new value/descriptor is installed
+// over a previously-deleted slot).
+static inline void jspd_set_deleted(ShapeEntry* se, bool d) {
+    if (!se) return;
+    if (d) se->flags |= JSPD_DELETED;
+    else   se->flags &= (uint8_t)~JSPD_DELETED;
 }
 
 // =============================================================================
@@ -120,6 +137,15 @@ void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
 // shape cache or constructor pre-shaping) are not affected. No-op if the entry
 // does not exist or the bit is already in the requested state.
 void js_shape_entry_set_accessor(Item obj, const char* name, int name_len, bool is_accessor);
+
+// A2-T8: set or clear the JSPD_DELETED tombstone bit on the ShapeEntry for
+// `name`. Per-Map clone safe (same primitive as the other shape mutators).
+// During the T8 transition, callers should write the legacy
+// JS_DELETED_SENTINEL_VAL slot value *and* call this helper; once readers
+// migrate to bit-only probing, the sentinel write site can drop. No-op when
+// no shape entry exists for `name` (e.g. companion-map indexed positions —
+// see AT-4 for the indexed-position storage unification).
+void js_shape_entry_set_deleted(Item obj, const char* name, int name_len, bool is_deleted);
 
 // =============================================================================
 // Stage A3: shape-flag-first attribute query helpers
