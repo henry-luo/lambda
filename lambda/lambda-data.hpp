@@ -252,6 +252,12 @@ typedef struct TypeMap : Type {
     // re-cloning. The original blueprint TypeMap (referenced by call-site
     // shape caches) keeps is_private_clone=false and stays immutable.
     bool is_private_clone;
+    // A3-T1 (JS): typed class identity (JsClass enum, declared in js/js_class.h).
+    // Zero-init = JS_CLASS_NONE so existing TypeMaps stay opaque to the new
+    // dispatch path. Stamped via `js_class_set_for_map` (which clones the
+    // TypeMap first to avoid cross-instance contamination via the per-callsite
+    // shape cache). Read via `js_class_get(Item)`.
+    uint8_t js_class;
 } TypeMap;
 
 // A1: FNV-1a hash for property name lookup

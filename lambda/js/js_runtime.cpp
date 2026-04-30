@@ -13,6 +13,7 @@
 #include "js_error_codes.h"
 #include "js_property_attrs.h"
 #include "js_props.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
@@ -20192,6 +20193,35 @@ static Item js_proto_class_method_dispatch(Item proto, const char* key_str, int 
     bool ip_own = false;
     js_map_get_fast_ext(pm, "__is_proto__", 12, &ip_own);
     if (!ip_own) return ItemNull;
+
+    // A3-T2: fast path — if the proto's TypeMap carries a JsClass tag, use
+    // it to skip the `__class_name__` string lookup + strncmp chain. The
+    // legacy string path below remains as fallback for prototypes whose
+    // TypeMap hasn't been stamped yet (A3-T3+ writer migration). New
+    // classes added to the dispatch table here MUST also be reflected in
+    // the legacy `cn`/strncmp branches below until A3 is fully retired so
+    // both paths stay in sync; new classes only added via the byte path
+    // will silently miss for unstamped instances.
+    JsClass cls = js_class_get(proto);
+    switch (cls) {
+    case JS_CLASS_BOOLEAN:
+        return js_lookup_builtin_method(LMD_TYPE_BOOL, key_str, key_len);
+    case JS_CLASS_STRING:
+        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
+        return js_lookup_builtin_method(LMD_TYPE_STRING, key_str, key_len);
+    case JS_CLASS_ARRAY:
+        if (key_len == 7 && strncmp(key_str, "__sym_1", 7) == 0)
+            return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
+        return js_lookup_builtin_method(LMD_TYPE_ARRAY, key_str, key_len);
+    // Number / Date / RegExp dispatch tables stay in the legacy path below
+    // until A3-T3+ stamps their prototypes — the per-method snprintf+lookup
+    // is the same code, no point duplicating it.
+    case JS_CLASS_NONE:
+    default:
+        break;  // fall through to legacy string path
+    }
+
     bool cn_own = false;
     Item cn = js_map_get_fast_ext(pm, "__class_name__", 14, &cn_own);
     if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return ItemNull;

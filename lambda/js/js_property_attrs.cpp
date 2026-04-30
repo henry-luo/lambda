@@ -126,6 +126,9 @@ static TypeMap* js_typemap_clone_for_mutation(Item obj) {
     clone->has_named_shape = tm->has_named_shape;
     clone->struct_name = tm->struct_name;
     clone->is_private_clone = true;
+    // A3-T1: propagate JsClass tag onto the private clone so attribute
+    // mutations after a class stamp don't lose class identity.
+    clone->js_class = tm->js_class;
 
     // Clone the shape chain: per-entry shallow copy with `next` rewired and
     // `name`/`type`/`ns`/`default_value` shared with the source (all
