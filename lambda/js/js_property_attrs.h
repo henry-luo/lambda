@@ -114,6 +114,13 @@ ShapeEntry* js_find_shape_entry(Item obj, const char* name, int name_len);
 void js_shape_entry_update_flags(Item obj, const char* name, int name_len,
                                  uint8_t set_mask, uint8_t clear_mask);
 
+// A2-T3: set or clear the JSPD_IS_ACCESSOR bit on the ShapeEntry for `name`.
+// Goes through the same Map-local clone primitive as
+// `js_shape_entry_update_flags` so siblings sharing a TypeMap (via per-callsite
+// shape cache or constructor pre-shaping) are not affected. No-op if the entry
+// does not exist or the bit is already in the requested state.
+void js_shape_entry_set_accessor(Item obj, const char* name, int name_len, bool is_accessor);
+
 // =============================================================================
 // Stage A3: shape-flag-first attribute query helpers
 // =============================================================================
@@ -142,6 +149,32 @@ bool js_props_query_configurable(Map* m, ShapeEntry* se,
 bool js_props_obj_query_enumerable(Item obj, const char* name, int name_len);
 bool js_props_obj_query_writable(Item obj, const char* name, int name_len);
 bool js_props_obj_query_configurable(Item obj, const char* name, int name_len);
+
+// =============================================================================
+// Stage A2.6: attribute marker write helpers
+// =============================================================================
+//
+// Centralize the repeated `snprintf("__nw_%.*s") + heap_create_name +
+// js_defprop_set_marker(obj, k, b2it(<bool>))` pattern. Each helper writes
+// the inverse marker (`__nw_X`/`__ne_X`/`__nc_X`) on `obj`:
+//   - `writable=true`  → marker value FALSE  (writable; default)
+//   - `writable=false` → marker value TRUE   (non-writable)
+//   - same inverse semantics for enumerable / configurable.
+//
+// All three route through `js_defprop_set_marker`, which handles the
+// MAP / FUNC / ARRAY companion-map dispatch and triggers
+// `js_dual_write_marker_flags` to keep the JSPD_NON_* shape bit in sync.
+//
+// Routes ~30 raw snprintf sites in js_runtime.cpp / js_globals.cpp /
+// js_props.cpp / js_property_attrs.cpp through one chokepoint, eliminating
+// the "one more place forgot to inverse-encode the marker" bug class. Use
+// these everywhere a non-* marker is being written or cleared.
+//
+// Property name length must satisfy 0 < name_len < 240 (defensive bound for
+// the 256-byte stack buffer including the 5-byte prefix and NUL).
+void js_attr_set_writable(Item obj, const char* name, int name_len, bool writable);
+void js_attr_set_enumerable(Item obj, const char* name, int name_len, bool enumerable);
+void js_attr_set_configurable(Item obj, const char* name, int name_len, bool configurable);
 
 // =============================================================================
 // Phase 2a: Universal dual-write hook

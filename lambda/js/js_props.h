@@ -165,6 +165,25 @@ JsOwnDescKind js_ordinary_get_own_descriptor(Item object,
 // only the presence flag is needed.
 bool js_ordinary_has_own(Item object, const char* name, int name_len);
 
+// Stage A1.8b: tri-state own-slot status. Distinguishes the two false cases
+// of `js_ordinary_has_own` so callers that need a fall-through path on slot
+// absence (vs. an explicit "deleted" tombstone) can branch correctly.
+//
+// Returns:
+//   JS_HAS_PRESENT — own slot exists with a non-sentinel value.
+//   JS_HAS_DELETED — own slot exists but holds the deleted sentinel.
+//   JS_HAS_ABSENT  — no own slot at all (object may also be non-MAP).
+//
+// Use site: `js_has_own_property` MAP branch must NOT fall through to the
+// builtin-method probe when the slot is DELETED (would resurrect a deleted
+// builtin). It MUST fall through when the slot is ABSENT.
+typedef enum {
+    JS_HAS_ABSENT  = 0,
+    JS_HAS_PRESENT = 1,
+    JS_HAS_DELETED = 2,
+} JsOwnSlotStatus;
+JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len);
+
 // Stage A1.9: ES §10.1.7.1 OrdinaryHasProperty (O, P) — own + proto chain.
 //
 // Walks `object`.[[Prototype]]* using js_get_prototype_of, returning true at
