@@ -5313,11 +5313,21 @@ extern "C" Item js_property_get(Item object, Item key) {
                     return js_get_or_create_builtin(JS_BUILTIN_FUNC_TO_STRING, "toString", 0);
                 }
             }
-            // Check Object.prototype methods (applies to all objects)
-            builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
-            if (builtin.item != ItemNull.item) return builtin;
+            // J39-7: null-proto objects (Object.create(null)) must NOT inherit
+            // Object.prototype methods or `.constructor`. The own __proto__ slot
+            // holds ITEM_JS_UNDEFINED as the null sentinel.
+            bool _np_is_null_proto = false;
+            {
+                Item _np_raw = js_map_get_fast(object.map, "__proto__", 9);
+                if (_np_raw.item == ITEM_JS_UNDEFINED) _np_is_null_proto = true;
+            }
+            // Check Object.prototype methods (applies to all objects with proto)
+            if (!_np_is_null_proto) {
+                builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                if (builtin.item != ItemNull.item) return builtin;
+            }
             // v18c: .constructor fallback — return appropriate constructor when not found
-            if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
+            if (!_np_is_null_proto && str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
                 // T5a: prefer typed JsClass byte; fall back to legacy string read
                 // (user-defined classes still write `__class_name__`).
                 JsClass cls_c = js_class_get(object);
@@ -19939,6 +19949,33 @@ extern "C" Item js_array_slice_from(Item arr, Item start_item) {
 
 static const char PROTO_KEY[] = "__proto__";
 static const int PROTO_KEY_LEN = 9;
+
+// J39-7: ES B.3.7 PropertyDefinitionEvaluation for `__proto__: expr` in
+// object initializers. Spec: if propValue is Object or Null, perform
+// [[SetPrototypeOf]]; otherwise NO-OP (do NOT create an own property).
+// This must NOT be invoked for computed keys (`["__proto__"]:`) or shorthand
+// (`{__proto__}`) — those are regular property definitions.
+extern "C" void js_object_proto_setter(Item object, Item value) {
+    TypeId vt = get_type_id(value);
+    bool is_null = (value.item == ItemNull.item || vt == LMD_TYPE_NULL);
+    bool is_obj =
+        (vt == LMD_TYPE_MAP || vt == LMD_TYPE_FUNC ||
+         vt == LMD_TYPE_ARRAY || vt == LMD_TYPE_ELEMENT);
+    if (!is_null && !is_obj) return;
+    if (is_null) {
+        // Match Object.create(null): write ITEM_JS_UNDEFINED sentinel so
+        // `js_get_prototype_of` distinguishes "explicit null proto" from
+        // "no __proto__ slot set".
+        TypeId ot = get_type_id(object);
+        if (ot == LMD_TYPE_MAP) {
+            Item key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+            Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+            js_property_set(object, key, undef);
+            return;
+        }
+    }
+    js_set_prototype(object, value);
+}
 
 // Set the prototype of an object (stores as __proto__ property on Map)
 extern "C" void js_set_prototype(Item object, Item prototype) {

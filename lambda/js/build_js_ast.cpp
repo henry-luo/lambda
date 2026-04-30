@@ -755,6 +755,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             property->key = ident;
             // Create a separate identifier node for value (same name)
             property->value = build_js_expression(tp, property_node);
+            property->shorthand = true;
             property->base.type = &TYPE_ANY;
             if (!prev_property) {
                 object->properties = (JsAstNode*)property;
@@ -962,6 +963,7 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         } else {
             // Shorthand property: { key } is equivalent to { key: key }
             property->value = property->key;
+            property->shorthand = true;
         }
         property->base.type = &TYPE_ANY;
 

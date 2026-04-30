@@ -1638,6 +1638,7 @@ JitImport jit_runtime_imports[] = {
     // prototype chain
     {"js_get_prototype", FPTR(js_get_prototype)},
     {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_object_proto_setter", FPTR(js_object_proto_setter)},
     {"js_link_base_prototype", FPTR(js_link_base_prototype)},
     {"js_prototype_lookup", FPTR(js_prototype_lookup)},
     {"js_mark_non_enumerable", FPTR(js_mark_non_enumerable)},

@@ -97,6 +97,34 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     // If obj is an array and name is "length", validate the value as a valid array length.
     if (get_type_id(obj) == LMD_TYPE_ARRAY && get_type_id(name) == LMD_TYPE_STRING) {
         String* ns = it2s(name);
+        // J39-7: ES §9.4.2.1 step 3.f.iii — for an array index P >= length,
+        // if length is non-writable (__nw_length marker on companion map),
+        // throw TypeError. Index names are decimal digit strings.
+        if (ns && ns->len > 0 && ns->len <= 10 &&
+            (ns->len == 1 || ns->chars[0] != '0')) {
+            bool _is_idx = true;
+            uint64_t _idx = 0;
+            for (uint32_t _i = 0; _i < ns->len; _i++) {
+                char _c = ns->chars[_i];
+                if (_c < '0' || _c > '9') { _is_idx = false; break; }
+                _idx = _idx * 10 + (uint64_t)(_c - '0');
+            }
+            if (_is_idx && _idx <= 0xFFFFFFFEULL) {
+                bool _nw_len = false;
+                if (obj.array && obj.array->extra != 0) {
+                    Map* _pm = (Map*)(uintptr_t)obj.array->extra;
+                    bool _f = false;
+                    Item _v = js_map_get_fast_ext(_pm, "__nw_length", 11, &_f);
+                    if (_f && _v.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_v)) _nw_len = true;
+                }
+                if (_nw_len && obj.array && (uint64_t)obj.array->length <= _idx) {
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Cannot add property: array length is non-writable"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+            }
+        }
         if (ns && ns->len == 6 && strncmp(ns->chars, "length", 6) == 0) {
             Item val_k = (Item){.item = s2it(heap_create_name("value", 5))};
             if (it2b(js_in(val_k, descriptor))) {
@@ -120,6 +148,23 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                 if ((double)u32 != d) {
                     Item tn = (Item){.item = s2it(heap_create_name("RangeError"))};
                     Item msg = (Item){.item = s2it(heap_create_name("Invalid array length"))};
+                    js_throw_value(js_new_error_with_name(tn, msg));
+                    return obj;
+                }
+                // J39-7: ES §9.4.2.4 ArraySetLength step 16/17 — if existing
+                // length is non-writable (__nw_length marker on companion map),
+                // reject any value change. Writable→non-writable is allowed
+                // (handled by step-7d below for the writable attribute).
+                bool _nw_len = false;
+                if (obj.array && obj.array->extra != 0) {
+                    Map* _pm = (Map*)(uintptr_t)obj.array->extra;
+                    bool _nw_found = false;
+                    Item _nwv = js_map_get_fast_ext(_pm, "__nw_length", 11, &_nw_found);
+                    if (_nw_found && _nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_nwv)) _nw_len = true;
+                }
+                if (_nw_len && (uint32_t)obj.array->length != u32) {
+                    Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+                    Item msg = (Item){.item = s2it(heap_create_name("Cannot redefine property: length"))};
                     js_throw_value(js_new_error_with_name(tn, msg));
                     return obj;
                 }
@@ -602,7 +647,7 @@ extern "C" Item js_date_now(void) {
 extern "C" Item js_date_new(void) {
     Item obj = js_new_object();
     Item time_val = js_date_now();
-    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     js_property_set(obj, key, time_val);
     // mark as Date for instanceof
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
@@ -624,7 +669,7 @@ extern "C" Item js_date_now_string(void) {
 // new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
 extern "C" Item js_date_new_from(Item value) {
     Item obj = js_new_object();
-    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     TypeId tid = get_type_id(value);
 
     // helper: store ms with TimeClip validation (|v| > 8.64e15 → NaN)
@@ -684,7 +729,7 @@ extern "C" Item js_date_new_from(Item value) {
     } else if (tid == LMD_TYPE_MAP) {
         // Date object: extract _time from the other Date
         bool has_time = false;
-        Item other_time = js_map_get_fast_ext(value.map, "_time", 5, &has_time);
+        Item other_time = js_map_get_fast_ext(value.map, "__time__", 8, &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
             double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
             store_time(ms);
@@ -774,7 +819,7 @@ extern "C" Item js_date_utc(Item args_array) {
 //   8=toISOString, 9=toLocaleDateString
 extern "C" Item js_date_method(Item date_obj, int method_id) {
     // extract epoch-ms from the _time property
-    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     Item time_val = js_property_get(date_obj, key);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
@@ -889,7 +934,7 @@ static int js_process_argc_raw = 0;
 // 40=getDay, 41=getUTCDay, 42=getTimezoneOffset, 43=valueOf, 44=toJSON,
 // 45=toUTCString, 46=toDateString, 47=toTimeString
 extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3) {
-    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item key = (Item){.item = s2it(heap_create_name("__time__"))};
     Item time_val = js_property_get(date_obj, key);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
@@ -1224,7 +1269,7 @@ extern "C" Item js_date_new_multi(Item args_array) {
 
     // Build the Date object now (so we always return a Date even when time value is NaN)
     Item obj = js_new_object();
-    Item time_key = (Item){.item = s2it(heap_create_name("_time"))};
+    Item time_key = (Item){.item = s2it(heap_create_name("__time__"))};
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
 
@@ -5409,6 +5454,24 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
+
+    // J39-7: ES §B.2.2.1 / §10.4.7 — the `__proto__` slot is the [[Prototype]]
+    // internal slot, NOT an own property of plain objects. Object literal
+    // `{__proto__: x}` and `Object.create(proto)` both store the proto via this
+    // slot but the spec says `Object.getOwnPropertyDescriptor(o, '__proto__')`
+    // must return undefined unless `__proto__` was explicitly created as an
+    // accessor or data property (e.g. via accessor syntax `get __proto__()`,
+    // `set __proto__(_)`, or `Object.defineProperty`). Suppress descriptor
+    // synthesis only when the slot is the [[Prototype]] storage (no IS_ACCESSOR
+    // shape flag for `__proto__`).
+    if (type == LMD_TYPE_MAP && name_str->len == 9 &&
+        memcmp(name_str->chars, "__proto__", 9) == 0) {
+        ShapeEntry* _se_pp = js_find_shape_entry(obj, "__proto__", 9);
+        if (!_se_pp || !jspd_is_accessor(_se_pp)) {
+            return make_js_undefined();
+        }
+        // fall through: explicit own accessor — return real descriptor below
+    }
 
     // Function properties: length, name, prototype
     if (type == LMD_TYPE_FUNC) {

@@ -14341,10 +14341,31 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 jm_emit_install_method_or_accessor(mt, object, key, val,
                                                     p->is_getter, p->is_setter);
             } else {
-                jm_call_3(mt, "js_property_set", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                // J39-7: ES B.3.7 — non-computed `__proto__: expr` in an object
+                // literal sets [[Prototype]] (or no-ops for non-Object/Null) and
+                // does NOT create an own property. Computed `["__proto__"]:`,
+                // shorthand `{__proto__}`, and method shorthand do NOT trigger.
+                bool is_proto_literal = false;
+                if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
+                    !p->shorthand &&
+                    p->key && p->value && p->key != p->value &&
+                    p->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* k_id = (JsIdentifierNode*)p->key;
+                    if (k_id->name && k_id->name->len == 9 &&
+                        memcmp(k_id->name->chars, "__proto__", 9) == 0) {
+                        is_proto_literal = true;
+                    }
+                }
+                if (is_proto_literal) {
+                    jm_call_void_2(mt, "js_object_proto_setter",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                } else {
+                    jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
             }
         } else if (prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
             // Object spread: { ...source } — copy all own properties from source into target

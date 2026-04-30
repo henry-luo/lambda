@@ -336,6 +336,7 @@ typedef struct JsPropertyNode {
     bool method;                    // true for method shorthand
     bool is_getter;                 // true for get accessor
     bool is_setter;                 // true for set accessor
+    bool shorthand;                 // true for { x } shorthand (vs. { x: x })
 } JsPropertyNode;
 
 // JavaScript variable declaration node
