@@ -1545,15 +1545,10 @@ extern "C" Item js_to_string(Item value) {
                 return js_to_string(result);
             }
         }
-        // Check for Date objects (have __class_name__ == "Date")
-        bool own_cls = false;
-        Item cls_val = js_map_get_fast(value.map, "__class_name__", 14, &own_cls);
-        if (own_cls && get_type_id(cls_val) == LMD_TYPE_STRING) {
-            String* cls_s = it2s(cls_val);
-            if (cls_s && cls_s->len == 4 && strncmp(cls_s->chars, "Date", 4) == 0) {
-                // delegate to js_date_method(obj, 17=toString)
-                return js_date_method(value, 17);
-            }
+        // Check for Date objects via the typed JsClass tag (A3-T4).
+        if (js_class_id(value) == JS_CLASS_DATE) {
+            // delegate to js_date_method(obj, 17=toString)
+            return js_date_method(value, 17);
         }
         // Wrapper objects with __primitiveValue__ (e.g. new Number(42), new String("hi"))
         // Skip fast path if custom toString/valueOf/@@toPrimitive exists on the object
@@ -1776,15 +1771,10 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 0;  // class objects are "function"
             // Function.prototype is callable per spec
-            bool own_cn = false;
-            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
-            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn_val);
-                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
-                    bool own_proto = false;
-                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
-                    if (own_proto) return 0;  // "function", not "object"
-                }
+            if (js_class_id(value) == JS_CLASS_FUNCTION) {
+                bool own_proto = false;
+                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                if (own_proto) return 0;  // "function", not "object"
             }
             return 1;
         }
@@ -1807,15 +1797,10 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
             js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
             if (own_ip) return 1;
             // Function.prototype is callable per spec
-            bool own_cn = false;
-            Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
-            if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn_val);
-                if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
-                    bool own_proto = false;
-                    js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
-                    if (own_proto) return 1;
-                }
+            if (js_class_id(value) == JS_CLASS_FUNCTION) {
+                bool own_proto = false;
+                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+                if (own_proto) return 1;
             }
             return 0;
         }
@@ -2977,17 +2962,12 @@ extern "C" Item js_typeof(Item value) {
             goto done;
         }
         // Function.prototype is callable per spec, typeof should return "function"
-        bool own_cn = false;
-        Item cn_val = js_map_get_fast_ext(value.map, "__class_name__", 14, &own_cn);
-        if (own_cn && get_type_id(cn_val) == LMD_TYPE_STRING) {
-            String* cn_str = it2s(cn_val);
-            if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) {
-                bool own_proto = false;
-                js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
-                if (own_proto) {
-                    result = "function";
-                    goto done;
-                }
+        if (js_class_id(value) == JS_CLASS_FUNCTION) {
+            bool own_proto = false;
+            js_map_get_fast_ext(value.map, "__is_proto__", 12, &own_proto);
+            if (own_proto) {
+                result = "function";
+                goto done;
             }
         }
         result = "object";
@@ -4597,14 +4577,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             while (proto.item != ItemNull.item && depth < 16) {
                 TypeId proto_t = get_type_id(proto);
                 if (proto_t == LMD_TYPE_MAP) {
-                    Item cn_key2 = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
-                    Item pcn = js_property_get(proto, cn_key2);
-                    if (get_type_id(pcn) == LMD_TYPE_STRING) {
-                        String* pcn_s = it2s(pcn);
-                        if (pcn_s && pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
-                            obj = js_array_new(0);
-                            break;
-                        }
+                    if (js_class_id(proto) == JS_CLASS_ARRAY) {
+                        obj = js_array_new(0);
+                        break;
                     }
                     proto = js_get_prototype(proto);
                 } else {
@@ -4844,14 +4819,9 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
             while (proto.item != ItemNull.item && depth < 16) {
                 TypeId proto_t = get_type_id(proto);
                 if (proto_t == LMD_TYPE_MAP) {
-                    bool cn_own = false;
-                    Item pcn = js_map_get_fast(proto.map, "__class_name__", 14, &cn_own);
-                    if (cn_own && get_type_id(pcn) == LMD_TYPE_STRING) {
-                        String* pcn_s = it2s(pcn);
-                        if (pcn_s && pcn_s->len == 5 && strncmp(pcn_s->chars, "Array", 5) == 0) {
-                            obj = js_array_new(0);
-                            break;
-                        }
+                    if (js_class_id(proto) == JS_CLASS_ARRAY) {
+                        obj = js_array_new(0);
+                        break;
                     }
                     proto = js_get_prototype(proto);
                 } else {
@@ -5447,21 +5417,18 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             Item builtin = ItemNull;
-            // v18o: Check __class_name__ FIRST for type-specific prototype resolution
+            // v18o: Check JsClass FIRST for type-specific prototype resolution
             // This ensures Number.prototype.toString returns Number's toString, not Object's.
             {
-                bool cn_own = false;
-                Item cn = js_map_get_fast(object.map, "__class_name__", 14, &cn_own);
-                if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                JsClass cls = js_class_id(object);
+                if (cls == JS_CLASS_STRING) {
                         // String.prototype[Symbol.iterator]
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_STRING_ITER, "[Symbol.iterator]", 0);
                         }
                         builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
-                    } else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                    } else if (cls == JS_CLASS_NUMBER) {
                         // Number prototype methods: toString, valueOf, toFixed, toPrecision, toExponential
                         if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
@@ -5478,7 +5445,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 13 && strncmp(str_key->chars, "toExponential", 13) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
                         }
-                    } else if (cn_str && cn_str->len == 4 && strncmp(cn_str->chars, "Date", 4) == 0) {
+                    } else if (cls == JS_CLASS_DATE) {
                         // v45: Date prototype methods — make Date methods visible as properties
                         struct { const char* name; int len; int id; int pc; } date_methods[] = {
                             {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
@@ -5536,7 +5503,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_2", 7) == 0) {
                             return js_get_or_create_builtin(JS_BUILTIN_DATE_TO_PRIMITIVE, "[Symbol.toPrimitive]", 1);
                         }
-                    } else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) {
+                    } else if (cls == JS_CLASS_REGEXP) {
                         // v46: RegExp prototype methods
                         if (str_key->len == 4 && strncmp(str_key->chars, "exec", 4) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_EXEC, "exec", 1);
@@ -5547,7 +5514,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (str_key->len == 7 && strncmp(str_key->chars, "compile", 7) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_COMPILE, "compile", 2);
                         // v90: Symbol-keyed methods resolved via prototype chain (supports delete/override)
-                    } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
+                    } else if (cls == JS_CLASS_ARRAY) {
                         // Array.prototype[Symbol.iterator] → values
                         if (str_key->len == 7 && strncmp(str_key->chars, "__sym_1", 7) == 0) {
                             return js_lookup_builtin_method(LMD_TYPE_ARRAY, "values", 6);
@@ -5555,12 +5522,11 @@ extern "C" Item js_property_get(Item object, Item key) {
                         // Array.prototype methods: resolve via Array builtin table
                         builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
-                    } else if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                    } else if (cls == JS_CLASS_BOOLEAN) {
                         // Boolean wrapper: toString/valueOf resolve to boolean-specific builtins
                         builtin = js_lookup_builtin_method(LMD_TYPE_BOOL, str_key->chars, (int)str_key->len);
                         if (builtin.item != ItemNull.item) return builtin;
                     }
-                }
             }
             // For class objects (MAPs with __instance_proto__), toString dispatches to
             // Function.prototype.toString so they return "function ClassName() { [native code] }"
@@ -10366,18 +10332,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (builtin_id == JS_BUILTIN_STR_TO_STRING || builtin_id == JS_BUILTIN_STR_VALUE_OF) {
             TypeId st = get_type_id(this_val);
             if (st != LMD_TYPE_STRING) {
-                // allow String wrapper objects (__class_name__ == "String")
-                bool is_str_obj = false;
-                if (st == LMD_TYPE_MAP) {
-                    bool cn_found = false;
-                    Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &cn_found);
-                    if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                        String* cn_str = it2s(cn);
-                        if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0)
-                            is_str_obj = true;
-                    }
-                }
-                if (!is_str_obj) {
+                // allow String wrapper objects (typed JsClass tag)
+                if (js_class_id(this_val) != JS_CLASS_STRING) {
                     Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
                     Item msg = (Item){.item = s2it(heap_create_name("String.prototype.toString requires that 'this' be a String"))};
                     Item error = js_new_error_with_name(type_name, msg);
@@ -10878,18 +10834,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Boolean.prototype.toString: throw TypeError if not boolean
         TypeId bt = get_type_id(this_val);
         if (bt != LMD_TYPE_BOOL) {
-            // check for Boolean wrapper object (__class_name__ == "Boolean")
-            bool is_bool_obj = false;
-            if (bt == LMD_TYPE_MAP) {
-                bool cn_found = false;
-                Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &cn_found);
-                if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0)
-                        is_bool_obj = true;
-                }
-            }
-            if (!is_bool_obj) {
+            // check for Boolean wrapper object via typed JsClass tag (A3-T4)
+            if (js_class_id(this_val) != JS_CLASS_BOOLEAN) {
                 Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
                 Item msg = (Item){.item = s2it(heap_create_name("Boolean.prototype.toString requires that 'this' be a Boolean"))};
                 Item error = js_new_error_with_name(type_name, msg);
@@ -10903,18 +10849,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Boolean.prototype.valueOf: throw TypeError if not boolean
         TypeId bt = get_type_id(this_val);
         if (bt == LMD_TYPE_BOOL) return this_val;
-        if (bt == LMD_TYPE_MAP) {
-            bool cn_found = false;
-            Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &cn_found);
-            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn);
-                if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
-                    bool pv_own = false;
-                    Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
-                    if (pv_own) return pv;
-                    return (Item){.item = b2it(false)};
-                }
-            }
+        if (js_class_id(this_val) == JS_CLASS_BOOLEAN) {
+            bool pv_own = false;
+            Item pv = js_map_get_fast(this_val.map, "__primitiveValue__", 18, &pv_own);
+            if (pv_own) return pv;
+            return (Item){.item = b2it(false)};
         }
         Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
         Item msg = (Item){.item = s2it(heap_create_name("Boolean.prototype.valueOf requires that 'this' be a Boolean"))};
@@ -11673,9 +11612,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_map_get_fast(this_val.map, "__rd", 4, &has_rd);
         if (!has_rd) {
             // RegExp.prototype itself: return undefined for flag getters, "(?:)" for source
-            bool has_cn = false;
-            Item cn = js_map_get_fast(this_val.map, "__class_name__", 14, &has_cn);
-            if (has_cn && get_type_id(cn) == LMD_TYPE_STRING && it2s(cn)->len == 6 && strncmp(it2s(cn)->chars, "RegExp", 6) == 0) {
+            if (js_class_id(this_val) == JS_CLASS_REGEXP) {
                 if (builtin_id == JS_BUILTIN_REGEXP_GET_SOURCE) return (Item){.item = s2it(heap_create_name("(?:)", 4))};
                 return make_js_undefined();
             }
@@ -12101,15 +12038,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (get_type_id(func_item) == LMD_TYPE_MAP) {
             bool is_proto = false;
             js_map_get_fast_ext(func_item.map, "__is_proto__", 12, &is_proto);
-            if (is_proto) {
-                bool has_cn = false;
-                Item cn = js_map_get_fast_ext(func_item.map, "__class_name__", 14, &has_cn);
-                if (has_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cns = it2s(cn);
-                    if (cns && cns->len == 8 && strncmp(cns->chars, "Function", 8) == 0) {
-                        return make_js_undefined();
-                    }
-                }
+            if (is_proto && js_class_id(func_item) == JS_CLASS_FUNCTION) {
+                return make_js_undefined();
             }
         }
         // Support objects with .call method (e.g. Sizzle's push polyfill)
@@ -15597,8 +15527,15 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         }
                     }
                 }
-                // v20: Error.prototype.toString — "name: message" format
+                // v20: Error.prototype.toString — "name: message" format.
+                // Use the suffix string check (covers TypeError/RangeError/SyntaxError/etc.
+                // which are not enumerated in JsClass). The js_class_id check
+                // covers Error/AggregateError directly.
                 {
+                    JsClass cls_e = js_class_id(obj);
+                    if (cls_e == JS_CLASS_ERROR || cls_e == JS_CLASS_AGGREGATE_ERROR) {
+                        return js_to_string(obj);
+                    }
                     bool cn_own = false;
                     Item cn = js_map_get_fast(obj.map, "__class_name__", 14, &cn_own);
                     if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
@@ -15610,20 +15547,13 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     }
                 }
                 // v18l: Wrapper objects (Number, String, Boolean) — delegate to primitive methods
-                bool own_cn = false;
-                Item cn = js_map_get_fast(obj.map, "__class_name__", 14, &own_cn);
-                if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    bool own_pv = false;
-                    Item pv = js_map_get_fast(obj.map, "__primitiveValue__", 18, &own_pv);
-                    if (own_pv) {
-                        if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
-                            return js_number_method(pv, method_name, args, argc);
-                        }
-                        if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
-                            return js_to_string(pv);
-                        }
-                        if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                {
+                    JsClass cls_w = js_class_id(obj);
+                    if (cls_w == JS_CLASS_NUMBER || cls_w == JS_CLASS_STRING || cls_w == JS_CLASS_BOOLEAN) {
+                        bool own_pv = false;
+                        Item pv = js_map_get_fast(obj.map, "__primitiveValue__", 18, &own_pv);
+                        if (own_pv) {
+                            if (cls_w == JS_CLASS_NUMBER) return js_number_method(pv, method_name, args, argc);
                             return js_to_string(pv);
                         }
                     }
@@ -16229,15 +16159,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = i2it(-1)};
     }
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
-        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            bool cn_found = false;
-            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
-            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cs = it2s(cn);
-                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
-                    return js_throw_type_error("First argument to String.prototype.includes must not be a regular expression");
-            }
-        }
+        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+            return js_throw_type_error("First argument to String.prototype.includes must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));
@@ -16267,15 +16190,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(false)};
     }
     if (method->len == 10 && strncmp(method->chars, "startsWith", 10) == 0) {
-        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            bool cn_found = false;
-            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
-            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cs = it2s(cn);
-                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
-                    return js_throw_type_error("First argument to String.prototype.startsWith must not be a regular expression");
-            }
-        }
+        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+            return js_throw_type_error("First argument to String.prototype.startsWith must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));
@@ -16300,15 +16216,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(memcmp(s->chars + byte_start, search_str->chars, search_str->len) == 0)};
     }
     if (method->len == 8 && strncmp(method->chars, "endsWith", 8) == 0) {
-        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
-            bool cn_found = false;
-            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
-            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cs = it2s(cn);
-                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
-                    return js_throw_type_error("First argument to String.prototype.endsWith must not be a regular expression");
-            }
-        }
+        if (argc >= 1 && js_class_id(args[0]) == JS_CLASS_REGEXP)
+            return js_throw_type_error("First argument to String.prototype.endsWith must not be a regular expression");
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));

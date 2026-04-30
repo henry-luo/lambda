@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
+#include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -445,19 +446,11 @@ extern "C" Item js_util_inspect(Item obj_item, Item options_item) {
 // =============================================================================
 
 extern "C" Item js_util_types_isDate(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 4 && memcmp(s->chars, "Date", 4) == 0)};
+    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_DATE)};
 }
 
 extern "C" Item js_util_types_isRegExp(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "RegExp", 6) == 0)};
+    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_REGEXP)};
 }
 
 extern "C" Item js_util_types_isArray(Item value) {
@@ -465,19 +458,11 @@ extern "C" Item js_util_types_isArray(Item value) {
 }
 
 extern "C" Item js_util_types_isMap(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 3 && memcmp(s->chars, "Map", 3) == 0)};
+    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_MAP)};
 }
 
 extern "C" Item js_util_types_isSet(Item value) {
-    if (get_type_id(value) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(value, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 3 && memcmp(s->chars, "Set", 3) == 0)};
+    return (Item){.item = b2it(js_class_id(value) == JS_CLASS_SET)};
 }
 
 // =============================================================================
@@ -663,14 +648,9 @@ extern "C" Item js_util_types_isUint8Array(Item obj) {
 }
 
 extern "C" Item js_util_types_isPromise(Item obj) {
+    if (js_class_id(obj) == JS_CLASS_PROMISE) return (Item){.item = b2it(true)};
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cls = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cls) == LMD_TYPE_STRING) {
-        String* s = it2s(cls);
-        if (s && s->len == 7 && memcmp(s->chars, "Promise", 7) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    // also check for .then method
+    // also check for .then method (thenable duck-type)
     Item then = js_property_get(obj, make_string_item("then"));
     if (get_type_id(then) == LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
     return (Item){.item = b2it(false)};
@@ -725,9 +705,18 @@ extern "C" Item js_util_types_isBuffer(Item obj) {
 
 extern "C" Item js_util_types_isError(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cls = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cls) == LMD_TYPE_STRING) {
-        String* s = it2s(cls);
+    JsClass cls = js_class_id(obj);
+    if (cls == JS_CLASS_ERROR || cls == JS_CLASS_AGGREGATE_ERROR ||
+        cls == JS_CLASS_ABORT_ERROR || cls == JS_CLASS_DOM_EXCEPTION) {
+        return (Item){.item = b2it(true)};
+    }
+    // Legacy duck-type: any __class_name__ ending in "Error" (covers user-defined
+    // subclasses + non-stamped builtins like TypeError/RangeError/SyntaxError
+    // whose JsClass tag is JS_CLASS_ERROR via from_name fallback OR via the
+    // js_new_error_with_name path that doesn't yet have per-name JsClass tags).
+    Item cn = js_property_get(obj, make_string_item("__class_name__"));
+    if (get_type_id(cn) == LMD_TYPE_STRING) {
+        String* s = it2s(cn);
         if (s && s->len >= 5 && memcmp(s->chars + s->len - 5, "Error", 5) == 0)
             return (Item){.item = b2it(true)};
     }
@@ -756,38 +745,19 @@ extern "C" Item js_util_types_isAnyArrayBuffer(Item obj) {
 }
 
 extern "C" Item js_util_types_isDataView(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 8 && memcmp(s->chars, "DataView", 8) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_DATA_VIEW)};
 }
 
 extern "C" Item js_util_types_isWeakMap(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakMap", 7) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_MAP)};
 }
 
 extern "C" Item js_util_types_isWeakSet(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakSet", 7) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_SET)};
 }
 
 extern "C" Item js_util_types_isWeakRef(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "WeakRef", 7) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_WEAK_REF)};
 }
 
 static bool is_typed_array_type(Item obj, JsTypedArrayType target_type) {
@@ -830,35 +800,19 @@ extern "C" Item js_util_types_isUint8ClampedArray(Item obj) {
 }
 
 extern "C" Item js_util_types_isNumberObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "Number", 6) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_NUMBER)};
 }
 
 extern "C" Item js_util_types_isStringObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "String", 6) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_STRING)};
 }
 
 extern "C" Item js_util_types_isBooleanObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 7 && memcmp(s->chars, "Boolean", 7) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_BOOLEAN)};
 }
 
 extern "C" Item js_util_types_isSymbolObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    return (Item){.item = b2it(s->len == 6 && memcmp(s->chars, "Symbol", 6) == 0)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_SYMBOL)};
 }
 
 extern "C" Item js_util_types_isNativeError(Item obj) {
@@ -867,16 +821,11 @@ extern "C" Item js_util_types_isNativeError(Item obj) {
 }
 
 extern "C" Item js_util_types_isBoxedPrimitive(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(cn);
-    if (s->len == 6 && memcmp(s->chars, "Number", 6) == 0) return (Item){.item = b2it(true)};
-    if (s->len == 6 && memcmp(s->chars, "String", 6) == 0) return (Item){.item = b2it(true)};
-    if (s->len == 7 && memcmp(s->chars, "Boolean", 7) == 0) return (Item){.item = b2it(true)};
-    if (s->len == 6 && memcmp(s->chars, "Symbol", 6) == 0) return (Item){.item = b2it(true)};
-    if (s->len == 6 && memcmp(s->chars, "BigInt", 6) == 0) return (Item){.item = b2it(true)};
-    return (Item){.item = b2it(false)};
+    JsClass cls = js_class_id(obj);
+    bool boxed = (cls == JS_CLASS_NUMBER || cls == JS_CLASS_STRING ||
+                  cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_SYMBOL ||
+                  cls == JS_CLASS_BIGINT);
+    return (Item){.item = b2it(boxed)};
 }
 
 extern "C" Item js_util_types_isProxy(Item obj) {
@@ -903,14 +852,7 @@ extern "C" Item js_util_types_isGeneratorFunction(Item obj) {
 }
 
 extern "C" Item js_util_types_isGeneratorObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 9 && memcmp(s->chars, "Generator", 9) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_GENERATOR)};
 }
 
 extern "C" Item js_util_types_isAsyncFunction(Item obj) {
@@ -925,36 +867,15 @@ extern "C" Item js_util_types_isAsyncFunction(Item obj) {
 }
 
 extern "C" Item js_util_types_isMapIterator(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 11 && memcmp(s->chars, "MapIterator", 11) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_MAP_ITERATOR)};
 }
 
 extern "C" Item js_util_types_isSetIterator(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 11 && memcmp(s->chars, "SetIterator", 11) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_SET_ITERATOR)};
 }
 
 extern "C" Item js_util_types_isArgumentsObject(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP && get_type_id(obj) != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
-    Item cn = js_property_get(obj, make_string_item("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len == 9 && memcmp(s->chars, "Arguments", 9) == 0)
-            return (Item){.item = b2it(true)};
-    }
-    return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(js_class_id(obj) == JS_CLASS_ARGUMENTS)};
 }
 
 // ─── util.styleText(format, text) — ANSI color formatting ──────────────────

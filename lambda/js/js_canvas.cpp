@@ -334,19 +334,15 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
 extern "C" bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args, int argc, Item* result) {
     // only handle MAP objects
     if (get_type_id(obj) != LMD_TYPE_MAP) return false;
-    // check __class_name__
-    bool has_cls = false;
-    Item cls = js_map_get_fast_ext(obj.map, "__class_name__", 14, &has_cls);
-    if (!has_cls || get_type_id(cls) != LMD_TYPE_STRING) return false;
-
-    String* cname = it2s(cls);
-    if (!cname) return false;
+    JsClass cls = js_class_id(obj);
+    if (cls != JS_CLASS_OFFSCREEN_CANVAS && cls != JS_CLASS_CANVAS_RENDERING_CONTEXT_2D)
+        return false;
 
     String* method = it2s(method_name);
     if (!method) return false;
 
     // OffscreenCanvas.getContext("2d")
-    if (cname->len == 15 && memcmp(cname->chars, "OffscreenCanvas", 15) == 0) {
+    if (cls == JS_CLASS_OFFSCREEN_CANVAS) {
         if (method->len == 10 && memcmp(method->chars, "getContext", 10) == 0) {
             *result = js_canvas_get_context(obj);
             return true;
@@ -355,7 +351,7 @@ extern "C" bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args
     }
 
     // CanvasRenderingContext2D methods
-    if (cname->len == 24 && memcmp(cname->chars, "CanvasRenderingContext2D", 24) == 0) {
+    if (cls == JS_CLASS_CANVAS_RENDERING_CONTEXT_2D) {
         if (method->len == 11 && memcmp(method->chars, "measureText", 11) == 0) {
             Item text = argc > 0 ? args[0] : ItemNull;
             *result = js_canvas_measure_text(obj, text);
@@ -380,13 +376,7 @@ extern "C" bool js_canvas_property_set_intercept(Item obj, Item key, Item value)
     static bool s_in_intercept = false;
     if (s_in_intercept) return false;
 
-    bool has_cls = false;
-    Item cls = js_map_get_fast_ext(obj.map, "__class_name__", 14, &has_cls);
-    if (!has_cls || get_type_id(cls) != LMD_TYPE_STRING) return false;
-
-    String* cname = it2s(cls);
-    if (!cname || cname->len != 24 || memcmp(cname->chars, "CanvasRenderingContext2D", 24) != 0)
-        return false;
+    if (js_class_id(obj) != JS_CLASS_CANVAS_RENDERING_CONTEXT_2D) return false;
 
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* kname = it2s(key);

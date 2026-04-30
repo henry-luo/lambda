@@ -134,15 +134,11 @@ static void blob_append_part(StrBuf* sb, Item part) {
     }
     if (tid == LMD_TYPE_MAP) {
         // Blob? Pull _text.
-        Item cn = js_property_get(part, make_str("__class_name__"));
-        if (get_type_id(cn) == LMD_TYPE_STRING) {
-            String* cns = it2s(cn);
-            if (cns && cns->len >= 4 && strncmp(cns->chars, "Blob", 4) == 0) {
-                size_t n = 0;
-                const char* t = str_prop_get(part, "_text", &n);
-                if (t && n > 0) strbuf_append_str_n(sb, t, n);
-                return;
-            }
+        if (js_class_id(part) == JS_CLASS_BLOB) {
+            size_t n = 0;
+            const char* t = str_prop_get(part, "_text", &n);
+            if (t && n > 0) strbuf_append_str_n(sb, t, n);
+            return;
         }
     }
     // Fallback: silently skip unsupported part types.
@@ -281,12 +277,9 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
         return ItemNull;
     }
     // Per spec: items must be a plain record. Reject Blob (and other tagged classes).
-    {
-        Item cn = js_property_get(items, make_str("__class_name__"));
-        if (get_type_id(cn) == LMD_TYPE_STRING) {
-            js_throw_type_error("ClipboardItem requires a record, not a Blob");
-            return ItemNull;
-        }
+    if (js_class_id(items) != JS_CLASS_NONE) {
+        js_throw_type_error("ClipboardItem requires a record, not a Blob");
+        return ItemNull;
     }
     // Iterate source map keys via js_object_keys helper.
     Item keys = js_object_keys(items);
@@ -934,25 +927,16 @@ static bool is_valid_mime_body(const char* s, size_t n) {
 }
 
 static bool item_is_clipboard_item(Item it) {
-    if (get_type_id(it) != LMD_TYPE_MAP) return false;
-    Item cn = js_property_get(it, make_str("__class_name__"));
-    if (get_type_id(cn) != LMD_TYPE_STRING) return false;
-    String* s = it2s(cn);
-    return s && strcmp(s->chars, "ClipboardItem") == 0;
+    return js_class_id(it) == JS_CLASS_CLIPBOARD_ITEM;
 }
 
-// Blob-like duck type: a native Blob (`__class_name__` == "Blob") OR any
+// Blob-like duck type: a native Blob/File OR any
 // object exposing both a string `.type` and a callable `.text()`.
 // Mirrors the shim's `isBlobLike` so fetch().blob() values round-trip.
 static bool item_is_blob_like(Item it) {
+    JsClass cls = js_class_id(it);
+    if (cls == JS_CLASS_BLOB || cls == JS_CLASS_FILE) return true;
     if (get_type_id(it) != LMD_TYPE_MAP) return false;
-    Item cn = js_property_get(it, make_str("__class_name__"));
-    if (get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && (strcmp(s->chars, "Blob") == 0 || strcmp(s->chars, "File") == 0)) {
-            return true;
-        }
-    }
     Item ty = js_property_get(it, make_str("type"));
     Item tx = js_property_get(it, make_str("text"));
     return get_type_id(ty) == LMD_TYPE_STRING &&

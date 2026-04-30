@@ -126,13 +126,10 @@ static Item fd_coerce_value(Item v) {
 // FormData methods
 // ============================================================================
 
-// Check if an Item is a Blob/File (MAP with __class_name__ == "Blob" or "File")
+// Check if an Item is a Blob/File
 static bool fd_is_blob(Item v) {
-    if (get_type_id(v) != LMD_TYPE_MAP) return false;
-    Item cn = prop_get(v, "__class_name__");
-    if (get_type_id(cn) != LMD_TYPE_STRING) return false;
-    const char* s = fn_to_cstr(cn);
-    return s && (strcmp(s, "Blob") == 0 || strcmp(s, "File") == 0);
+    JsClass cls = js_class_id(v);
+    return cls == JS_CLASS_BLOB || cls == JS_CLASS_FILE;
 }
 
 static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
@@ -154,9 +151,7 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
     // Per spec: if value is Blob (not File) and no filename, set filename to "blob".
     // If value is Blob/File and filename was provided, convert to File with that name.
     if (fd_is_blob(value)) {
-        Item cls = prop_get(value, "__class_name__");
-        const char* cs = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
-        bool is_file = cs && strcmp(cs, "File") == 0;
+        bool is_file = (js_class_id(value) == JS_CLASS_FILE);
         bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
         if (has_filename || !is_file) {
             value = fd_blob_to_file(value, filename_item);
@@ -275,9 +270,7 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
     Item value = fd_coerce_value(value_item);
     if (js_check_exception()) return ItemNull;
     if (fd_is_blob(value)) {
-        Item cls = prop_get(value, "__class_name__");
-        const char* cs = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
-        bool is_file = cs && strcmp(cs, "File") == 0;
+        bool is_file = (js_class_id(value) == JS_CLASS_FILE);
         bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
         if (has_filename || !is_file) {
             value = fd_blob_to_file(value, filename_item);
@@ -771,9 +764,7 @@ static Item js_file_construct(Item parts, Item name, Item options) {
 static Item fd_blob_to_file(Item value, Item filename_item) {
     // value must be a Blob/File MAP at this point
     bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
-    Item cls = prop_get(value, "__class_name__");
-    const char* cls_s = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
-    bool is_file = cls_s && strcmp(cls_s, "File") == 0;
+    bool is_file = (js_class_id(value) == JS_CLASS_FILE);
 
     Item file = js_new_object();
     prop_set(file, "__class_name__", make_str("File"));

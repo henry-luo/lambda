@@ -40,6 +40,7 @@ enum JsClass : uint8_t {
     JS_CLASS_NONE = 0,        // not a built-in class (default for plain objects)
     // Core JS types — match LMD_TYPE_* dispatch in js_lookup_builtin_method.
     JS_CLASS_OBJECT,
+    JS_CLASS_FUNCTION,
     JS_CLASS_BOOLEAN,
     JS_CLASS_NUMBER,
     JS_CLASS_STRING,
@@ -97,6 +98,20 @@ enum JsClass : uint8_t {
     JS_CLASS_CSS_NESTED_DECLARATIONS,
     // Timers.
     JS_CLASS_TIMEOUT,
+    // Collections (A3-T4 additions).
+    JS_CLASS_MAP,
+    JS_CLASS_SET,
+    JS_CLASS_WEAK_MAP,
+    JS_CLASS_WEAK_SET,
+    JS_CLASS_WEAK_REF,
+    JS_CLASS_MAP_ITERATOR,
+    JS_CLASS_SET_ITERATOR,
+    // Generators / async (A3-T4 additions).
+    JS_CLASS_GENERATOR,
+    JS_CLASS_GENERATOR_FUNCTION,
+    JS_CLASS_ASYNC_FUNCTION,
+    JS_CLASS_ARGUMENTS,
+    JS_CLASS_CLIPBOARD_ITEM,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -142,6 +157,8 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
     switch (nl) {
         case 3:
             if (!strncmp(nm, "URL", 3)) return JS_CLASS_URL;
+            if (!strncmp(nm, "Map", 3)) return JS_CLASS_MAP;
+            if (!strncmp(nm, "Set", 3)) return JS_CLASS_SET;
             break;
         case 4:
             if (!strncmp(nm, "Date", 4)) return JS_CLASS_DATE;
@@ -169,15 +186,21 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Boolean", 7)) return JS_CLASS_BOOLEAN;
             if (!strncmp(nm, "Promise", 7)) return JS_CLASS_PROMISE;
             if (!strncmp(nm, "Timeout", 7)) return JS_CLASS_TIMEOUT;
+            if (!strncmp(nm, "WeakMap", 7)) return JS_CLASS_WEAK_MAP;
+            if (!strncmp(nm, "WeakSet", 7)) return JS_CLASS_WEAK_SET;
+            if (!strncmp(nm, "WeakRef", 7)) return JS_CLASS_WEAK_REF;
             break;
         case 8:
             if (!strncmp(nm, "DataView", 8)) return JS_CLASS_DATA_VIEW;
             if (!strncmp(nm, "FormData", 8)) return JS_CLASS_FORM_DATA;
+            if (!strncmp(nm, "Function", 8)) return JS_CLASS_FUNCTION;
             break;
         case 9:
             if (!strncmp(nm, "TLSServer", 9)) return JS_CLASS_TLS_SERVER;
             if (!strncmp(nm, "TLSSocket", 9)) return JS_CLASS_TLS_SOCKET;
             if (!strncmp(nm, "Selection", 9)) return JS_CLASS_SELECTION;
+            if (!strncmp(nm, "Generator", 9)) return JS_CLASS_GENERATOR;
+            if (!strncmp(nm, "Arguments", 9)) return JS_CLASS_ARGUMENTS;
             break;
         case 10:
             if (!strncmp(nm, "TypedArray", 10)) return JS_CLASS_TYPED_ARRAY;
@@ -191,6 +214,8 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "EventTarget", 11)) return JS_CLASS_EVENT_TARGET;
             if (!strncmp(nm, "TextDecoder", 11)) return JS_CLASS_TEXT_DECODER;
             if (!strncmp(nm, "TextEncoder", 11)) return JS_CLASS_TEXT_ENCODER;
+            if (!strncmp(nm, "MapIterator", 11)) return JS_CLASS_MAP_ITERATOR;
+            if (!strncmp(nm, "SetIterator", 11)) return JS_CLASS_SET_ITERATOR;
             break;
         case 12:
             if (!strncmp(nm, "DOMException", 12)) return JS_CLASS_DOM_EXCEPTION;
@@ -201,6 +226,8 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "ClientRequest", 13)) return JS_CLASS_CLIENT_REQUEST;
             if (!strncmp(nm, "StringDecoder", 13)) return JS_CLASS_STRING_DECODER;
             if (!strncmp(nm, "SecureContext", 13)) return JS_CLASS_SECURE_CONTEXT;
+            if (!strncmp(nm, "AsyncFunction", 13)) return JS_CLASS_ASYNC_FUNCTION;
+            if (!strncmp(nm, "ClipboardItem", 13)) return JS_CLASS_CLIPBOARD_ITEM;
             break;
         case 14:
             if (!strncmp(nm, "AggregateError", 14)) return JS_CLASS_AGGREGATE_ERROR;
@@ -215,6 +242,9 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "OffscreenCanvas", 15)) return JS_CLASS_OFFSCREEN_CANVAS;
             if (!strncmp(nm, "IncomingMessage", 15)) return JS_CLASS_INCOMING_MESSAGE;
             break;
+        case 17:
+            if (!strncmp(nm, "GeneratorFunction", 17)) return JS_CLASS_GENERATOR_FUNCTION;
+            break;
         case 21:
             if (!strncmp(nm, "CSSNestedDeclarations", 21)) return JS_CLASS_CSS_NESTED_DECLARATIONS;
             break;
@@ -223,4 +253,36 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             break;
     }
     return JS_CLASS_NONE;
+}
+
+// Forward declaration — defined in js_runtime.cpp. Returns the value of
+// `m[key_str]` (or ItemNull when absent); `*out_found` flips to true iff
+// the key resolves through an own/proto entry.
+extern "C" Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+
+// Unified class-identity resolver. Prefers the typed JsClass byte stamped on
+// the Map's TypeMap (A3-T3a/T3b). When the byte is JS_CLASS_NONE — the
+// blueprint hasn't been migrated yet — falls back to reading the legacy
+// `__class_name__` string property and mapping it via `js_class_from_name`.
+//
+// Use this from reader sites (predicates, dispatch, instanceof name fallback)
+// during the A3-T4 migration. Once A3-T5 drops `__class_name__` writes the
+// fallback becomes dead and can be removed.
+//
+// Returns JS_CLASS_NONE for non-MAP items, plain objects without a class
+// stamp, and class names not present in `js_class_from_name`.
+static inline JsClass js_class_id(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
+    Map* m = obj.map;
+    if (!m) return JS_CLASS_NONE;
+    if (m->type) {
+        JsClass cls = (JsClass)((TypeMap*)m->type)->js_class;
+        if (cls != JS_CLASS_NONE) return cls;
+    }
+    bool found = false;
+    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &found);
+    if (!found || get_type_id(cn) != LMD_TYPE_STRING) return JS_CLASS_NONE;
+    String* s = it2s(cn);
+    if (!s) return JS_CLASS_NONE;
+    return js_class_from_name(s->chars, (int)s->len);
 }

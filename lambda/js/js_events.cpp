@@ -231,7 +231,13 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
                 }
                 // check if err_arg is an Error instance
                 bool is_error = false;
-                if (get_type_id(err_arg) == LMD_TYPE_MAP) {
+                JsClass ecls = js_class_id(err_arg);
+                if (ecls == JS_CLASS_ERROR || ecls == JS_CLASS_AGGREGATE_ERROR ||
+                    ecls == JS_CLASS_ABORT_ERROR || ecls == JS_CLASS_DOM_EXCEPTION) {
+                    is_error = true;
+                } else if (get_type_id(err_arg) == LMD_TYPE_MAP) {
+                    // Legacy duck-type fallback: any __class_name__ ending in "Error"
+                    // (covers user-defined Error subclasses + non-stamped variants).
                     Item cn = js_property_get(err_arg, make_string_item("__class_name__"));
                     if (get_type_id(cn) == LMD_TYPE_STRING) {
                         String* cns = it2s(cn);
