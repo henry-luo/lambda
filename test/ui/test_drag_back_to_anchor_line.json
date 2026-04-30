@@ -1,0 +1,43 @@
+{
+  "name": "Drag back to anchor line — selection must not collapse on different positions",
+  "html": "test/ui/test_drag_back_to_anchor_line.html",
+  "description": "User-reported regression: anchor on a wrapped line, drag to a lower line (selection works), drag back to a DIFFERENT position on the anchor line — selection collapses. Causes: (1) inter-line gap below anchor x — fixed by snapping to line-break boundary; (2) recomputed char_offset on the anchor line could equal the anchor offset for unrelated mouse positions if the rect/block math is wrong. This test exercises both: drag down to line 2, drag back via the gap below the anchor x (case 1), then continue back to several distinct positions on line 1 that are NOT the anchor (case 2).",
+  "events": [
+    {"type": "log", "message": "=== Drag back to anchor line ==="},
+    {"type": "wait", "ms": 100},
+
+    {"type": "mouse_down", "target": {"text": "hotel"}, "button": 0},
+    {"type": "wait", "ms": 20},
+
+    {"type": "log", "message": "Drag down to line 2 ('oscar')"},
+    {"type": "mouse_move", "target": {"text": "oscar"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Drag UP into gap straight below anchor x — must remain non-collapsed (gap snap)"},
+    {"type": "mouse_move", "x": 324, "y": 60},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Continue UP onto line 1 at distinct positions LEFT of anchor"},
+    {"type": "mouse_move", "x": 50, "y": 30},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_move", "x": 100, "y": 30},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_move", "x": 200, "y": 30},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "And distinct positions to the RIGHT of anchor still on line 1"},
+    {"type": "mouse_move", "x": 360, "y": 30},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "render", "file": "./temp/drag_back.png"},
+    {"type": "mouse_up", "x": 360, "y": 30, "button": 0},
+
+    {"type": "log", "message": "=== End ==="}
+  ]
+}

@@ -281,6 +281,19 @@ extern "C" void dom_selection_sync_from_legacy_caret(RadiantState* state) {
     if (!state || !state->caret) return;
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
+    // During an active drag-selection (or any non-collapsed legacy selection
+    // whose focus matches the caret), the legacy caret_set() call is just
+    // moving the focus end of the selection — NOT collapsing it. Mirroring
+    // it as `collapse(...)` here would wipe out the selection that
+    // `selection_extend()` just synced into DomSelection a moment ago.
+    // In that case skip the sync; the legacy SelectionState→DomSelection
+    // mirror in selection_extend already updated the focus boundary.
+    SelectionState* sel = state->selection;
+    if (sel && !sel->is_collapsed && sel->is_selecting &&
+        sel->focus_view == state->caret->view &&
+        sel->focus_offset == state->caret->char_offset) {
+        return;
+    }
     DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
     if (!b.node) return;
     const char* exc = NULL;

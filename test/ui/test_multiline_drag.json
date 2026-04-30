@@ -1,0 +1,33 @@
+{
+  "name": "Drag selection survives mouse in line gap (multi-line wrapped text)",
+  "html": "test/ui/test_multiline_drag.html",
+  "description": "Regression: when dragging across multi-line wrapped text, the selection used to collapse whenever the mouse_x crossed the anchor x (e.g. when passing through the inter-line gap directly below the anchor). Root cause: the MOUSE_MOVE drag handler always used text->rect (the FIRST TextRect of the wrapped text node) and ignored mouse_y, so for any mouse position the focus_offset was computed within line 1. The fix walks the TextRect chain and picks the rect whose vertical band best matches mouse_y.",
+  "events": [
+    {"type": "log", "message": "=== Multi-line drag through line gaps ==="},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Mouse down on text 'Alpha' (line 1 of p1)"},
+    {"type": "mouse_down", "target": {"text": "Alpha"}, "button": 0},
+    {"type": "wait", "ms": 20},
+
+    {"type": "log", "message": "Drag to text on a later line ('mike')"},
+    {"type": "mouse_move", "target": {"text": "mike"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Drag into the GAP between lines (column near anchor x)"},
+    {"type": "mouse_move", "x": 50, "y": 87},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Drag onto text on yet a later line ('quebec')"},
+    {"type": "mouse_move", "target": {"text": "quebec"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "render", "file": "./temp/multiline_selection.png"},
+    {"type": "mouse_up", "target": {"text": "quebec"}, "button": 0},
+
+    {"type": "log", "message": "=== End ==="}
+  ]
+}

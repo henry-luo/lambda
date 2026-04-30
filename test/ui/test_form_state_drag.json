@@ -1,0 +1,18 @@
+{
+  "name": "Drag back to anchor on multi-text-node paragraph",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "mouse_down", "target": {"text": "buttons - no dashed"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": "orange dashed"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Drag back to a different word on line 1"},
+    {"type": "mouse_move", "target": {"text": "no dashed outline"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "render", "file": "./temp/form_state_drag.png"},
+    {"type": "mouse_up", "target": {"text": "no dashed outline"}, "button": 0}
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Drag selection must keep DomSelection non-collapsed (regression)",
+  "html": "test/ui/test_drag_selection_render.html",
+  "description": "Regression: while dragging to select text, caret_set was being mirrored to dom_selection_collapse and wiping the just-extended DomSelection. Renderer reads DomSelection, so the selection rectangle never appeared. assert_selection now checks both legacy SelectionState AND the canonical DomSelection.",
+  "events": [
+    {"type": "log", "message": "=== Drag selection render regression ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Drag across the first paragraph (text-targeted)"},
+    {"type": "mouse_drag",
+     "target":    {"text": "quick"},
+     "to_target": {"text": "lazy"},
+     "button": 0},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Click elsewhere to collapse"},
+    {"type": "click", "target": {"text": "Click"}},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true},
+
+    {"type": "log", "message": "Drag across the second paragraph"},
+    {"type": "mouse_drag",
+     "target":    {"text": "drag"},
+     "to_target": {"text": "select"},
+     "button": 0},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "=== End ==="}
+  ]
+}

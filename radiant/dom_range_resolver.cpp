@@ -22,6 +22,18 @@
 #include <stddef.h>
 #include <math.h>
 
+// Glyph-precise X resolver injected by event.cpp at static-init time. Kept
+// as a function pointer so this TU stays free of GLFW/event.hpp transitively
+// and unit-test binaries that don't link event.cpp (e.g.
+// test_dom_range_gtest) cleanly fall back to linear interpolation.
+typedef float (*GlyphXResolverFn)(UiContext* uicon, ViewText* text,
+    TextRect* rect, int byte_offset);
+static GlyphXResolverFn g_glyph_x_resolver = NULL;
+
+extern "C" void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn) {
+    g_glyph_x_resolver = fn;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — view tree walks
 // ---------------------------------------------------------------------------
@@ -255,13 +267,25 @@ extern "C" DomBoundary dom_hit_test_to_boundary(View* root_view, float vx, float
 // Public — multi-rect rendering helper
 // ---------------------------------------------------------------------------
 
-extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void* userdata) {
+extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata) {
     if (!range || !cb) return;
     if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
 
     View* sv = (View*)range->start_view;
     View* ev = (View*)range->end_view;
     if (!sv || !ev) return;
+
+    // Glyph-precise X for `bo` within `r` of text node `t`. Falls back to
+    // linear interpolation when no UiContext / font is available, or when
+    // the resolver function pointer hasn't been registered (unit-test
+    // binaries that don't link event.cpp).
+    auto glyph_x = [&](DomText* t, TextRect* r, int bo) -> float {
+        if (uicon && g_glyph_x_resolver) {
+            return g_glyph_x_resolver(uicon, (ViewText*)t, r, bo);
+        }
+        return interp_x_in_rect(r, bo);
+    };
 
     // Same-text-node, single TextRect (the common case): one rectangle.
     if (sv == ev && sv->is_text()) {
@@ -272,8 +296,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void
 
         // Walk every TextRect in [sr .. er] inclusive.
         for (TextRect* r = sr; r; r = r->next) {
-            float lx0 = (r == sr) ? interp_x_in_rect(r, range->start_byte_offset) : r->x;
-            float lx1 = (r == er) ? interp_x_in_rect(r, range->end_byte_offset)   : r->x + r->width;
+            float lx0 = (r == sr) ? glyph_x(t, r, range->start_byte_offset) : r->x;
+            float lx1 = (r == er) ? glyph_x(t, r, range->end_byte_offset)   : r->x + r->width;
             float ax, ay;
             rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);
@@ -293,8 +317,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void
             int lo = bo_lo > rs ? bo_lo : rs;
             int hi = bo_hi < re ? bo_hi : re;
             if (lo >= hi) continue;
-            float lx0 = interp_x_in_rect(r, lo);
-            float lx1 = interp_x_in_rect(r, hi);
+            float lx0 = glyph_x(t, r, lo);
+            float lx1 = glyph_x(t, r, hi);
             float ax, ay;
             rel_to_abs((View*)t, lx0, r->y, &ax, &ay);
             cb(ax, ay, lx1 - lx0, r->height, userdata);

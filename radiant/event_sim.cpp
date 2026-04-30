@@ -5,6 +5,7 @@
 #include "event_sim.hpp"
 #include "event.hpp"
 #include "state_store.hpp"
+#include "dom_range.hpp"
 #include "form_control.hpp"
 #include "view.hpp"
 #include "webview.h"
@@ -965,6 +966,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     else if (strcmp(type_str, "assert_selection") == 0) {
         ev->type = SIM_EVENT_ASSERT_SELECTION;
         ev->expected_is_collapsed = reader.get("is_collapsed").asBool();
+        ev->check_dom_selection = reader.get("check_dom").asBool();
     }
     else if (strcmp(type_str, "assert_target") == 0) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
@@ -1523,7 +1525,11 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     return passed;
 }
 
-// Assert helper for selection state
+// Assert helper for selection state.
+// Checks both legacy SelectionState (used by event/caret code) and the
+// canonical DomSelection (used by the renderer to paint highlight rects).
+// They MUST agree — disagreement means the selection is set internally but
+// nothing visible is drawn (or vice-versa).
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon->document;
     if (!doc || !doc->state) {
@@ -1533,17 +1539,32 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
     }
 
     SelectionState* sel = doc->state->selection;
-    bool is_collapsed = sel ? sel->is_collapsed : true;
+    bool legacy_collapsed = sel ? sel->is_collapsed : true;
 
-    if (is_collapsed != ev->expected_is_collapsed) {
-        log_error("event_sim: assert_selection - is_collapsed mismatch: expected %s, got %s",
+    DomSelection* ds = doc->state->dom_selection;
+    bool dom_collapsed = (!ds || ds->range_count == 0) ? true : ds->is_collapsed;
+
+    if (legacy_collapsed != ev->expected_is_collapsed) {
+        log_error("event_sim: assert_selection - legacy is_collapsed mismatch: expected %s, got %s",
                  ev->expected_is_collapsed ? "true" : "false",
-                 is_collapsed ? "true" : "false");
+                 legacy_collapsed ? "true" : "false");
         ctx->fail_count++;
         return false;
     }
 
-    log_info("event_sim: assert_selection PASS");
+    if (ev->check_dom_selection && dom_collapsed != ev->expected_is_collapsed) {
+        log_error("event_sim: assert_selection - DomSelection is_collapsed mismatch: expected %s, got %s "
+                 "(range_count=%u). Highlight will not render.",
+                 ev->expected_is_collapsed ? "true" : "false",
+                 dom_collapsed ? "true" : "false",
+                 ds ? ds->range_count : 0u);
+        ctx->fail_count++;
+        return false;
+    }
+
+    log_info("event_sim: assert_selection PASS (legacy=%s%s)",
+             legacy_collapsed ? "collapsed" : "non-collapsed",
+             ev->check_dom_selection ? (dom_collapsed ? ", DOM=collapsed" : ", DOM=non-collapsed") : "");
     ctx->pass_count++;
     return true;
 }

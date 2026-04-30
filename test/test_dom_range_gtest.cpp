@@ -1032,7 +1032,7 @@ TEST_F(DomResolverTest, ForEachRectEmitsSingleRectForSameNodeRange) {
     ASSERT_TRUE(dom_range_set_end  (r, hello, 5, &exc));
     ASSERT_TRUE(dom_range_resolve_layout(r));
     RectCollector c;
-    dom_range_for_each_rect(r, &RectCollector::cb, &c);
+    dom_range_for_each_rect(r, nullptr, &RectCollector::cb, &c);
     EXPECT_EQ(c.count, 1);
     EXPECT_FLOAT_EQ(c.total_w, 60.0f);
 }
