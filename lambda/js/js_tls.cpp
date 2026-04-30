@@ -181,7 +181,7 @@ extern "C" Item js_tls_socket_getAuthorized(Item self) {
 // create a JS TLSSocket object
 static Item make_tls_socket_object(JsTlsSocket* sock) {
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("TLSSocket"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_TLS_SOCKET);  // A3-T3b
     js_property_set(obj, make_string_item("__handle__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)sock)});
@@ -237,7 +237,7 @@ extern "C" Item js_tls_createSecureContext(Item options_item) {
     }
 
     Item result = js_new_object();
-    js_property_set(result, make_string_item("__class_name__"), make_string_item("SecureContext"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(result, JS_CLASS_SECURE_CONTEXT);  // A3-T3b
     js_property_set(result, make_string_item("__ctx__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)ctx)});
@@ -566,7 +566,7 @@ extern "C" Item js_tls_createServer(Item options_item, Item handler) {
     srv->connection_handler = handler;
 
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("TLSServer"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_TLS_SERVER);  // A3-T3b
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});

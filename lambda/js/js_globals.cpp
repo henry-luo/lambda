@@ -4145,12 +4145,23 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                 Item obj = custom_proto;
                 int depth = 0;
                 while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-                    Item obj_name = map_get(obj.map, class_key);
-                    if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
-                        String* on = it2s(obj_name);
-                        if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
-                            return (Item){.item = b2it(true)};
+                    // T5a: prefer typed JsClass byte; fall back to legacy string
+                    const char* on_chars = NULL;
+                    int on_len = 0;
+                    JsClass jc = js_class_get(obj);
+                    if (jc != JS_CLASS_NONE) {
+                        const char* nm = js_class_to_name(jc);
+                        if (nm) { on_chars = nm; on_len = (int)strlen(nm); }
+                    }
+                    if (!on_chars) {
+                        Item obj_name = map_get(obj.map, class_key);
+                        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
+                            String* on = it2s(obj_name);
+                            if (on) { on_chars = on->chars; on_len = (int)on->len; }
                         }
+                    }
+                    if (on_chars && on_len == rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
+                        return (Item){.item = b2it(true)};
                     }
                     Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
                     obj = map_get(obj.map, proto_key);
@@ -4167,22 +4178,36 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     Item obj = left;
     int depth = 0;
     while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-        Item obj_name = map_get(obj.map, class_key);
-        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
-            String* on = it2s(obj_name);
-            if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
+        // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
+        // (User-defined classes & unenumerated subclasses still use the string.)
+        const char* on_chars = NULL;
+        int on_len = 0;
+        JsClass jc = js_class_get(obj);
+        if (jc != JS_CLASS_NONE) {
+            const char* nm = js_class_to_name(jc);
+            if (nm) { on_chars = nm; on_len = (int)strlen(nm); }
+        }
+        if (!on_chars) {
+            Item obj_name = map_get(obj.map, class_key);
+            if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
+                String* on = it2s(obj_name);
+                if (on) { on_chars = on->chars; on_len = (int)on->len; }
+            }
+        }
+        if (on_chars) {
+            if (on_len == rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
                 return (Item){.item = b2it(true)};
             }
             // error hierarchy: any *Error subtype instanceof Error
             if (rn->len == 5 && strncmp(rn->chars, "Error", 5) == 0) {
                 // check if class name ends with "Error" (covers TypeError, RangeError, AssertionError, etc.)
-                if (on->len > 5 && strncmp(on->chars + on->len - 5, "Error", 5) == 0) {
+                if (on_len > 5 && strncmp(on_chars + on_len - 5, "Error", 5) == 0) {
                     return (Item){.item = b2it(true)};
                 }
             }
             // Event hierarchy: any *Event subtype instanceof Event
             if (rn->len == 5 && strncmp(rn->chars, "Event", 5) == 0) {
-                if (on->len > 5 && strncmp(on->chars + on->len - 5, "Event", 5) == 0) {
+                if (on_len > 5 && strncmp(on_chars + on_len - 5, "Event", 5) == 0) {
                     return (Item){.item = b2it(true)};
                 }
             }
@@ -4195,22 +4220,22 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                     "PointerEvent", NULL };
                 for (int i = 0; ui_subs[i]; i++) {
                     size_t sl = strlen(ui_subs[i]);
-                    if (on->len == sl && strncmp(on->chars, ui_subs[i], sl) == 0) {
+                    if ((size_t)on_len == sl && strncmp(on_chars, ui_subs[i], sl) == 0) {
                         return (Item){.item = b2it(true)};
                     }
                 }
             }
             // MouseEvent hierarchy: Wheel / Pointer extend MouseEvent.
             if (rn->len == 10 && strncmp(rn->chars, "MouseEvent", 10) == 0) {
-                if ((on->len == 10 && strncmp(on->chars, "WheelEvent", 10) == 0) ||
-                    (on->len == 12 && strncmp(on->chars, "PointerEvent", 12) == 0)) {
+                if ((on_len == 10 && strncmp(on_chars, "WheelEvent", 10) == 0) ||
+                    (on_len == 12 && strncmp(on_chars, "PointerEvent", 12) == 0)) {
                     return (Item){.item = b2it(true)};
                 }
             }
             // EventTarget: any DOM Node, document, or constructed EventTarget
             // is an EventTarget. Plain Event instances are NOT.
             if (rn->len == 11 && strncmp(rn->chars, "EventTarget", 11) == 0) {
-                if (on->len == 11 && strncmp(on->chars, "EventTarget", 11) == 0) {
+                if (on_len == 11 && strncmp(on_chars, "EventTarget", 11) == 0) {
                     return (Item){.item = b2it(true)};
                 }
             }
@@ -5672,21 +5697,13 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 bool ip_own = false;
                 js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
                 if (ip_own) {
-                    bool cn_own = false;
-                    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
-                    if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
+                    JsClass cls = js_class_id((Item){.map = m});
                     TypeId lookup_type = (TypeId)0;
-                    if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0)
-                        lookup_type = LMD_TYPE_ARRAY;
-                    else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0)
-                        lookup_type = LMD_TYPE_STRING;
-                    else if (cn_str && cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0)
-                        lookup_type = LMD_TYPE_FUNC;
-                    else if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)
-                        lookup_type = LMD_TYPE_INT;
-                    else if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0)
-                        lookup_type = LMD_TYPE_BOOL;
+                    if (cls == JS_CLASS_ARRAY) lookup_type = LMD_TYPE_ARRAY;
+                    else if (cls == JS_CLASS_STRING) lookup_type = LMD_TYPE_STRING;
+                    else if (cls == JS_CLASS_FUNCTION) lookup_type = LMD_TYPE_FUNC;
+                    else if (cls == JS_CLASS_NUMBER) lookup_type = LMD_TYPE_INT;
+                    else if (cls == JS_CLASS_BOOLEAN) lookup_type = LMD_TYPE_BOOL;
 
                     Item builtin = ItemNull;
                     if (lookup_type != (TypeId)0) {
@@ -5715,7 +5732,6 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                         js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
                         js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
                         return desc;
-                    }
                     }
                     // "constructor" — always has a descriptor if hasOwn returned true
                     if (name_str->len == 11 && strncmp(name_str->chars, "constructor", 11) == 0) {
@@ -6065,11 +6081,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
 
     // v25: String wrapper objects — character indices + "length"
     {
-        bool own_cn = false;
-        Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &own_cn);
-        if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-            String* cn_s = it2s(cn);
-            if (cn_s && cn_s->len == 6 && memcmp(cn_s->chars, "String", 6) == 0) {
+        if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
                 bool own_pv = false;
                 Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
                 if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
@@ -6090,7 +6102,6 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     }
                     return result;
                 }
-            }
         }
     }
 
@@ -6125,16 +6136,13 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         bool ip_own = false;
         js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
         if (ip_own) {
-            bool cn_own = false;
-            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
-            if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn);
-                if (cn_str) {
+            JsClass cls = js_class_id((Item){.map = m});
+            if (cls != JS_CLASS_NONE) {
                     TypeId lookup_type = LMD_TYPE_MAP;
-                    if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) lookup_type = LMD_TYPE_STRING;
-                    else if (cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) lookup_type = LMD_TYPE_ARRAY;
-                    else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
-                    else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
+                    if (cls == JS_CLASS_STRING) lookup_type = LMD_TYPE_STRING;
+                    else if (cls == JS_CLASS_ARRAY) lookup_type = LMD_TYPE_ARRAY;
+                    else if (cls == JS_CLASS_NUMBER) lookup_type = LMD_TYPE_INT;
+                    else if (cls == JS_CLASS_FUNCTION) lookup_type = LMD_TYPE_FUNC;
                     // Append builtin method names (they are "own" properties of the prototype)
                     int prev_len = arr->length;
                     js_append_builtin_method_names(lookup_type, result);
@@ -6153,7 +6161,6 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                             arr->length--;
                         }
                     }
-                }
             }
         }
     }
@@ -6355,11 +6362,7 @@ extern "C" Item js_object_keys(Item object) {
 
     // v25: String wrapper objects — enumerate character indices then non-internal properties
     {
-        bool own_cn = false;
-        Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &own_cn);
-        if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-            String* cn_s = it2s(cn);
-            if (cn_s && cn_s->len == 6 && memcmp(cn_s->chars, "String", 6) == 0) {
+        if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
                 bool own_pv = false;
                 Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
                 if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
@@ -6373,7 +6376,6 @@ extern "C" Item js_object_keys(Item object) {
                     }
                     return result;
                 }
-            }
         }
     }
 
@@ -7802,19 +7804,15 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     bool ip_own = false;
     js_map_get_fast_ext(m, "__is_proto__", 12, &ip_own);
     if (!ip_own) return false;
-    bool cn_own = false;
-    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_own);
-    if (!cn_own || get_type_id(cn) != LMD_TYPE_STRING) return false;
-    String* cn_str = it2s(cn);
-    if (!cn_str) return false;
-    // map class name to TypeId for builtin lookup
+    JsClass cls = js_class_id((Item){.map = m});
+    if (cls == JS_CLASS_NONE) return false;
+    // map class to TypeId for builtin lookup
     TypeId lookup_type = LMD_TYPE_MAP;
-    if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) lookup_type = LMD_TYPE_STRING;
-    else if (cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) lookup_type = LMD_TYPE_ARRAY;
-    else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) lookup_type = LMD_TYPE_INT;
-    else if (cn_str->len == 8 && strncmp(cn_str->chars, "Function", 8) == 0) lookup_type = LMD_TYPE_FUNC;
-    else if (cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) lookup_type = LMD_TYPE_MAP;
-    else if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) lookup_type = LMD_TYPE_BOOL;
+    if (cls == JS_CLASS_STRING) lookup_type = LMD_TYPE_STRING;
+    else if (cls == JS_CLASS_ARRAY) lookup_type = LMD_TYPE_ARRAY;
+    else if (cls == JS_CLASS_NUMBER) lookup_type = LMD_TYPE_INT;
+    else if (cls == JS_CLASS_FUNCTION) lookup_type = LMD_TYPE_FUNC;
+    else if (cls == JS_CLASS_BOOLEAN) lookup_type = LMD_TYPE_BOOL;
     // Skip "constructor" — handled separately
     if (len == 11 && strncmp(name, "constructor", 11) == 0) return true;
     // Symbol.iterator (__sym_1) is a virtual property on Array and String prototypes
@@ -7825,7 +7823,7 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
     if (builtin.item != ItemNull.item) return true;
     // check class-name-specific methods not in js_lookup_builtin_method
     // (Date, RegExp, Error, Map/Set collections, etc.)
-    if (cn_str->len == 4 && strncmp(cn_str->chars, "Date", 4) == 0) {
+    if (cls == JS_CLASS_DATE) {
         // Date prototype methods — same table as js_property_get
         static const char* date_methods[] = {
             "getTime","getFullYear","getMonth","getDate","getHours","getMinutes",
@@ -7842,7 +7840,7 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
         for (int i = 0; date_methods[i]; i++) {
             if ((int)strlen(date_methods[i]) == len && strncmp(name, date_methods[i], len) == 0) return true;
         }
-    } else if (cn_str->len == 6 && strncmp(cn_str->chars, "RegExp", 6) == 0) {
+    } else if (cls == JS_CLASS_REGEXP) {
         static const char* regexp_methods[] = {
             "exec","test","toString","compile",NULL
         };
@@ -7852,11 +7850,8 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
         // symbol methods
         if (len >= 7 && strncmp(name, "__sym_", 6) == 0) return true;
     }
-    // collection methods (Map, Set, WeakMap, WeakSet) — check by class name
-    if ((cn_str->len == 3 && strncmp(cn_str->chars, "Map", 3) == 0) ||
-        (cn_str->len == 3 && strncmp(cn_str->chars, "Set", 3) == 0) ||
-        (cn_str->len == 7 && strncmp(cn_str->chars, "WeakMap", 7) == 0) ||
-        (cn_str->len == 7 && strncmp(cn_str->chars, "WeakSet", 7) == 0)) {
+    // collection methods (Map, Set, WeakMap, WeakSet)
+    if (cls == JS_CLASS_MAP || cls == JS_CLASS_SET || cls == JS_CLASS_WEAK_MAP || cls == JS_CLASS_WEAK_SET) {
         static const char* collection_methods[] = {
             "values","keys","entries","forEach","has","get","set",
             "add","delete","clear",NULL
@@ -8039,11 +8034,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
         // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
         if (ks->len > 0 && ks->chars[0] >= '0' && ks->chars[0] <= '9') {
-            bool cn_found = false;
-            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
-            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                String* cn_str = it2s(cn);
-                if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+            if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
                     bool pv_found = false;
                     Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &pv_found);
                     if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
@@ -8058,7 +8049,6 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                             return (Item){.item = b2it(true)};
                         }
                     }
-                }
             }
         }
         return (Item){.item = b2it(false)};
@@ -8668,23 +8658,21 @@ static bool js_stringify_value(StrBuf* sb, Item value, Item replacer, Item repla
 
     // Step 4: Unwrap Boolean/Number/String/BigInt wrapper objects
     if (vtype == LMD_TYPE_MAP) {
-        bool cn_own = false;
-        Item cn = js_map_get_fast_ext(value.map, "__class_name__", 14, &cn_own);
-        if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-            String* cn_str = it2s(cn);
+        JsClass cls = js_class_id(value);
+        if (cls == JS_CLASS_BOOLEAN || cls == JS_CLASS_NUMBER || cls == JS_CLASS_STRING || cls == JS_CLASS_BIGINT) {
             bool pv_own = false;
             Item pv = js_map_get_fast_ext(value.map, "__primitiveValue__", 18, &pv_own);
             if (pv_own) {
-                if (cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                if (cls == JS_CLASS_BOOLEAN) {
                     value = pv;
                     vtype = get_type_id(value);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
+                } else if (cls == JS_CLASS_NUMBER) {
                     value = js_to_number(pv);
                     vtype = get_type_id(value);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                } else if (cls == JS_CLASS_STRING) {
                     value = js_to_string(pv);
                     vtype = get_type_id(value);
-                } else if (cn_str->len == 6 && strncmp(cn_str->chars, "BigInt", 6) == 0) {
+                } else if (cls == JS_CLASS_BIGINT) {
                     // ES spec step 10: BigInt → TypeError
                     js_throw_type_error("Do not know how to serialize a BigInt");
                     return false;
@@ -8855,15 +8843,11 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
     // Process space parameter
     // ES spec §24.5.3 step 5: unwrap Number/String wrapper objects
     if (get_type_id(space) == LMD_TYPE_MAP) {
-        bool cn_own = false;
-        Item cn = js_map_get_fast_ext(space.map, "__class_name__", 14, &cn_own);
-        if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-            String* cn_str = it2s(cn);
-            if (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0) {
-                space = js_to_number(space);
-            } else if (cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
-                space = js_to_string(space);
-            }
+        JsClass cls = js_class_id(space);
+        if (cls == JS_CLASS_NUMBER) {
+            space = js_to_number(space);
+        } else if (cls == JS_CLASS_STRING) {
+            space = js_to_string(space);
         }
     }
     char gap_buf[11] = {0};
@@ -8911,14 +8895,9 @@ extern "C" Item js_json_stringify_full(Item value, Item replacer, Item space) {
                 item = js_to_string(v);
             } else if (vt == LMD_TYPE_MAP) {
                 // Check for String or Number wrapper objects
-                bool cn_own = false;
-                Item cn = js_map_get_fast_ext(v.map, "__class_name__", 14, &cn_own);
-                if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    if ((cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) ||
-                        (cn_str->len == 6 && strncmp(cn_str->chars, "Number", 6) == 0)) {
-                        item = js_to_string(v);
-                    }
+                JsClass cls = js_class_id(v);
+                if (cls == JS_CLASS_STRING || cls == JS_CLASS_NUMBER) {
+                    item = js_to_string(v);
                 }
             }
             // Skip undefined/null entries and duplicates
@@ -9783,7 +9762,7 @@ static Item make_string_item(const char* str, int len) {
 // AbortSignal constructor — creates an AbortSignal object
 static Item js_make_abort_signal() {
     Item signal = js_new_object();
-    js_property_set(signal, make_string_item("__class_name__"), make_string_item("AbortSignal"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(signal, JS_CLASS_ABORT_SIGNAL);  // A3-T3b
     js_property_set(signal, make_string_item("aborted"), (Item){.item = b2it(false)});
     js_property_set(signal, make_string_item("reason"), make_js_undefined());
@@ -9837,7 +9816,7 @@ extern "C" Item js_abort_signal_abort(Item reason) {
     // default reason: DOMException "AbortError"
     if (get_type_id(reason) == LMD_TYPE_UNDEFINED || get_type_id(reason) == LMD_TYPE_NULL) {
         Item err = js_new_object();
-        js_property_set(err, make_string_item("__class_name__"), make_string_item("DOMException"));
+        // T5b: legacy `__class_name__` string write retired.
         js_class_stamp(err, JS_CLASS_DOM_EXCEPTION);  // A3-T3b
         js_property_set(err, make_string_item("name"), make_string_item("AbortError"));
         js_property_set(err, make_string_item("message"), make_string_item("This operation was aborted"));
@@ -9884,7 +9863,7 @@ extern "C" Item js_option_new(Item text_arg, Item value_arg) {
 // DOMException(message, nameOrOptions) constructor
 extern "C" Item js_domexception_new(Item message, Item name_arg) {
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("DOMException"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_DOM_EXCEPTION);  // A3-T3b
 
     // message (default: "")
@@ -9964,7 +9943,7 @@ extern "C" Item js_abort_controller_abort(Item reason);
 // AbortController() constructor
 extern "C" Item js_new_AbortController(void) {
     Item controller = js_new_object();
-    js_property_set(controller, make_string_item("__class_name__"), make_string_item("AbortController"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(controller, JS_CLASS_ABORT_CONTROLLER);  // A3-T3b
 
     Item signal = js_make_abort_signal();
@@ -10041,7 +10020,7 @@ extern "C" Item js_abort_controller_abort(Item reason) {
                         // reject promise with AbortError and clear the timer
                         Item timer_signal = js_property_get(entry, make_string_item("__timer_signal__"));
                         Item abort_err = js_new_object();
-                        js_property_set(abort_err, make_string_item("__class_name__"), make_string_item("AbortError"));
+                        // T5b: legacy `__class_name__` string write retired.
                         js_class_stamp(abort_err, JS_CLASS_ABORT_ERROR);  // A3-T3b
                         js_property_set(abort_err, make_string_item("name"), make_string_item("AbortError"));
                         js_property_set(abort_err, make_string_item("code"), make_string_item("ABORT_ERR"));
@@ -10094,7 +10073,7 @@ static Item js_message_port_close(void) {
 
 extern "C" Item js_message_port_new(void) {
     Item port = js_new_object();
-    js_property_set(port, make_string_item("__class_name__"), make_string_item("MessagePort"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(port, JS_CLASS_MESSAGE_PORT);  // A3-T3b
     js_property_set(port, make_string_item("postMessage"),
         js_new_function((void*)js_message_port_postMessage, 1));
@@ -10122,7 +10101,7 @@ extern "C" Item js_message_port_new(void) {
 
 extern "C" Item js_message_channel_new(void) {
     Item channel = js_new_object();
-    js_property_set(channel, make_string_item("__class_name__"), make_string_item("MessageChannel"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(channel, JS_CLASS_MESSAGE_CHANNEL);  // A3-T3b
     Item port1 = js_message_port_new();
     Item port2 = js_message_port_new();
@@ -11759,9 +11738,8 @@ static Item js_url_to_object(Url* url) {
                         js_url_search_params_new(search_str));
     }
 
-    // mark as URL for instanceof checks
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("__class_name__"))},
-                    (Item){.item = s2it(heap_create_name("URL"))});
+    // T5b: legacy `__class_name__` string write retired; typed JsClass byte
+    // is the URL class identity.
     js_class_stamp(obj, JS_CLASS_URL);  // A3-T3b
 
     url_destroy(url);

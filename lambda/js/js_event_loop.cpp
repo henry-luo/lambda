@@ -196,9 +196,8 @@ static Item make_timer_object(int64_t id) {
     Item toPrim_fn = js_new_function((void*)js_timeout_toPrimitive, 0);
     js_property_set(obj, (Item){.item = s2it(heap_create_name("__sym_2", 7))}, toPrim_fn);
 
-    // class name for inspection
-    js_property_set(obj, (Item){.item = s2it(heap_create_name("__class_name__", 14))},
-                    (Item){.item = s2it(heap_create_name("Timeout", 7))});
+    // class identity (T5b: typed JsClass byte; legacy `__class_name__`
+    // string write retired).
     js_class_stamp(obj, JS_CLASS_TIMEOUT);  // A3-T3b
 
     return obj;
@@ -430,8 +429,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
 // helper: create an AbortError for promise rejection
 static Item make_abort_error(Item signal) {
     Item err = js_new_object();
-    js_property_set(err, (Item){.item = s2it(heap_create_name("__class_name__", 14))},
-                    (Item){.item = s2it(heap_create_name("AbortError", 10))});
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(err, JS_CLASS_ABORT_ERROR);  // A3-T3b
     js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
                     (Item){.item = s2it(heap_create_name("AbortError", 10))});

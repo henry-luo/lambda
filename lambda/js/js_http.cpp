@@ -427,7 +427,7 @@ extern "C" Item js_http_res_end(Item self, Item data_item) {
 // create a ServerResponse object for a connection
 static Item make_response_object(JsHttpConn* conn) {
     Item res = js_new_object();
-    js_property_set(res, make_string_item("__class_name__"), make_string_item("ServerResponse"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(res, JS_CLASS_SERVER_RESPONSE);  // A3-T3b
     js_property_set(res, make_string_item("__conn__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)conn)});
@@ -459,7 +459,7 @@ static Item make_response_object(JsHttpConn* conn) {
 // create an IncomingMessage from a parsed HTTP request
 static Item make_request_object(ParsedRequest* req) {
     Item msg = js_new_object();
-    js_property_set(msg, make_string_item("__class_name__"), make_string_item("IncomingMessage"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(msg, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
 
     js_property_set(msg, make_string_item("method"), make_string_item(req->method));
@@ -708,7 +708,7 @@ extern "C" Item js_http_createServer(Item handler) {
     srv->request_handler = handler;
 
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("Server"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_SERVER);  // A3-T3b
     js_property_set(obj, make_string_item("__server__"),
                     (Item){.item = i2it((int64_t)(uintptr_t)srv)});
@@ -860,7 +860,7 @@ static void http_client_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf
                                           &status_code, &headers, &hdr_size) == 0) {
                 // create IncomingMessage-style response
                 Item res = js_new_object();
-                js_property_set(res, make_string_item("__class_name__"), make_string_item("IncomingMessage"));
+                // T5b: legacy `__class_name__` string write retired.
                 js_class_stamp(res, JS_CLASS_INCOMING_MESSAGE);  // A3-T3b
                 js_property_set(res, make_string_item("statusCode"), (Item){.item = i2it(status_code)});
                 js_property_set(res, make_string_item("headers"), headers);
@@ -1082,7 +1082,7 @@ extern "C" Item js_http_request(Item options_item, Item callback) {
 
     // create JS ClientRequest object
     Item obj = js_new_object();
-    js_property_set(obj, make_string_item("__class_name__"), make_string_item("ClientRequest"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_CLIENT_REQUEST);  // A3-T3b
     js_property_set(obj, make_string_item("write"),
                     js_new_function((void*)js_http_client_write, 2));
@@ -1216,7 +1216,7 @@ extern "C" Item js_http_agent_createConnection(Item options) {
 // new http.Agent(options) constructor
 extern "C" Item js_http_Agent(Item options) {
     Item agent = js_new_object();
-    js_property_set(agent, make_string_item("__class_name__"), make_string_item("Agent"));
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(agent, JS_CLASS_AGENT);  // A3-T3b
 
     // defaults

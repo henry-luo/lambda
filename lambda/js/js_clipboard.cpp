@@ -63,9 +63,14 @@ static inline Item make_str_n(const char* s, size_t n) {
     return (Item){.item = s2it(heap_create_name(s, (int)n))};
 }
 
-// Set __class_name__ marker so instanceof <Name> works via the name fallback
-// in js_instanceof_impl. A3-T3b: also stamp the typed JsClass byte (no-op
-// for class names not yet in the enum).
+// Stamp class identity. A3-T3b: dual-write the legacy `__class_name__`
+// string AND the typed JsClass byte. T6 attempted to skip the string
+// write when the class is in the enum, but that change broke
+// `Props.SuperSet_FindsInheritedSetter` via an indirect map_put assertion
+// in input.cpp; root cause not pursued. Helpers cover unenumerated
+// subclasses (ClipboardEvent, PermissionStatus, Clipboard) regardless,
+// so the unconditional string write is harmless redundancy for the
+// enumerated cases.
 static inline void mark_class(Item obj, const char* name) {
     js_property_set(obj, make_str("__class_name__"), make_str(name));
     js_class_stamp(obj, js_class_from_name(name, (int)strlen(name)));

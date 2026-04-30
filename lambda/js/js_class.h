@@ -255,6 +255,83 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
     return JS_CLASS_NONE;
 }
 
+// Reverse mapping: JsClass → const char* class-name string (the value previously
+// written to `__class_name__`). Returns NULL for JS_CLASS_NONE / unknown enum
+// values. The returned pointer is a static string literal — safe to use directly
+// or to copy via heap_create_name. Used by T5a string-OUTPUT readers
+// (Symbol.toStringTag synth, FUNC_TO_STRING, prototype-chain synth, etc.) to
+// derive the class-name string from the byte without consulting the legacy
+// `__class_name__` property.
+static inline const char* js_class_to_name(JsClass cls) {
+    switch (cls) {
+        case JS_CLASS_OBJECT: return "Object";
+        case JS_CLASS_FUNCTION: return "Function";
+        case JS_CLASS_BOOLEAN: return "Boolean";
+        case JS_CLASS_NUMBER: return "Number";
+        case JS_CLASS_STRING: return "String";
+        case JS_CLASS_SYMBOL: return "Symbol";
+        case JS_CLASS_BIGINT: return "BigInt";
+        case JS_CLASS_ARRAY: return "Array";
+        case JS_CLASS_DATE: return "Date";
+        case JS_CLASS_REGEXP: return "RegExp";
+        case JS_CLASS_ERROR: return "Error";
+        case JS_CLASS_AGGREGATE_ERROR: return "AggregateError";
+        case JS_CLASS_PROMISE: return "Promise";
+        case JS_CLASS_TYPED_ARRAY: return "TypedArray";
+        case JS_CLASS_ARRAY_BUFFER: return "ArrayBuffer";
+        case JS_CLASS_DATA_VIEW: return "DataView";
+        case JS_CLASS_READABLE_STREAM: return "ReadableStream";
+        case JS_CLASS_WRITABLE_STREAM: return "WritableStream";
+        case JS_CLASS_STRING_DECODER: return "StringDecoder";
+        case JS_CLASS_TEXT_DECODER: return "TextDecoder";
+        case JS_CLASS_TEXT_ENCODER: return "TextEncoder";
+        case JS_CLASS_EVENT: return "Event";
+        case JS_CLASS_CUSTOM_EVENT: return "CustomEvent";
+        case JS_CLASS_EVENT_TARGET: return "EventTarget";
+        case JS_CLASS_EVENT_EMITTER: return "EventEmitter";
+        case JS_CLASS_DOM_EXCEPTION: return "DOMException";
+        case JS_CLASS_ABORT_CONTROLLER: return "AbortController";
+        case JS_CLASS_ABORT_SIGNAL: return "AbortSignal";
+        case JS_CLASS_ABORT_ERROR: return "AbortError";
+        case JS_CLASS_MESSAGE_CHANNEL: return "MessageChannel";
+        case JS_CLASS_MESSAGE_PORT: return "MessagePort";
+        case JS_CLASS_URL: return "URL";
+        case JS_CLASS_URL_SEARCH_PARAMS: return "URLSearchParams";
+        case JS_CLASS_FORM_DATA: return "FormData";
+        case JS_CLASS_BLOB: return "Blob";
+        case JS_CLASS_FILE: return "File";
+        case JS_CLASS_DATA_TRANSFER: return "DataTransfer";
+        case JS_CLASS_AGENT: return "Agent";
+        case JS_CLASS_CLIENT_REQUEST: return "ClientRequest";
+        case JS_CLASS_INCOMING_MESSAGE: return "IncomingMessage";
+        case JS_CLASS_SERVER: return "Server";
+        case JS_CLASS_SERVER_RESPONSE: return "ServerResponse";
+        case JS_CLASS_SOCKET: return "Socket";
+        case JS_CLASS_SECURE_CONTEXT: return "SecureContext";
+        case JS_CLASS_TLS_SERVER: return "TLSServer";
+        case JS_CLASS_TLS_SOCKET: return "TLSSocket";
+        case JS_CLASS_RANGE: return "Range";
+        case JS_CLASS_SELECTION: return "Selection";
+        case JS_CLASS_CANVAS_RENDERING_CONTEXT_2D: return "CanvasRenderingContext2D";
+        case JS_CLASS_OFFSCREEN_CANVAS: return "OffscreenCanvas";
+        case JS_CLASS_CSS_NESTED_DECLARATIONS: return "CSSNestedDeclarations";
+        case JS_CLASS_TIMEOUT: return "Timeout";
+        case JS_CLASS_MAP: return "Map";
+        case JS_CLASS_SET: return "Set";
+        case JS_CLASS_WEAK_MAP: return "WeakMap";
+        case JS_CLASS_WEAK_SET: return "WeakSet";
+        case JS_CLASS_WEAK_REF: return "WeakRef";
+        case JS_CLASS_MAP_ITERATOR: return "MapIterator";
+        case JS_CLASS_SET_ITERATOR: return "SetIterator";
+        case JS_CLASS_GENERATOR: return "Generator";
+        case JS_CLASS_GENERATOR_FUNCTION: return "GeneratorFunction";
+        case JS_CLASS_ASYNC_FUNCTION: return "AsyncFunction";
+        case JS_CLASS_ARGUMENTS: return "Arguments";
+        case JS_CLASS_CLIPBOARD_ITEM: return "ClipboardItem";
+        default: return NULL;
+    }
+}
+
 // Forward declaration — defined in js_runtime.cpp. Returns the value of
 // `m[key_str]` (or ItemNull when absent); `*out_found` flips to true iff
 // the key resolves through an own/proto entry.

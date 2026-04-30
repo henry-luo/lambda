@@ -5369,11 +5369,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (sk->chars[ni] < '0' || sk->chars[ni] > '9') { is_num = false; break; }
                 }
                 if (is_num) {
-                    bool cn_found = false;
-                    Item cn = js_map_get_fast(m, "__class_name__", 14, &cn_found);
-                    if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                        String* cn_str = it2s(cn);
-                        if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                    if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
                             bool pv_found = false;
                             Item pv = js_map_get_fast(m, "__primitiveValue__", 18, &pv_found);
                             if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
@@ -5384,7 +5380,6 @@ extern "C" Item js_property_get(Item object, Item key) {
                                     return (Item){.item = s2it(heap_create_name(ch, 1))};
                                 }
                             }
-                        }
                     }
                 }
             }
@@ -5543,7 +5538,15 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (builtin.item != ItemNull.item) return builtin;
             // v18c: .constructor fallback — return appropriate constructor when not found
             if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
-                // Check if object has __class_name__ to determine its type
+                // T5a: prefer typed JsClass byte; fall back to legacy string read
+                // (user-defined classes still write `__class_name__`).
+                JsClass cls_c = js_class_get(object);
+                if (cls_c != JS_CLASS_NONE) {
+                    const char* cn_name = js_class_to_name(cls_c);
+                    if (cn_name) {
+                        return js_get_constructor((Item){.item = s2it(heap_create_name(cn_name, (int)strlen(cn_name)))});
+                    }
+                }
                 bool cn_own = false;
                 Item cn = js_map_get_fast(object.map, "__class_name__", 14, &cn_own);
                 if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
@@ -9575,15 +9578,24 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         return (Item){.item = s2it(heap_create_name(buf, blen))};
                     }
                 }
-                // Use __class_name__ for the tag when it matches a built-in type
-                // ES spec §20.1.3.6: only certain built-in classes define a [[Class]] tag
-                bool own_cn = false;
-                Item cn = js_map_get_fast(m, "__class_name__", 14, &own_cn);
-                if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    if (cn_str && cn_str->len > 0) {
-                        const char* c = cn_str->chars;
-                        int cl = (int)cn_str->len;
+                // Use class identity for the tag when it matches a built-in type.
+                // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
+                const char* c = NULL;
+                int cl = 0;
+                JsClass jc = js_class_get(this_val);
+                if (jc != JS_CLASS_NONE) {
+                    const char* nm = js_class_to_name(jc);
+                    if (nm) { c = nm; cl = (int)strlen(nm); }
+                }
+                if (!c) {
+                    bool own_cn = false;
+                    Item cn = js_map_get_fast(m, "__class_name__", 14, &own_cn);
+                    if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
+                        String* cn_str = it2s(cn);
+                        if (cn_str && cn_str->len > 0) { c = cn_str->chars; cl = (int)cn_str->len; }
+                    }
+                }
+                if (c) {
                         // Map class names to ES spec builtinTag
                         const char* tag = NULL;
                         int tag_len = 0;
@@ -9624,7 +9636,6 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                             int blen = snprintf(buf, sizeof(buf), "[object %.*s]", tag_len, tag);
                             return (Item){.item = s2it(heap_create_name(buf, blen))};
                         }
-                    }
                 }
             }
         }
@@ -9707,28 +9718,39 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 bool found = false;
                 js_map_get_fast(m, "__rd", 4, &found);
                 if (found) return (Item){.item = s2it(heap_create_name("[object RegExp]", 15))};
-                found = false;
-                Item cn = js_map_get_fast(m, "__class_name__", 14, &found);
-                if (found && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cns = it2s(cn);
-                    if (cns) {
-                        if (cns->len == 4 && memcmp(cns->chars, "Date", 4) == 0)
+                // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string.
+                const char* cnchars = NULL;
+                int cnlen = 0;
+                JsClass jc2 = js_class_get(this_val);
+                if (jc2 != JS_CLASS_NONE) {
+                    const char* nm = js_class_to_name(jc2);
+                    if (nm) { cnchars = nm; cnlen = (int)strlen(nm); }
+                }
+                if (!cnchars) {
+                    found = false;
+                    Item cn = js_map_get_fast(m, "__class_name__", 14, &found);
+                    if (found && get_type_id(cn) == LMD_TYPE_STRING) {
+                        String* cns = it2s(cn);
+                        if (cns) { cnchars = cns->chars; cnlen = (int)cns->len; }
+                    }
+                }
+                if (cnchars) {
+                        if (cnlen == 4 && memcmp(cnchars, "Date", 4) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Date]", 13))};
                         // ES spec: [[ErrorData]] is only on error instances, not prototypes
                         bool is_proto = false;
                         js_map_get_fast(m, "__is_proto__", 12, &is_proto);
                         if (!is_proto) {
-                            if (cns->len == 5 && memcmp(cns->chars, "Error", 5) == 0)
+                            if (cnlen == 5 && memcmp(cnchars, "Error", 5) == 0)
                                 return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
                             // Check for error subtypes
-                            if (cns->len >= 5 && memcmp(cns->chars + cns->len - 5, "Error", 5) == 0)
+                            if (cnlen >= 5 && memcmp(cnchars + cnlen - 5, "Error", 5) == 0)
                                 return (Item){.item = s2it(heap_create_name("[object Error]", 14))};
                         }
-                        if (cns->len == 3 && memcmp(cns->chars, "Map", 3) == 0)
+                        if (cnlen == 3 && memcmp(cnchars, "Map", 3) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Map]", 12))};
-                        if (cns->len == 3 && memcmp(cns->chars, "Set", 3) == 0)
+                        if (cnlen == 3 && memcmp(cnchars, "Set", 3) == 0)
                             return (Item){.item = s2it(heap_create_name("[object Set]", 12))};
-                    }
                 }
                 // Check for Math object
                 found = false;
@@ -10136,13 +10158,27 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 if (own_st && get_type_id(st) == LMD_TYPE_STRING) {
                     return st;
                 }
-                bool own_cn_ts = false;
-                Item cn_ts = js_map_get_fast(this_val.map, "__class_name__", 14, &own_cn_ts);
+                // T5a: prefer typed JsClass byte; fall back to legacy string
+                // (user-defined classes still write `__class_name__`).
+                const char* cn_chars = NULL;
+                int cn_len = 0;
+                JsClass cls_ts = js_class_get(this_val);
+                if (cls_ts != JS_CLASS_NONE) {
+                    cn_chars = js_class_to_name(cls_ts);
+                    if (cn_chars) cn_len = (int)strlen(cn_chars);
+                }
+                if (!cn_chars) {
+                    bool own_cn_ts = false;
+                    Item cn_ts = js_map_get_fast(this_val.map, "__class_name__", 14, &own_cn_ts);
+                    if (own_cn_ts && get_type_id(cn_ts) == LMD_TYPE_STRING) {
+                        String* cn_str_ts = it2s(cn_ts);
+                        if (cn_str_ts) { cn_chars = cn_str_ts->chars; cn_len = (int)cn_str_ts->len; }
+                    }
+                }
                 StrBuf* sb_ts = strbuf_new();
                 strbuf_append_str_n(sb_ts, "function ", 9);
-                if (own_cn_ts && get_type_id(cn_ts) == LMD_TYPE_STRING) {
-                    String* cn_str_ts = it2s(cn_ts);
-                    strbuf_append_str_n(sb_ts, cn_str_ts->chars, (int)cn_str_ts->len);
+                if (cn_chars && cn_len > 0) {
+                    strbuf_append_str_n(sb_ts, cn_chars, cn_len);
                 }
                 strbuf_append_str_n(sb_ts, "() { [native code] }", 20);
                 String* result_ts = heap_create_name(sb_ts->str, sb_ts->length);
@@ -15468,13 +15504,19 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         if (method) {
             bool is_text_codec = false;
             {
-                bool has_cls = false;
-                Item cls = js_map_get_fast(obj.map, "__class_name__", 14, &has_cls);
-                if (has_cls && get_type_id(cls) == LMD_TYPE_STRING) {
-                    String* cname = it2s(cls);
-                    if ((cname->len == 11 && memcmp(cname->chars, "TextEncoder", 11) == 0) ||
-                        (cname->len == 11 && memcmp(cname->chars, "TextDecoder", 11) == 0))
-                        is_text_codec = true;
+                JsClass cls = js_class_id(obj);
+                if (cls == JS_CLASS_TEXT_ENCODER || cls == JS_CLASS_TEXT_DECODER) {
+                    is_text_codec = true;
+                } else {
+                    // legacy fallback for unstamped instances
+                    bool has_cls = false;
+                    Item cls_v = js_map_get_fast(obj.map, "__class_name__", 14, &has_cls);
+                    if (has_cls && get_type_id(cls_v) == LMD_TYPE_STRING) {
+                        String* cname = it2s(cls_v);
+                        if ((cname->len == 11 && memcmp(cname->chars, "TextEncoder", 11) == 0) ||
+                            (cname->len == 11 && memcmp(cname->chars, "TextDecoder", 11) == 0))
+                            is_text_codec = true;
+                    }
                 }
             }
             if (is_text_codec) {
@@ -16066,11 +16108,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             // String.prototype itself has __class_name__="String" but no
             // __primitiveValue__; per ES5 [[StringData]] = "" so default to empty.
             if (get_type_id(str) == LMD_TYPE_MAP) {
-                bool cn_found = false;
-                Item cn = js_map_get_fast(str.map, "__class_name__", 14, &cn_found);
-                if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-                    String* cn_str = it2s(cn);
-                    if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                if (js_class_id(str) == JS_CLASS_STRING) {
                         bool pv_found = false;
                         Item pv = js_map_get_fast(str.map, "__primitiveValue__", 18, &pv_found);
                         if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
@@ -16079,7 +16117,6 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                             // String.prototype-style: default to empty string
                             str = (Item){.item = s2it(heap_create_name("", 0))};
                         }
-                    }
                 }
             }
             if (get_type_id(str) != LMD_TYPE_STRING) {
@@ -20076,15 +20113,22 @@ static Item js_get_implicit_proto(Item object) {
         if (raw.item == ITEM_JS_UNDEFINED) return ItemNull;
         return raw;
     }
-    // No own __proto__ slot — synthesize from __class_name__.
-    // Determine the class name (default to "Object" for plain instances).
-    bool cn_found = false;
-    Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
+    // No own __proto__ slot — synthesize from class identity.
+    // T5a: prefer typed JsClass byte; fall back to legacy `__class_name__` string
+    // (user-defined classes still write the string).
     const char* cls = "Object";
     int cls_len = 6;
-    if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
-        String* s = it2s(cn);
-        if (s && s->len > 0) { cls = s->chars; cls_len = (int)s->len; }
+    JsClass jc = js_class_get(object);
+    if (jc != JS_CLASS_NONE) {
+        const char* nm = js_class_to_name(jc);
+        if (nm) { cls = nm; cls_len = (int)strlen(nm); }
+    } else {
+        bool cn_found = false;
+        Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
+        if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+            String* s = it2s(cn);
+            if (s && s->len > 0) { cls = s->chars; cls_len = (int)s->len; }
+        }
     }
     // Look up the constructor and read its `.prototype` property.
     Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name(cls, cls_len))});
@@ -22011,8 +22055,7 @@ static Item js_any_reject_element(Item counter_obj, Item index_item, Item result
         Item err = js_new_error(msg);
         js_property_set(err, (Item){.item = s2it(k_errors)}, errors);
         // Mark as AggregateError for instanceof and constructor.name checks
-        js_property_set(err, (Item){.item = s2it(heap_create_name("__class_name__", 14))},
-            (Item){.item = s2it(heap_create_name("AggregateError", 14))});
+        // (T5b: typed JsClass byte; legacy `__class_name__` string write retired).
         js_class_stamp(err, JS_CLASS_AGGREGATE_ERROR);  // A3-T3b
         js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
             (Item){.item = s2it(heap_create_name("AggregateError", 14))});

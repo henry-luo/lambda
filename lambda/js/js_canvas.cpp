@@ -204,10 +204,8 @@ static FontHandle* parse_css_font_shorthand(const char* font_str, int len) {
 extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
     Item obj = js_new_object();
 
-    // set class name for dispatch
-    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item type_val = (Item){.item = s2it(heap_create_name("OffscreenCanvas"))};
-    js_property_set(obj, type_key, type_val);
+    // T5b: typed JsClass byte is the class identity; legacy `__class_name__`
+    // string write retired.
     js_class_stamp(obj, JS_CLASS_OFFSCREEN_CANVAS);  // A3-T3b
 
     // store width/height
@@ -228,10 +226,7 @@ extern "C" Item js_offscreen_canvas_new(Item width_arg, Item height_arg) {
 extern "C" Item js_canvas_get_context(Item canvas) {
     Item obj = js_new_object();
 
-    // set class name
-    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
-    Item type_val = (Item){.item = s2it(heap_create_name("CanvasRenderingContext2D"))};
-    js_property_set(obj, type_key, type_val);
+    // T5b: legacy `__class_name__` string write retired.
     js_class_stamp(obj, JS_CLASS_CANVAS_RENDERING_CONTEXT_2D);  // A3-T3b
 
     // store canvas reference
