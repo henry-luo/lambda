@@ -254,7 +254,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (is_http) {
         size_t content_size = 0;
-        content = download_http_content(resolved_path, &content_size, nullptr);
+        content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
         if (content) {
             log_debug("script_runner: downloaded external script from URL: %s (%zu bytes)", resolved_path, content_size);
         } else {

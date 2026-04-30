@@ -820,11 +820,13 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         ui_context.document = doc;
 
         // Initialize network support for HTTP-loaded documents
-        // This enables async resource loading (CSS, images, fonts) during rendering
+        // This enables async resource loading (CSS, images, fonts) during rendering.
+        // Use 16 worker threads so a typical web page's many sub-resources
+        // (CSS, images, fonts, scripts) download in parallel rather than serially.
         if (doc->html_root && file_to_load &&
             (strncmp(file_to_load, "http://", 7) == 0 || strncmp(file_to_load, "https://", 8) == 0)) {
             network_downloader_init_shared();
-            thread_pool = thread_pool_create(4);
+            thread_pool = thread_pool_create(16);
             file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
             if (thread_pool) {
                 radiant_init_network_support(doc, thread_pool, file_cache);

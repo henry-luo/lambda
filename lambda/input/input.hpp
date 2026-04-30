@@ -121,6 +121,16 @@ typedef struct FetchResponse {
 
 char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config, char** effective_url = nullptr);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
+
+// Cache-aware synchronous download. Checks disk cache first; downloads on miss.
+// Returns content (caller mem_free()s) and sets *content_size.
+char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir);
+
+// Pre-fetch a list of URLs in parallel into the disk cache.
+// Returns number successfully populated. Each URL is downloaded at most once.
+// Safe to call before download_http_content_cached / download_to_cache.
+int http_prefetch_urls_parallel(const char* const* urls, int count, const char* cache_dir, int max_threads);
+
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 FetchResponse* http_fetch(const char* url, const FetchConfig* config);
 void free_fetch_response(FetchResponse* response);
