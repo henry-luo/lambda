@@ -17361,6 +17361,12 @@ static inline Item js_array_element(Item arr_item, int idx) {
         }
         // AT-3: legacy __get_<idx> marker fallback retired.
     }
+    // J39-7: spec [[Get]] for index >= length returns undefined (after array
+    // mutation during iteration, find/forEach/map etc. may visit indices that
+    // were captured before splice/pop reduced the array length).
+    if (idx < 0 || idx >= arr->length) {
+        return make_js_undefined();
+    }
     // v25: check for deleted sentinel (array hole) — return undefined
     if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
         return make_js_undefined();
@@ -18160,6 +18166,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 js_create_data_property_or_throw(result, i, mapped);
                 if (js_exception_pending) break;
             }
+            // J39-7: refresh check_proto in case callback mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
         return result;
@@ -18198,6 +18206,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 }
                 out_idx++;
             }
+            // J39-7: refresh check_proto in case callback mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
         return result;
@@ -18244,6 +18254,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;
+            // J39-7: refresh check_proto in case callback mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         return accumulator;
     }
@@ -18267,6 +18279,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
+            // J39-7: refresh check_proto in case callback mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
         return ItemNull;
@@ -18373,6 +18387,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
+            // J39-7: refresh check_proto in case callback or getter mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
         return (Item){.item = b2it(false)};
@@ -18398,6 +18414,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
+            // J39-7: refresh check_proto in case callback or getter mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
         return (Item){.item = b2it(true)};
@@ -19038,6 +19056,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;
+            // J39-7: refresh check_proto in case callback mutated proto chain.
+            check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         return accumulator;
     }

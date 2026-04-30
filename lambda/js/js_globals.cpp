@@ -5988,12 +5988,32 @@ extern "C" Item js_object_define_properties(Item obj, Item props) {
     if (obj.item == 0 || (pt != LMD_TYPE_MAP && pt != LMD_TYPE_ARRAY)) return obj;
     Item keys = js_object_keys(props);
     if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
-    for (int i = 0; i < keys.array->length; i++) {
+    int n = keys.array->length;
+    if (n == 0) return obj;
+    // J39-7: ES §19.1.2.3 ObjectDefineProperties is two-phase per spec:
+    //   Phase 1 (step 4): for each key, fetch descObj (may invoke getter) and
+    //     validate via ToPropertyDescriptor — collect into descriptors list.
+    //   Phase 2 (step 5): for each (key, desc), DefinePropertyOrThrow.
+    // If any ToPropertyDescriptor throws in phase 1, no defines happen.
+    Item* desc_objs = (Item*)malloc(sizeof(Item) * n);
+    if (!desc_objs) return obj;
+    for (int i = 0; i < n; i++) {
         Item key = keys.array->items[i];
         Item desc = js_property_get(props, key);
-        js_object_define_property(obj, key, desc);
-        if (js_check_exception()) break; // stop on first error (ES2020 §19.1.2.3.1)
+        if (js_check_exception()) { free(desc_objs); return obj; }
+        JsPropertyDescriptor tmp;
+        if (!js_descriptor_from_object(desc, &tmp)) {
+            free(desc_objs);
+            return obj; // ToPropertyDescriptor threw — abort before any define
+        }
+        desc_objs[i] = desc;
     }
+    for (int i = 0; i < n; i++) {
+        Item key = keys.array->items[i];
+        js_object_define_property(obj, key, desc_objs[i]);
+        if (js_check_exception()) break; // DefinePropertyOrThrow failure
+    }
+    free(desc_objs);
     return obj;
 }
 
@@ -6780,13 +6800,21 @@ extern "C" Item js_object_values(Item object) {
     }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
 
-    // v20: use js_object_keys for spec-compliant ordering
+    // ES §7.3.22 EnumerableOwnPropertyNames: snapshot OwnKeys, then for each key
+    // re-check enumerable via [[GetOwnProperty]] before reading the value.
     Item keys = js_object_keys(object);
     int len = (int)js_array_length(keys);
     Item result = js_array_new(0);
     for (int i = 0; i < len; i++) {
         Item key = js_array_get(keys, (Item){.item = i2it(i)});
+        Item desc = js_object_get_own_property_descriptor(object, key);
+        if (js_check_exception()) return result;
+        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+        bool en_found = false;
+        Item en = js_map_get_fast_ext(desc.map, "enumerable", 10, &en_found);
+        if (!en_found || !js_is_truthy(en)) continue;
         Item val = js_property_access(object, key);
+        if (js_check_exception()) return result;
         js_array_push(result, val);
     }
     return result;
@@ -6818,13 +6846,21 @@ extern "C" Item js_object_entries(Item object) {
     }
     if (type != LMD_TYPE_MAP) return js_array_new(0);
 
-    // v20: use js_object_keys for spec-compliant ordering
+    // ES §7.3.22 EnumerableOwnPropertyNames: snapshot OwnKeys, re-check
+    // enumerable via [[GetOwnProperty]] for each key before reading value.
     Item keys = js_object_keys(object);
     int len = (int)js_array_length(keys);
     Item result = js_array_new(0);
     for (int i = 0; i < len; i++) {
         Item key = js_array_get(keys, (Item){.item = i2it(i)});
+        Item desc = js_object_get_own_property_descriptor(object, key);
+        if (js_check_exception()) return result;
+        if (get_type_id(desc) != LMD_TYPE_MAP) continue;
+        bool en_found = false;
+        Item en = js_map_get_fast_ext(desc.map, "enumerable", 10, &en_found);
+        if (!en_found || !js_is_truthy(en)) continue;
         Item val = js_property_access(object, key);
+        if (js_check_exception()) return result;
         Item pair = js_array_new(2);
         js_array_set(pair, (Item){.item = i2it(0)}, key);
         js_array_set(pair, (Item){.item = i2it(1)}, val);
