@@ -3065,6 +3065,34 @@ static void _select_mark_dirty(DomElement* sel) {
         (Item){.item = b2it(true)});
 }
 
+// Text-control dirty value flag (input/textarea), tracked via expando so we
+// can distinguish "API has been called to set value" from "value reflects
+// defaultValue". Cleared by form reset.
+static bool _value_is_dirty(DomElement* elem) {
+    if (!elem) return false;
+    Item exp = expando_get_map((DomNode*)elem);
+    if (exp.item == ITEM_NULL) return false;
+    Item v = js_property_get(exp,
+        (Item){.item = s2it(heap_create_name("__valueDirty"))});
+    return v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+}
+static void _value_mark_dirty(DomElement* elem) {
+    if (!elem) return;
+    Item exp = expando_get_or_create_map((DomNode*)elem);
+    if (exp.item == ITEM_NULL) return;
+    js_property_set(exp,
+        (Item){.item = s2it(heap_create_name("__valueDirty"))},
+        (Item){.item = b2it(true)});
+}
+static void _value_clear_dirty(DomElement* elem) {
+    if (!elem) return;
+    Item exp = expando_get_map((DomNode*)elem);
+    if (exp.item == ITEM_NULL) return;
+    js_property_set(exp,
+        (Item){.item = s2it(heap_create_name("__valueDirty"))},
+        (Item){.item = ITEM_NULL});
+}
+
 static void _set_selectedness(DomElement* opt, bool v) {
     if (!opt) return;
     Item exp = expando_get_or_create_map((DomNode*)opt);
@@ -3233,6 +3261,13 @@ static void _reset_form_control(DomElement* elem) {
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
             // checked := defaultChecked (presence of "checked" content attr)
             _set_checkedness(elem, dom_element_has_attribute(elem, "checked"));
+            // Clear dirty checkedness flag.
+            Item exp = expando_get_map((DomNode*)elem);
+            if (exp.item != ITEM_NULL) {
+                js_property_set(exp,
+                    (Item){.item = s2it(heap_create_name("__chkDirty"))},
+                    (Item){.item = ITEM_NULL});
+            }
             return;
         }
         if (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
@@ -3251,6 +3286,7 @@ static void _reset_form_control(DomElement* elem) {
             const char* dv = dom_element_get_attribute(elem, "value");
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
+            _value_clear_dirty(elem);
             if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
         return;
@@ -3263,6 +3299,7 @@ static void _reset_form_control(DomElement* elem) {
             collect_text_content((DomNode*)elem, sb);
             const char* s = sb->str ? sb->str : "";
             tc_set_value(elem, s, sb->length);
+            _value_clear_dirty(elem);
             strbuf_free(sb);
             if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
         }
@@ -3279,6 +3316,13 @@ static void _reset_form_control(DomElement* elem) {
             if (!opt) continue;
             // Default selectedness = presence of "selected" content attribute
             _set_selectedness(opt, dom_element_has_attribute(opt, "selected"));
+            // Clear per-option dirty selectedness flag.
+            Item oexp = expando_get_map((DomNode*)opt);
+            if (oexp.item != ITEM_NULL) {
+                js_property_set(oexp,
+                    (Item){.item = s2it(heap_create_name("__optDirty"))},
+                    (Item){.item = ITEM_NULL});
+            }
         }
         // Clear the dirty flag so default-reset rules apply again.
         Item exp = expando_get_map((DomNode*)elem);
@@ -3301,32 +3345,89 @@ static void _reset_form_control(DomElement* elem) {
 }
 
 // Run the HTML form reset algorithm on a form element. Walks all listed
-// controls (excluding nested forms / shadow trees) and resets each.
-// Caller is responsible for dispatching the "reset" event before invoking;
-// this just runs the per-control reset steps.
+// controls associated with this form (whether descendants or associated by
+// the `form="<id>"` attribute) and resets each. Caller is responsible for
+// dispatching the "reset" event before invoking; this just runs the
+// per-control reset steps.
 static void _run_form_reset(DomElement* form_elem) {
     if (!form_elem) return;
-    std::function<void(DomNode*)> walk = [&](DomNode* node) {
+    DomDocument* doc = _js_current_document;
+    DomElement* doc_root = doc ? doc->root : nullptr;
+    // Determine if form is connected to the document.
+    bool form_in_doc = false;
+    if (doc_root) {
+        DomNode* p = (DomNode*)form_elem;
+        while (p) {
+            if (p == (DomNode*)doc_root) { form_in_doc = true; break; }
+            p = p->parent;
+        }
+    }
+    // First pass: descendant controls (always walk these).
+    std::function<void(DomNode*, DomElement*)> walk =
+        [&](DomNode* node, DomElement* nearest_form) {
         while (node) {
             if (node->is_element()) {
                 DomElement* ce = (DomElement*)node;
                 if (ce->tag_name) {
-                    // Don't descend into nested forms.
-                    if (strcasecmp(ce->tag_name, "form") != 0) {
-                        if (strcasecmp(ce->tag_name, "input") == 0 ||
-                            strcasecmp(ce->tag_name, "textarea") == 0 ||
-                            strcasecmp(ce->tag_name, "select") == 0 ||
-                            strcasecmp(ce->tag_name, "output") == 0) {
-                            _reset_form_control(ce);
+                    bool is_ctrl =
+                        strcasecmp(ce->tag_name, "input") == 0 ||
+                        strcasecmp(ce->tag_name, "textarea") == 0 ||
+                        strcasecmp(ce->tag_name, "select") == 0 ||
+                        strcasecmp(ce->tag_name, "output") == 0;
+                    if (is_ctrl) {
+                        const char* fa = dom_element_get_attribute(ce, "form");
+                        DomElement* owner = nullptr;
+                        if (fa && *fa) {
+                            owner = doc_root ? dom_find_by_id(doc_root, fa) : nullptr;
+                        } else {
+                            owner = nearest_form;
                         }
-                        walk(ce->first_child);
+                        if (owner == form_elem) _reset_form_control(ce);
                     }
+                    bool is_form = strcasecmp(ce->tag_name, "form") == 0;
+                    DomElement* new_nearest = is_form ? ce : nearest_form;
+                    // Don't change nearest_form for the form_elem itself
+                    // when it appears at the top of recursion.
+                    walk(ce->first_child, new_nearest);
                 }
             }
             node = node->next_sibling;
         }
     };
-    walk(form_elem->first_child);
+    // Walk the form's own descendants (handles detached forms too).
+    walk(form_elem->first_child, form_elem);
+    // For associated controls (via `form` attribute) outside the form
+    // subtree, walk the rest of the document — but skip the form_elem
+    // subtree to avoid double-resetting.
+    if (form_in_doc && doc_root && doc_root != form_elem) {
+        std::function<void(DomNode*)> walk_assoc = [&](DomNode* node) {
+            while (node) {
+                if (node == (DomNode*)form_elem) {
+                    node = node->next_sibling; continue;
+                }
+                if (node->is_element()) {
+                    DomElement* ce = (DomElement*)node;
+                    if (ce->tag_name) {
+                        bool is_ctrl =
+                            strcasecmp(ce->tag_name, "input") == 0 ||
+                            strcasecmp(ce->tag_name, "textarea") == 0 ||
+                            strcasecmp(ce->tag_name, "select") == 0 ||
+                            strcasecmp(ce->tag_name, "output") == 0;
+                        if (is_ctrl) {
+                            const char* fa = dom_element_get_attribute(ce, "form");
+                            if (fa && *fa) {
+                                DomElement* owner = dom_find_by_id(doc_root, fa);
+                                if (owner == form_elem) _reset_form_control(ce);
+                            }
+                        }
+                        walk_assoc(ce->first_child);
+                    }
+                }
+                node = node->next_sibling;
+            }
+        };
+        walk_assoc((DomNode*)doc_root);
+    }
 }
 
 extern "C" void js_dom_run_form_reset(void* form_elem) {
@@ -5322,6 +5423,32 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     // ------------------------------------------------------------------
     if (strcmp(prop, "checked") == 0 && _is_tag(elem, "input")) {
         _set_checkedness(elem, js_is_truthy(value));
+        // Mark the dirty checkedness flag so subsequent `checked` content
+        // attribute changes do not override the value.
+        Item exp = expando_get_or_create_map((DomNode*)elem);
+        if (exp.item != ITEM_NULL) {
+            js_property_set(exp,
+                (Item){.item = s2it(heap_create_name("__chkDirty"))},
+                (Item){.item = b2it(true)});
+        }
+        return value;
+    }
+
+    // input.defaultChecked setter — reflects `checked` attribute. Per spec,
+    // when the dirty checkedness flag is false, current checkedness also
+    // updates to match the new default.
+    if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
+        bool t = js_is_truthy(value);
+        if (t) dom_element_set_attribute(elem, "checked", "");
+        else   dom_element_remove_attribute(elem, "checked");
+        Item exp = expando_get_map((DomNode*)elem);
+        bool dirty = false;
+        if (exp.item != ITEM_NULL) {
+            Item v = js_property_get(exp,
+                (Item){.item = s2it(heap_create_name("__chkDirty"))});
+            dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+        }
+        if (!dirty) _set_checkedness(elem, t);
         return value;
     }
 
@@ -5439,9 +5566,37 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     if (_is_tag(elem, "option")) {
         if (strcmp(prop, "selected") == 0) {
             _set_selectedness(elem, js_is_truthy(value));
+            // Mark the option's dirty selectedness flag.
+            Item exp = expando_get_or_create_map((DomNode*)elem);
+            if (exp.item != ITEM_NULL) {
+                js_property_set(exp,
+                    (Item){.item = s2it(heap_create_name("__optDirty"))},
+                    (Item){.item = b2it(true)});
+            }
             // Per spec, run ask-for-reset to enforce single-selection.
             DomElement* sel = _option_owner_select(elem);
             if (sel) _select_ask_for_reset(sel);
+            return value;
+        }
+        // option.defaultSelected setter — reflects `selected` attribute.
+        // When the dirty selectedness flag is false, current selectedness
+        // updates to match the new default.
+        if (strcmp(prop, "defaultSelected") == 0) {
+            bool t = js_is_truthy(value);
+            if (t) dom_element_set_attribute(elem, "selected", "");
+            else   dom_element_remove_attribute(elem, "selected");
+            Item exp = expando_get_map((DomNode*)elem);
+            bool dirty = false;
+            if (exp.item != ITEM_NULL) {
+                Item v = js_property_get(exp,
+                    (Item){.item = s2it(heap_create_name("__optDirty"))});
+                dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+            }
+            if (!dirty) {
+                _set_selectedness(elem, t);
+                DomElement* sel = _option_owner_select(elem);
+                if (sel) _select_ask_for_reset(sel);
+            }
             return value;
         }
         if (strcmp(prop, "value") == 0) {
@@ -5512,6 +5667,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                             stripped[out] = '\0';
                             tc_set_value(elem, stripped, out);
                             free(stripped);
+                            _value_mark_dirty(elem);
                             if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
                             return value;
                         }
@@ -5519,6 +5675,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 }
             }
             tc_set_value(elem, s, strlen(s));
+            _value_mark_dirty(elem);
             if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
             return value;
         }
@@ -5559,9 +5716,42 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         if (strcmp(prop, "defaultValue") == 0) {
             const char* s = fn_to_cstr(value);
             if (!s) s = "";
+            if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
+                // textarea.defaultValue setter: replace descendant text
+                // content with a single text node holding the new value.
+                DomNode* child = elem->first_child;
+                while (child) {
+                    DomNode* next = child->next_sibling;
+                    child->parent = nullptr;
+                    child->next_sibling = nullptr;
+                    child->prev_sibling = nullptr;
+                    child = next;
+                }
+                elem->first_child = nullptr;
+                elem->last_child = nullptr;
+                if (*s) {
+                    String* str = heap_create_name(s);
+                    DomText* tn = dom_text_create(str, elem);
+                    if (tn) {
+                        tn->parent = elem;
+                        elem->first_child = tn;
+                        elem->last_child = tn;
+                    }
+                }
+                // Per spec: API value updates only when dirty flag is false.
+                if (!_value_is_dirty(elem)) {
+                    tc_set_value(elem, s, strlen(s));
+                    if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+                }
+                js_dom_mutation_notify();
+                return value;
+            }
+            // input.defaultValue setter: reflects "value" attribute.
             dom_element_set_attribute(elem, "value", s);
-            tc_set_value(elem, s, strlen(s));
-            if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            if (!_value_is_dirty(elem)) {
+                tc_set_value(elem, s, strlen(s));
+                if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            }
             return value;
         }
     }
@@ -6764,15 +6954,11 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "reset") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
         // Per HTML §4.10.21.4: fire `reset` event (bubbles, cancelable);
         // if not cancelled, run reset algorithm on each listed control.
-        Item ev = js_new_object();
-        js_property_set(ev, (Item){.item = s2it(heap_create_name("type"))},
-                        (Item){.item = s2it(heap_create_name("reset"))});
-        js_property_set(ev, (Item){.item = s2it(heap_create_name("bubbles"))},
-                        (Item){.item = ITEM_TRUE});
-        js_property_set(ev, (Item){.item = s2it(heap_create_name("cancelable"))},
+        Item ev = js_create_event("reset", /*bubbles=*/true, /*cancelable=*/true);
+        // form.reset() fires a trusted event per spec.
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("isTrusted"))},
                         (Item){.item = ITEM_TRUE});
         Item dispatched = js_dom_dispatch_event(elem_item, ev);
-        // dispatchEvent returns false when default was prevented.
         if (dispatched.item == ITEM_FALSE) return make_js_undefined();
         _run_form_reset(elem);
         return make_js_undefined();

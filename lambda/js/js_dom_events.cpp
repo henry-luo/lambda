@@ -21,6 +21,7 @@
 #include <cstring>
 #include <ctime>
 #include <cmath>
+#include <functional>
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -1636,16 +1637,44 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
         if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
             DomElement* el = (DomElement*)act_target;
-            DomNode* p = el->parent;
-            while (p && p->is_element()) {
-                DomElement* pe = (DomElement*)p;
-                if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
-                    Item form_item = js_dom_wrap_element(pe);
-                    Item m = (Item){.item = s2it(heap_create_name("reset"))};
-                    js_dom_element_method(form_item, m, nullptr, 0);
-                    break;
+            DomElement* owner = nullptr;
+            // Per HTML spec, a form-associated element's owner is determined
+            // by the `form` attribute first; otherwise the nearest ancestor.
+            const char* fa = dom_element_get_attribute(el, "form");
+            if (fa && *fa) {
+                DomDocument* doc = (DomDocument*)js_dom_get_document();
+                if (doc && doc->root) {
+                    // Walk to find element with matching id.
+                    std::function<DomElement*(DomNode*)> find_id =
+                        [&](DomNode* node) -> DomElement* {
+                        while (node) {
+                            if (node->is_element()) {
+                                DomElement* ce = (DomElement*)node;
+                                const char* eid = dom_element_get_attribute(ce, "id");
+                                if (eid && strcmp(eid, fa) == 0) return ce;
+                                DomElement* r = find_id(ce->first_child);
+                                if (r) return r;
+                            }
+                            node = node->next_sibling;
+                        }
+                        return nullptr;
+                    };
+                    owner = find_id((DomNode*)doc->root);
                 }
-                p = p->parent;
+            } else {
+                DomNode* p = el->parent;
+                while (p && p->is_element()) {
+                    DomElement* pe = (DomElement*)p;
+                    if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
+                        owner = pe; break;
+                    }
+                    p = p->parent;
+                }
+            }
+            if (owner) {
+                Item form_item = js_dom_wrap_element(owner);
+                Item m = (Item){.item = s2it(heap_create_name("reset"))};
+                js_dom_element_method(form_item, m, nullptr, 0);
             }
         }
     }
