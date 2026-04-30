@@ -712,16 +712,9 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             js_property_set(object, name_item, pd->value);
         }
 
-        // Clean up legacy __get_/__set_ markers when converting accessor→data.
-        char gk_buf[256], sk_buf[256];
-        snprintf(gk_buf, sizeof(gk_buf), "__get_%.*s", name_len, name);
-        snprintf(sk_buf, sizeof(sk_buf), "__set_%.*s", name_len, name);
-        Item gk = js_props_str(gk_buf, (int)strlen(gk_buf));
-        Item sk = js_props_str(sk_buf, (int)strlen(sk_buf));
-        Item del = (Item){.item = JS_DELETED_SENTINEL_VAL};
-        // Probe via js_has_own_property (handles array companion-map indirection).
-        if (it2b(js_has_own_property(object, gk))) { js_defprop_set_marker(object, gk, del); was_accessor = true; }
-        if (it2b(js_has_own_property(object, sk))) { js_defprop_set_marker(object, sk, del); was_accessor = true; }
+        // AT-3: legacy __get_/__set_ marker cleanup retired. Post-AT-1 accessors
+        // are stored under the property name with IS_ACCESSOR shape flag; the
+        // accessor→data conversion above already cleared the flag.
 
         if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/false);
     }

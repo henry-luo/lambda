@@ -554,12 +554,13 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
 // =============================================================================
 
 extern "C" bool js_intercept_accessor_marker(Item obj, Item key, Item value) {
-    // Companion maps stash legacy `__get_N`/`__set_N` keys for array indices,
-    // arguments, and similar exotic-storage paths where there are no shape
-    // entries to carry IS_ACCESSOR. Writes targeting those maps must keep the
-    // literal key — bypass the JsAccessorPair routing.
-    if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
-        obj.map->map_kind == MAP_KIND_ARRAY_PROPS) return false;
+    // AT-1 (was: companion-map bypass for MAP_KIND_ARRAY_PROPS). Phase 5D
+    // added IS_ACCESSOR shape-entry support on companion maps under digit-
+    // string names, so the bypass is no longer required: js_define_accessor_partial
+    // → js_install_native_accessor stores the JsAccessorPair* under the actual
+    // property name X (e.g. "5") with IS_ACCESSOR + NON_ENUMERABLE shape flags,
+    // which the Phase 5D readers in js_property_get / js_object_get_own_property_descriptor
+    // / propertyIsEnumerable / etc. already detect and dispatch correctly.
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* ks = it2s(key);
     if (!ks || ks->len < 7) return false;  // need __get_X / __set_X minimum

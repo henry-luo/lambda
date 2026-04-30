@@ -111,25 +111,81 @@ the gate is `regressions=0`, met).
      branch of `js_props_query_*` (latent bug exposed by T5: prior code
      always overwrote stale tombstones, masking the truthy-sentinel
      misread). Verified `0 regressions / 28853 baseline passing` after T5.
-   - **Phase A2-T6 — Retire marker reads.** Delete fallback blocks in
-     `js_props_query_*`; sweep codebase for any remaining
-     `__nw_`/`__ne_`/`__nc_` references — should be zero.
-   - **Phase A2-T7 — Retire `__get_X`/`__set_X` accessor markers.** Accessor
-     pairs already live in the slot, IS_ACCESSOR already in the shape — the
-     marker is vestigial dual-write. Delete writers, then readers.
+   - **Phase A2-T6 — Retire marker reads. — BLOCKED on indexed-property
+     storage.** Survey shows the `js_props_query_*` reader fallback for
+     `__nw_X`/`__ne_X`/`__nc_X` is *load-bearing for indexed properties on
+     arrays* (companion-map markers like `__nw_5` have no ShapeEntry to carry
+     the bit). Cannot delete the fallback without first introducing either
+     (a) ShapeEntry tracking for indexed positions on companion maps, or
+     (b) a separate index-attribute table. The ~15 string-key direct writers
+     (`snprintf("__nw_%.*s")+js_property_set`) could be migrated to
+     `js_attr_set_*` first as a safe partial step, but it does not unblock
+     the reader retirement.
+   - **Phase A2-T7 — Retire `__get_X`/`__set_X` accessor markers. — DONE
+     (via AT-1 + AT-3).** See "AT-Phase" subsection below for the
+     full retirement story. All `__get_%d` / `__set_%d` /
+     `__get_%.*s` / `__set_%.*s` snprintf sites in
+     `lambda/js/*.cpp` are retired (string-grep returns 0 matches).
+     Verified `0 regressions / 28853 baseline passing` and Props 19/19
+     after each batch.
    - **Phase A2-T8 — `JSPD_DELETED` shape bit; retire `JS_DELETED_SENTINEL_VAL`
-     overlap with `LMD_TYPE_INT`.** Delete becomes a clone+set-bit; readers gate
-     slot access on the bit. Fixes the FLOAT-key sentinel-misread bug class
+     overlap with `LMD_TYPE_INT`.** Structurally clean (bit is independent of
+     marker work), but the sentinel is checked at 100+ sites across
+     `js_runtime.cpp`/`js_globals.cpp`/`js_props.cpp`/`transpile_js_mir.cpp`
+     (search `JS_DELETED_SENTINEL_VAL` returns 100+ matches before
+     truncation). This is its own multi-session refactor: introduce the bit,
+     migrate writers (~10 sites), migrate readers (~80+ sites), then drop
+     the sentinel encoding. Fixes the FLOAT-key sentinel-misread bug class
      structurally.
    - **Phase A2-T9 — FUNC virtual-property unification.** R5 (FUNC delete) and
      R2-FUNC (FUNC set) WONTFIX comments come down; `js_ordinary_*` kernels
      absorb FUNC writes since `__nw_X` is now uniform shape state on
-     `properties_map`.
+     `properties_map`. Largest of the four — expects T6/T7/T8 unification
+     of attribute storage as a precondition.
 
    **Non-goals during A2:** no `Map` header changes, no GC-tracer changes, no
    `shape_pool.cpp` changes, no `transpile_js_mir.cpp` changes. The single new
    `TypeMap` field is `bool is_private` (or equivalent clone-source pointer) —
    one byte.
+
+   ### AT-Phase — Array Attribute Table (companion-map shape parity)
+
+   Goal: give `MAP_KIND_ARRAY_PROPS` companion maps the same shape-entry
+   storage parity as regular maps, unblocking T6/T7/T9.
+
+   - **AT-1 — DONE (0 regressions / 28853).** Removed
+     `MAP_KIND_ARRAY_PROPS` bypass in `js_intercept_accessor_marker`
+     (`lambda/js/js_property_attrs.cpp` ~L561). Writers calling
+     `js_property_set(props, "__get_5", fn)` now route through intercept
+     → `js_install_native_accessor` storing `JsAccessorPair*` under
+     digit-string name "5" with IS_ACCESSOR + NON_ENUMERABLE shape flags.
+     Insight: bypass was obsolete; Phase 5D added IS_ACCESSOR support on
+     companion maps under digit-string names.
+   - **AT-2 — SUBSUMED by AT-1.** Writers auto-migrate via intercept.
+   - **AT-3 — DONE (0 regressions / 28853).** Retired all
+     `__get_<X>`/`__set_<X>` reader fallbacks across `js_runtime.cpp` +
+     `js_globals.cpp` + `js_props.cpp`. Critical fix discovered during
+     batch 2: `Object.keys` array branch was missing non-enumerable
+     accessors because it only checked `__ne_<idx>` marker; post-AT-1
+     the NON_ENUMERABLE bit lives on the digit-string shape entry
+     directly. Added `jspd_is_enumerable(_se_idx)` probe alongside the
+     marker probe (`js_globals.cpp` ~L6325). Final string-grep for
+     `__get_%`/`__set_%` in `lambda/js/*.cpp` returns zero matches.
+   - **AT-4 — TODO: marker attribute table for indexed positions.**
+     Blocker for T6 (marker reader fallback retirement):
+     `__nw_<idx>`/`__ne_<idx>`/`__nc_<idx>` writes can't migrate to
+     shape flags because writing `__nw_5` doesn't create "5" ShapeEntry
+     on companion map (indexed values live in `arr->items[5]`, not in
+     the map). `js_dual_write_marker_flags` →
+     `js_shape_entry_update_flags` bails on missing ShapeEntry. Design
+     options: (a) co-write a placeholder sentinel slot at digit-string
+     name when writing `__nw_<idx>` so a ShapeEntry exists to carry the
+     bit (sentinel signals "value is at `arr->items[idx]`, not here"),
+     or (b) separate index-attribute table on companion map (parallel
+     to ShapeEntry chain). Recommendation: (a) less invasive.
+   - **AT-5 — TODO.** After AT-4, retire `js_props_query_*` marker
+     fallback path (T6) and remaining marker write-path sites that
+     bypass intercept. Then T9 (FUNC virtual-property unification).
 
 2. **A3 — `JsClass` enum.** Add `JsClass klass` byte to `Map`/`TypeMap`. Replace `__class_name__` reads with the byte; route `js_proto_class_method_dispatch` through a switch.
 3. **D — extended hidden-state audit.** Builtin function caches keyed by enum, name-pool reuse across batches. Convert remaining bare set/restore patterns (if any surface during A2) to the existing RAII guards.
