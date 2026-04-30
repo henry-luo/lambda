@@ -1457,6 +1457,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                         const char* itype = js_dom_input_type_lower(el);
                         if (strcmp(itype, "submit") == 0 || strcmp(itype, "image") == 0) {
                             act_target = el; act_kind = 2;
+                        } else if (strcmp(itype, "reset") == 0) {
+                            act_target = el; act_kind = 3;
                         }
                     } else if (strcasecmp(tag, "button") == 0) {
                         // Default button type is "submit".
@@ -1464,6 +1466,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                         if (strcmp(btype, "text") == 0 /* default */ ||
                             strcmp(btype, "submit") == 0) {
                             act_target = el; act_kind = 2;
+                        } else if (strcmp(btype, "reset") == 0) {
+                            act_target = el; act_kind = 3;
                         }
                     }
                 }
@@ -1622,6 +1626,23 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                     Item form_item = js_dom_wrap_element(pe);
                     Item submit_ev = js_create_event("submit", true, true);
                     js_dom_dispatch_event(form_item, submit_ev);
+                    break;
+                }
+                p = p->parent;
+            }
+        }
+    } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
+        // Reset-button activation: walk up to owning <form> and call reset().
+        extern Item js_dom_element_method(Item elem, Item method_name, Item* args, int argc);
+        if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
+            DomElement* el = (DomElement*)act_target;
+            DomNode* p = el->parent;
+            while (p && p->is_element()) {
+                DomElement* pe = (DomElement*)p;
+                if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
+                    Item form_item = js_dom_wrap_element(pe);
+                    Item m = (Item){.item = s2it(heap_create_name("reset"))};
+                    js_dom_element_method(form_item, m, nullptr, 0);
                     break;
                 }
                 p = p->parent;

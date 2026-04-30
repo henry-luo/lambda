@@ -30,6 +30,7 @@
 #include <cstring>
 #include <cctype>
 #include <cinttypes>
+#include <ctime>
 
 // ============================================================================
 // Forward declarations of engine APIs used here
@@ -83,6 +84,9 @@ static inline Item make_sym_iterator_key() {
 
 // Internal entries array key
 static const char* FD_ENTRIES_KEY = "_fd_entries";
+
+// Forward decls
+static Item fd_blob_to_file(Item value, Item filename_item);
 
 static Item fd_get_entries(Item this_fd) {
     return prop_get(this_fd, FD_ENTRIES_KEY);
@@ -146,6 +150,17 @@ static Item js_fd_append(Item name_item, Item value_item, Item filename_item) {
 
     Item value = fd_coerce_value(value_item);
     if (js_check_exception()) return ItemNull;
+    // Per spec: if value is Blob (not File) and no filename, set filename to "blob".
+    // If value is Blob/File and filename was provided, convert to File with that name.
+    if (fd_is_blob(value)) {
+        Item cls = prop_get(value, "__class_name__");
+        const char* cs = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
+        bool is_file = cs && strcmp(cs, "File") == 0;
+        bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
+        if (has_filename || !is_file) {
+            value = fd_blob_to_file(value, filename_item);
+        }
+    }
 
     Item pair = js_array_new(0);
     js_array_push(pair, make_str(name_cs));
@@ -258,6 +273,15 @@ static Item js_fd_set(Item name_item, Item value_item, Item filename_item) {
     if (!name_cs) name_cs = "undefined";
     Item value = fd_coerce_value(value_item);
     if (js_check_exception()) return ItemNull;
+    if (fd_is_blob(value)) {
+        Item cls = prop_get(value, "__class_name__");
+        const char* cs = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
+        bool is_file = cs && strcmp(cs, "File") == 0;
+        bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
+        if (has_filename || !is_file) {
+            value = fd_blob_to_file(value, filename_item);
+        }
+    }
 
     // Find first occurrence
     int64_t first_idx = -1;
@@ -655,26 +679,138 @@ static void fd_install_methods(Item fd_obj) {
 }
 
 // ============================================================================
-// File stub (for <input type=file> form data entries)
+// Blob and File constructors
 // ============================================================================
 
-static Item js_file_construct_stub() {
+// Compute the byte-size of a Blob parts array (parts is an Array of strings/Blobs).
+// Strings count UTF-8 byte length; Blob/File parts use their .size property.
+static int64_t blob_compute_size(Item parts) {
+    if (get_type_id(parts) != LMD_TYPE_ARRAY) return 0;
+    int64_t total = 0;
+    int64_t plen = js_array_length(parts);
+    for (int64_t i = 0; i < plen; i++) {
+        Item p = js_array_get_int(parts, i);
+        TypeId pt = get_type_id(p);
+        if (pt == LMD_TYPE_STRING) {
+            const char* s = fn_to_cstr(p);
+            if (s) total += (int64_t)strlen(s);
+        } else if (pt == LMD_TYPE_MAP) {
+            // nested Blob/File: add its size
+            Item sz = prop_get(p, "size");
+            if (get_type_id(sz) == LMD_TYPE_INT) total += it2i(sz);
+        } else {
+            // coerce to string and use its byte length
+            const char* s = fn_to_cstr(p);
+            if (s) total += (int64_t)strlen(s);
+        }
+    }
+    return total;
+}
+
+// Read options.type (a string) → returns owned string or "".
+static const char* blob_options_type(Item options) {
+    if (get_type_id(options) != LMD_TYPE_MAP) return "";
+    Item t = prop_get(options, "type");
+    if (get_type_id(t) != LMD_TYPE_STRING) return "";
+    const char* s = fn_to_cstr(t);
+    return s ? s : "";
+}
+
+// new Blob([parts], { type })
+static Item js_blob_construct(Item parts, Item options) {
+    Item obj = js_new_object();
+    prop_set(obj, "__class_name__", make_str("Blob"));
+    int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
+    prop_set(obj, "size", make_int_item(size));
+    prop_set(obj, "type", make_str(blob_options_type(options)));
+    Item ctor = prop_get(js_get_global_this(), "Blob");
+    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
+    return obj;
+}
+
+// Current epoch milliseconds.
+static int64_t now_epoch_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// new File([parts], name, { type, lastModified })
+static Item js_file_construct(Item parts, Item name, Item options) {
+    Item obj = js_new_object();
+    prop_set(obj, "__class_name__", make_str("File"));
+
+    int64_t size = (get_type_id(parts) == LMD_TYPE_UNDEFINED) ? 0 : blob_compute_size(parts);
+    prop_set(obj, "size", make_int_item(size));
+    prop_set(obj, "type", make_str(blob_options_type(options)));
+
+    const char* name_cs = (get_type_id(name) == LMD_TYPE_UNDEFINED) ? "" : fn_to_cstr(name);
+    prop_set(obj, "name", make_str(name_cs ? name_cs : ""));
+
+    int64_t lm = now_epoch_ms();
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item lm_item = prop_get(options, "lastModified");
+        if (get_type_id(lm_item) == LMD_TYPE_INT) lm = it2i(lm_item);
+        else if (get_type_id(lm_item) == LMD_TYPE_FLOAT) lm = (int64_t)it2d(lm_item);
+    }
+    prop_set(obj, "lastModified", make_int_item(lm));
+
+    Item ctor = prop_get(js_get_global_this(), "File");
+    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
+    return obj;
+}
+
+// Convert a Blob value to a File when filename is provided to FormData.append/set.
+// If value is already a File, returns a clone with name=filename. If value is a Blob
+// (not a File), returns a new File wrapping it with name=filename.
+// If filename is undefined and value is a Blob (not File), returns a File named "blob".
+static Item fd_blob_to_file(Item value, Item filename_item) {
+    // value must be a Blob/File MAP at this point
+    bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
+    Item cls = prop_get(value, "__class_name__");
+    const char* cls_s = (get_type_id(cls) == LMD_TYPE_STRING) ? fn_to_cstr(cls) : nullptr;
+    bool is_file = cls_s && strcmp(cls_s, "File") == 0;
+
+    Item file = js_new_object();
+    prop_set(file, "__class_name__", make_str("File"));
+
+    Item sz = prop_get(value, "size");
+    prop_set(file, "size", get_type_id(sz) == LMD_TYPE_INT ? sz : make_int_item(0));
+
+    Item ty = prop_get(value, "type");
+    prop_set(file, "type", get_type_id(ty) == LMD_TYPE_STRING ? ty : make_str(""));
+
+    const char* fname = nullptr;
+    if (has_filename) fname = fn_to_cstr(filename_item);
+    else if (is_file) {
+        Item nm = prop_get(value, "name");
+        if (get_type_id(nm) == LMD_TYPE_STRING) fname = fn_to_cstr(nm);
+    }
+    if (!fname) fname = is_file ? "" : "blob";
+    prop_set(file, "name", make_str(fname));
+
+    int64_t lm = 0;
+    Item lm_item = prop_get(value, "lastModified");
+    if (get_type_id(lm_item) == LMD_TYPE_INT) lm = it2i(lm_item);
+    else lm = now_epoch_ms();
+    prop_set(file, "lastModified", make_int_item(lm));
+
+    Item ctor = prop_get(js_get_global_this(), "File");
+    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(file, "constructor", ctor);
+    return file;
+}
+
+// Create a File stub for an empty file input.
+static Item fd_make_file_stub() {
     Item obj = js_new_object();
     prop_set(obj, "__class_name__", make_str("File"));
     prop_set(obj, "size",           make_int_item(0));
     prop_set(obj, "name",           make_str(""));
     prop_set(obj, "type",           make_str("application/octet-stream"));
-    // set constructor to global File so that fileEntry[0].constructor === File
-    Item file_ctor = prop_get(js_get_global_this(), "File");
-    if (get_type_id(file_ctor) != LMD_TYPE_UNDEFINED) {
-        prop_set(obj, "constructor", file_ctor);
-    }
+    prop_set(obj, "lastModified",   make_int_item(now_epoch_ms()));
+    Item ctor = prop_get(js_get_global_this(), "File");
+    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
     return obj;
-}
-
-// Create a File stub for an empty file input.
-static Item fd_make_file_stub() {
-    return js_file_construct_stub();
 }
 
 // Constructor: new FormData([form])
@@ -735,15 +871,20 @@ extern "C" void js_formdata_install_globals(void) {
     Item ctor_fn = js_new_function((void*)js_formdata_construct, 1);
     prop_set(global, "FormData", ctor_fn);
 
-    // Install File stub constructor (needed for type=file form entries)
-    Item file_ctor_fn = js_new_function((void*)js_file_construct_stub, 0);
+    // Install Blob constructor: new Blob(parts, options)
+    Item blob_ctor_fn = js_new_function((void*)js_blob_construct, 2);
+    prop_set(global, "Blob", blob_ctor_fn);
+
+    // Install File constructor: new File(parts, name, options)
+    Item file_ctor_fn = js_new_function((void*)js_file_construct, 3);
     prop_set(global, "File", file_ctor_fn);
 
     // Also install on window if it exists
     Item window = prop_get(global, "window");
     if (get_type_id(window) == LMD_TYPE_MAP) {
         prop_set(window, "FormData", ctor_fn);
+        prop_set(window, "Blob", blob_ctor_fn);
         prop_set(window, "File", file_ctor_fn);
     }
-    log_debug("js_formdata_install_globals: FormData and File installed on global");
+    log_debug("js_formdata_install_globals: FormData, Blob, File installed on global");
 }

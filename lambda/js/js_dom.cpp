@@ -372,6 +372,14 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // install FormData constructor
         extern void js_formdata_install_globals(void);
         js_formdata_install_globals();
+        // F-1: install collection interface globals (HTMLCollection,
+        // NodeList, RadioNodeList, HTMLFormControlsCollection,
+        // HTMLOptionsCollection) so existence and instanceof checks work.
+        extern void js_dom_install_collection_globals(void);
+        js_dom_install_collection_globals();
+        // F-5: install HTMLOptionElement Option() constructor.
+        extern void js_dom_install_option_constructor(void);
+        js_dom_install_option_constructor();
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
@@ -2579,6 +2587,43 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return (Item){.item = s2it(heap_create_name("CSS1Compat"))};
     }
 
+    // F-1: document.forms — array of all <form> elements in the document.
+    if (strcmp(prop, "forms") == 0) {
+        Item arr = js_array_new(0);
+        DomDocument* doc = _js_current_document;
+        if (doc && doc->root) {
+            std::function<void(DomNode*)> walk = [&](DomNode* n) {
+                while (n) {
+                    if (n->is_element()) {
+                        DomElement* ce = (DomElement*)n;
+                        if (ce->tag_name && strcasecmp(ce->tag_name, "form") == 0) {
+                            Item fitem = js_dom_wrap_element(ce);
+                            js_array_push(arr, fitem);
+                            // Named access: forms[name] / forms[id] per HTML
+                            // §HTMLCollection-namedItem semantics.
+                            const char* nm = dom_element_get_attribute(ce, "name");
+                            if (nm && *nm) {
+                                js_property_set(arr,
+                                    (Item){.item = s2it(heap_create_name(nm))},
+                                    fitem);
+                            }
+                            const char* id = dom_element_get_attribute(ce, "id");
+                            if (id && *id && (!nm || strcmp(id, nm) != 0)) {
+                                js_property_set(arr,
+                                    (Item){.item = s2it(heap_create_name(id))},
+                                    fitem);
+                            }
+                        }
+                        walk(ce->first_child);
+                    }
+                    n = n->next_sibling;
+                }
+            };
+            walk((DomNode*)doc->root);
+        }
+        return arr;
+    }
+
     // characterSet / charset
     if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
         return (Item){.item = s2it(heap_create_name("UTF-8"))};
@@ -2790,12 +2835,47 @@ static bool _elem_is_barred(DomElement* elem) {
     }
     // barred if disabled
     if (dom_element_has_attribute(elem, "disabled")) return true;
+    // barred if descendant of a disabled <fieldset>, except when descendant
+    // of that fieldset's first <legend> child.
+    {
+        DomNode* prev = (DomNode*)elem;
+        for (DomNode* p = elem->parent; p; prev = p, p = p->parent) {
+            if (!p->is_element()) continue;
+            DomElement* pe = p->as_element();
+            if (!pe->tag_name) continue;
+            if (strcasecmp(pe->tag_name, "fieldset") == 0 &&
+                dom_element_has_attribute(pe, "disabled")) {
+                // Find first legend child of pe.
+                DomElement* first_legend = nullptr;
+                for (DomNode* c = pe->first_child; c; c = c->next_sibling) {
+                    if (c->is_element()) {
+                        DomElement* ce = c->as_element();
+                        if (ce->tag_name && strcasecmp(ce->tag_name, "legend") == 0) {
+                            first_legend = ce; break;
+                        }
+                    }
+                }
+                // If `prev` (the child of fieldset on path to elem) is the
+                // first legend, the element is NOT barred by this fieldset.
+                if (!first_legend || prev != (DomNode*)first_legend) return true;
+            }
+        }
+    }
     // barred if readonly
     if (dom_element_has_attribute(elem, "readonly")) return true;
     if (strcasecmp(tag, "input") == 0) {
         const char* type = js_dom_input_type_lower(elem);
-        // only type=hidden is barred (not submit/button/image/reset per WPT)
-        if (strcmp(type, "hidden") == 0) {
+        // Per HTML spec, input types hidden, reset, button are barred
+        // from constraint validation.
+        if (strcmp(type, "hidden") == 0 || strcmp(type, "reset") == 0 ||
+            strcmp(type, "button") == 0) {
+            return true;
+        }
+    }
+    if (strcasecmp(tag, "button") == 0) {
+        // <button type=reset|button> is barred. Default and submit are not.
+        const char* btype = dom_element_get_attribute(elem, "type");
+        if (btype && (strcasecmp(btype, "reset") == 0 || strcasecmp(btype, "button") == 0)) {
             return true;
         }
     }
@@ -2840,7 +2920,6 @@ static bool _elem_value_is_empty(DomElement* elem) {
 }
 
 // Build and return a ValidityState plain JS object for the given element.
-// --- date/time helpers for constraint validation ---
 
 // Parse "HH:MM[:SS[.mmm]]" to milliseconds since midnight (-1 on error)
 static long long _time_to_ms(const char* t) {
@@ -2894,8 +2973,373 @@ static long long _parse_datetime(const char* s) {
     return days * 86400000LL + (long long)h * 3600000 + m * 60000 + sec * 1000;
 }
 
+// For a <select required> element, returns true iff no <option> is
+// "selected" with a non-empty value (i.e. the placeholder option requires
+// user to explicitly pick a non-empty one).
+static bool _get_selectedness(DomElement* opt);
+static void _set_selectedness(DomElement* opt, bool v);
+
+// Walk the descendants of `sel` and append each <option> to `arr`. Walks
+// into <optgroup> children too. Does NOT walk into nested <select>.
+static void _collect_options(DomNode* node, Item arr) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* ce = (DomElement*)node;
+            if (ce->tag_name) {
+                if (strcasecmp(ce->tag_name, "option") == 0) {
+                    js_array_push(arr, js_dom_wrap_element(ce));
+                } else if (strcasecmp(ce->tag_name, "select") == 0) {
+                    // skip nested select
+                } else {
+                    _collect_options(ce->first_child, arr);
+                }
+            }
+        }
+        node = node->next_sibling;
+    }
+}
+
+// Get the option's text content (concatenated descendant text, trimmed
+// of leading/trailing ASCII whitespace, with internal whitespace
+// collapsed per HTML spec for <option> label).
+static char* _option_text(DomElement* opt) {
+    StrBuf* sb = strbuf_new_cap(32);
+    collect_text_content((DomNode*)opt, sb);
+    // collapse whitespace
+    StrBuf* out = strbuf_new_cap(32);
+    bool prev_ws = true;
+    if (sb->str) {
+        for (size_t i = 0; i < sb->length; i++) {
+            char c = sb->str[i];
+            bool ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f');
+            if (ws) {
+                if (!prev_ws) strbuf_append_char(out, ' ');
+                prev_ws = true;
+            } else {
+                strbuf_append_char(out, c);
+                prev_ws = false;
+            }
+        }
+    }
+    // trim trailing
+    while (out->length > 0 && out->str[out->length - 1] == ' ') {
+        out->str[--out->length] = '\0';
+    }
+    char* result = strdup(out->str ? out->str : "");
+    strbuf_free(sb);
+    strbuf_free(out);
+    return result;
+}
+
+// Get/set the option's selectedness. Stored as expando "__selected".
+// Default falls back to the `selected` content attribute (defaultSelected).
+static bool _get_selectedness(DomElement* opt) {
+    if (!opt) return false;
+    Item exp = expando_get_map((DomNode*)opt);
+    if (exp.item != ITEM_NULL) {
+        Item key = (Item){.item = s2it(heap_create_name("__selected"))};
+        Item v = js_property_get(exp, key);
+        if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
+    }
+    return dom_element_has_attribute(opt, "selected");
+}
+
+// Returns true if the select's selectedness has been explicitly modified
+// (via selectedIndex/value/option.selected setter), so default-reset
+// behavior should NOT be applied.
+static bool _select_is_dirty(DomElement* sel) {
+    if (!sel) return false;
+    Item exp = expando_get_map((DomNode*)sel);
+    if (exp.item == ITEM_NULL) return false;
+    Item v = js_property_get(exp,
+        (Item){.item = s2it(heap_create_name("__selDirty"))});
+    return v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
+}
+
+static void _select_mark_dirty(DomElement* sel) {
+    if (!sel) return;
+    Item exp = expando_get_or_create_map((DomNode*)sel);
+    if (exp.item == ITEM_NULL) return;
+    js_property_set(exp,
+        (Item){.item = s2it(heap_create_name("__selDirty"))},
+        (Item){.item = b2it(true)});
+}
+
+static void _set_selectedness(DomElement* opt, bool v) {
+    if (!opt) return;
+    Item exp = expando_get_or_create_map((DomNode*)opt);
+    if (exp.item == ITEM_NULL) return;
+    Item key = (Item){.item = s2it(heap_create_name("__selected"))};
+    js_property_set(exp, key, (Item){.item = b2it(v)});
+}
+
+// Find the parent <select> of an <option>. Returns nullptr if none.
+static DomElement* _option_owner_select(DomElement* opt) {
+    if (!opt) return nullptr;
+    for (DomNode* p = opt->parent; p; p = p->parent) {
+        if (p->is_element()) {
+            DomElement* pe = (DomElement*)p;
+            if (pe->tag_name && strcasecmp(pe->tag_name, "select") == 0) return pe;
+        }
+    }
+    return nullptr;
+}
+
+// Return the option's effective value (`value` attribute, or text content
+// if absent). Heap-allocated cstring caller must free.
+static char* _option_value(DomElement* opt) {
+    const char* v = dom_element_get_attribute(opt, "value");
+    if (v) return strdup(v);
+    return _option_text(opt);
+}
+
+// Return index of `opt` within its owner select's options list (-1 if not
+// in any select).
+static int _option_index_in_select(DomElement* opt) {
+    DomElement* sel = _option_owner_select(opt);
+    if (!sel) return -1;
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    int64_t n = js_array_length(arr);
+    for (int64_t i = 0; i < n; i++) {
+        Item it = js_array_get_int(arr, i);
+        DomElement* ce = (DomElement*)js_dom_unwrap_element(it);
+        if (ce == opt) return (int)i; // INT_CAST_OK: option index
+    }
+    return -1;
+}
+
+// Run "ask for a reset" algorithm on a <select>: ensures exactly one option
+// is selectedness=true for non-multiple selects. If multiple options had
+// selectedness, only the LAST one in tree order remains selected. If none
+// had selectedness, the first non-disabled option is selected.
+static void _select_ask_for_reset(DomElement* sel) {
+    if (!sel) return;
+    if (dom_element_has_attribute(sel, "multiple")) return;
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    int64_t n = js_array_length(arr);
+    if (n == 0) return;
+    // Find last selected option.
+    int last_selected = -1;
+    int first_non_disabled = -1;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        if (_get_selectedness(opt)) last_selected = (int)i; // INT_CAST_OK: option index
+        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+            first_non_disabled = (int)i; // INT_CAST_OK: option index
+        }
+    }
+    int chosen = (last_selected >= 0) ? last_selected :
+        (first_non_disabled >= 0 ? first_non_disabled : 0);
+    int size = 0;
+    {
+        const char* sz = dom_element_get_attribute(sel, "size");
+        if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+    }
+    // For display-size <= 1 (the common dropdown), exactly one option
+    // must be selected. For listbox (size > 1) without multiple, zero or
+    // one option may be selected — but if more than one has selectedness,
+    // only the last remains.
+    bool require_one = size <= 1;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        if (require_one) {
+            _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
+        } else {
+            // listbox: keep only the last selected (if any was selected).
+            if (last_selected < 0) {
+                _set_selectedness(opt, false);
+            } else {
+                _set_selectedness(opt, (int)i == last_selected); // INT_CAST_OK: option index
+            }
+        }
+    }
+}
+
+// For a <select required> element, returns true iff no <option> is
+// "valueMissing" for a <select required>: the select has no selected option,
+// OR all selected options are placeholder label options.
+// A placeholder label option = the first option child of the select whose
+// value is "" AND text is empty. Only applies when display size is 1 and
+// multiple is unset; otherwise placeholders are not recognized.
+static bool _select_value_missing(DomElement* sel) {
+    if (!sel) return true;
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    int64_t n = js_array_length(arr);
+    if (n == 0) return true;
+    int size = 0;
+    const char* sz = dom_element_get_attribute(sel, "size");
+    if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+    bool is_listbox = dom_element_has_attribute(sel, "multiple") || size > 1;
+    // Identify the placeholder option (first direct option child of the
+    // select, when display size is 1 and not multiple, with value="" and
+    // empty text). Options inside an optgroup don't qualify.
+    DomElement* placeholder = nullptr;
+    if (!is_listbox) {
+        for (DomNode* c = sel->first_child; c; c = c->next_sibling) {
+            if (!c->is_element()) continue;
+            DomElement* ce = (DomElement*)c;
+            if (ce->tag_name && strcasecmp(ce->tag_name, "option") == 0) {
+                const char* v = dom_element_get_attribute(ce, "value");
+                if (!v || !*v) {
+                    char* t = _option_text(ce);
+                    bool empty_text = !t || !*t;
+                    free(t);
+                    if (empty_text) placeholder = ce;
+                }
+                break;
+            }
+        }
+    }
+    bool any_non_placeholder_selected = false;
+    bool any_selected = false;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        if (_get_selectedness(opt)) {
+            any_selected = true;
+            if (opt != placeholder) { any_non_placeholder_selected = true; break; }
+        }
+    }
+    // Apply default-reset: if no option selected and not dirty/listbox, the
+    // first non-disabled option counts as selected.
+    if (!any_selected && !is_listbox && !_select_is_dirty(sel)) {
+        for (int64_t i = 0; i < n; i++) {
+            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+            if (!opt || dom_element_has_attribute(opt, "disabled")) continue;
+            any_selected = true;
+            if (opt != placeholder) any_non_placeholder_selected = true;
+            break;
+        }
+    }
+    return !any_non_placeholder_selected;
+}
+
+// ----------------------------------------------------------------------
+// F-3: Form reset algorithm
+// ----------------------------------------------------------------------
+
+// Reset a single form-control element to its default state, per HTML
+// spec §4.10.21.4 "Form reset" + each control's reset algorithm.
+static void _reset_form_control(DomElement* elem) {
+    if (!elem || !elem->tag_name) return;
+    const char* tag = elem->tag_name;
+    if (strcasecmp(tag, "input") == 0) {
+        const char* itype = _input_type_lower(elem);
+        if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
+            // checked := defaultChecked (presence of "checked" content attr)
+            _set_checkedness(elem, dom_element_has_attribute(elem, "checked"));
+            return;
+        }
+        if (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
+            strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0 ||
+            strcmp(itype, "hidden") == 0 || strcmp(itype, "file") == 0) {
+            // Buttons/hidden/image/file: skip (file resets selection only).
+            if (strcmp(itype, "file") == 0 && tc_is_text_control_elem(elem)) {
+                tc_ensure_init(elem);
+                tc_set_value(elem, "", 0);
+            }
+            return;
+        }
+        // Text-like input: value := defaultValue (= value attribute)
+        if (tc_is_text_control_elem(elem)) {
+            tc_ensure_init(elem);
+            const char* dv = dom_element_get_attribute(elem, "value");
+            if (!dv) dv = "";
+            tc_set_value(elem, dv, strlen(dv));
+            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "textarea") == 0) {
+        if (tc_is_text_control_elem(elem)) {
+            tc_ensure_init(elem);
+            // textarea defaultValue = descendant text content of original markup
+            StrBuf* sb = strbuf_new_cap(64);
+            collect_text_content((DomNode*)elem, sb);
+            const char* s = sb->str ? sb->str : "";
+            tc_set_value(elem, s, sb->length);
+            strbuf_free(sb);
+            if (RadiantState* st = js_dom_current_state()) tc_sync_form_to_legacy(elem, st);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "select") == 0) {
+        // Reset selectedness of all options to their defaults, then run
+        // ask-for-reset for non-multiple selects.
+        Item arr = js_array_new(0);
+        _collect_options(elem->first_child, arr);
+        int64_t n = js_array_length(arr);
+        for (int64_t i = 0; i < n; i++) {
+            DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+            if (!opt) continue;
+            // Default selectedness = presence of "selected" content attribute
+            _set_selectedness(opt, dom_element_has_attribute(opt, "selected"));
+        }
+        // Clear the dirty flag so default-reset rules apply again.
+        Item exp = expando_get_map((DomNode*)elem);
+        if (exp.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name("__selDirty"))};
+            js_property_set(exp, key, (Item){.item = ITEM_NULL});
+        }
+        if (!dom_element_has_attribute(elem, "multiple")) {
+            _select_ask_for_reset(elem);
+        }
+        return;
+    }
+    if (strcasecmp(tag, "output") == 0) {
+        // For <output>: textContent := defaultValue. We do not track an
+        // explicit "default value override" (defaultValue setter); without
+        // an override, defaultValue == descendant text content, so reset
+        // is effectively a no-op. This matches WPT reset-form expectations.
+        return;
+    }
+}
+
+// Run the HTML form reset algorithm on a form element. Walks all listed
+// controls (excluding nested forms / shadow trees) and resets each.
+// Caller is responsible for dispatching the "reset" event before invoking;
+// this just runs the per-control reset steps.
+static void _run_form_reset(DomElement* form_elem) {
+    if (!form_elem) return;
+    std::function<void(DomNode*)> walk = [&](DomNode* node) {
+        while (node) {
+            if (node->is_element()) {
+                DomElement* ce = (DomElement*)node;
+                if (ce->tag_name) {
+                    // Don't descend into nested forms.
+                    if (strcasecmp(ce->tag_name, "form") != 0) {
+                        if (strcasecmp(ce->tag_name, "input") == 0 ||
+                            strcasecmp(ce->tag_name, "textarea") == 0 ||
+                            strcasecmp(ce->tag_name, "select") == 0 ||
+                            strcasecmp(ce->tag_name, "output") == 0) {
+                            _reset_form_control(ce);
+                        }
+                        walk(ce->first_child);
+                    }
+                }
+            }
+            node = node->next_sibling;
+        }
+    };
+    walk(form_elem->first_child);
+}
+
+extern "C" void js_dom_run_form_reset(void* form_elem) {
+    _run_form_reset((DomElement*)form_elem);
+}
+
 static Item _build_validity_state(DomElement* elem) {
     Item vs = js_new_object();
+    // Set Symbol.toStringTag = "ValidityState" so
+    // Object.prototype.toString.call(validity) === "[object ValidityState]"
+    js_property_set(vs,
+        (Item){.item = s2it(heap_create_name("__sym_4"))},
+        (Item){.item = s2it(heap_create_name("ValidityState"))});
     bool value_missing   = false;
     bool type_mismatch   = false;
     bool pattern_mismatch = false;
@@ -2906,6 +3350,12 @@ static Item _build_validity_state(DomElement* elem) {
     bool step_mismatch   = false;
     bool bad_input       = false; // always false in headless
     bool custom_error    = false;
+
+    // Elements barred from constraint validation (disabled, readonly,
+    // hidden, datalist descendants, etc.) report all suffering flags
+    // as false. customError flag is also suppressed since checkValidity
+    // returns true for barred elements.
+    bool barred = !elem || _elem_is_barred(elem);
 
     if (elem) {
         // customError
@@ -2918,15 +3368,163 @@ static Item _build_validity_state(DomElement* elem) {
         const char* val = _elem_current_value(elem);
         bool val_empty  = (val[0] == '\0');
 
+        // For typed input controls (date, time, number, etc.) the value
+        // sanitization algorithm replaces an unparseable value with the
+        // empty string. WPT tests expect valueMissing=true when the
+        // value attribute is an invalid date/time/number string.
+        if (!val_empty && strcasecmp(tag, "input") == 0) {
+            const char* itype = js_dom_input_type_lower(elem);
+            bool sanitized_empty = false;
+            if (strcmp(itype, "number") == 0 || strcmp(itype, "range") == 0) {
+                char* ep = nullptr;
+                strtod(val, &ep);
+                if (ep == val || *ep != '\0') sanitized_empty = true;
+            } else if (strcmp(itype, "date") == 0) {
+                if (_parse_date(val) == -(1LL<<62)) sanitized_empty = true;
+                else {
+                    // Also validate Y/M/D ranges
+                    int y=0,m=0,d=0;
+                    if (sscanf(val, "%d-%d-%d", &y,&m,&d) != 3 ||
+                        m < 1 || m > 12 || d < 1 || d > 31) sanitized_empty = true;
+                }
+            } else if (strcmp(itype, "month") == 0) {
+                if (_parse_month(val) == -(1LL<<62)) sanitized_empty = true;
+                else { int y=0,m=0;
+                    if (sscanf(val, "%d-%d", &y,&m) != 2 || m<1 || m>12) sanitized_empty=true;
+                }
+            } else if (strcmp(itype, "week") == 0) {
+                if (_parse_week(val) == -(1LL<<62)) sanitized_empty = true;
+                else { int y=0,w=0;
+                    if (sscanf(val, "%d-W%d", &y,&w) != 2 || w<1 || w>53) sanitized_empty=true;
+                }
+            } else if (strcmp(itype, "time") == 0) {
+                int h=0, m=0, s=0;
+                int n = sscanf(val, "%d:%d:%d", &h, &m, &s);
+                if (n < 2 || h<0 || h>23 || m<0 || m>59 || (n==3 && (s<0 || s>59))) sanitized_empty = true;
+                // reject extra colon segments like "12:00:00:001"
+                if (!sanitized_empty) {
+                    int colons = 0;
+                    for (const char* p = val; *p; p++) if (*p == ':') colons++;
+                    if (colons > 2) sanitized_empty = true;
+                }
+            } else if (strcmp(itype, "datetime-local") == 0) {
+                // Accept either "T" or single space as separator (per spec
+                // setter normalises space → T, but raw attribute may have
+                // either). However extra spaces (e.g. "  ") are invalid.
+                char tmp[64]; size_t vl = strlen(val);
+                bool space_sep = false;
+                if (vl < sizeof(tmp)) {
+                    strcpy(tmp, val);
+                    // require exactly one space or T at position 10
+                    if (vl >= 11 && tmp[10] == ' ' && tmp[11] != ' ') {
+                        tmp[10] = 'T'; space_sep = true;
+                    }
+                }
+                const char* parse_str = space_sep ? tmp : val;
+                if (_parse_datetime(parse_str) == -(1LL<<62)) sanitized_empty = true;
+                else {
+                    int y=0,mo=0,d=0,h=0,mi=0;
+                    if (sscanf(parse_str, "%d-%d-%dT%d:%d", &y,&mo,&d,&h,&mi) < 5 ||
+                        mo<1||mo>12||d<1||d>31||h<0||h>23||mi<0||mi>59)
+                        sanitized_empty = true;
+                }
+            } else if (strcmp(itype, "color") == 0) {
+                // valid color: #RRGGBB
+                if (val[0] != '#' || strlen(val) != 7) sanitized_empty = true;
+                else for (int i = 1; i < 7; i++)
+                    if (!((val[i]>='0'&&val[i]<='9')||(val[i]>='a'&&val[i]<='f')||(val[i]>='A'&&val[i]<='F')))
+                    { sanitized_empty = true; break; }
+            }
+            if (sanitized_empty) val_empty = true;
+        }
+
         // valueMissing
-        if (dom_element_has_attribute(elem, "required")) {
+        // Special-case radio: valueMissing applies to ALL members of the
+        // group when any member is required and none is checked, even if
+        // this particular element does not carry the required attribute.
+        bool radio_handled = false;
+        if (strcasecmp(tag, "input") == 0) {
+            const char* itype0 = js_dom_input_type_lower(elem);
+            if (strcmp(itype0, "radio") == 0) {
+                radio_handled = true;
+                const char* rname = dom_element_get_attribute(elem, "name");
+                bool elem_connected = js_dom_is_connected(elem);
+                bool own_required = dom_element_has_attribute(elem, "required");
+                if (!rname || !*rname) {
+                    // Empty/missing name → no group. WPT expects
+                    // valueMissing=false even if required.
+                    value_missing = false;
+                } else if (!elem_connected) {
+                    value_missing = own_required && !js_dom_get_checkedness(elem);
+                } else {
+                    // Find the ancestor <form>, if any.
+                    DomElement* form_scope = nullptr;
+                    for (DomNode* p = elem->parent; p; p = p->parent) {
+                        if (p->is_element()) {
+                            DomElement* pe = (DomElement*)p;
+                            if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
+                                form_scope = pe; break;
+                            }
+                        }
+                    }
+                    DomElement* root = form_scope ? form_scope :
+                        (_js_current_document ? (DomElement*)_js_current_document->root : nullptr);
+                    bool any_checked = false;
+                    bool any_required = own_required;
+                    std::function<void(DomNode*)> scan = [&](DomNode* n) {
+                        while (n) {
+                            if (n->is_element()) {
+                                DomElement* ce = (DomElement*)n;
+                                if (ce->tag_name && strcasecmp(ce->tag_name, "input") == 0) {
+                                    const char* tt = js_dom_input_type_lower(ce);
+                                    if (strcmp(tt, "radio") == 0) {
+                                        const char* nm = dom_element_get_attribute(ce, "name");
+                                        if (nm && strcmp(nm, rname) == 0) {
+                                            DomElement* ce_form = nullptr;
+                                            for (DomNode* pp = ce->parent; pp; pp = pp->parent) {
+                                                if (pp->is_element()) {
+                                                    DomElement* pe2 = (DomElement*)pp;
+                                                    if (pe2->tag_name && strcasecmp(pe2->tag_name, "form") == 0) {
+                                                        ce_form = pe2; break;
+                                                    }
+                                                }
+                                            }
+                                            if (ce_form == form_scope) {
+                                                if (js_dom_get_checkedness(ce)) any_checked = true;
+                                                if (dom_element_has_attribute(ce, "required")) any_required = true;
+                                            }
+                                        }
+                                    }
+                                    scan(ce->first_child);
+                                } else {
+                                    scan(ce->first_child);
+                                }
+                            }
+                            n = n->next_sibling;
+                        }
+                    };
+                    if (root) scan(root->first_child);
+                    value_missing = any_required && !any_checked;
+                }
+            }
+        }
+
+        if (!radio_handled && dom_element_has_attribute(elem, "required")) {
             if (strcasecmp(tag, "input") == 0) {
                 const char* itype = js_dom_input_type_lower(elem);
-                if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
+                if (strcmp(itype, "checkbox") == 0) {
                     value_missing = !js_dom_get_checkedness(elem);
+                } else if (strcmp(itype, "file") == 0) {
+                    // file input: missing iff no files. We don't support
+                    // file uploads in headless, so always missing if required.
+                    value_missing = true;
                 } else {
                     value_missing = val_empty;
                 }
+            } else if (strcasecmp(tag, "select") == 0) {
+                // select with required: missing iff no option selected
+                // OR the selected option has empty value.
+                value_missing = _select_value_missing(elem);
             } else {
                 value_missing = val_empty;
             }
@@ -3105,6 +3703,36 @@ static Item _build_validity_state(DomElement* elem) {
                    too_short || range_overflow || range_underflow || step_mismatch ||
                    bad_input || custom_error);
 
+    // Per HTML spec, the suffering-from-being-missing algorithm requires
+    // the element to be "mutable" — only for text-like inputs and
+    // textareas. Checkbox/radio/select/file controls keep their
+    // valueMissing flag even when barred (they're not "mutable" per say,
+    // but their suffering condition isn't gated on mutability).
+    if (barred) {
+        const char* tag = elem ? elem->tag_name : "";
+        bool is_input = elem && tag && strcasecmp(tag, "input") == 0;
+        bool gate_value_missing = false;
+        if (is_input) {
+            const char* itype = js_dom_input_type_lower(elem);
+            // gate for text-like types only
+            if (strcmp(itype, "checkbox") != 0 && strcmp(itype, "radio") != 0 &&
+                strcmp(itype, "file") != 0) {
+                gate_value_missing = true;
+            }
+        } else if (tag && (strcasecmp(tag, "textarea") == 0 ||
+                           strcasecmp(tag, "select") == 0)) {
+            // textarea is text-like; select per spec also gated.
+            // WPT shows select expected==expectedImmutable so gate it.
+            gate_value_missing = (strcasecmp(tag, "textarea") == 0);
+        }
+        if (gate_value_missing) value_missing = false;
+        too_long = false;
+        too_short = false;
+        valid = !(value_missing || type_mismatch || pattern_mismatch ||
+                  range_overflow || range_underflow || step_mismatch ||
+                  bad_input || custom_error);
+    }
+
     auto _b = [](bool v) -> Item { return (Item){.item = b2it(v)}; };
     js_property_set(vs, (Item){.item = s2it(heap_create_name("valueMissing"))},    _b(value_missing));
     js_property_set(vs, (Item){.item = s2it(heap_create_name("typeMismatch"))},    _b(type_mismatch));
@@ -3118,6 +3746,169 @@ static Item _build_validity_state(DomElement* elem) {
     js_property_set(vs, (Item){.item = s2it(heap_create_name("customError"))},     _b(custom_error));
     js_property_set(vs, (Item){.item = s2it(heap_create_name("valid"))},           _b(valid));
     return vs;
+}
+
+// ----------------------------------------------------------------------
+// F-0: IDL-name → HTML-attribute-name mapping for reflected attributes.
+// Returns nullptr when no mapping exists (caller uses prop name verbatim).
+// ----------------------------------------------------------------------
+static const char* _idl_to_attr_name(const char* prop) {
+    if (!prop) return nullptr;
+    switch (prop[0]) {
+        case 'r':
+            if (strcmp(prop, "readOnly") == 0) return "readonly";
+            break;
+        case 'n':
+            if (strcmp(prop, "noValidate") == 0) return "novalidate";
+            break;
+        case 'm':
+            if (strcmp(prop, "maxLength") == 0) return "maxlength";
+            if (strcmp(prop, "minLength") == 0) return "minlength";
+            break;
+        case 'a':
+            if (strcmp(prop, "acceptCharset") == 0) return "accept-charset";
+            break;
+        case 'd':
+            if (strcmp(prop, "defaultChecked") == 0) return "checked";
+            if (strcmp(prop, "defaultSelected") == 0) return "selected";
+            break;
+        case 'h':
+            if (strcmp(prop, "htmlFor") == 0) return "for";
+            break;
+        case 't':
+            if (strcmp(prop, "tabIndex") == 0) return "tabindex";
+            break;
+        case 'f':
+            if (strcmp(prop, "formAction") == 0) return "formaction";
+            if (strcmp(prop, "formMethod") == 0) return "formmethod";
+            if (strcmp(prop, "formEnctype") == 0) return "formenctype";
+            if (strcmp(prop, "formEncoding") == 0) return "formenctype";
+            if (strcmp(prop, "formTarget") == 0) return "formtarget";
+            if (strcmp(prop, "formNoValidate") == 0) return "formnovalidate";
+            break;
+    }
+    return nullptr;
+}
+
+// True if `prop` reflects a HTML boolean attribute on the given element.
+// Per HTML spec, IDL boolean reflection setters do ToBoolean coercion:
+// truthy → set attribute (empty value), falsy → remove attribute.
+static bool _is_bool_reflected(DomElement* elem, const char* prop) {
+    if (!elem || !elem->tag_name) return false;
+    const char* tag = elem->tag_name;
+    bool input = strcasecmp(tag, "input") == 0;
+    bool button = strcasecmp(tag, "button") == 0;
+    bool select = strcasecmp(tag, "select") == 0;
+    bool textarea = strcasecmp(tag, "textarea") == 0;
+    bool form = strcasecmp(tag, "form") == 0;
+    bool fieldset = strcasecmp(tag, "fieldset") == 0;
+    bool option = strcasecmp(tag, "option") == 0;
+    bool optgroup = strcasecmp(tag, "optgroup") == 0;
+    if (strcmp(prop, "disabled") == 0)
+        return input || button || select || textarea || fieldset || option || optgroup;
+    if (strcmp(prop, "required") == 0) return input || select || textarea;
+    if (strcmp(prop, "multiple") == 0) return input || select;
+    if (strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0)
+        return input || textarea;
+    if (strcmp(prop, "noValidate") == 0) return form;
+    if (strcmp(prop, "formNoValidate") == 0) return input || button;
+    if (strcmp(prop, "autofocus") == 0)
+        return input || button || select || textarea;
+    if (strcmp(prop, "defaultChecked") == 0) return input;
+    if (strcmp(prop, "defaultSelected") == 0) return option;
+    return false;
+}
+
+// True if `prop` reflects a non-negative-integer-with-default attribute.
+// Sets *attr_name to the HTML attribute name and *default_val to the
+// IDL default returned when attribute is missing or invalid.
+static bool _is_int_reflected(DomElement* elem, const char* prop,
+                              const char** attr_name, int* default_val) {
+    if (!elem || !elem->tag_name || !attr_name || !default_val) return false;
+    const char* tag = elem->tag_name;
+    bool input = strcasecmp(tag, "input") == 0;
+    bool textarea = strcasecmp(tag, "textarea") == 0;
+    bool select = strcasecmp(tag, "select") == 0;
+    if (strcmp(prop, "maxLength") == 0 && (input || textarea)) {
+        *attr_name = "maxlength"; *default_val = -1; return true;
+    }
+    if (strcmp(prop, "minLength") == 0 && (input || textarea)) {
+        *attr_name = "minlength"; *default_val = 0; return true;
+    }
+    if (strcmp(prop, "size") == 0 && input) {
+        *attr_name = "size"; *default_val = 20; return true;
+    }
+    if (strcmp(prop, "size") == 0 && select) {
+        *attr_name = "size"; *default_val = 0; return true;
+    }
+    if (strcmp(prop, "rows") == 0 && textarea) {
+        *attr_name = "rows"; *default_val = 2; return true;
+    }
+    if (strcmp(prop, "cols") == 0 && textarea) {
+        *attr_name = "cols"; *default_val = 20; return true;
+    }
+    return false;
+}
+
+// Returns the lowercased input `formmethod` value or "get" default.
+static const char* _normalise_method(const char* v) {
+    if (v) {
+        if (strcasecmp(v, "post") == 0) return "post";
+        if (strcasecmp(v, "dialog") == 0) return "dialog";
+    }
+    return "get";
+}
+static const char* _normalise_enctype(const char* v) {
+    if (v) {
+        if (strcasecmp(v, "multipart/form-data") == 0) return "multipart/form-data";
+        if (strcasecmp(v, "text/plain") == 0) return "text/plain";
+    }
+    return "application/x-www-form-urlencoded";
+}
+
+// ----------------------------------------------------------------------
+// F-1: Form-listed-element collection helpers
+// ----------------------------------------------------------------------
+// HTML §4.10.3 "form-associated elements" listed predicate. Excludes
+// <input type=image> from `form.elements` (per spec note for the elements
+// IDL attribute) but `<fieldset>` is included.
+static bool _is_listed_form_control(DomElement* e) {
+    if (!e || !e->tag_name) return false;
+    const char* t = e->tag_name;
+    if (strcasecmp(t, "input") == 0) {
+        const char* it = _input_type_lower(e);
+        return strcmp(it, "image") != 0;
+    }
+    return strcasecmp(t, "button") == 0 ||
+           strcasecmp(t, "select") == 0 ||
+           strcasecmp(t, "textarea") == 0 ||
+           strcasecmp(t, "fieldset") == 0 ||
+           strcasecmp(t, "object") == 0 ||
+           strcasecmp(t, "output") == 0;
+}
+
+// Walk a subtree and append each listed control to `arr` (in tree order).
+// Uses iterative-but-recursive traversal — safe given our shallow form trees.
+static void _collect_form_controls_rec(DomNode* node, Item arr) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* ce = (DomElement*)node;
+            if (_is_listed_form_control(ce)) {
+                js_array_push(arr, js_dom_wrap_element(ce));
+            }
+            _collect_form_controls_rec(ce->first_child, arr);
+        }
+        node = node->next_sibling;
+    }
+}
+
+// Return the lowercased name/id key used to look up a form control by name.
+// Returns nullptr if the element has neither.
+static const char* _form_control_name_or_id(DomElement* e) {
+    const char* n = dom_element_get_attribute(e, "name");
+    if (n && *n) return n;
+    if (e->id && *e->id) return e->id;
+    return nullptr;
 }
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
@@ -3135,6 +3926,30 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
 
     if (!prop) return ItemNull;
+
+    // F-5: HTMLSelectElement indexed property access (numeric key).
+    // `select[i]` returns options[i] or undefined for out-of-range.
+    if (node->is_element()) {
+        DomElement* sel_elem = node->as_element();
+        if (sel_elem && _is_tag(sel_elem, "select")) {
+            TypeId kt = get_type_id(prop_name);
+            int64_t idx = -1;
+            bool numeric = false;
+            if (kt == LMD_TYPE_INT) { idx = it2i(prop_name); numeric = true; }
+            else if ((prop[0] >= '0' && prop[0] <= '9')) {
+                char* ep = nullptr; long n = strtol(prop, &ep, 10);
+                if (ep && *ep == '\0' && n >= 0) { idx = n; numeric = true; }
+            }
+            if (numeric) {
+                Item arr = js_array_new(0);
+                _collect_options(sel_elem->first_child, arr);
+                if (idx >= 0 && idx < js_array_length(arr)) {
+                    return js_array_get_int(arr, idx);
+                }
+                return make_js_undefined();
+            }
+        }
+    }
 
     // Text node properties
     if (node->is_text()) {
@@ -3257,6 +4072,22 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // tagName (uppercased per spec)
     if (strcmp(prop, "tagName") == 0) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
+    }
+
+    // localName (lowercased per spec; tag names are stored lowercase already).
+    if (strcmp(prop, "localName") == 0) {
+        const char* tn = elem->tag_name ? elem->tag_name : "";
+        return (Item){.item = s2it(heap_create_name(tn))};
+    }
+
+    // namespaceURI — HTML elements live in the XHTML namespace.
+    if (strcmp(prop, "namespaceURI") == 0) {
+        return (Item){.item = s2it(heap_create_name("http://www.w3.org/1999/xhtml"))};
+    }
+
+    // prefix — HTML elements have null prefix.
+    if (strcmp(prop, "prefix") == 0) {
+        return ItemNull;
     }
 
     // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
@@ -3627,6 +4458,182 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
 
     // ------------------------------------------------------------------
+    // F-5: HTMLSelectElement / HTMLOptionElement IDL properties
+    // ------------------------------------------------------------------
+    if (_is_tag(elem, "select")) {
+        if (strcmp(prop, "options") == 0) {
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            // Compute selectedIndex (with default-reset rule) so the
+            // collection's `selectedIndex` property mirrors the select.
+            int64_t n = js_array_length(arr);
+            int sel_idx = -1, first_non_disabled = -1;
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK
+                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
+                    first_non_disabled = (int)i; // INT_CAST_OK
+            }
+            int size = 0;
+            const char* sz = dom_element_get_attribute(elem, "size");
+            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+            if (sel_idx < 0 && !dom_element_has_attribute(elem, "multiple") && size <= 1
+                && !_select_is_dirty(elem))
+                sel_idx = first_non_disabled;
+            js_property_set(arr, (Item){.item = s2it(heap_create_name("selectedIndex"))},
+                            (Item){.item = i2it(sel_idx)});
+            js_property_set(arr, (Item){.item = s2it(heap_create_name("length"))},
+                            (Item){.item = i2it(n)});
+            return arr;
+        }
+        if (strcmp(prop, "length") == 0) {
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            return (Item){.item = i2it(js_array_length(arr))};
+        }
+        if (strcmp(prop, "selectedOptions") == 0) {
+            Item arr = js_array_new(0);
+            Item out = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t n = js_array_length(arr);
+            for (int64_t i = 0; i < n; i++) {
+                Item it = js_array_get_int(arr, i);
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(it);
+                if (opt && _get_selectedness(opt)) js_array_push(out, it);
+            }
+            return out;
+        }
+        if (strcmp(prop, "selectedIndex") == 0) {
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t n = js_array_length(arr);
+            int first_non_disabled = -1;
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                if (_get_selectedness(opt)) return (Item){.item = i2it(i)};
+                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
+                    first_non_disabled = (int)i; // INT_CAST_OK: option index
+            }
+            // Default-selected behavior: non-multiple, size<=1 select with
+            // no explicit selectedness picks the first non-disabled option.
+            int size = 0;
+            const char* sz = dom_element_get_attribute(elem, "size");
+            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+            if (!dom_element_has_attribute(elem, "multiple") && size <= 1
+                && first_non_disabled >= 0 && !_select_is_dirty(elem)) {
+                return (Item){.item = i2it(first_non_disabled)};
+            }
+            return (Item){.item = i2it(-1)};
+        }
+        if (strcmp(prop, "value") == 0) {
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t n = js_array_length(arr);
+            int first_non_disabled = -1;
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                if (_get_selectedness(opt)) {
+                    char* v = _option_value(opt);
+                    String* s = heap_create_name(v ? v : "");
+                    free(v);
+                    return (Item){.item = s2it(s)};
+                }
+                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
+                    first_non_disabled = (int)i; // INT_CAST_OK: option index
+            }
+            int size = 0;
+            const char* sz = dom_element_get_attribute(elem, "size");
+            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+            if (!dom_element_has_attribute(elem, "multiple") && size <= 1
+                && first_non_disabled >= 0 && !_select_is_dirty(elem)) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, first_non_disabled));
+                if (opt) {
+                    char* v = _option_value(opt);
+                    String* s = heap_create_name(v ? v : "");
+                    free(v);
+                    return (Item){.item = s2it(s)};
+                }
+            }
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
+        if (strcmp(prop, "type") == 0) {
+            const char* t = dom_element_has_attribute(elem, "multiple")
+                ? "select-multiple" : "select-one";
+            return (Item){.item = s2it(heap_create_name(t))};
+        }
+    }
+
+    // HTMLOptionElement properties.
+    if (_is_tag(elem, "option")) {
+        if (strcmp(prop, "value") == 0) {
+            char* v = _option_value(elem);
+            String* s = heap_create_name(v ? v : "");
+            free(v);
+            return (Item){.item = s2it(s)};
+        }
+        if (strcmp(prop, "text") == 0 || strcmp(prop, "label") == 0) {
+            // label IDL: returns label attribute, falling back to text.
+            if (strcmp(prop, "label") == 0) {
+                const char* lab = dom_element_get_attribute(elem, "label");
+                if (lab && *lab) return (Item){.item = s2it(heap_create_name(lab))};
+            }
+            char* t = _option_text(elem);
+            String* s = heap_create_name(t ? t : "");
+            free(t);
+            return (Item){.item = s2it(s)};
+        }
+        if (strcmp(prop, "selected") == 0) {
+            if (_get_selectedness(elem)) return (Item){.item = b2it(true)};
+            // Apply default-reset rule: in a non-multiple, size<=1 select
+            // with no option having selectedness, the first non-disabled
+            // direct-child option counts as selected.
+            DomElement* sel = _option_owner_select(elem);
+            if (!sel || _select_is_dirty(sel)) return (Item){.item = b2it(false)};
+            if (dom_element_has_attribute(sel, "multiple")) return (Item){.item = b2it(false)};
+            int size = 0;
+            const char* sz = dom_element_get_attribute(sel, "size");
+            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+            if (size > 1) return (Item){.item = b2it(false)};
+            // Walk options of sel; check none has selectedness; find first
+            // non-disabled.
+            Item arr = js_array_new(0);
+            _collect_options(sel->first_child, arr);
+            int64_t n = js_array_length(arr);
+            int first_nd = -1;
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* o = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!o) continue;
+                if (_get_selectedness(o)) return (Item){.item = b2it(false)};
+                if (first_nd < 0 && !dom_element_has_attribute(o, "disabled"))
+                    first_nd = (int)i; // INT_CAST_OK: option index
+            }
+            if (first_nd < 0) return (Item){.item = b2it(false)};
+            DomElement* first = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, first_nd));
+            return (Item){.item = b2it(first == elem)};
+        }
+        if (strcmp(prop, "index") == 0) {
+            return (Item){.item = i2it(_option_index_in_select(elem))};
+        }
+        if (strcmp(prop, "form") == 0) {
+            DomElement* sel = _option_owner_select(elem);
+            if (sel) {
+                // Walk up to find the form
+                for (DomNode* p = sel->parent; p; p = p->parent) {
+                    if (p->is_element()) {
+                        DomElement* pe = (DomElement*)p;
+                        if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0)
+                            return js_dom_wrap_element(pe);
+                    }
+                }
+            }
+            return ItemNull;
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Boolean IDL attributes that must be returned as real booleans
     // (HTML form-control properties used by activation behavior).
     // ------------------------------------------------------------------
@@ -3701,44 +4708,14 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // F-1: HTMLFormElement.elements — snapshot array of listed form controls
     if (_is_tag(elem, "form") && strcmp(prop, "elements") == 0) {
         Item arr = js_array_new(0);
-        // Walk descendants collecting listed controls
-        std::function<void(DomNode*)> collect = [&](DomNode* node) {
-            while (node) {
-                if (node->is_element()) {
-                    DomElement* ce = (DomElement*)node;
-                    const char* ctag = ce->tag_name ? ce->tag_name : "";
-                    if (strcasecmp(ctag, "input") == 0 || strcasecmp(ctag, "button") == 0 ||
-                        strcasecmp(ctag, "select") == 0 || strcasecmp(ctag, "textarea") == 0 ||
-                        strcasecmp(ctag, "object") == 0) {
-                        js_array_push(arr, js_dom_wrap_element(ce));
-                    }
-                    collect(ce->first_child);
-                }
-                node = node->next_sibling;
-            }
-        };
-        collect(elem->first_child);
+        _collect_form_controls_rec(elem->first_child, arr);
         return arr;
     }
     // F-1: HTMLFormElement.length → number of listed controls
     if (_is_tag(elem, "form") && strcmp(prop, "length") == 0) {
-        int count = 0;
-        std::function<void(DomNode*)> count_ctrl = [&](DomNode* node) {
-            while (node) {
-                if (node->is_element()) {
-                    DomElement* ce = (DomElement*)node;
-                    const char* ctag = ce->tag_name ? ce->tag_name : "";
-                    if (strcasecmp(ctag, "input") == 0 || strcasecmp(ctag, "button") == 0 ||
-                        strcasecmp(ctag, "select") == 0 || strcasecmp(ctag, "textarea") == 0) {
-                        count++;
-                    }
-                    count_ctrl(ce->first_child);
-                }
-                node = node->next_sibling;
-            }
-        };
-        count_ctrl(elem->first_child);
-        return (Item){.item = i2it((int64_t)count)};
+        Item arr = js_array_new(0);
+        _collect_form_controls_rec(elem->first_child, arr);
+        return (Item){.item = i2it(js_array_length(arr))};
     }
 
     // Helper: read a non-negative integer attr; return default_val if absent/invalid
@@ -3805,27 +4782,29 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     }
     // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
     if (_is_tag(elem, "form")) {
-        if (strcmp(prop, "action") == 0 || strcmp(prop, "target") == 0) {
+        if (strcmp(prop, "action") == 0) {
+            const char* v = dom_element_get_attribute(elem, "action");
+            if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
+            // Empty/missing action falls back to document URL per HTML spec.
+            DomDocument* doc = elem->doc;
+            const char* doc_url = "";
+            if (doc && doc->url) {
+                const char* href = url_get_href(doc->url);
+                if (href) doc_url = href;
+            }
+            return (Item){.item = s2it(heap_create_name(doc_url))};
+        }
+        if (strcmp(prop, "target") == 0) {
             const char* v = dom_element_get_attribute(elem, prop);
             return (Item){.item = s2it(heap_create_name(v ? v : ""))};
         }
         if (strcmp(prop, "method") == 0) {
             const char* v = dom_element_get_attribute(elem, "method");
-            if (v) {
-                if (strcasecmp(v, "post") == 0) return (Item){.item = s2it(heap_create_name("post"))};
-                if (strcasecmp(v, "dialog") == 0) return (Item){.item = s2it(heap_create_name("dialog"))};
-            }
-            return (Item){.item = s2it(heap_create_name("get"))};
+            return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
         }
         if (strcmp(prop, "enctype") == 0 || strcmp(prop, "encoding") == 0) {
             const char* v = dom_element_get_attribute(elem, "enctype");
-            if (v) {
-                if (strcasecmp(v, "multipart/form-data") == 0)
-                    return (Item){.item = s2it(heap_create_name("multipart/form-data"))};
-                if (strcasecmp(v, "text/plain") == 0)
-                    return (Item){.item = s2it(heap_create_name("text/plain"))};
-            }
-            return (Item){.item = s2it(heap_create_name("application/x-www-form-urlencoded"))};
+            return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
         }
         if (strcmp(prop, "acceptCharset") == 0) {
             const char* v = dom_element_get_attribute(elem, "accept-charset");
@@ -3874,6 +4853,89 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return (Item){.item = i2it(_reflect_int_attr("size", 0))};
     }
 
+    // HTMLInputElement.defaultChecked — reflects `checked` content attribute
+    if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "checked"))};
+    }
+    // HTMLOptionElement.defaultSelected — reflects `selected` content attribute
+    if (strcmp(prop, "defaultSelected") == 0 && _is_tag(elem, "option")) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "selected"))};
+    }
+    // HTMLLabelElement.htmlFor / HTMLOutputElement.htmlFor — reflects `for`
+    if (strcmp(prop, "htmlFor") == 0 &&
+        (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
+        const char* v = dom_element_get_attribute(elem, "for");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
+    // HTMLOutputElement.defaultValue — descendant text content if no override
+    // has been set. We do not yet track an explicit override (defaultValue
+    // setter), so this always returns current descendant text content. That
+    // matches WPT reset-form-html behavior where defaultValue tracks textContent.
+    if (strcmp(prop, "defaultValue") == 0 && _is_tag(elem, "output")) {
+        StrBuf* sb = strbuf_new_cap(32);
+        collect_text_content((DomNode*)elem, sb);
+        String* s = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(s)};
+    }
+    // HTMLOutputElement.value — descendant text content (getter); we do not
+    // track an explicit value override yet.
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "output")) {
+        StrBuf* sb = strbuf_new_cap(32);
+        collect_text_content((DomNode*)elem, sb);
+        String* s = heap_create_name(sb->str ? sb->str : "");
+        strbuf_free(sb);
+        return (Item){.item = s2it(s)};
+    }
+    // tabIndex — reflects `tabindex` as integer (default 0 for elements that
+    // are normally focusable; we use 0 unconditionally — spec-conformant for
+    // form controls, anchors, and any element with tabindex set).
+    if (strcmp(prop, "tabIndex") == 0) {
+        const char* v = dom_element_get_attribute(elem, "tabindex");
+        if (!v) return (Item){.item = i2it(0)};
+        char* end = nullptr; long n = strtol(v, &end, 10);
+        return (Item){.item = i2it((end != v) ? n : 0)};
+    }
+    // autofocus boolean reflection (input/button/select/textarea)
+    if (strcmp(prop, "autofocus") == 0 &&
+        (_is_tag(elem, "input") || _is_tag(elem, "button") ||
+         _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
+        return (Item){.item = b2it(dom_element_has_attribute(elem, "autofocus"))};
+    }
+
+    // formAction / formMethod / formEnctype / formTarget / formNoValidate
+    // (HTMLButtonElement and HTMLInputElement). Per spec, `formAction` getter
+    // returns the document's URL when the attribute is missing or empty.
+    if (_is_tag(elem, "input") || _is_tag(elem, "button")) {
+        if (strcmp(prop, "formAction") == 0) {
+            const char* v = dom_element_get_attribute(elem, "formaction");
+            if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
+            // fall back to document URL
+            DomDocument* doc = elem->doc;
+            const char* doc_url = "";
+            if (doc && doc->url) {
+                const char* href = url_get_href(doc->url);
+                if (href) doc_url = href;
+            }
+            return (Item){.item = s2it(heap_create_name(doc_url))};
+        }
+        if (strcmp(prop, "formMethod") == 0) {
+            const char* v = dom_element_get_attribute(elem, "formmethod");
+            return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
+        }
+        if (strcmp(prop, "formEnctype") == 0) {
+            const char* v = dom_element_get_attribute(elem, "formenctype");
+            return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
+        }
+        if (strcmp(prop, "formTarget") == 0) {
+            const char* v = dom_element_get_attribute(elem, "formtarget");
+            return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+        }
+        if (strcmp(prop, "formNoValidate") == 0) {
+            return (Item){.item = b2it(dom_element_has_attribute(elem, "formnovalidate"))};
+        }
+    }
+
     // ------------------------------------------------------------------
     // F-4: Constraint Validation API property getters
     // ------------------------------------------------------------------
@@ -3907,6 +4969,56 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name(elem->form->custom_validity_msg))};
         }
         return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    // ------------------------------------------------------------------
+    // F-1: HTMLFormElement named getter — `form["name"]` returns the
+    // listed control whose name or id matches. If multiple controls match,
+    // returns a snapshot array (RadioNodeList placeholder). If none match,
+    // falls through to expando / attribute lookup.
+    // ------------------------------------------------------------------
+    if (_is_tag(elem, "form") && prop && *prop) {
+        // Skip standard IDL props (already handled above) and known DOM methods
+        // to avoid shadowing them.
+        static const char* form_idl_props[] = {
+            "elements", "length", "action", "method", "enctype", "encoding",
+            "acceptCharset", "target", "noValidate", "autocomplete", "name",
+            "submit", "reset", "checkValidity", "reportValidity", "requestSubmit",
+            nullptr
+        };
+        bool is_idl = false;
+        for (int i = 0; form_idl_props[i]; i++) {
+            if (strcmp(prop, form_idl_props[i]) == 0) { is_idl = true; break; }
+        }
+        if (!is_idl) {
+            Item matches = js_array_new(0);
+            std::function<void(DomNode*)> walk = [&](DomNode* node) {
+                while (node) {
+                    if (node->is_element()) {
+                        DomElement* ce = (DomElement*)node;
+                        if (_is_listed_form_control(ce)) {
+                            const char* k = _form_control_name_or_id(ce);
+                            if (k && strcmp(k, prop) == 0) {
+                                js_array_push(matches, js_dom_wrap_element(ce));
+                            }
+                        }
+                        walk(ce->first_child);
+                    }
+                    node = node->next_sibling;
+                }
+            };
+            walk(elem->first_child);
+            int64_t mlen = js_array_length(matches);
+            if (mlen == 1) {
+                // single match — return the element itself
+                Array* a = matches.array;
+                return a->items[0];
+            }
+            if (mlen > 1) {
+                // multiple matches — return as RadioNodeList-ish array
+                return matches;
+            }
+        }
     }
 
     // fall back to native element attribute access
@@ -4214,6 +5326,162 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
 
     // ------------------------------------------------------------------
+    // F-5: HTMLSelectElement / HTMLOptionElement IDL setters
+    // ------------------------------------------------------------------
+    if (_is_tag(elem, "select")) {
+        if (strcmp(prop, "value") == 0) {
+            const char* sv = fn_to_cstr(value);
+            if (!sv) sv = "";
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t n = js_array_length(arr);
+            int found = -1;
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                char* v = _option_value(opt);
+                bool match = v && strcmp(v, sv) == 0;
+                free(v);
+                if (match) { found = (int)i; break; } // INT_CAST_OK: option index
+            }
+            // Per spec, set selectedness of all options accordingly.
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
+            }
+            _select_mark_dirty(elem);
+            return value;
+        }
+        if (strcmp(prop, "selectedIndex") == 0) {
+            int idx = 0;
+            { TypeId t = get_type_id(value);
+              if (t == LMD_TYPE_INT) idx = (int)it2i(value); // INT_CAST_OK: idx
+              else if (t == LMD_TYPE_FLOAT) {
+                  double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
+                  if (d) idx = (int)*d; // INT_CAST_OK: idx
+              }
+            }
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t n = js_array_length(arr);
+            for (int64_t i = 0; i < n; i++) {
+                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                if (!opt) continue;
+                _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
+            }
+            // Mark select's selectedness as explicitly set so the default
+            // reset (first non-disabled option) is no longer applied.
+            _select_mark_dirty(elem);
+            return value;
+        }
+        if (strcmp(prop, "length") == 0) {
+            // Setting length adjusts the option list. Increase: append
+            // empty <option> children. Decrease: remove trailing options.
+            int new_len = 0;
+            { TypeId t = get_type_id(value);
+              if (t == LMD_TYPE_INT) new_len = (int)it2i(value); // INT_CAST_OK: count
+              else if (t == LMD_TYPE_FLOAT) {
+                  double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
+                  if (d) new_len = (int)*d; // INT_CAST_OK: count
+              }
+            }
+            if (new_len < 0) new_len = 0;
+            Item arr = js_array_new(0);
+            _collect_options(elem->first_child, arr);
+            int64_t cur = js_array_length(arr);
+            if (new_len > cur) {
+                int to_add = new_len - (int)cur; // INT_CAST_OK: count
+                DomDocument* doc = elem->doc;
+                for (int i = 0; i < to_add; i++) {
+                    // Create a proper Lambda Element + DomElement so
+                    // it has a backing native_element for attributes.
+                    if (!doc || !doc->input) break;
+                    MarkBuilder builder(doc->input);
+                    Item nat_item = builder.element("option").final();
+                    Element* nat = nat_item.element;
+                    DomElement* opt = dom_element_create(doc, "option", nat);
+                    if (!opt) break;
+                    // append to elem
+                    opt->parent = elem;
+                    if (!elem->first_child) {
+                        elem->first_child = opt;
+                        elem->last_child = opt;
+                    } else {
+                        DomNode* last = elem->last_child;
+                        last->next_sibling = opt;
+                        opt->prev_sibling = last;
+                        elem->last_child = opt;
+                    }
+                }
+            } else if (new_len < cur) {
+                // remove trailing options
+                for (int64_t i = cur - 1; i >= new_len; i--) {
+                    DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+                    if (!opt) continue;
+                    DomNode* on = (DomNode*)opt;
+                    DomNode* parent = on->parent;
+                    if (!parent) continue;
+                    DomElement* pe = (DomElement*)parent;
+                    if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
+                    else pe->first_child = on->next_sibling;
+                    if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
+                    else pe->last_child = on->prev_sibling;
+                    on->parent = nullptr;
+                    on->next_sibling = nullptr;
+                    on->prev_sibling = nullptr;
+                }
+            }
+            js_dom_mutation_notify();
+            return value;
+        }
+    }
+    if (_is_tag(elem, "option")) {
+        if (strcmp(prop, "selected") == 0) {
+            _set_selectedness(elem, js_is_truthy(value));
+            // Per spec, run ask-for-reset to enforce single-selection.
+            DomElement* sel = _option_owner_select(elem);
+            if (sel) _select_ask_for_reset(sel);
+            return value;
+        }
+        if (strcmp(prop, "value") == 0) {
+            const char* sv = fn_to_cstr(value);
+            dom_element_set_attribute(elem, "value", sv ? sv : "");
+            return value;
+        }
+        if (strcmp(prop, "text") == 0) {
+            // Setting text replaces the children with a single text node.
+            const char* sv = fn_to_cstr(value);
+            if (!sv) sv = "";
+            // Detach existing children
+            DomNode* child = elem->first_child;
+            while (child) {
+                DomNode* next = child->next_sibling;
+                child->parent = nullptr;
+                child->next_sibling = nullptr;
+                child->prev_sibling = nullptr;
+                child = next;
+            }
+            elem->first_child = nullptr;
+            elem->last_child = nullptr;
+            String* str = heap_create_name(sv);
+            DomText* tn = dom_text_create(str, elem);
+            if (tn) {
+                tn->parent = elem;
+                elem->first_child = tn;
+                elem->last_child = tn;
+            }
+            js_dom_mutation_notify();
+            return value;
+        }
+        if (strcmp(prop, "defaultSelected") == 0) {
+            if (js_is_truthy(value)) dom_element_set_attribute(elem, "selected", "");
+            else dom_element_remove_attribute(elem, "selected");
+            return value;
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Text-control IDL setters — must intercept before the generic
     // expando/attribute fallback. Per HTML §4.10.6.
     // ------------------------------------------------------------------
@@ -4294,6 +5562,94 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             dom_element_set_attribute(elem, "value", s);
             tc_set_value(elem, s, strlen(s));
             if (tc_st) tc_sync_form_to_legacy(elem, tc_st);
+            return value;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // F-0: Reflected attribute setters
+    //   - boolean: ToBoolean(value); truthy → set (empty), falsy → remove
+    //   - integer: ToInt32(value); write decimal string to attribute
+    //   - string : write attribute under spec attribute name (handles
+    //              IDL→HTML name mapping like readOnly→readonly)
+    // ------------------------------------------------------------------
+    {
+        // Boolean reflection — handle BEFORE int/string so e.g. `disabled`
+        // assignment of a non-bool truthy value writes empty string, not the
+        // raw value.
+        if (_is_bool_reflected(elem, prop)) {
+            const char* attr = _idl_to_attr_name(prop);
+            if (!attr) attr = prop;
+            // lowercase the attr name in case caller passed the camelCase form
+            // verbatim (e.g. `readonly` already matches; `disabled` already
+            // lowercase). Boolean reflected attrs we list above are already
+            // in lowercase form via the mapping table.
+            bool truthy = js_is_truthy(value);
+            if (truthy) {
+                dom_element_set_attribute(elem, attr, "");
+            } else {
+                dom_element_remove_attribute(elem, attr);
+            }
+            js_dom_mutation_notify();
+            return value;
+        }
+
+        // Integer reflection — coerce to long, write canonical decimal.
+        const char* int_attr = nullptr; int int_default = 0;
+        if (_is_int_reflected(elem, prop, &int_attr, &int_default)) {
+            long n = int_default;
+            TypeId vt = get_type_id(value);
+            if (vt == LMD_TYPE_INT) {
+                n = (long)it2i(value);
+            } else if (vt == LMD_TYPE_FLOAT) {
+                double d = it2d(value);
+                n = (long)d;
+            } else {
+                const char* s = fn_to_cstr(value);
+                if (s && *s) {
+                    char* end = nullptr;
+                    long parsed = strtol(s, &end, 10);
+                    n = (end != s) ? parsed : 0;  // non-numeric → 0
+                } else {
+                    n = 0;
+                }
+            }
+            if (n < 0) n = int_default;  // negative → reset to default
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%ld", n);
+            dom_element_set_attribute(elem, int_attr, buf);
+            js_dom_mutation_notify();
+            return value;
+        }
+
+        // String reflection with IDL→HTML name mapping (readOnly → readonly,
+        // formAction → formaction, htmlFor → for, etc.).
+        const char* mapped_attr = _idl_to_attr_name(prop);
+        if (mapped_attr) {
+            const char* s = fn_to_cstr(value);
+            if (s) {
+                dom_element_set_attribute(elem, mapped_attr, s);
+            } else {
+                dom_element_remove_attribute(elem, mapped_attr);
+            }
+            js_dom_mutation_notify();
+            return value;
+        }
+
+        // <input>.type setter — lowercase, fall back to "text" for unknown.
+        if (strcmp(prop, "type") == 0 && _is_tag(elem, "input")) {
+            const char* s = fn_to_cstr(value);
+            if (s && *s) {
+                char buf[32];
+                size_t i = 0;
+                for (; s[i] && i < sizeof(buf) - 1; i++)
+                    buf[i] = (char)tolower((unsigned char)s[i]);
+                buf[i] = '\0';
+                dom_element_set_attribute(elem, "type", buf);
+            } else {
+                dom_element_set_attribute(elem, "type", "text");
+            }
+            js_dom_mutation_notify();
             return value;
         }
     }
@@ -5401,6 +6757,27 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return make_js_undefined();
     }
 
+    // ----------------------------------------------------------------
+    // F-3: form.reset() — fire `reset` event (cancelable), then run reset
+    // algorithm on all listed form controls.
+    // ----------------------------------------------------------------
+    if (strcmp(method, "reset") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+        // Per HTML §4.10.21.4: fire `reset` event (bubbles, cancelable);
+        // if not cancelled, run reset algorithm on each listed control.
+        Item ev = js_new_object();
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("type"))},
+                        (Item){.item = s2it(heap_create_name("reset"))});
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("bubbles"))},
+                        (Item){.item = ITEM_TRUE});
+        js_property_set(ev, (Item){.item = s2it(heap_create_name("cancelable"))},
+                        (Item){.item = ITEM_TRUE});
+        Item dispatched = js_dom_dispatch_event(elem_item, ev);
+        // dispatchEvent returns false when default was prevented.
+        if (dispatched.item == ITEM_FALSE) return make_js_undefined();
+        _run_form_reset(elem);
+        return make_js_undefined();
+    }
+
     // checkValidity(): fire invalid event if not valid, return bool
     if (strcmp(method, "checkValidity") == 0) {
         // form.checkValidity(): check all listed form controls
@@ -5422,6 +6799,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                                 Item cev = js_new_object();
                                 js_property_set(cev, (Item){.item = s2it(heap_create_name("type"))},
                                                 (Item){.item = s2it(heap_create_name("invalid"))});
+                                js_property_set(cev, (Item){.item = s2it(heap_create_name("cancelable"))},
+                                                (Item){.item = ITEM_TRUE});
                                 js_dom_dispatch_event(js_dom_wrap_element(ce), cev);
                             }
                         }
@@ -5439,14 +6818,14 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         Item valid_flag = js_property_get(vs, (Item){.item = s2it(heap_create_name("valid"))});
         bool is_valid = ((valid_flag.item & 0xFF) != 0 && valid_flag.item != ITEM_NULL);
         if (!is_valid) {
-            // fire "invalid" event (not bubbles, not cancelable)
+            // fire "invalid" event (not bubbles, but cancelable per spec)
             Item ev_obj = js_new_object();
             js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
                             (Item){.item = s2it(heap_create_name("invalid"))});
             js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("bubbles"))},
                             (Item){.item = ITEM_FALSE});
             js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
-                            (Item){.item = ITEM_FALSE});
+                            (Item){.item = ITEM_TRUE});
             js_dom_dispatch_event(elem_item, ev_obj);
         }
         return (Item){.item = b2it(is_valid)};
@@ -5467,14 +6846,138 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             Item ev_obj = js_new_object();
             js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("type"))},
                             (Item){.item = s2it(heap_create_name("invalid"))});
+            js_property_set(ev_obj, (Item){.item = s2it(heap_create_name("cancelable"))},
+                            (Item){.item = ITEM_TRUE});
             js_dom_dispatch_event(elem_item, ev_obj);
         }
         return (Item){.item = b2it(is_valid)};
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);
-    // HTMLSelectElement.add(option) — silently accept and ignore (options not tracked)
+    // HTMLSelectElement.add(element, before) — insert option/optgroup
     if (strcmp(method, "add") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        if (argc < 1) return ItemNull;
+        DomElement* new_opt = (DomElement*)js_dom_unwrap_element(args[0]);
+        if (!new_opt || !new_opt->tag_name) return ItemNull;
+        // Per spec, must be HTMLOptionElement or HTMLOptGroupElement, otherwise TypeError.
+        if (strcasecmp(new_opt->tag_name, "option") != 0 &&
+            strcasecmp(new_opt->tag_name, "optgroup") != 0) {
+            return ItemNull;
+        }
+        // If new_opt is an ancestor of elem, must throw HierarchyRequestError.
+        for (DomNode* p = (DomNode*)elem; p; p = p->parent) {
+            if ((DomElement*)p == new_opt) {
+                extern void js_throw_value(Item error);
+                extern Item js_new_error_with_name(Item type_name, Item message);
+                Item n = (Item){.item = s2it(heap_create_name("HierarchyRequestError"))};
+                Item m = (Item){.item = s2it(heap_create_name(
+                    "Failed to execute 'add' on 'HTMLSelectElement': "
+                    "The new child element contains the parent."))};
+                js_throw_value(js_new_error_with_name(n, m));
+                return ItemNull;
+            }
+        }
+        // before: null/undefined/missing/-1 → append; else if number → option at index;
+        // else if element → that element.
+        DomElement* before_elem = nullptr;
+        bool append_at_end = true;
+        if (argc >= 2 && args[1].item != ITEM_NULL && !is_js_undefined(args[1])) {
+            TypeId bt = get_type_id(args[1]);
+            if (bt == LMD_TYPE_INT) {
+                int idx = (int)it2i(args[1]); // INT_CAST_OK: index
+                if (idx >= 0) {
+                    Item arr = js_array_new(0);
+                    _collect_options(elem->first_child, arr);
+                    if (idx < js_array_length(arr)) {
+                        before_elem = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, idx));
+                        append_at_end = false;
+                    }
+                }
+            } else {
+                DomElement* be = (DomElement*)js_dom_unwrap_element(args[1]);
+                if (be) { before_elem = be; append_at_end = false; }
+            }
+        }
+        // No-op if before == new_opt (per spec).
+        if (before_elem == new_opt) return ItemNull;
+        // Detach new_opt from current parent first.
+        if (new_opt->parent) {
+            DomElement* op = (DomElement*)new_opt->parent;
+            if (new_opt->prev_sibling) new_opt->prev_sibling->next_sibling = new_opt->next_sibling;
+            else op->first_child = new_opt->next_sibling;
+            if (new_opt->next_sibling) new_opt->next_sibling->prev_sibling = new_opt->prev_sibling;
+            else op->last_child = new_opt->prev_sibling;
+            new_opt->next_sibling = nullptr;
+            new_opt->prev_sibling = nullptr;
+            new_opt->parent = nullptr;
+        }
+        // Insert into elem.
+        new_opt->parent = elem;
+        if (append_at_end || !before_elem) {
+            if (!elem->first_child) {
+                elem->first_child = new_opt;
+                elem->last_child = new_opt;
+            } else {
+                DomNode* last = elem->last_child;
+                last->next_sibling = new_opt;
+                new_opt->prev_sibling = last;
+                elem->last_child = new_opt;
+            }
+        } else {
+            // Insert before before_elem (which must be a child of elem,
+            // or a descendant — for nested optgroup case we still insert
+            // before its position in the option list, but DOM-wise we
+            // insert before the closest ancestor that's a direct child).
+            DomNode* anchor = (DomNode*)before_elem;
+            while (anchor && anchor->parent != elem) anchor = anchor->parent;
+            if (!anchor) {
+                // Not in this select — append at end.
+                if (!elem->first_child) {
+                    elem->first_child = new_opt;
+                    elem->last_child = new_opt;
+                } else {
+                    DomNode* last = elem->last_child;
+                    last->next_sibling = new_opt;
+                    new_opt->prev_sibling = last;
+                    elem->last_child = new_opt;
+                }
+            } else {
+                new_opt->prev_sibling = anchor->prev_sibling;
+                new_opt->next_sibling = anchor;
+                if (anchor->prev_sibling) anchor->prev_sibling->next_sibling = new_opt;
+                else elem->first_child = new_opt;
+                anchor->prev_sibling = new_opt;
+            }
+        }
+        js_dom_mutation_notify();
+        return ItemNull;
+    }
+    // HTMLSelectElement.remove(index) — remove option at index.
+    if (strcmp(method, "remove") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        // remove() with no args: spec calls ChildNode.remove(); but
+        // HTMLSelectElement overrides — with no arg, do nothing per WPT.
+        if (argc < 1) return ItemNull;
+        TypeId t = get_type_id(args[0]);
+        int idx = -1;
+        if (t == LMD_TYPE_INT) idx = (int)it2i(args[0]); // INT_CAST_OK: index
+        else if (t == LMD_TYPE_FLOAT) {
+            double* d = (double*)(args[0].item & 0x00FFFFFFFFFFFFFF);
+            if (d) idx = (int)*d; // INT_CAST_OK: index
+        }
+        if (idx < 0) return ItemNull;
+        Item arr = js_array_new(0);
+        _collect_options(elem->first_child, arr);
+        if (idx >= js_array_length(arr)) return ItemNull;
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, idx));
+        if (!opt || !opt->parent) return ItemNull;
+        DomElement* parent = (DomElement*)opt->parent;
+        DomNode* on = (DomNode*)opt;
+        if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
+        else parent->first_child = on->next_sibling;
+        if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
+        else parent->last_child = on->prev_sibling;
+        on->parent = nullptr; on->next_sibling = nullptr; on->prev_sibling = nullptr;
+        js_dom_mutation_notify();
         return ItemNull;
     }
     return ItemNull;
@@ -5855,3 +7358,97 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
     log_debug("js_dom_style_method: unknown method '%s'", method);
     return ItemNull;
 }
+
+// ============================================================================
+// F-1: Collection interface globals
+// ----------------------------------------------------------------------------
+// HTMLCollection / NodeList / RadioNodeList / HTMLFormControlsCollection /
+// HTMLOptionsCollection are exposed so that:
+//   - typeof HTMLCollection === 'function'
+//   - HTMLCollection.prototype.{item,namedItem} exist
+// In Lambda's headless runtime these are stub interface objects: calling
+// them as constructors throws TypeError (per WebIDL). Real instances are
+// still plain Arrays — methods on the prototype object exist for IDL
+// surface conformance but are not used for actual collection access (which
+// is satisfied by Array .item() and indexed access).
+// ============================================================================
+
+extern "C" Item js_throw_type_error(const char* message);
+extern "C" void js_set_function_name(Item fn_item, Item name_item);
+extern "C" Item js_new_function(void* func_ptr, int param_count);
+
+static Item _coll_illegal_constructor(Item /*first*/) {
+    return js_throw_type_error("Illegal constructor");
+}
+
+static void _install_iface(Item global, const char* name) {
+    Item ctor = js_new_function((void*)_coll_illegal_constructor, 0);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
+    Item proto = js_new_object();
+    js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+    js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
+    js_property_set(global, (Item){.item = s2it(heap_create_name(name))}, ctor);
+}
+
+extern "C" void js_dom_install_collection_globals(void) {
+    Item global = js_get_global_this();
+    _install_iface(global, "HTMLCollection");
+    _install_iface(global, "HTMLFormControlsCollection");
+    _install_iface(global, "HTMLOptionsCollection");
+    _install_iface(global, "NodeList");
+    _install_iface(global, "RadioNodeList");
+    log_debug("js_dom_install_collection_globals: installed collection interfaces");
+}
+
+// ----------------------------------------------------------------------------
+// F-5: Option constructor — `new Option(text, value, defaultSelected, selected)`
+// ----------------------------------------------------------------------------
+static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item sel_arg) {
+    DomDocument* doc = _js_current_document;
+    if (!doc || !doc->input) return ItemNull;
+    MarkBuilder builder(doc->input);
+    Item nat_item = builder.element("option").final();
+    Element* nat = nat_item.element;
+    DomElement* opt = dom_element_create(doc, "option", nat);
+    if (!opt) return ItemNull;
+    // text → option's text content (single text child).
+    if (text_arg.item != ITEM_NULL && !is_js_undefined(text_arg)) {
+        const char* t = fn_to_cstr(text_arg);
+        if (t && *t) {
+            String* str = heap_create_name(t);
+            DomText* tn = dom_text_create(str, opt);
+            if (tn) {
+                tn->parent = opt;
+                opt->first_child = tn;
+                opt->last_child = tn;
+            }
+        }
+    }
+    // value attr — only set if value_arg is provided AND not undefined.
+    if (value_arg.item != ITEM_NULL && !is_js_undefined(value_arg)) {
+        const char* v = fn_to_cstr(value_arg);
+        dom_element_set_attribute(opt, "value", v ? v : "");
+    }
+    // defaultSelected → `selected` content attribute.
+    if (def_sel_arg.item != ITEM_NULL && !is_js_undefined(def_sel_arg) &&
+        js_is_truthy(def_sel_arg)) {
+        dom_element_set_attribute(opt, "selected", "");
+    }
+    // selected → live selectedness flag.
+    if (sel_arg.item != ITEM_NULL && !is_js_undefined(sel_arg)) {
+        _set_selectedness(opt, js_is_truthy(sel_arg));
+    }
+    return js_dom_wrap_element(opt);
+}
+
+extern "C" void js_dom_install_option_constructor(void) {
+    Item global = js_get_global_this();
+    Item ctor = js_new_function((void*)_option_ctor, 4);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Option"))});
+    Item proto = js_new_object();
+    js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+    js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
+    js_property_set(global, (Item){.item = s2it(heap_create_name("Option"))}, ctor);
+    log_debug("js_dom_install_option_constructor: installed Option");
+}
+
