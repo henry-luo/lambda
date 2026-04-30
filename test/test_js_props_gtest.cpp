@@ -448,3 +448,101 @@ TEST(Props, SuperSet_FindsInheritedSetter) {
     EXPECT_NE(out.find("base:42"), std::string::npos) << out;
     EXPECT_NE(out.find("OK"),      std::string::npos) << out;
 }
+
+// =============================================================================
+// 17. SiblingMapSharingTypeMap_NonWritablePerMap
+// A2-T4 invariant: two `new Foo()` instances share a TypeMap via the
+// per-callsite shape cache (transpile_js_mir.cpp §7). When one instance
+// freezes a property non-writable via Object.defineProperty, the other
+// instance must still be writable. The Map-local TypeMap clone (A2-T1+T2)
+// is what makes this safe.
+// =============================================================================
+TEST(Props, SiblingMapSharingTypeMap_NonWritablePerMap) {
+    auto out = expect_ok("SiblingMapSharingTypeMap_NonWritablePerMap", R"JS(
+        function Foo() { this.x = 1; this.y = 2; }
+        var a = new Foo();
+        var b = new Foo();
+        Object.defineProperty(a, 'x', { writable: false });
+        b.x = 99;
+        console.log("a.x=" + a.x);
+        console.log("b.x=" + b.x);
+        console.log("OK");
+    )JS");
+    // a.x must remain 1 (non-writable on a); b.x must update to 99.
+    EXPECT_NE(out.find("a.x=1"),  std::string::npos) << out;
+    EXPECT_NE(out.find("b.x=99"), std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),     std::string::npos) << out;
+}
+
+// =============================================================================
+// 18. AccessorToData_NoSiblingCorruption
+// A2-T3 invariant: clearing JSPD_IS_ACCESSOR on one Map's shape entry must
+// not cause sibling Maps (sharing the original TypeMap) to lose their own
+// accessor dispatch. Two instances are created from the same constructor
+// callsite, then one redefines an accessor as a data property; the sibling
+// must keep dispatching to the accessor.
+// =============================================================================
+TEST(Props, AccessorToData_NoSiblingCorruption) {
+    auto out = expect_ok("AccessorToData_NoSiblingCorruption", R"JS(
+        function Foo() {
+            Object.defineProperty(this, 'x', {
+                get: function() { return 'getter'; },
+                configurable: true
+            });
+        }
+        var a = new Foo();
+        var b = new Foo();
+        // Convert a.x from accessor to data property — must not affect b.x.
+        Object.defineProperty(a, 'x', { value: 'data', writable: true, configurable: true });
+        console.log("a.x=" + a.x);
+        console.log("b.x=" + b.x);
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("a.x=data"),    std::string::npos) << out;
+    EXPECT_NE(out.find("b.x=getter"),  std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),          std::string::npos) << out;
+}
+
+// =============================================================================
+// 19. CloneIdempotent_NoDoubleAlloc
+// A2-T1 idempotency: repeated attribute mutations on the same Map must not
+// trigger repeated TypeMap cloning. Verified observationally: after the
+// first defineProperty on `a`, subsequent mutations apply in place to the
+// same private TypeMap (is_private_clone == true short-circuit). We can't
+// directly observe the TypeMap pointer from JS, but we can verify that
+// many mutations succeed without corrupting state — a regression in the
+// idempotency check would surface as either a crash or stale flag reads.
+// =============================================================================
+TEST(Props, CloneIdempotent_NoDoubleAlloc) {
+    auto out = expect_ok("CloneIdempotent_NoDoubleAlloc", R"JS(
+        // Each mutation targets a distinct property to avoid
+        // ES re-define restrictions (configurable=false→writable change rules).
+        function Foo() { this.a = 1; this.b = 2; this.c = 3; }
+        var o = new Foo();
+        Object.defineProperty(o, 'a', { writable: false });
+        Object.defineProperty(o, 'b', { enumerable: false });
+        Object.defineProperty(o, 'c', { configurable: false });
+        var da = Object.getOwnPropertyDescriptor(o, 'a');
+        var db = Object.getOwnPropertyDescriptor(o, 'b');
+        var dc = Object.getOwnPropertyDescriptor(o, 'c');
+        console.log("a.writable="     + da.writable);
+        console.log("b.enumerable="   + db.enumerable);
+        console.log("c.configurable=" + dc.configurable);
+        // Sibling created from same callsite must have all defaults.
+        var s = new Foo();
+        var sa = Object.getOwnPropertyDescriptor(s, 'a');
+        var sb = Object.getOwnPropertyDescriptor(s, 'b');
+        var sc = Object.getOwnPropertyDescriptor(s, 'c');
+        console.log("s.a.writable="     + sa.writable);
+        console.log("s.b.enumerable="   + sb.enumerable);
+        console.log("s.c.configurable=" + sc.configurable);
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("a.writable=false"),     std::string::npos) << out;
+    EXPECT_NE(out.find("b.enumerable=false"),   std::string::npos) << out;
+    EXPECT_NE(out.find("c.configurable=false"), std::string::npos) << out;
+    EXPECT_NE(out.find("s.a.writable=true"),     std::string::npos) << out;
+    EXPECT_NE(out.find("s.b.enumerable=true"),   std::string::npos) << out;
+    EXPECT_NE(out.find("s.c.configurable=true"), std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),                    std::string::npos) << out;
+}

@@ -244,6 +244,12 @@ typedef struct TypeMap : Type {
     // Populated for constructor-shaped objects. slot_entries[i] points to the i-th ShapeEntry.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
+    // A2-T1 (JS): true once this TypeMap has been cloned for a single Map's
+    // private use (e.g. by an attribute mutation like defineProperty
+    // non-writable). Subsequent attribute mutations on the same Map skip
+    // re-cloning. The original blueprint TypeMap (referenced by call-site
+    // shape caches) keeps is_private_clone=false and stays immutable.
+    bool is_private_clone;
 } TypeMap;
 
 // A1: FNV-1a hash for property name lookup

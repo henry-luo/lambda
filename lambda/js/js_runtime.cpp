@@ -5834,33 +5834,35 @@ extern "C" Item js_property_get(Item object, Item key) {
             // v23: Check properties_map FIRST for overridden/deleted .name/.length/.prototype
             // This enables Object.defineProperty and delete to work correctly on function
             // virtual properties. properties_map takes priority over struct-based values.
+            //
+            // Stage A1 leaf-probe routing: dispatch the slot+sentinel+
+            // IS_ACCESSOR sequence through js_ordinary_get_own. Receiver is
+            // bound to the function (not its properties_map) so getter `this`
+            // is the FUNC. NOTE: the kernel resolves IS_ACCESSOR via shape
+            // entries on `pm_obj`; this matches how Phase 4 stores FUNC
+            // accessor pairs (the shape lives on properties_map, not on the
+            // FUNC). The legacy `js_find_shape_entry(object, ...)` call here
+            // was a vestigial bug — accessor pairs are not on the FUNC's
+            // own shape chain.
             if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                bool pm_found = false;
-                Item pm_val = js_map_get_fast_ext(fn->properties_map.map, str_key->chars, (int)str_key->len, &pm_found);
-                if (pm_found) {
-                    // v91: For "prototype" key, DELETED_SENTINEL means "fall through to fn->prototype field"
-                    // because js_property_set stores a sentinel when prototype is set to a MAP
-                    // (to clear any previous non-MAP entry in properties_map).
-                    if (js_is_deleted_sentinel(pm_val)) {
-                        if (!(str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0))
-                            return make_js_undefined();
-                        // else: fall through to fn->prototype check below
-                    } else {
-                        // Phase 3 Stage B: if shape entry has JSPD_IS_ACCESSOR, slot holds
-                        // a JsAccessorPair*; dispatch via pair->getter.
-                        ShapeEntry* _se = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                        if (_se && jspd_is_accessor(_se)) {
-                            JsAccessorPair* pair = js_item_to_accessor_pair(pm_val);
-                            if (pair && pair->getter.item != ItemNull.item) {
-                                return js_call_function(pair->getter, object, NULL, 0);
-                            }
-                            return make_js_undefined();
-                        }
-                        return pm_val;
-                    }
+                Item pm_obj = fn->properties_map;
+                Item ord_val = ItemNull;
+                JsOwnGetStatus st = js_ordinary_get_own(pm_obj, key, object, &ord_val);
+                if (st == JS_OWN_READY) {
+                    return ord_val;
                 }
+                if (st == JS_OWN_DELETED) {
+                    // v91: for "prototype" key, DELETED_SENTINEL means "fall
+                    // through to fn->prototype field" because js_property_set
+                    // stores a sentinel when prototype is set to a MAP (to
+                    // clear any previous non-MAP entry in properties_map).
+                    if (!(str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0))
+                        return make_js_undefined();
+                    // else: fall through to fn->prototype check below
+                }
+                // JS_OWN_NOT_FOUND: fall through to builtin fallbacks below.
                 // Phase 5: legacy __get_<propName> probe in properties_map removed.
-                // The IS_ACCESSOR fast-path above handles all FUNC accessors.
+                // The kernel's IS_ACCESSOR fast-path above handles all FUNC accessors.
             }
             // Annex B legacy RegExp static properties ($1-$9, input, lastMatch, etc.)
             if (fn->name && fn->name->len == 6 && strncmp(fn->name->chars, "RegExp", 6) == 0) {
@@ -13537,9 +13539,11 @@ extern "C" Item js_regex_test(Item regex, Item str) {
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value) {
     if (get_type_id(regex) == LMD_TYPE_MAP) {
         Map* m = regex.map;
-        bool nw_found = false;
-        Item nw_val = js_map_get_fast(m, "__nw_lastIndex", 14, &nw_found);
-        if (nw_found && js_is_truthy(nw_val)) {
+        // A2-T5: shape-flag-first non-writable check (was marker-only).
+        // `js_attr_set_writable(false)` may now set only the JSPD_NON_WRITABLE
+        // shape bit, without writing the legacy `__nw_lastIndex` marker.
+        ShapeEntry* _se = js_find_shape_entry(regex, "lastIndex", 9);
+        if (!js_props_query_writable(m, _se, "lastIndex", 9)) {
             Item err_name = (Item){.item = s2it(heap_create_name("TypeError", 9))};
             Item err_msg = (Item){.item = s2it(heap_create_name("Cannot assign to read only property 'lastIndex' of object", 56))};
             js_throw_value(js_new_error_with_name(err_name, err_msg));
@@ -17591,64 +17595,59 @@ static void js_create_data_property_or_throw(Item object, int index, Item value)
             Item key = (Item){.item = i2it(index)};
             js_array_set(object, key, value);
         } else {
-            // check for non-writable marker and remove it (configurable allows redefine)
+            // A2-T5: shape-flag-first checks via js_props_query_* (which
+            // probes shape AND marker). Pre-T5 the marker presence was
+            // inadvertently a "has-been-defineProperty'd" sentinel — that's
+            // no longer true since helpers may set shape flags only.
+            //
+            // For ARRAY indexed properties the shape entry is often absent
+            // (indexed props live in arr->items, only attribute markers in
+            // the companion map), so we always consult both shape (NULL) +
+            // marker via the unified query helpers.
+            //
+            // Per ES OrdinaryDefineOwnProperty: if the existing property is
+            // non-configurable, the {writable:true, enumerable:true,
+            // configurable:true} redefine must throw if any attribute would
+            // change.
             if (arr->extra != 0) {
                 Map* props = (Map*)(uintptr_t)arr->extra;
-                char nw_buf[64];
-                snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", index);
-                bool nw_found = false;
-                js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
-                if (nw_found) {
-                    // check configurable: if __nc_<idx> exists and true, throw TypeError
-                    char nc_buf[64];
-                    snprintf(nc_buf, sizeof(nc_buf), "__nc_%d", index);
-                    bool nc_found = false;
-                    Item nc_val = js_map_get_fast(props, nc_buf, (int)strlen(nc_buf), &nc_found);
-                    if (nc_found && js_is_truthy(nc_val)) {
-                        js_throw_type_error("Cannot redefine property");
-                        return;
-                    }
-                    // remove non-writable marker (redefine as writable)
-                    Item nw_key = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
-                    js_property_set((Item){.map = props}, nw_key, (Item){.item = b2it(false)});
-                    // remove non-enumerable marker if present
-                    char ne_buf[64];
-                    snprintf(ne_buf, sizeof(ne_buf), "__ne_%d", index);
-                    Item ne_key = (Item){.item = s2it(heap_create_name(ne_buf, strlen(ne_buf)))};
-                    js_property_set((Item){.map = props}, ne_key, (Item){.item = b2it(false)});
+                char buf[24];
+                snprintf(buf, sizeof(buf), "%d", index);
+                int blen = (int)strlen(buf);
+                ShapeEntry* _se = js_find_shape_entry(object, buf, blen);
+                bool is_configurable = js_props_query_configurable(props, _se, buf, blen);
+                bool is_writable     = js_props_query_writable(props, _se, buf, blen);
+                bool is_enumerable   = js_props_query_enumerable(props, _se, buf, blen);
+                if (!is_configurable && (!is_writable || !is_enumerable)) {
+                    js_throw_type_error("Cannot redefine property");
+                    return;
                 }
+                if (!is_writable)   js_attr_set_writable(object, buf, blen, /*writable=*/true);
+                if (!is_enumerable) js_attr_set_enumerable(object, buf, blen, /*enumerable=*/true);
             }
             arr->items[index] = value;
         }
     } else if (type == LMD_TYPE_MAP) {
-        // for objects, use defineProperty-like semantics
+        // A2-T5: shape-flag-first checks via js_props_query_* (see ARRAY branch).
         char buf[24];
         snprintf(buf, sizeof(buf), "%d", index);
-        String* key_str = heap_create_name(buf, strlen(buf));
-        // remove non-writable marker if configurable
-        char nw_buf[64];
-        snprintf(nw_buf, sizeof(nw_buf), "__nw_%s", buf);
-        bool nw_found = false;
-        js_map_get_fast(object.map, nw_buf, (int)strlen(nw_buf), &nw_found);
-        if (nw_found) {
-            char nc_buf[64];
-            snprintf(nc_buf, sizeof(nc_buf), "__nc_%s", buf);
-            bool nc_found = false;
-            Item nc_val = js_map_get_fast(object.map, nc_buf, (int)strlen(nc_buf), &nc_found);
-            if (nc_found && js_is_truthy(nc_val)) {
+        int blen = (int)strlen(buf);
+        ShapeEntry* _se = js_find_shape_entry(object, buf, blen);
+        bool is_configurable = js_props_query_configurable(object.map, _se, buf, blen);
+        bool is_writable     = js_props_query_writable(object.map, _se, buf, blen);
+        bool is_enumerable   = js_props_query_enumerable(object.map, _se, buf, blen);
+        // Only enforce checks if the property already exists on this map — for
+        // a brand-new property the queries trivially return all-true (no shape,
+        // no marker), and we just write through.
+        if (_se || !is_writable || !is_enumerable || !is_configurable) {
+            if (!is_configurable && (!is_writable || !is_enumerable)) {
                 js_throw_type_error("Cannot redefine property");
                 return;
             }
-            // remove non-writable marker
-            Item nw_key = (Item){.item = s2it(heap_create_name(nw_buf, strlen(nw_buf)))};
-            js_property_set(object, nw_key, (Item){.item = b2it(false)});
-            // remove non-enumerable marker
-            char ne_buf[64];
-            snprintf(ne_buf, sizeof(ne_buf), "__ne_%s", buf);
-            Item ne_key = (Item){.item = s2it(heap_create_name(ne_buf, strlen(ne_buf)))};
-            js_property_set(object, ne_key, (Item){.item = b2it(false)});
+            if (!is_writable)   js_attr_set_writable(object, buf, blen, /*writable=*/true);
+            if (!is_enumerable) js_attr_set_enumerable(object, buf, blen, /*enumerable=*/true);
         }
-        Item key = (Item){.item = s2it(key_str)};
+        Item key = (Item){.item = s2it(heap_create_name(buf, blen))};
         js_property_set(object, key, value);
     }
 }
@@ -20129,10 +20128,7 @@ extern "C" void js_mark_non_enumerable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    char ne_key[256];
-    snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", (int)str->len, str->chars);
-    Item nk = (Item){.item = s2it(heap_create_name(ne_key, strlen(ne_key)))};
-    js_property_set(object, nk, (Item){.item = b2it(true)});
+    js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
 }
 
 // Mark a property as non-writable by setting __nw_<name> marker
@@ -20141,10 +20137,7 @@ extern "C" void js_mark_non_writable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    char nw_key[256];
-    snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str->len, str->chars);
-    Item nk = (Item){.item = s2it(heap_create_name(nw_key, strlen(nw_key)))};
-    js_property_set(object, nk, (Item){.item = b2it(true)});
+    js_attr_set_writable(object, str->chars, (int)str->len, /*writable=*/false);
 }
 
 // Mark a property as non-configurable by setting __nc_<name> marker.
@@ -20156,10 +20149,7 @@ extern "C" void js_mark_non_configurable(Item object, Item name) {
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC) return;
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* str = it2s(name);
-    char nc_key[256];
-    snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str->len, str->chars);
-    Item nk = (Item){.item = s2it(heap_create_name(nc_key, strlen(nc_key)))};
-    js_property_set(object, nk, (Item){.item = b2it(true)});
+    js_attr_set_configurable(object, str->chars, (int)str->len, /*configurable=*/false);
 }
 
 // Mark all user-visible properties on an object as non-enumerable (used for class prototypes)
@@ -20178,10 +20168,7 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
             entry = entry->next;
             continue;
         }
-        char ne_key[256];
-        snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", name_len, name);
-        Item nk = (Item){.item = s2it(heap_create_name(ne_key, strlen(ne_key)))};
-        js_property_set(object, nk, (Item){.item = b2it(true)});
+        js_attr_set_enumerable(object, name, name_len, /*enumerable=*/false);
         entry = entry->next;
     }
 }

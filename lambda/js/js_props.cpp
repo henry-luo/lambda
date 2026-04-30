@@ -203,6 +203,16 @@ extern "C" bool js_ordinary_has_own(Item object, const char* name, int name_len)
     return true;
 }
 
+// Stage A1.8b: tri-state own-slot status — see header for contract.
+extern "C" JsOwnSlotStatus js_ordinary_own_status(Item object, const char* name, int name_len) {
+    JS_PROPS_ASSERT_KEY(name, name_len);
+    if (get_type_id(object) != LMD_TYPE_MAP) return JS_HAS_ABSENT;
+    bool found = false;
+    Item slot = js_map_get_fast_ext(object.map, name, name_len, &found);
+    if (!found) return JS_HAS_ABSENT;
+    return js_props_is_deleted_sentinel(slot) ? JS_HAS_DELETED : JS_HAS_PRESENT;
+}
+
 // Stage A1.9: own + proto-chain HasProperty (no proxy / builtin fallback).
 extern "C" bool js_ordinary_has_property(Item object, const char* name, int name_len) {
     JS_PROPS_ASSERT_KEY(name, name_len);
@@ -265,9 +275,13 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
     JS_PROPS_ASSERT_ACCESSOR_PAIR(slot, se);
     if (!js_props_query_configurable(m, se, name, name_len)) return false;
 
-    // Clear IS_ACCESSOR shape flag so future reads don't dispatch the
-    // deleted accessor pair under the bare-name slot.
-    if (se && jspd_is_accessor(se)) jspd_set_accessor(se, false);
+    // A2-T3: clear IS_ACCESSOR shape flag so future reads don't dispatch the
+    // deleted accessor pair under the bare-name slot. Routed through the
+    // Map-local clone primitive so siblings sharing this TypeMap (via shape
+    // cache) keep their own IS_ACCESSOR state.
+    if (se && jspd_is_accessor(se)) {
+        js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
+    }
 
     // Tombstone legacy descriptor markers FIRST so the subsequent sentinel
     // write to the data slot is not blocked by __nw_X non-writable guard.
@@ -671,12 +685,17 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         //       the previous slot held an accessor pair.
         if (!is_new_property) {
             ShapeEntry* se = js_find_shape_entry(object, name, name_len);
-            if (se && jspd_is_accessor(se)) { jspd_set_accessor(se, false); was_accessor = true; }
+            if (se && jspd_is_accessor(se)) {
+                // A2-T3: per-Map clone before clearing IS_ACCESSOR.
+                js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
+                was_accessor = true;
+            }
         }
 
         // Temporarily clear __nw_ so js_property_set's writable guard does
         // not block the [[DefineOwnProperty]] write (validation already
-        // performed by caller).
+        // performed by caller). Probe + clear via the A2.6 helper; restore
+        // after the value write only if the marker was originally set.
         char nw_buf[256];
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", name_len, name);
         Item nw_k = js_props_str(nw_buf, (int)strlen(nw_buf));
@@ -684,7 +703,7 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         if (!is_new_property && it2b(js_has_own_property(object, nw_k))) {
             Item nv = js_property_get(object, nw_k);
             had_nw = js_is_truthy(nv);
-            if (had_nw) js_defprop_set_marker(object, nw_k, (Item){.item = b2it(false)});
+            if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/true);
         }
 
         if (get_type_id(object) == LMD_TYPE_FUNC) {
@@ -704,48 +723,37 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         if (it2b(js_has_own_property(object, gk))) { js_defprop_set_marker(object, gk, del); was_accessor = true; }
         if (it2b(js_has_own_property(object, sk))) { js_defprop_set_marker(object, sk, del); was_accessor = true; }
 
-        if (had_nw) js_defprop_set_marker(object, nw_k, (Item){.item = b2it(true)});
+        if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/false);
     }
 
     // ----- Attribute markers: __nw_, __nc_, __ne_ (inverse "non-*" bits).
-    char attr_buf[256];
+    // Routed through js_attr_set_* helpers (Stage A2.6) — single chokepoint
+    // for the snprintf + heap_create_name + js_defprop_set_marker pattern.
 
     // writable — only for data descriptors (accessor descriptors have no writable bit).
     if (!is_accessor_desc) {
         if (pd->flags & JS_PD_HAS_WRITABLE) {
             bool w = (pd->flags & JS_PD_WRITABLE) != 0;
-            snprintf(attr_buf, sizeof(attr_buf), "__nw_%.*s", name_len, name);
-            Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-            js_defprop_set_marker(object, k, (Item){.item = b2it(!w)});
+            js_attr_set_writable(object, name, name_len, w);
         } else if (is_new_property || was_accessor) {
             // ES §6.2.5.5: default for new data property is writable=false.
             // accessor→data conversion without explicit writable also defaults
             // to non-writable (matches original ValidateAndApplyPropertyDescriptor).
-            snprintf(attr_buf, sizeof(attr_buf), "__nw_%.*s", name_len, name);
-            Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-            js_defprop_set_marker(object, k, (Item){.item = b2it(true)});
+            js_attr_set_writable(object, name, name_len, /*writable=*/false);
         }
     }
 
     if (pd->flags & JS_PD_HAS_ENUMERABLE) {
         bool e = (pd->flags & JS_PD_ENUMERABLE) != 0;
-        snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", name_len, name);
-        Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-        js_defprop_set_marker(object, k, (Item){.item = b2it(!e)});
+        js_attr_set_enumerable(object, name, name_len, e);
     } else if (is_new_property) {
-        snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", name_len, name);
-        Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-        js_defprop_set_marker(object, k, (Item){.item = b2it(true)});
+        js_attr_set_enumerable(object, name, name_len, /*enumerable=*/false);
     }
 
     if (pd->flags & JS_PD_HAS_CONFIGURABLE) {
         bool c = (pd->flags2 & 0x01u) != 0;
-        snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", name_len, name);
-        Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-        js_defprop_set_marker(object, k, (Item){.item = b2it(!c)});
+        js_attr_set_configurable(object, name, name_len, c);
     } else if (is_new_property) {
-        snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", name_len, name);
-        Item k = js_props_str(attr_buf, (int)strlen(attr_buf));
-        js_defprop_set_marker(object, k, (Item){.item = b2it(true)});
+        js_attr_set_configurable(object, name, name_len, /*configurable=*/false);
     }
 }

@@ -8066,16 +8066,17 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (!ks) return (Item){.item = b2it(false)};
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
-    // Stage A1.8: own-presence check via the shared kernel. If the slot is
-    // tombstoned (deleted sentinel), the property is NOT present and we
-    // must NOT fall through to the builtin-method / String-wrapper probe
-    // (which would resurrect a deleted builtin).
+    // Stage A1.8b (R4 routing): tri-state kernel chokepoint.
+    //   PRESENT — own own slot, non-sentinel → property exists.
+    //   DELETED — own slot is tombstoned; per spec the property does NOT
+    //             exist and we MUST NOT fall through to the builtin /
+    //             String-wrapper probe (would resurrect deleted builtin).
+    //   ABSENT  — no own slot at all; fall through to builtin / String-wrapper.
     {
-        bool slot_found = false;
-        Item slot = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &slot_found);
-        if (slot_found) {
-            return (Item){.item = b2it(slot.item != JS_DELETED_SENTINEL_VAL)};
-        }
+        JsOwnSlotStatus st = js_ordinary_own_status(obj, ks->chars, (int)ks->len);
+        if (st == JS_HAS_PRESENT) return (Item){.item = b2it(true)};
+        if (st == JS_HAS_DELETED) return (Item){.item = b2it(false)};
+        // JS_HAS_ABSENT — fall through.
     }
     // Slot truly absent: fall back to builtin methods / String-wrapper indexed access.
     {
@@ -9146,12 +9147,15 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                             Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
                             js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
                         }
-                        // Phase 5: clear IS_ACCESSOR shape flag on the bare-key
-                        // slot (which holds JsAccessorPair*) before tombstoning,
-                        // so reads no longer dispatch to the deleted accessor.
+                        // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
+                        // bare-key slot (which holds JsAccessorPair*) before
+                        // tombstoning, so reads no longer dispatch to the
+                        // deleted accessor. Routed through the per-Map clone
+                        // primitive so sibling Maps sharing this TypeMap
+                        // (shape cache) keep their IS_ACCESSOR untouched.
                         ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
                         if (_se && jspd_is_accessor(_se)) {
-                            jspd_set_accessor(_se, false);
+                            js_shape_entry_set_accessor(pm_item, ks->chars, (int)ks->len, /*is_accessor=*/false);
                         }
                         Item bare_k = (Item){.item = s2it(heap_create_name(ks->chars, ks->len))};
                         js_property_set(pm_item, bare_k, (Item){.item = JS_DELETED_SENTINEL_VAL});
@@ -9264,32 +9268,27 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0 && str_key->len < 200) {
-            char attr_buf[256];
-            Item false_val = (Item){.item = b2it(false)};
-            // Clear non-writable marker to false (allows sentinel write through js_property_set)
-            snprintf(attr_buf, sizeof(attr_buf), "__nw_%.*s", (int)str_key->len, str_key->chars);
-            bool nw_found = false;
-            js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &nw_found);
-            if (nw_found) {
-                Item nw_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                js_property_set(obj, nw_key, false_val);
-            }
-            // Clear non-configurable marker
-            snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", (int)str_key->len, str_key->chars);
-            bool nc_found = false;
-            js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &nc_found);
-            if (nc_found) {
-                Item nc_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                js_property_set(obj, nc_key, false_val);
-            }
-            // Clear non-enumerable marker
-            snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", (int)str_key->len, str_key->chars);
-            bool ne_found = false;
-            js_map_get_fast_ext(obj.map, attr_buf, (int)strlen(attr_buf), &ne_found);
-            if (ne_found) {
-                Item ne_key = (Item){.item = s2it(heap_create_name(attr_buf, strlen(attr_buf)))};
-                js_property_set(obj, ne_key, false_val);
-            }
+            // Probe-then-clear pattern. Pre-A2-T5: probed marker map entry only.
+            // Post-A2-T5: `js_attr_set_*` may set the shape flag without writing
+            // a marker entry, so we must consult the shape flag too. The
+            // unified `js_props_query_*` helpers check shape-flag-first then
+            // marker-fallback, matching the reader semantics. If the property
+            // is currently non-writable / non-configurable / non-enumerable
+            // (from either source), clear via the A2.6 helper which now goes
+            // through the per-Map shape clone (and falls back to a marker
+            // write only if no shape entry exists).
+            int kl = (int)str_key->len;
+            const char* kc = str_key->chars;
+            ShapeEntry* _se = js_find_shape_entry(obj, kc, kl);
+            // Clear non-writable (allows sentinel write through js_property_set)
+            if (!js_props_query_writable(obj.map, _se, kc, kl))
+                js_attr_set_writable(obj, kc, kl, /*writable=*/true);
+            // Clear non-configurable
+            if (!js_props_query_configurable(obj.map, _se, kc, kl))
+                js_attr_set_configurable(obj, kc, kl, /*configurable=*/true);
+            // Clear non-enumerable
+            if (!js_props_query_enumerable(obj.map, _se, kc, kl))
+                js_attr_set_enumerable(obj, kc, kl, /*enumerable=*/true);
             // Clear getter/setter markers via js_property_set with the deleted sentinel.
             // Using js_property_set ensures the slot type can be rebuilt (FUNC→INT) even
             // when the original marker was a function — fn_map_set may reject that
@@ -9297,6 +9296,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             // (js_has_own_property, js_in, accessor dispatch) treat the marker as absent
             // via the existing JS_DELETED_SENTINEL_VAL probe. The `__get_/__set_` key
             // prefix already bypasses accessor dispatch in js_property_set.
+            char attr_buf[256];
             Item del_sentinel = (Item){.item = JS_DELETED_SENTINEL_VAL};
             snprintf(attr_buf, sizeof(attr_buf), "__get_%.*s", (int)str_key->len, str_key->chars);
             bool get_found = false;
@@ -9336,17 +9336,18 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             }
         }
     }
-    // Phase 4: clear IS_ACCESSOR shape flag before writing sentinel.
+    // Phase 4 / A2-T3: clear IS_ACCESSOR shape flag before writing sentinel.
     // If the property was an accessor (slot holds JsAccessorPair*), the
     // sentinel write would leave IS_ACCESSOR set with a stale int sentinel
     // in the slot — subsequent reads (descriptor synthesis, dispatch) would
-    // dereference the sentinel as a pair pointer and crash.
+    // dereference the sentinel as a pair pointer and crash. Routed through
+    // the per-Map clone primitive so sibling Maps are unaffected.
     if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0) {
             ShapeEntry* _se = js_find_shape_entry(obj, str_key->chars, (int)str_key->len);
             if (_se && jspd_is_accessor(_se)) {
-                jspd_set_accessor(_se, false);
+                js_shape_entry_set_accessor(obj, str_key->chars, (int)str_key->len, /*is_accessor=*/false);
             }
         }
     }

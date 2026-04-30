@@ -5,15 +5,17 @@
 Verification gates throughout: `make build` (Errors: 0), `./test/test_js_props_gtest.exe`
 (16/16 PASS), test262 baseline batch
 (`ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe --batch-only --baseline-only --run-partial`):
-**28747 fully passing, 0 regressions, 0 improvements** vs the locked baseline.
+**~28746–28747 fully passing, 0 regressions, 0 improvements** vs the locked baseline
+(small ±1 batch noise observed across consecutive runs even without code changes;
+the gate is `regressions=0`, met).
 
 | Stage | Status | Notes |
 |---|---|---|
 | B — Property-model GTest harness | DONE | `test/test_js_props_gtest.cpp`, 16 tests in `Props.*` suite, ~600ms. Inner-loop gate for all Stage A work. |
 | A1 — `ToPropertyKey` extraction & sweep | DONE | `js_to_property_key` in `js_runtime.cpp`. 6 ad-hoc `js_to_string(key)` sites converted. URLSearchParams left as `js_to_string` (spec). |
-| A1 — `Ordinary*` kernels in `lambda/js/js_props.{h,cpp}` | DONE | 10 kernels: `js_ordinary_get_own`, `_get_own_descriptor`, `_set_via_accessor`, `_has_own`, `_has_property`, `_get`, `_set`, `_delete`, `_resolve_shape_value`, plus the `js_props_*` query helpers. MAP-only chokepoints; callers wrap with full ABI. |
-| A1 routing — call-site replacement | PARTIAL | Routed: Array companion-map delete branch in `js_globals.cpp` (~30 lines → ~12). Investigated/blocked: R3 `js_in` (proxy-on-proto walk per step), R5 FUNC delete (virtual `length`/`name`/`prototype` shadow-delete via `properties_map` — kernel is spec-pure and writes nothing → marked WONTFIX with source comment). R1/R2/R4/R7 deferred (large fns with side concerns). |
-| A2 — `PropertyDescriptor` table | NOT STARTED | Replaces `JSPD_IS_ACCESSOR` flag + `JS_DELETED_SENTINEL_VAL` + `__get_X`/`__set_X` markers. |
+| A1 — `Ordinary*` kernels in `lambda/js/js_props.{h,cpp}` | DONE | 11 kernels: `js_ordinary_get_own`, `_get_own_descriptor`, `_set_via_accessor`, `_has_own`, `_own_status` (tri-state), `_has_property`, `_get`, `_set`, `_delete`, `_resolve_shape_value`, plus the `js_props_*` query helpers. MAP-only chokepoints; callers wrap with full ABI. |
+| A1 routing — call-site replacement | LARGELY DONE | Routed: Array companion-map delete branch in `js_globals.cpp` (~30 → ~12 lines); R4 `js_has_own_property` MAP branch via tri-state `js_ordinary_own_status`; R7 `js_super_property_set` setter dispatch via `js_ordinary_set_via_accessor` (A1.4); **R1 `js_property_get` MAP branch via `js_ordinary_get_own` (L5373) and FUNC branch's `properties_map` slot+sentinel+IS_ACCESSOR via `js_ordinary_get_own(pm_obj, key, object)` (L5837)**; **R2 `js_property_set` MAP branch setter dispatch via `js_ordinary_set_via_accessor` (L7111)**. Investigated/blocked (WONTFIX with source comments): R3 `js_in` (proxy-on-proto walk per step), R5 FUNC delete and R2 FUNC set (both depend on virtual `length`/`name`/`prototype` shadow semantics + `__nw_X` markers — the kernels are spec-pure MAP-only and can’t model these without losing their narrowness). Net: every kernel-eligible leaf primitive in the `get`/`set`/`delete`/`has` MAP entrypoints is now routed; FUNC virtual-property paths are intentionally left hand-rolled. |
+| A2 — `PropertyDescriptor` table | PARTIAL | A2.1 read-side facade `js_get_own_property_descriptor` (synthesizes descriptor from shape+slot+legacy markers) — DONE; A2.3 write-side kernel `js_descriptor_from_object` + `js_define_own_property_from_descriptor` (ToPropertyDescriptor + ValidateAndApply storage tail) — DONE; A2.5 `Object.defineProperty` / `Object.getOwnPropertyDescriptor` / `Object.defineProperties` routing — DONE; A2.6 marker write helpers `js_attr_set_writable/_enumerable/_configurable` (centralizes the `snprintf("__nX_%.*s") + heap_create_name + js_defprop_set_marker` pattern) — DONE, **14 sites routed**: 6 in the descriptor kernel (final attribute writes), 4 in `js_runtime.cpp` (`js_mark_non_*` family + `js_mark_all_non_enumerable` loop), 3 in `js_globals.cpp` `js_delete_property` marker-clear cluster (probe stays to avoid spurious shape entries; only the conditional clear is routed), 1 in `js_props.cpp` `js_define_own_property_from_descriptor` data-branch save/restore (the `had_nw` clear-then-restore pair). **A2-T1+T2 (Map-local shape clone) — DONE**: `js_typemap_clone_for_mutation` in `js_property_attrs.cpp` allocates a private TypeMap+ShapeEntry chain on first attribute mutation, repopulates field_index hash and slot_entries, marks `is_private_clone=true` for idempotency, swaps `m->type`. `js_shape_entry_update_flags` rerouted: probe-first to skip cloning when entry absent or mutation is a no-op (avoids stranding maps that started with type==NULL via the &EmptyMap-derived path). **A2-T3 (`jspd_set_accessor` rerouting) — DONE**: new `js_shape_entry_set_accessor(obj, name, len, bool)` helper, all 4 in-place `jspd_set_accessor(_se, false)` sites routed (js_props.cpp:280,684; js_globals.cpp:9155,9347). Sibling Maps sharing a TypeMap via per-callsite shape cache are now safe from cross-contamination on attribute mutation. Verified `0 regressions / 28748 fully passing` after T3. Markers (`__nw_/__ne_/__nc_/__get_/__set_`) still dual-written for transition safety; T5 onwards retire them in phases. |
 | A3 — `JsClass` enum | NOT STARTED | Replaces `__class_name__` magic strings. |
 | C — Megafile splits | NOT STARTED | Mechanical, gated on A2. |
 | D — Hidden-state RAII | DONE | `lambda/js/js_state_guards.h` (`ScopedSkipAccessorDispatch`); anon-namespace `ScopedProxyReceiver` adjacent to file-static `js_proxy_receiver` in `js_runtime.cpp`. 5 manual save/restore sites converted (3 in `js_runtime.cpp`, 1 in `js_props.cpp`, 1 in `js_property_attrs.cpp` — last one drops a manual restore on early-return). Builtin caches and name-pool reuse audit still pending. |
@@ -22,12 +24,117 @@ Verification gates throughout: `make build` (Errors: 0), `./test/test_js_props_g
 
 ### Outstanding tasks (priority order)
 
-1. **Finish A1 routing** (R1/R2/R4/R7 — `js_property_get` MAP branch, `js_property_set` MAP branch, `js_has_own_property` MAP branch, `js_super_property_set`). Each is a large function with proxy/builtin/exotic concerns; route under the gated harness one at a time.
-2. **A2 — `PropertyDescriptor` table.** Highest structural payoff remaining. Eliminates the IS_ACCESSOR/sentinel desync class entirely. Needs migration plan for legacy `__get_X`/`__set_X`/`__nw_X`/`__ne_X`/`__nc_X` markers (read-compat → refuse new writes → GC sweep).
-3. **A3 — `JsClass` enum.** Add `JsClass klass` byte to `Map`/`TypeMap`. Replace `__class_name__` reads with the byte; route `js_proto_class_method_dispatch` through a switch.
-4. **D — extended hidden-state audit.** Builtin function caches keyed by enum, name-pool reuse across batches. Convert remaining bare set/restore patterns (if any surface during routing) to the existing RAII guards.
-5. **C — megafile splits.** Mechanical once A2 lands. Do `js_runtime.cpp` first along the boundaries listed below.
-6. **Stage B harness expansion.** Add coverage rows for new kernels added during A2 (descriptor merge semantics, configurable→non-configurable transitions, accessor↔data conversions).
+1. **A2 dense storage via SHAPE TRANSITIONS — design committed.**
+
+   **Corrected picture of what's actually shared.** The Lambda `shape_pool.cpp`
+   is **not used by the JS engine at all** — it's only used by Lambda input
+   parsers ([`input.cpp`](../../lambda/input/input.cpp),
+   [`shape_builder.cpp`](../../lambda/shape_builder.cpp)). JS Maps acquire their
+   `TypeMap` either by direct allocation
+   ([`js_runtime.cpp::js_new_object_with_shape` L4763](../../lambda/js/js_runtime.cpp#L4763))
+   or via **per-call-site shape cache** (`shape_cache_ptr` —
+   [`transpile_js_mir.cpp` §7 L256, L4450, L4453](../../lambda/js/transpile_js_mir.cpp#L256);
+   populated by
+   [`js_constructor_create_object_shaped_cached` L4866](../../lambda/js/js_runtime.cpp#L4866)).
+
+   So the real "siblings get corrupted" mechanism is: every `new Foo(...)`
+   from the same callsite shares the cached `TypeMap*`. When one instance
+   mutates `ShapeEntry::flags` in place, every other instance sees the change.
+   The legacy `__nw_/__ne_/__nc_/__get_/__set_` markers exist as the per-Map
+   override that papers over this.
+
+   **Chosen design — Map-local shape clone (V8/JSC hidden-class pattern):**
+   `ShapeEntry` stays immutable once a `TypeMap` is published (i.e. cached or
+   referenced by ≥1 Map). Attribute mutation (writable / enumerable /
+   configurable / accessor flip / delete) **clones the `TypeMap` + shape chain
+   for that Map only**, mutates the cloned entry, and swaps `m->type`. The
+   shape cache `shape_cache_ptr` still points at the original immutable
+   TypeMap — future `new Foo(...)` calls keep getting the unmodified blueprint.
+
+   **Why this is the cleanest option:**
+   - Single source of truth for property attributes: `ShapeEntry::flags`. No
+     dual-write, no marker probes, no fallback.
+   - Zero coupling to `shape_pool.cpp` — the pool stays Lambda-only; the JS
+     change is contained to `js_property_attrs.cpp` plus reader cleanup.
+   - Readers stay simple: `jspd_is_writable(se)` is the entire query. The
+     `js_props_query_*` helpers and the `__nw_/__ne_/__nc_/__get_/__set_` markers
+     all retire.
+   - The clone primitive composes with `js_shape_entry_update_flags` and
+     `jspd_set_accessor` mutation sites — same call shape, just goes through
+     `js_shape_clone_for_mutation(m)` first.
+   - Unblocks FUNC virtual-property paths (R5 / R2-FUNC WONTFIX) — once
+     attributes live uniformly on `properties_map`'s shape, the kernels can
+     absorb FUNC writes without a special MAP-only contract.
+
+   **Phased implementation (each phase independently shippable, gated by
+   `make build` + Props gtest + test262 baseline):**
+
+   - **Phase A2-T1 — `js_shape_clone_for_mutation(Map* m)` primitive.** In
+     `js_property_attrs.cpp`: allocates a new `TypeMap` and a new `ShapeEntry`
+     chain copying the existing `name`/`type`/`byte_offset`/`flags`/`ns`/`default_value`
+     (`next` rewired). Repopulates `field_index` hash and `slot_entries` (if
+     present). Swaps `m->type`. Idempotent: tracks whether the current TypeMap
+     is already this Map's private clone (e.g. via a `bool is_private` field on
+     TypeMap, or by recording the clone-source pointer) to avoid re-cloning on
+     repeated mutations to the same Map.
+   - **Phase A2-T2 — Route `js_shape_entry_update_flags` through clone.** Body
+     becomes: `js_shape_clone_for_mutation(m); ShapeEntry* se =
+     js_find_shape_entry(...); se->flags = ...;`. Same external contract;
+     siblings now safe.
+   - **Phase A2-T3 — Route the 4 `jspd_set_accessor` sites through clone.**
+     Same pattern — clone first, then mutate. (Sites: js_props.cpp:280, 684;
+     js_globals.cpp:9155, 9347.)
+   - **Phase A2-T4 — Add Stage B sibling-Map invariant tests. — DONE.**
+     Three new `Props.*` gtests added to `test_js_props_gtest.cpp`:
+     `SiblingMapSharingTypeMap_NonWritablePerMap` (two `new Foo()` instances,
+     `defineProperty` non-writable on one, asserts other still writable),
+     `AccessorToData_NoSiblingCorruption` (accessor→data conversion on one
+     instance leaves sibling's accessor intact), `CloneIdempotent_NoDoubleAlloc`
+     (multiple mutations on same Map; sibling defaults preserved). Suite is
+     19/19 PASS in ~600ms. These would FAIL without A2-T1+T2+T3 — they
+     capture the cross-Map contamination class structurally.
+   - **Phase A2-T5 — Stop dual-writing markers from `js_attr_set_*`. — DONE.**
+     `js_attr_set_writable/_enumerable/_configurable` now go through new
+     `js_attr_apply_or_marker` helper: probe `js_find_shape_entry` first; if
+     entry exists, mutate via the clone-aware `js_shape_entry_update_flags`
+     (no marker write); if absent, fall back to legacy marker write so the
+     attribute applies once the property is later defined and the marker
+     reader fallback in `js_props_query_*` picks it up. Three downstream
+     callers had to switch from marker-presence probes to shape-aware
+     `js_props_query_*` probes (their pre-T5 logic relied on the inadvertent
+     "marker = was-defineProperty'd" sentinel that T5 invalidates):
+     `js_globals.cpp` `js_delete_property` MAP marker-clear loop,
+     `js_runtime.cpp::js_create_data_property_or_throw` (ARRAY+MAP branches:
+     check configurable + clear writable/enumerable via shape rather than
+     marker presence), and `js_runtime.cpp::js_regex_set_lastindex_strict`.
+     Also added `JS_DELETED_SENTINEL_VAL` filtering to the marker-fallback
+     branch of `js_props_query_*` (latent bug exposed by T5: prior code
+     always overwrote stale tombstones, masking the truthy-sentinel
+     misread). Verified `0 regressions / 28853 baseline passing` after T5.
+   - **Phase A2-T6 — Retire marker reads.** Delete fallback blocks in
+     `js_props_query_*`; sweep codebase for any remaining
+     `__nw_`/`__ne_`/`__nc_` references — should be zero.
+   - **Phase A2-T7 — Retire `__get_X`/`__set_X` accessor markers.** Accessor
+     pairs already live in the slot, IS_ACCESSOR already in the shape — the
+     marker is vestigial dual-write. Delete writers, then readers.
+   - **Phase A2-T8 — `JSPD_DELETED` shape bit; retire `JS_DELETED_SENTINEL_VAL`
+     overlap with `LMD_TYPE_INT`.** Delete becomes a clone+set-bit; readers gate
+     slot access on the bit. Fixes the FLOAT-key sentinel-misread bug class
+     structurally.
+   - **Phase A2-T9 — FUNC virtual-property unification.** R5 (FUNC delete) and
+     R2-FUNC (FUNC set) WONTFIX comments come down; `js_ordinary_*` kernels
+     absorb FUNC writes since `__nw_X` is now uniform shape state on
+     `properties_map`.
+
+   **Non-goals during A2:** no `Map` header changes, no GC-tracer changes, no
+   `shape_pool.cpp` changes, no `transpile_js_mir.cpp` changes. The single new
+   `TypeMap` field is `bool is_private` (or equivalent clone-source pointer) —
+   one byte.
+
+2. **A3 — `JsClass` enum.** Add `JsClass klass` byte to `Map`/`TypeMap`. Replace `__class_name__` reads with the byte; route `js_proto_class_method_dispatch` through a switch.
+3. **D — extended hidden-state audit.** Builtin function caches keyed by enum, name-pool reuse across batches. Convert remaining bare set/restore patterns (if any surface during A2) to the existing RAII guards.
+4. **C — megafile splits.** Mechanical once A2 lands. Do `js_runtime.cpp` first along the boundaries listed below.
+5. **Stage B harness expansion.** Add coverage rows for new kernels added during A2 (descriptor merge semantics, configurable→non-configurable transitions, accessor↔data conversions). Also add explicit FUNC-branch tests once A2 has unified the descriptor model.
 
 ## Motivation
 
