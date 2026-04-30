@@ -134,6 +134,7 @@ struct SimEvent {
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
     bool expected_is_collapsed;  // for assertions
+    bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
     float scroll_dx, scroll_dy;  // scroll offsets
     char* message;               // for log events

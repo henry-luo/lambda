@@ -68,7 +68,13 @@ typedef void (*DomRangeRectCb)(float x, float y, float w, float h, void* userdat
 // range this fires once; for a multi-line range it fires once per line of
 // each crossed text node. Caller must have called
 // `dom_range_resolve_layout(range)` first.
-void dom_range_for_each_rect(DomRange* range, DomRangeRectCb cb, void* userdata);
+//
+// `uicon` is optional: when non-NULL the helper uses glyph-precise advance
+// widths (matching the caret painter) so the right edge of the selection
+// rectangle aligns exactly with the caret. When NULL the resolver falls
+// back to linear interpolation across the rect width.
+void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
+    DomRangeRectCb cb, void* userdata);
 
 // ---------------------------------------------------------------------------
 // Legacy → DOM mirroring

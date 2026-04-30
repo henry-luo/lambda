@@ -3586,7 +3586,7 @@ void render_selection(RenderContext* rdcon, RadiantState* state) {
     // Standard text-selection blue; alpha 0x80 = 50% (matches inline painter).
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
 
-    dom_range_for_each_rect(r, selection_paint_rect_cb, &ctx);
+    dom_range_for_each_rect(r, rdcon->ui_context, selection_paint_rect_cb, &ctx);
     log_debug("[SELECTION] Rendered DomSelection range via dom_range_for_each_rect");
 }
 

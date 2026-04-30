@@ -2964,23 +2964,74 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.block.x = sel_block_x;
                 evcon.block.y = sel_block_y;
 
+                // Pick the TextRect whose vertical band best matches mouse_y. For
+                // multi-line wrapped text the chain `text->rect -> next -> next ...`
+                // is one rect per visual line; using only `text->rect` (line 1)
+                // makes the selection collapse whenever the mouse passes through
+                // the gap between lines (or onto later lines) at an x near the
+                // anchor's x. Convert mouse_y to layout-relative y, then pick
+                // the rect that contains it.
+                //
+                // Special case (in_gap): when rel_y falls in the inter-line GAP
+                // between two rects of the SAME wrapped text node (line-height
+                // > the rect's own height), snap the focus offset to the
+                // line-break boundary (end of the rect above) instead of
+                // recomputing from mouse_x. Otherwise, when dragging back up
+                // from a lower line to the anchor's line, the mouse passes
+                // through that gap directly below the anchor x and the
+                // recomputed offset would equal the anchor offset -> selection
+                // visually disappears for one frame.
+                float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
+                    ? evcon.ui_context->pixel_ratio : 1.0f;
+                float rel_y = (motion->y / pixel_ratio) - sel_block_y;
+                TextRect* picked = rect;
+                bool in_gap = false;
+                int gap_offset = -1;
+                for (TextRect* r = rect; r; r = r->next) {
+                    if (rel_y < r->y) {
+                        if (r == rect) {
+                            picked = r;  // above the very first line
+                        } else {
+                            // In the gap between previous rect (picked) and r:
+                            // snap focus to the line-break boundary.
+                            in_gap = true;
+                            gap_offset = picked->start_index + max(picked->length, 0);
+                        }
+                        break;
+                    }
+                    picked = r;
+                    if (rel_y <= r->y + r->height) break;  // mouse inside this rect
+                    // else: keep walking; if no later rect contains rel_y we'll
+                    // end up with the last rect (mouse below all lines).
+                }
+                rect = picked;
+
                 // Calculate character offset from mouse position using target text rect
-                int char_offset = calculate_char_offset_from_position(
-                    &evcon, text, rect,
-                    motion->x, motion->y);
+                int char_offset;
+                if (in_gap && gap_offset >= 0) {
+                    char_offset = gap_offset;
+                } else {
+                    char_offset = calculate_char_offset_from_position(
+                        &evcon, text, rect,
+                        motion->x, motion->y);
+                }
 
-                log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d",
-                    drag_target_view, drag_target_view == anchor_view, char_offset, state->selection->anchor_offset);
+                log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d, picked_rect=(%.1f,%.1f,%.1fx%.1f start=%d len=%d) rel_y=%.1f in_gap=%d",
+                    drag_target_view, drag_target_view == anchor_view, char_offset, state->selection->anchor_offset,
+                    rect->x, rect->y, rect->width, rect->height, rect->start_index, rect->length, rel_y, in_gap);
 
-                // Check if we're extending to a different view
+                // Always use selection_extend_to_view so that focus_view is
+                // refreshed to the current drag target. Using the same-view
+                // selection_extend() leaves focus_view at whatever it was last
+                // set to — which is wrong if the user previously dragged across
+                // a different text view and now drags back: focus_view stays
+                // pointing at the OTHER view while focus_offset becomes a byte
+                // offset valid only in this (anchor) view, producing a broken
+                // DomSelection range that renders as collapsed.
+                selection_extend_to_view(state, drag_target_view, char_offset);
                 if (drag_target_view != anchor_view) {
-                    // Cross-view selection: update focus_view
-                    selection_extend_to_view(state, drag_target_view, char_offset);
                     log_debug("[CROSS-VIEW SEL] Extending from anchor_view=%p to focus_view=%p",
                         anchor_view, drag_target_view);
-                } else {
-                    // Same view selection
-                    selection_extend(state, char_offset);
                 }
                 caret_set(state, drag_target_view, char_offset);
 
