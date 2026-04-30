@@ -9293,6 +9293,18 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         }
     }
     js_property_set(obj, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
+    // A2-T8 dual-write: also stamp the JSPD_DELETED bit on the shape entry so
+    // future readers can detect tombstones without consulting the slot value
+    // (avoids the FLOAT-key sentinel-misread bug class). The slot sentinel
+    // continues to be written for back-compat with un-migrated readers; once
+    // all readers move to bit-only probing, this dual-write collapses to the
+    // bit-only call. No-op when no shape entry exists for the key.
+    if (map_type && map_type->shape && get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0) {
+            js_shape_entry_set_deleted(obj, str_key->chars, (int)str_key->len, /*is_deleted=*/true);
+        }
+    }
     return (Item){.item = b2it(true)};
 }
 

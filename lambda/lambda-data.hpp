@@ -198,6 +198,8 @@ typedef TypeArray TypeList;
 #define JSPD_NON_ENUMERABLE   0x02u  // 1 = property hidden from for-in / Object.keys
 #define JSPD_NON_CONFIGURABLE 0x04u  // 1 = property cannot be deleted/redefined
 #define JSPD_IS_ACCESSOR      0x08u  // 1 = slot holds JsAccessorPair*, not data value
+#define JSPD_DELETED          0x10u  // 1 = property logically deleted (tombstone bit;
+                                     //     A2-T8 successor to JS_DELETED_SENTINEL_VAL).
 
 // First-class accessor pair stored in the map data slot when ShapeEntry::flags has
 // JSPD_IS_ACCESSOR set. Replaces the legacy `__get_X`/`__set_X` magic-key scheme.

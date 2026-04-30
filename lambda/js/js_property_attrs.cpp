@@ -218,6 +218,22 @@ extern "C" void js_shape_entry_set_accessor(Item obj, const char* name, int name
     }
 }
 
+// A2-T8 tombstone bit mutator. Same per-Map clone safety as the accessor
+// helper. Bit-only — does NOT write the legacy JS_DELETED_SENTINEL_VAL slot
+// value (callers in the transition phase should call this *and* the existing
+// sentinel write site; once readers migrate to the bit, the sentinel write
+// can drop). When the property has no shape entry yet (e.g. companion-map
+// indexed positions on arrays) this is a no-op — those sites continue to use
+// the slot sentinel until AT-4 lands.
+extern "C" void js_shape_entry_set_deleted(Item obj, const char* name, int name_len,
+                                           bool is_deleted) {
+    if (is_deleted) {
+        js_shape_entry_update_flags(obj, name, name_len, JSPD_DELETED, 0);
+    } else {
+        js_shape_entry_update_flags(obj, name, name_len, 0, JSPD_DELETED);
+    }
+}
+
 // =============================================================================
 // Stage A3: shape-flag-first attribute query helpers
 // =============================================================================

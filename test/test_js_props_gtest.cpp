@@ -546,3 +546,38 @@ TEST(Props, CloneIdempotent_NoDoubleAlloc) {
     EXPECT_NE(out.find("s.c.configurable=true"), std::string::npos) << out;
     EXPECT_NE(out.find("OK"),                    std::string::npos) << out;
 }
+
+// =============================================================================
+// 20. Tombstone_DeletePropagatesAcrossReaders (A2-T8 foundation)
+// Verifies that deleting a property leaves it unobservable to all standard
+// observers (in/hasOwnProperty/getOwnPropertyDescriptor/Object.keys/for-in).
+// Acts as a regression gate for the upcoming JSPD_DELETED bit migration:
+// readers must keep agreeing on tombstone semantics whether they consult the
+// slot sentinel, the shape bit, or both.
+// =============================================================================
+TEST(Props, Tombstone_DeletePropagatesAcrossReaders) {
+    auto out = expect_ok("Tombstone_DeletePropagatesAcrossReaders", R"JS(
+        var o = { a: 1, b: 2, c: 3 };
+        delete o.b;
+        console.log("in="              + ('b' in o));
+        console.log("hasOwn="          + o.hasOwnProperty('b'));
+        console.log("desc="            + (Object.getOwnPropertyDescriptor(o, 'b') === undefined));
+        console.log("keys="            + Object.keys(o).join(','));
+        var seen = [];
+        for (var k in o) seen.push(k);
+        console.log("forin="           + seen.join(','));
+        // Re-defining after delete must work (clears the tombstone).
+        o.b = 42;
+        console.log("revived="         + o.b);
+        console.log("revived.in="      + ('b' in o));
+        console.log("OK");
+    )JS");
+    EXPECT_NE(out.find("in=false"),       std::string::npos) << out;
+    EXPECT_NE(out.find("hasOwn=false"),   std::string::npos) << out;
+    EXPECT_NE(out.find("desc=true"),      std::string::npos) << out;
+    EXPECT_NE(out.find("keys=a,c"),       std::string::npos) << out;
+    EXPECT_NE(out.find("forin=a,c"),      std::string::npos) << out;
+    EXPECT_NE(out.find("revived=42"),     std::string::npos) << out;
+    EXPECT_NE(out.find("revived.in=true"),std::string::npos) << out;
+    EXPECT_NE(out.find("OK"),             std::string::npos) << out;
+}

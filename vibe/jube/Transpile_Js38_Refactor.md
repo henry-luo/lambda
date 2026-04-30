@@ -129,14 +129,34 @@ the gate is `regressions=0`, met).
      Verified `0 regressions / 28853 baseline passing` and Props 19/19
      after each batch.
    - **Phase A2-T8 — `JSPD_DELETED` shape bit; retire `JS_DELETED_SENTINEL_VAL`
-     overlap with `LMD_TYPE_INT`.** Structurally clean (bit is independent of
-     marker work), but the sentinel is checked at 100+ sites across
-     `js_runtime.cpp`/`js_globals.cpp`/`js_props.cpp`/`transpile_js_mir.cpp`
-     (search `JS_DELETED_SENTINEL_VAL` returns 100+ matches before
-     truncation). This is its own multi-session refactor: introduce the bit,
-     migrate writers (~10 sites), migrate readers (~80+ sites), then drop
-     the sentinel encoding. Fixes the FLOAT-key sentinel-misread bug class
-     structurally.
+     overlap with `LMD_TYPE_INT`. — FOUNDATION DONE (T8a).** Bit `0x10` added
+     to the `JSPD_*` set in `lambda/lambda-data.hpp`; `jspd_is_deleted` /
+     `jspd_set_deleted` predicates added to `lambda/js/js_property_attrs.h`;
+     per-Map clone-safe mutator `js_shape_entry_set_deleted` added in
+     `lambda/js/js_property_attrs.cpp` (wraps the existing
+     `js_shape_entry_update_flags` primitive). Central `js_delete_property`
+     site in `js_globals.cpp` (~L9295) now dual-writes — slot sentinel +
+     shape bit — so the bit propagates through the most common delete path.
+     Props gtest #20 `Tombstone_DeletePropagatesAcrossReaders` added as the
+     reader-agreement gate (covers `in` / `hasOwnProperty` /
+     `getOwnPropertyDescriptor` / `Object.keys` / `for-in` / re-define after
+     delete). Verified `0 regressions / 28853 baseline passing` and Props
+     20/20 PASS after T8a. Remaining T8 work (T8b–T8d) is mechanical but
+     spans 90+ sites and is its own multi-session refactor:
+     - **T8b**: at every reader site that does
+       `slot.item == JS_DELETED_SENTINEL_VAL` on a map slot, add an OR check
+       for `jspd_is_deleted(se)` (or replace the sentinel probe entirely
+       where the ShapeEntry is already in scope). ~80+ sites across
+       `js_runtime.cpp` / `js_globals.cpp` / `js_props.cpp`.
+     - **T8c**: at every other writer site that writes the sentinel to a map
+       slot, also call `js_shape_entry_set_deleted(...)`. ~10 sites.
+     - **T8d**: drop sentinel writes; bit becomes the single source of
+       truth. Drops the `JS_DELETED_SENTINEL_VAL` macro and the FLOAT-key
+       sentinel-misread bug class structurally.
+     **Out of scope for T8** (separate problem): array-hole sentinel writes
+     to `arr->items[idx]` (positional storage, no ShapeEntry to carry the
+     bit). These either stay as slot sentinels or wait for AT-4 to give
+     companion-map digit-string ShapeEntries the same parity.
    - **Phase A2-T9 — FUNC virtual-property unification.** R5 (FUNC delete) and
      R2-FUNC (FUNC set) WONTFIX comments come down; `js_ordinary_*` kernels
      absorb FUNC writes since `__nw_X` is now uniform shape state on
