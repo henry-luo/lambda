@@ -1,0 +1,18 @@
+{
+  "name": "Down arrow without shift collapses selection (DOM check)",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": "focusable elements"}},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "focusable elements"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "key_press", "key": "Down"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true},
+    {"type": "assert_caret", "view_type": 1}
+  ]
+}

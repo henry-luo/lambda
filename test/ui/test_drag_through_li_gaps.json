@@ -1,0 +1,24 @@
+{
+  "name": "Drag across LIs through inter-li gaps",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 100},
+    {"type": "log", "message": "Anchor on first li text"},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "log", "message": "Drag onto 2nd li text - extends selection across li[0]->li[1]"},
+    {"type": "mouse_move", "target": {"text": "move the caret"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Drag onto 3rd li text - extends across li[0]->li[2]"},
+    {"type": "mouse_move", "target": {"text": "extend selection"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "log", "message": "Now find a y position in the GAP between 2nd and 3rd li"},
+    {"type": "mouse_move", "target": {"text": "extend selection"}, "offset_y": -10},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "render", "file": "./temp/li_gap_drag.png"},
+    {"type": "mouse_up", "target": {"text": "extend selection"}, "button": 0}
+  ]
+}

@@ -5,6 +5,7 @@
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
+#include "dom_range_resolver.hpp"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -2575,6 +2576,121 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     *out_height = rect->height;  // use rect height as caret height
 }
 
+// Glyph-precise X resolver registered with the dom_range resolver so that
+// `dom_range_for_each_rect()` (used to paint selection rectangles) computes
+// rect-relative x using the SAME glyph walk as the caret painter
+// (`calculate_position_from_char_offset`). Without this, the resolver falls
+// back to linear interpolation and the right edge of the selection ends up
+// off by ~1 character width from where the caret is drawn (since real fonts
+// are proportional, not monospaced).
+static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
+                                    TextRect* rect, int byte_offset) {
+    if (!text || !rect) return rect ? rect->x : 0.0f;
+    if (byte_offset <= rect->start_index) return rect->x;
+    if (rect->length <= 0) return rect->x;
+    if (byte_offset >= rect->start_index + rect->length) {
+        return rect->x + rect->width;
+    }
+
+    // Mirror calculate_position_from_char_offset, but build a temporary
+    // FontBox from text->font (no EventContext available here).
+    FontBox fbox;
+    memset(&fbox, 0, sizeof(fbox));
+    if (text->font) setup_font(uicon, &fbox, text->font);
+    if (!fbox.font_handle || !fbox.style) return rect->x;
+
+    unsigned char* str = text->text_data();
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + rect->length;
+    int byte_off = rect->start_index;
+    float x = rect->x;
+    bool has_space = false;
+
+    while (p < end && byte_off < byte_offset) {
+        float wd = 0;
+        int bytes = 1;
+        if (is_space(*p)) {
+            if (has_space) { p++; byte_off++; continue; }
+            has_space = true;
+            wd = fbox.style->space_width;
+        } else {
+            has_space = false;
+            uint32_t codepoint;
+            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+            if (bytes <= 0) { bytes = 1; codepoint = *p; }
+            GlyphInfo ginfo = font_get_glyph(fbox.font_handle, codepoint);
+            if (ginfo.id == 0) { p += bytes; byte_off += bytes; continue; }
+            wd = ginfo.advance_x;
+        }
+        x += wd;
+        p += bytes;
+        byte_off += bytes;
+    }
+    return x;
+}
+
+// Static registration: hooks the resolver into dom_range_resolver.cpp at
+// program start so selection painting always uses glyph-precise widths.
+__attribute__((constructor))
+static void register_event_glyph_x_resolver() {
+    dom_range_set_glyph_x_resolver(event_glyph_x_resolver);
+}
+
+// Inverse resolver: given a rect-relative target X, return the byte offset
+// in `rect` whose visual X is closest. Used by Up/Down arrow vertical
+// caret navigation so the caret lands at the same visual column on the
+// new line. Mirrors the glyph walk used elsewhere.
+static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
+                                            TextRect* rect, float target_local_x) {
+    if (!text || !rect) return rect ? rect->start_index : 0;
+    if (rect->length <= 0) return rect->start_index;
+    if (target_local_x <= rect->x) return rect->start_index;
+    if (target_local_x >= rect->x + rect->width) {
+        return rect->start_index + rect->length;
+    }
+
+    FontBox fbox;
+    memset(&fbox, 0, sizeof(fbox));
+    if (text->font) setup_font(uicon, &fbox, text->font);
+    if (!fbox.font_handle || !fbox.style) return rect->start_index;
+
+    unsigned char* str = text->text_data();
+    unsigned char* p = str + rect->start_index;
+    unsigned char* end = p + rect->length;
+    int byte_off = rect->start_index;
+    float x = rect->x;
+    bool has_space = false;
+
+    while (p < end) {
+        float wd = 0;
+        int bytes = 1;
+        if (is_space(*p)) {
+            if (has_space) { p++; byte_off++; continue; }
+            has_space = true;
+            wd = fbox.style->space_width;
+        } else {
+            has_space = false;
+            uint32_t codepoint;
+            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
+            if (bytes <= 0) { bytes = 1; codepoint = *p; }
+            GlyphInfo ginfo = font_get_glyph(fbox.font_handle, codepoint);
+            if (ginfo.id == 0) { p += bytes; byte_off += bytes; continue; }
+            wd = ginfo.advance_x;
+        }
+        // Caret goes BEFORE this glyph if target_local_x is left of the midpoint.
+        if (target_local_x < x + wd / 2.0f) return byte_off;
+        x += wd;
+        p += bytes;
+        byte_off += bytes;
+    }
+    return rect->start_index + rect->length;
+}
+
+__attribute__((constructor))
+static void register_event_byte_offset_for_x_resolver() {
+    dom_range_set_byte_offset_for_x_resolver(event_byte_offset_for_x_resolver);
+}
+
 /**
  * Find the TextRect containing a given character offset
  * Returns the TextRect that contains the offset, or the last rect if offset is beyond all rects
@@ -2926,8 +3042,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             View* drag_target_view = nullptr;
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
                 drag_target_view = current_target;
+            } else if (state->selection && state->selection->focus_view &&
+                       state->selection->focus_view->view_type == RDT_VIEW_TEXT &&
+                       !state->selection->is_collapsed) {
+                // Mouse is not over a text view (e.g., in the gap between
+                // adjacent block-level elements like <li>s). If we already
+                // have an extended selection, keep its focus_view — falling
+                // back to anchor_view here would RESET focus_view to anchor
+                // and visually collapse the selection back into the anchor's
+                // text node, making the highlight appear to disappear.
+                drag_target_view = state->selection->focus_view;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT) {
-                // Mouse is not over a text view, stay with the anchor view
+                // Initial drag (still collapsed): stay with the anchor view.
                 drag_target_view = anchor_view;
             }
 
@@ -4417,11 +4543,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             selection_start(state, caret_view, state->caret->char_offset);
                         }
                         // Calculate line start/end for extending selection
-                        caret_move_line(state, -1);
+                        caret_move_line(state, -1, evcon.ui_context);
                         selection_extend(state, state->caret->char_offset);
                     } else {
                         selection_clear(state);
-                        caret_move_line(state, -1);
+                        caret_move_line(state, -1, evcon.ui_context);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -4432,11 +4558,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (!state->selection || state->selection->is_collapsed) {
                             selection_start(state, caret_view, state->caret->char_offset);
                         }
-                        caret_move_line(state, 1);
+                        caret_move_line(state, 1, evcon.ui_context);
                         selection_extend(state, state->caret->char_offset);
                     } else {
                         selection_clear(state);
-                        caret_move_line(state, 1);
+                        caret_move_line(state, 1, evcon.ui_context);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;

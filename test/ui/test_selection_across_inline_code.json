@@ -1,0 +1,15 @@
+{
+  "name": "Drag selection includes <code> inline element fragments",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "log", "message": "Drag from before <code>Tab</code> through after <code>Shift+Tab</code>"},
+    {"type": "mouse_down", "target": {"text": "Use "}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": " to navigate"}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "mouse_up", "target": {"text": " to navigate"}, "button": 0},
+    {"type": "render", "file": "./temp/selection_with_code.png"}
+  ]
+}

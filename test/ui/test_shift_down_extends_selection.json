@@ -1,0 +1,15 @@
+{
+  "name": "Shift+Down extends selection across lines",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "key_press", "key": "Down", "mods_str": "shift"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_caret", "view_type": 1}
+  ]
+}

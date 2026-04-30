@@ -936,6 +936,16 @@ static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
     }
 }
 
+struct SelectionPaintCtx {
+    RenderContext* rdcon;
+    Color          color;
+    float          scale;
+    float          iframe_offset_x;
+    float          iframe_offset_y;
+};
+
+static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud);
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
@@ -961,6 +971,20 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (!text_rect) {
         log_debug("no text rect for text view");
         return;
+    }
+
+    // Resolve DomSelection once for this text view; rects are emitted per
+    // fragment further below (after the parent inline background) so the
+    // selection band sits beneath glyphs but above any <code>/<span>
+    // background, matching native browser behavior.
+    DomRange* sel_range = nullptr;
+    {
+        RadiantState* st = rdcon->ui_context && rdcon->ui_context->document
+            ? rdcon->ui_context->document->state : nullptr;
+        DomSelection* ds = st ? st->dom_selection : nullptr;
+        if (ds && ds->range_count > 0 && !ds->is_collapsed && ds->ranges[0]) {
+            sel_range = ds->ranges[0];
+        }
     }
 
     // Check if this text view has a selection (supports cross-view selection)
@@ -1096,6 +1120,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             } else {
                 rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
             }
+        }
+
+        // Paint selection background for THIS text rect, after parent inline
+        // background but before glyphs. This way the highlight always sits
+        // above any <code>/<span> background and below the text itself.
+        if (sel_range) {
+            SelectionPaintCtx ctx;
+            ctx.rdcon = rdcon;
+            ctx.scale = rdcon->scale;
+            RadiantState* st = rdcon->ui_context->document->state;
+            ctx.iframe_offset_x = st->selection ? st->selection->iframe_offset_x : 0;
+            ctx.iframe_offset_y = st->selection ? st->selection->iframe_offset_y : 0;
+            ctx.color.r = 0xB3; ctx.color.g = 0xD7; ctx.color.b = 0xFF; ctx.color.a = 0xFF;
+            dom_range_for_each_rect_in_text_rect(sel_range, (DomText*)text_view,
+                text_rect, rdcon->ui_context, selection_paint_rect_cb, &ctx);
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
@@ -3533,14 +3572,6 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
  * `dom_range_for_each_rect()` returns rectangles in absolute CSS
  * coordinates; we just scale to physical pixels and fill.
  */
-struct SelectionPaintCtx {
-    RenderContext* rdcon;
-    Color          color;
-    float          scale;
-    float          iframe_offset_x;
-    float          iframe_offset_y;
-};
-
 static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
@@ -3603,9 +3634,10 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
 
     log_debug("[UI_OVERLAY] Rendering overlays: caret=%p", (void*)state->caret);
 
-    // Phase A: render selection via DomSelection-driven multi-rect overlay.
-    // Inline glyph painter in render_text_view is now disabled.
-    render_selection(rdcon, state);
+    // Selection background is painted inline inside render_text_view (per
+    // text view, before glyphs) so that text renders on top of the highlight
+    // rather than being obscured by an after-the-fact overlay. Therefore we
+    // do NOT call render_selection() here.
 
     // Render open dropdown popup (above content)
     if (state->open_dropdown) {

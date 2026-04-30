@@ -1,0 +1,16 @@
+{
+  "name": "Single-node partial selection in <h1> does not bleed to other nodes",
+  "html": "test/layout/data/form/form_state.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "log", "message": "Click + drag a few characters inside h1 title"},
+    {"type": "mouse_down", "target": {"text": "Radiant"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"text": "Suite"}},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "Suite"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "render", "file": "./temp/selection_partial_title.png"}
+  ]
+}
