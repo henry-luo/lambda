@@ -2831,6 +2831,13 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
     if (dtype == LMD_TYPE_UNDEFINED) {
         digits = 0;
     } else {
+        // ES §7.1.4 ToNumber: Symbol → TypeError. Some js_to_number paths
+        // currently return NaN silently for Symbols, which would let toFixed
+        // fall through to digits=0 — spec mandates TypeError before any
+        // RangeError checks.
+        if (js_key_is_symbol_c(digits_item)) {
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        }
         Item coerced = js_to_number(digits_item);
         if (js_check_exception()) return ItemNull;
         TypeId ct = get_type_id(coerced);
@@ -5741,6 +5748,12 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     }
     if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
     String* name_str = it2s(name_str_item);
+    // ES §7.1.19 ToPropertyKey: name is already coerced; replace `name` so all
+    // downstream lookups (js_has_own_property, js_property_get, etc.) use the
+    // coerced string key rather than the raw input (which may be an object
+    // whose toString returns the actual key — see test
+    // built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-2-42).
+    name = name_str_item;
 
     // J39-7: ES §B.2.2.1 / §10.4.7 — the `__proto__` slot is the [[Prototype]]
     // internal slot, NOT an own property of plain objects. Object literal
@@ -6448,7 +6461,85 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         int blen = snprintf(buf, sizeof(buf), "%d", i);
                         js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
                     }
+                    // J39-7: also include any extra own properties added after construction.
+                    // Per ES §10.4.3.4 [[OwnPropertyKeys]] of String exotic: integer-index
+                    // properties up to length come first, then other own properties (which
+                    // includes both extra numeric indices like str[5] and named properties
+                    // added via defineProperty), then inherited "length" placeholder.
+                    // Pass A: extra numeric indices >= slen, in numeric order.
+                    // Pass B: named (non-numeric, non-internal) shape entries.
+                    TypeMap* _tm = (TypeMap*)m->type;
+                    // Collect extra integer indices from shape, sort ascending.
+                    int extra_idx_count = 0;
+                    int extra_idx_capacity = 8;
+                    int* extra_idx = (int*)alloca(extra_idx_capacity * sizeof(int));
+                    {
+                        ShapeEntry* se = _tm ? _tm->shape : NULL;
+                        while (se) {
+                            const char* s = se->name->str;
+                            int len = (int)se->name->length;
+                            if (len > 0 && len < 12 && s[0] >= '0' && s[0] <= '9') {
+                                bool all_digit = true;
+                                int v = 0;
+                                for (int i = 0; i < len; i++) {
+                                    if (s[i] < '0' || s[i] > '9') { all_digit = false; break; }
+                                    v = v * 10 + (s[i] - '0');
+                                }
+                                if (all_digit && v >= slen) {
+                                    Item val = _map_read_field(se, m->data);
+                                    if (val.item != JS_DELETED_SENTINEL_VAL) {
+                                        if (extra_idx_count >= extra_idx_capacity) {
+                                            int new_cap = extra_idx_capacity * 2;
+                                            int* nb = (int*)alloca(new_cap * sizeof(int));
+                                            memcpy(nb, extra_idx, extra_idx_count * sizeof(int));
+                                            extra_idx = nb;
+                                            extra_idx_capacity = new_cap;
+                                        }
+                                        extra_idx[extra_idx_count++] = v;
+                                    }
+                                }
+                            }
+                            se = se->next;
+                        }
+                    }
+                    // simple insertion sort (small N)
+                    for (int i = 1; i < extra_idx_count; i++) {
+                        int v = extra_idx[i]; int j = i - 1;
+                        while (j >= 0 && extra_idx[j] > v) { extra_idx[j+1] = extra_idx[j]; j--; }
+                        extra_idx[j+1] = v;
+                    }
+                    for (int i = 0; i < extra_idx_count; i++) {
+                        char buf[16];
+                        int blen = snprintf(buf, sizeof(buf), "%d", extra_idx[i]);
+                        js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
+                    }
                     js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
+                    // Pass B: named (non-numeric, non-internal) own properties.
+                    {
+                        ShapeEntry* se = _tm ? _tm->shape : NULL;
+                        while (se) {
+                            const char* s = se->name->str;
+                            int len = (int)se->name->length;
+                            bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                            // skip "length" (already added) and numeric-only names
+                            if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
+                            if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
+                                bool all_digit = true;
+                                for (int i = 0; i < len; i++) {
+                                    if (s[i] < '0' || s[i] > '9') { all_digit = false; break; }
+                                }
+                                if (all_digit) skip = true;
+                            }
+                            if (!skip) {
+                                Item val = _map_read_field(se, m->data);
+                                if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+                            }
+                            if (!skip) {
+                                js_array_push(result, (Item){.item = s2it(heap_create_name(s, len))});
+                            }
+                            se = se->next;
+                        }
+                    }
                     // v26: append builtin String method names only for prototype objects
                     bool is_proto = false;
                     js_map_get_fast_ext(m, "__is_proto__", 12, &is_proto);
@@ -8067,17 +8158,26 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         Map* m = source.map;
         if (!m || !m->type) continue;
         TypeMap* tm = (TypeMap*)m->type;
+        // ES OrdinaryOwnPropertyKeys: strings before symbols. Two-pass.
+        for (int pass = 0; pass < 2; pass++) {
         ShapeEntry* e = tm->shape;
         while (e) {
             if (e->name) {
                 const char* n = e->name->str;
                 int nlen = (int)e->name->length;
                 // v20: Skip internal marker properties (but allow __sym_ symbol keys)
+                bool is_sym = (nlen >= 6 && n[0] == '_' && n[1] == '_' &&
+                               n[2] == 's' && n[3] == 'y' && n[4] == 'm' && n[5] == '_');
                 if (nlen >= 2 && n[0] == '_' && n[1] == '_') {
-                    if (!(nlen >= 6 && n[2] == 's' && n[3] == 'y' && n[4] == 'm' && n[5] == '_')) {
+                    if (!is_sym) {
                         e = e->next;
                         continue;
                     }
+                }
+                // pass 0: strings only; pass 1: symbols only.
+                if ((pass == 0 && is_sym) || (pass == 1 && !is_sym)) {
+                    e = e->next;
+                    continue;
                 }
                 // Stage A3: shape-flag-first non-enumerable check
                 if (!js_props_query_enumerable(m, e, n, nlen)) {
@@ -8112,6 +8212,7 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
             }
             e = e->next;
         }
+        } // end pass loop
         // Second pass: detect accessor-only properties (__get_<name> / __set_<name>)
         // that have no regular data entry (e.g. properties defined only with a getter)
         // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
@@ -8206,7 +8307,7 @@ static bool js_map_has_builtin_method(Map* m, const char* name, int len) {
             "setHours","setMinutes","setSeconds","setMilliseconds",
             "setUTCFullYear","setUTCMonth","setUTCDate","setUTCHours",
             "setUTCMinutes","setUTCSeconds","setUTCMilliseconds",
-            "getYear","setYear","toLocaleString",NULL
+            "getYear","setYear","toLocaleString","toLocaleTimeString",NULL
         };
         for (int i = 0; date_methods[i]; i++) {
             if ((int)strlen(date_methods[i]) == len && strncmp(name, date_methods[i], len) == 0) return true;

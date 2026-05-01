@@ -1514,11 +1514,12 @@ extern "C" Item js_to_string(Item value) {
                     TypeId rt = get_type_id(result);
                     if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) return js_to_string(result);
                 }
-                // callable method(s) returned non-primitive → TypeError
-                if (ts_callable || vo_callable) {
-                    js_throw_type_error("Cannot convert object to primitive value");
-                    return (Item){.item = s2it(heap_create_name(""))};
-                }
+                // ES §7.1.1.1 OrdinaryToPrimitive step 6: after both methods attempted
+                // (whether callable or not), if no primitive obtained, throw TypeError.
+                // This covers {toString: undefined, valueOf: undefined} where both are
+                // own properties but neither is callable.
+                js_throw_type_error("Cannot convert object to primitive value");
+                return (Item){.item = s2it(heap_create_name(""))};
             }
         }
         // Check for Error-like objects (have 'name' and 'message' properties)
@@ -5238,6 +5239,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
                             {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
                             {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+                            {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
                             {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
                             {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
                             {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
@@ -5979,6 +5981,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
                                 {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
                                 {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+                                {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
                                 {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
                                 {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
                                 {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
@@ -8297,7 +8300,16 @@ extern "C" Item js_constructor_static_property(Item ctor_name, Item prop_name) {
     String* cn = it2s(ctor_name);
     String* pn = it2s(prop_name);
     if (!cn || !pn) return ItemNull;
-    return js_lookup_constructor_static(cn->chars, (int)cn->len, pn->chars, (int)pn->len);
+    Item v = js_lookup_constructor_static(cn->chars, (int)cn->len, pn->chars, (int)pn->len);
+    if (v.item != ItemNull.item) return v;
+    // Fall back to general property access on the constructor function object.
+    // This handles standard function properties (length, name, prototype) and
+    // any user-assigned own properties on the constructor.
+    Item ctor = js_get_constructor(ctor_name);
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        return js_property_get(ctor, prop_name);
+    }
+    return make_js_undefined();
 }
 
 // Populate %TypedArray%.prototype with proper Array builtin methods
@@ -16257,6 +16269,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         int form_len = 3;
         if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
             Item form_str = js_to_string(args[0]);
+            if (js_exception_pending) return ItemNull;
             String* f = it2s(form_str);
             if (f) { form = f->chars; form_len = (int)f->len; }
         }
@@ -16568,7 +16581,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 6 && strncmp(method->chars, "repeat", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        // ES §22.1.3.16: ToIntegerOrInfinity — Symbol throws TypeError before NaN check.
+        extern int64_t js_key_is_symbol_c(Item key);
+        if (js_key_is_symbol_c(args[0])) {
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        }
         double n = js_get_number(args[0]);
+        if (js_exception_pending) return ItemNull;
         // spec: ToIntegerOrInfinity first — NaN becomes 0, then range check
         if (n != n) n = 0;  // NaN → 0 (covers undefined, null, NaN)
         n = trunc(n);        // truncate toward zero (ToIntegerOrInfinity)
@@ -17495,9 +17514,17 @@ static Item js_array_species_create(Item original_array, int length) {
         }
         // step 10: if species is a constructor, Construct(C, «length»)
         if (get_type_id(S) == LMD_TYPE_FUNC) {
+            JsFunction* sfn0 = (JsFunction*)S.function;
+            // step 9: not a constructor → TypeError. Built-in non-constructable
+            // functions (parseInt, arrows, methods, generators) are excluded.
+            if ((sfn0->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_GENERATOR))
+                || sfn0->builtin_id > 0 || sfn0->builtin_id == -2) {
+                js_throw_type_error("Species constructor is not a constructor");
+                return ItemNull;
+            }
             Item len_arg = (Item){.item = i2it(length)};
             // Simulate `new S(length)`: create this with S.prototype, call S, check return
-            JsFunction* sfn = (JsFunction*)S.function;
+            JsFunction* sfn = sfn0;
             // Lazily create prototype if not yet initialized
             if (sfn->prototype.item == ItemNull.item) {
                 Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
@@ -17977,8 +18004,15 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* src = arr.array;
-        int start = argc > 0 ? (int)js_get_number(args[0]) : 0;
-        int end = argc > 1 ? (int)js_get_number(args[1]) : src->length;
+        // ES §23.1.3.28: undefined start/end → defaults (0 / length).
+        int start = 0;
+        if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
+            start = (int)js_get_number(args[0]);
+        }
+        int end = src->length;
+        if (argc > 1 && args[1].item != ITEM_JS_UNDEFINED && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            end = (int)js_get_number(args[1]);
+        }
         if (start < 0) start = src->length + start;
         if (end < 0) end = src->length + end;
         if (start < 0) start = 0;
@@ -18036,12 +18070,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         auto is_concat_spreadable = [](Item item) -> bool {
             TypeId t = get_type_id(item);
             bool is_array = (t == LMD_TYPE_ARRAY);
-            // Check Symbol.isConcatSpreadable (stored as __sym_12)
+            // Check Symbol.isConcatSpreadable (stored as __sym_12).
+            // ES §22.1.3.1.1 step 4: If spreadable is not undefined, return ToBoolean(spreadable).
+            // Step 5: Else return IsArray(O). (so undefined falls through to IsArray)
             if (t == LMD_TYPE_ARRAY && item.array->extra != 0) {
                 Map* props = (Map*)(uintptr_t)item.array->extra;
                 bool found = false;
                 Item val = js_map_get_fast_ext(props, "__sym_12", 8, &found);
-                if (found) return js_is_truthy(val);
+                if (found && get_type_id(val) != LMD_TYPE_UNDEFINED) return js_is_truthy(val);
             } else if (t == LMD_TYPE_MAP) {
                 bool found = false;
                 Item val = js_map_get_fast_ext(item.map, "__sym_12", 8, &found);
@@ -18052,7 +18088,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                     if (val.item != ITEM_NULL && get_type_id(val) != LMD_TYPE_UNDEFINED)
                         found = true;
                 }
-                if (found) return js_is_truthy(val);
+                if (found && get_type_id(val) != LMD_TYPE_UNDEFINED) return js_is_truthy(val);
             }
             return is_array;
         };
@@ -18309,7 +18345,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // forEach
     if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
-        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
         Array* src = arr.array;
@@ -18331,7 +18367,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
         js_current_this = prev_this;
-        return ItemNull;
+        return make_js_undefined();
     }
     // find
     if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
@@ -20472,6 +20508,7 @@ static Item js_proto_class_dispatch_for_class(JsClass cls, const char* key_str, 
             {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
             {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
             {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+            {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
             {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
             {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
             {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
