@@ -186,6 +186,13 @@ void tc_ensure_init(DomElement* elem) {
             dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
         }
     }
+
+    // F5: seed :valid / :invalid / :required / :read-only on first init so
+    // CSS selectors match before any user interaction.
+    te_validate(elem);
+    // F8: ARIA reflection — push disabled/readonly/required/invalid bits
+    // onto matching aria-* attributes for AT consumers.
+    te_aria_reflect(elem);
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
@@ -270,6 +277,11 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
 
     // F4: refresh :placeholder-shown after value changes (incl. clear).
     tc_refresh_placeholder_shown(elem, f);
+
+    // F5: re-evaluate :valid / :invalid (and friends) after every mutation.
+    te_validate(elem);
+    // F8: keep aria-invalid in sync with the new validity state.
+    te_aria_reflect(elem);
 }
 
 void tc_set_selection_range(DomElement* elem,

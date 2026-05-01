@@ -87,6 +87,11 @@ enum SimEventType {
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
+    // F6: clipboard helpers
+    SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
+    SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
+    // F7: IME composition
+    SIM_EVENT_IME_COMPOSE,     // drive te_ime_begin/update/commit/cancel
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -209,6 +214,10 @@ struct SimEvent {
     // tripleclick sets 3). Used as MouseButtonEvent::clicks on the
     // last synthesized down/up pair.
     int click_count;
+    // F7 (Radiant_Design_Form_Input.md §4.1): IME composition phase
+    // for SIM_EVENT_IME_COMPOSE. One of "begin", "update", "commit",
+    // "cancel". Empty / unknown defaults to "update".
+    char* ime_phase;
 };
 
 // Event simulation context

@@ -85,8 +85,8 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
  * @param font Font properties to use
  * @param color Text color
  */
-static void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
-                                 FontProp* font, Color color) {
+void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+                          FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
 
     // Setup font for rendering

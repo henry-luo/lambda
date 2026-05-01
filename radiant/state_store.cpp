@@ -173,6 +173,10 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     // Initialize animation scheduler
     state->animation_scheduler = animation_scheduler_create(pool);
 
+    // F8: context-menu starts hidden; -1 indicates "no item highlighted".
+    state->context_menu_target = nullptr;
+    state->context_menu_hover = -1;
+
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }

@@ -1,0 +1,22 @@
+{
+  "name": "Form input - tripleclick selects all (F2)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_input_tripleclick ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "alpha beta"},
+    {"type": "wait", "ms": 80},
+
+    {"type": "tripleclick", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "equals": "alpha beta"}
+  ]
+}

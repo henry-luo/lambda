@@ -1,8 +1,10 @@
 #include "handler.hpp"
+#include "render.hpp"
 #include "state_store.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "text_edit.hpp"
+#include "context_menu.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -2150,6 +2152,15 @@ bool is_view_focusable(View* view) {
         ViewElement* elem = (ViewElement*)view;
         uint32_t tag = elem->tag();
 
+        // F8 (Radiant_Design_Form_Input.md §4): a disabled form control
+        // is not part of the tabbing order. The HTML/ARIA spec says
+        // disabled form elements are inert.
+        DomElement* delem = (DomElement*)view;
+        if (delem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+            delem->form && delem->form->disabled) {
+            return false;
+        }
+
         switch (tag) {
         case HTM_TAG_A:
             // <a> is focusable if it has href
@@ -3277,6 +3288,34 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
 
+        // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
+        // hit-testing. Runs before any focus / drag work so a click inside
+        // the popup or its dismissal doesn't reach underlying views.
+        if (event->type == RDT_EVENT_MOUSE_DOWN && state && state->context_menu_target) {
+            float mxp = (float)btn_event->x;
+            float myp = (float)btn_event->y;
+            if (context_menu_contains(state, mxp, myp)) {
+                if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                    context_menu_click(state, mxp, myp);
+                }
+                break;
+            }
+            // Click outside the open menu always dismisses it; we then
+            // continue with normal handling so the new click still works.
+            context_menu_close(state);
+        }
+        // Right-click on a text control opens the native context menu.
+        if (event->type == RDT_EVENT_MOUSE_DOWN &&
+            btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
+            state && evcon.target && evcon.target->is_element()) {
+            DomElement* hit = (DomElement*)evcon.target;
+            if (tc_is_text_control(hit)) {
+                context_menu_open(state, evcon.target,
+                    (float)btn_event->x, (float)btn_event->y);
+                break;
+            }
+        }
+
         // Update active and focus states
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
             log_debug("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
@@ -4102,6 +4141,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         if (!state) break;
 
+        // F8: Esc closes the native context menu before any other handler.
+        if (state->context_menu_target && key_event->key == RDT_KEY_ESCAPE) {
+            context_menu_close(state);
+            evcon.need_repaint = true;
+            break;
+        }
+
         // Handle dropdown keyboard navigation first (if dropdown is open)
         if (state->open_dropdown) {
             if (handle_dropdown_key(&evcon, key_event->key)) {
@@ -4212,6 +4258,30 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                         evcon.need_repaint = true;
                     }
+                    break;
+                }
+
+                // F6: Cmd+V paste into single-line input. te_paste sanitizes
+                // newlines (CR/LF -> space) and clamps to maxlength before
+                // delegating to te_replace_byte_range, which fires
+                // beforeinput/input and pushes an undo entry. Caret is
+                // positioned by te_replace_byte_range.
+                if (cmd && key_event->key == RDT_KEY_V) {
+                    const char* clip = clipboard_get_text();
+                    if (clip && *clip) {
+                        evcon.paste_text = clip;
+                        dispatch_lambda_handler(&evcon, focused, "paste");
+                        evcon.paste_text = nullptr;
+                        focused = focus_get(state);
+                        if (focused && focused->is_element()) {
+                            DomElement* fe = (DomElement*)focused;
+                            if (tc_is_text_control(fe)) {
+                                te_paste(fe, state, focused, clip,
+                                         (uint32_t)strlen(clip));
+                            }
+                        }
+                    }
+                    evcon.need_repaint = true;
                     break;
                 }
 
@@ -4448,38 +4518,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                // Cmd+V: paste clipboard text into textarea
+                // Cmd+V: paste clipboard text into textarea. F6 routes
+                // through te_paste so newline normalization (\r\n → \n) and
+                // maxlength clamping happen in one place; caret + undo are
+                // handled by te_replace_byte_range.
                 if (cmd && key_event->key == RDT_KEY_V) {
                     const char* clip = clipboard_get_text();
                     if (clip && *clip) {
-                        // if selection active, move caret to selection start
-                        bool had_selection = state->selection && !state->selection->is_collapsed;
-                        int sel_s = 0;
-                        if (had_selection) {
-                            int sel_e;
-                            selection_get_range(state, &sel_s, &sel_e);
-                            state->caret->char_offset = sel_s;
-                        }
-
-                        // dispatch "paste" event to Lambda handler with clipboard text
                         evcon.paste_text = clip;
                         dispatch_lambda_handler(&evcon, focused, "paste");
                         evcon.paste_text = nullptr;
                         focused = focus_get(state);
-
-                        // clear selection, advance caret by paste length
-                        selection_clear(state);
-                        int paste_byte_len = (int)strlen(clip);
-                        int new_caret = (had_selection ? sel_s : cur) + paste_byte_len;
                         if (focused && focused->is_element()) {
                             DomElement* fe = (DomElement*)focused;
-                            if (fe->form && fe->form->value) {
-                                int new_len = (int)strlen(fe->form->value);
-                                if (new_caret > new_len) new_caret = new_len;
+                            if (tc_is_text_control(fe)) {
+                                uint32_t inserted = te_paste(fe, state, focused,
+                                                             clip,
+                                                             (uint32_t)strlen(clip));
+                                log_debug("Textarea paste: %u bytes inserted",
+                                          inserted);
                             }
                         }
-                        state->caret->char_offset = new_caret;
-                        log_debug("Textarea paste: %d bytes", paste_byte_len);
                     }
                     evcon.need_repaint = true;
                     break;

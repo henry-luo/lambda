@@ -7,6 +7,8 @@
 #include "state_store.hpp"
 #include "dom_range.hpp"
 #include "form_control.hpp"
+#include "text_control.hpp"
+#include "text_edit.hpp"
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/log.h"
@@ -1034,6 +1036,39 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             mem_free(ev);
             return NULL;
         }
+    }
+    // F6 (Radiant_Design_Form_Input.md §3.6): clipboard helpers.
+    else if (strcmp(type_str, "paste_text") == 0) {
+        ev->type = SIM_EVENT_PASTE_TEXT;
+        const char* text = reader.get("text").cstring();
+        if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_clipboard") == 0) {
+        ev->type = SIM_EVENT_ASSERT_CLIPBOARD;
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+    }
+    // F7 (Radiant_Design_Form_Input.md §4.1): IME composition driver.
+    //   {"type":"ime_compose","phase":"begin"}
+    //   {"type":"ime_compose","phase":"update","preedit":"か","caret":1}
+    //   {"type":"ime_compose","phase":"commit","commit":"日本"}
+    //   {"type":"ime_compose","phase":"cancel"}
+    // Optional `target` selects/focuses an input first.
+    else if (strcmp(type_str, "ime_compose") == 0) {
+        ev->type = SIM_EVENT_IME_COMPOSE;
+        const char* phase = reader.get("phase").cstring();
+        ev->ime_phase = mem_strdup(phase ? phase : "update", MEM_CAT_LAYOUT);
+        const char* preedit = reader.get("preedit").cstring();
+        if (preedit) ev->input_text = mem_strdup(preedit, MEM_CAT_LAYOUT);
+        const char* commit = reader.get("commit").cstring();
+        if (commit && !ev->input_text) {
+            ev->input_text = mem_strdup(commit, MEM_CAT_LAYOUT);
+        }
+        ev->expected_char_offset = reader.get("caret").asInt32();
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
@@ -2194,6 +2229,108 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        // F6: paste sanitized text into the focused control. Mirrors a
+        // user pressing Cmd+V after the OS clipboard has the given text.
+        case SIM_EVENT_PASTE_TEXT: {
+            if (ev->target_selector || ev->target_text) {
+                int x, y;
+                if (resolve_target(ev, uicon->document, &x, &y)) {
+                    sim_mouse_button(uicon, x, y, 0, 0, true);
+                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                }
+            }
+            const char* text = ev->input_text ? ev->input_text : "";
+            log_info("event_sim: paste_text len=%zu", strlen(text));
+            clipboard_copy_text(text);
+            #ifdef __APPLE__
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, true);
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, false);
+            #else
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, true);
+            sim_key(uicon, GLFW_KEY_V, RDT_MOD_CTRL, false);
+            #endif
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_CLIPBOARD: {
+            const char* clip = clipboard_get_text();
+            if (!clip) clip = "";
+            bool passed = true;
+            if (ev->assert_equals && strcmp(clip, ev->assert_equals) != 0) {
+                log_error("event_sim: assert_clipboard equals fail: expected '%s', got '%s'",
+                          ev->assert_equals, clip);
+                passed = false;
+            }
+            if (ev->assert_contains && !strstr(clip, ev->assert_contains)) {
+                log_error("event_sim: assert_clipboard contains fail: '%s' not in '%s'",
+                          ev->assert_contains, clip);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_clipboard PASS");
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        // F7: drive te_ime_begin / update / commit / cancel against the
+        // focused (or specified) text control. Mirrors the OS shim path
+        // without requiring NSTextInputClient / IMM in the test runner.
+        case SIM_EVENT_IME_COMPOSE: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: ime_compose - no document/state");
+                ctx->fail_count++;
+                break;
+            }
+            // Optional target focus: click to focus first.
+            if (ev->target_selector || ev->target_text) {
+                int x, y;
+                if (resolve_target(ev, doc, &x, &y)) {
+                    sim_mouse_button(uicon, x, y, 0, 0, true);
+                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                }
+            }
+            RadiantState* state = (RadiantState*)doc->state;
+            View* focused = focus_get(state);
+            if (!focused || !focused->is_element()) {
+                log_error("event_sim: ime_compose - no focused element");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* elem = (DomElement*)focused;
+            if (!tc_is_text_control(elem)) {
+                log_error("event_sim: ime_compose - focused is not a text control");
+                ctx->fail_count++;
+                break;
+            }
+            const char* phase = ev->ime_phase ? ev->ime_phase : "update";
+            const char* data  = ev->input_text ? ev->input_text : "";
+            uint32_t dlen = (uint32_t)strlen(data);
+            if (strcmp(phase, "begin") == 0) {
+                te_ime_begin(elem);
+                log_info("event_sim: ime_compose begin");
+            } else if (strcmp(phase, "update") == 0) {
+                te_ime_update(elem, data, dlen,
+                              (uint32_t)ev->expected_char_offset);
+                log_info("event_sim: ime_compose update '%s'", data);
+            } else if (strcmp(phase, "commit") == 0) {
+                te_ime_commit(elem, state, focused, data, dlen);
+                log_info("event_sim: ime_compose commit '%s'", data);
+            } else if (strcmp(phase, "cancel") == 0) {
+                te_ime_cancel(elem);
+                log_info("event_sim: ime_compose cancel");
+            } else {
+                log_error("event_sim: ime_compose - unknown phase '%s'", phase);
+                ctx->fail_count++;
+                break;
+            }
+            state->needs_repaint = true;
+            break;
+        }
+
         // ===== Assertions =====
 
         case SIM_EVENT_ASSERT_CARET:
@@ -2275,8 +2412,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DomElement* dom_elem = (DomElement*)elem;
-            const char* val = dom_element_get_attribute(dom_elem, "value");
-            const char* actual = val ? val : "";
+            // Prefer live edit buffer (FormControlProp::current_value) when
+            // present — the "value" attribute only carries the initial default
+            // for HTML <input>/<textarea>. Falling back to the attribute keeps
+            // legacy non-FormControl widgets (e.g. todo.ls) working.
+            const char* actual = nullptr;
+            if (dom_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                dom_elem->form && dom_elem->form->current_value) {
+                actual = dom_elem->form->current_value;
+            }
+            if (!actual) {
+                const char* val = dom_element_get_attribute(dom_elem, "value");
+                actual = val ? val : "";
+            }
             bool passed = true;
             if (ev->assert_equals) {
                 if (strcmp(actual, ev->assert_equals) != 0) {

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Form Input UI Automation Fixture</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 12px; }
+        h2 { margin-bottom: 8px; }
+        .row { margin-bottom: 8px; }
+        .row label { display: inline-block; width: 110px; }
+        input[type="text"], input[type="password"] {
+            padding: 4px 6px;
+            width: 240px;
+            border: 1px solid #999;
+            font-size: 14px;
+        }
+        textarea {
+            padding: 4px 6px;
+            width: 320px;
+            height: 90px;
+            border: 1px solid #999;
+            font-size: 14px;
+            font-family: monospace;
+        }
+        #submit-btn {
+            padding: 6px 16px;
+            background: #4488cc;
+            color: white;
+            border: 1px solid #336699;
+            margin-top: 6px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Form Input Test Fixture</h2>
+
+    <form id="the-form">
+        <div class="row">
+            <label for="name">Name:</label>
+            <input type="text" id="name" value="" tabindex="1">
+        </div>
+
+        <div class="row">
+            <label for="code">Code (max 5):</label>
+            <input type="text" id="code" maxlength="5" value="" tabindex="2">
+        </div>
+
+        <div class="row">
+            <label for="pwd">Password:</label>
+            <input type="password" id="pwd" value="" tabindex="3">
+        </div>
+
+        <div class="row">
+            <label for="readonly-fld">Readonly:</label>
+            <input type="text" id="readonly-fld" value="locked" readonly tabindex="4">
+        </div>
+
+        <div class="row">
+            <label for="disabled-fld">Disabled:</label>
+            <input type="text" id="disabled-fld" value="off" disabled>
+        </div>
+
+        <div class="row">
+            <label for="bio">Bio:</label>
+            <textarea id="bio" tabindex="5"></textarea>
+        </div>
+
+        <button type="submit" id="submit-btn">Submit</button>
+    </form>
+</body>
+</html>

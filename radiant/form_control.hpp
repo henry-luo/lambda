@@ -220,6 +220,19 @@ struct FormControlProp {
     uint8_t  placeholder_shown : 1;
     uint8_t  focus_visible : 1;
 
+    // ------------------------------------------------------------------
+    // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
+    // The preedit string is the partially-entered text shown by the OS
+    // input method between `compositionstart` and `compositionend`. It is
+    // NOT part of `current_value` until commit. The renderer overlays it
+    // at the caret with an underline so the user can see what they're
+    // composing. `preedit_caret` is the codepoint offset inside preedit
+    // (where the IME's own caret sits).
+    // ------------------------------------------------------------------
+    char*    preedit_utf8;
+    uint32_t preedit_len;
+    uint32_t preedit_caret;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -237,13 +250,15 @@ struct FormControlProp {
         custom_validity_msg(nullptr),
         value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
         scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
-        caret_on(1), placeholder_shown(0), focus_visible(0) {}
+        caret_on(1), placeholder_shown(0), focus_visible(0),
+        preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
 
     ~FormControlProp() {
         if (current_value) { free(current_value); current_value = nullptr; }
         if (custom_validity_msg) { free(custom_validity_msg); custom_validity_msg = nullptr; }
         if (value_at_focus) { free(value_at_focus); value_at_focus = nullptr; }
         if (history) { te_history_free((EditHistory*)history); history = nullptr; }
+        if (preedit_utf8) { free(preedit_utf8); preedit_utf8 = nullptr; }
     }
 };
 

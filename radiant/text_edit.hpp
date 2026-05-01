@@ -130,3 +130,76 @@ void te_history_push(DomElement* elem);
 // Returns false if no further undo/redo is available.
 bool te_history_undo(DomElement* elem);
 bool te_history_redo(DomElement* elem);
+
+// ---------- F5: events + constraint validation -------------------------
+
+// Queue an `input` / `beforeinput` event for the given text control.
+// Both default to no-ops; the JS DOM bridge overrides them with weak
+// linkage (see text_control.cpp for the matching selectionchange pattern).
+// Calling these in non-JS builds is free.
+void te_dispatch_beforeinput(DomElement* elem);
+void te_dispatch_input      (DomElement* elem);
+
+// Re-evaluate constraint validation for `elem` and refresh the cached
+// pseudo-state bits (:valid, :invalid, :required, :optional, :read-only,
+// :read-write). Cheap; called from tc_ensure_init, tc_set_value and on
+// blur. Implements the v1 minimum from §3.11:
+//   - required   ⇒ invalid when value is empty
+//   - maxlength  ⇒ already enforced by tc_set_value, also reflected here
+//   - type=number / email / url / pattern attribute checked when non-empty
+//   - custom_validity_msg non-empty ⇒ invalid
+void te_validate(DomElement* elem);
+
+// ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
+
+// Insert `text` at the caret (replacing the current selection if any)
+// after applying spec-compliant sanitization:
+//   - <input> single-line controls: newlines (\r, \n, \r\n) are replaced
+//     with U+0020 spaces (HTML §4.10.5.1).
+//   - maxlength is enforced by truncating the inserted text at a UTF-8
+//     character boundary so the post-paste codepoint count fits.
+// Returns the number of bytes actually inserted (0 on failure / no-op).
+// Internally invokes te_replace_byte_range, which already fires
+// `beforeinput` / `input` and pushes an undo entry.
+uint32_t te_paste(DomElement* elem, RadiantState* state, void* target,
+                  const char* text, uint32_t len);
+
+// ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
+//
+// Composition lifecycle (mirrors the DOM CompositionEvent contract):
+//
+//   te_ime_begin   → sets composing flag, fires `compositionstart`.
+//   te_ime_update  → replaces the preedit buffer (transient overlay,
+//                    NOT part of value), fires `compositionupdate`.
+//   te_ime_commit  → drops preedit, inserts `committed` at the caret via
+//                    te_replace_byte_range (so undo + input fire), then
+//                    `compositionend`.
+//   te_ime_cancel  → drops preedit and fires `compositionend` with empty
+//                    data; value is unchanged.
+//
+// The OS shim (NSTextInputClient on macOS, IMM on Windows) calls these.
+// Tests drive them via the `ime_compose` simulation event.
+void te_ime_begin (DomElement* elem);
+void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
+                   uint32_t caret_cp);
+void te_ime_commit(DomElement* elem, RadiantState* state, void* target,
+                   const char* committed, uint32_t len);
+void te_ime_cancel(DomElement* elem);
+
+// True when an IME composition is in progress on `elem`.
+bool te_ime_is_composing(DomElement* elem);
+
+// ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
+//
+// Reflect form-control state onto the matching ARIA attributes so that
+// assistive technology and CSS attribute selectors see the live values:
+//
+//   form->disabled   → aria-disabled="true"  (or removed)
+//   form->readonly   → aria-readonly="true"
+//   form->required   → aria-required="true"
+//   :invalid bit set → aria-invalid="true"
+//   <input type=range> → aria-valuenow / aria-valuemin / aria-valuemax
+//
+// Idempotent. Call from tc_ensure_init, tc_set_value, te_validate, and
+// any setter that flips disabled/readonly/required.
+void te_aria_reflect(DomElement* elem);

@@ -4,6 +4,7 @@
 #include "animation.h"
 #include "rdt_video.h"
 #include "webview.h"
+#include "state_store.hpp"
 #include <locale.h>
 
 #include "../lib/log.h"
@@ -19,6 +20,13 @@ void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
 void scroll_config_init(int pixel_ratio);
+
+// F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).
+// Take an opaque GLFWwindow*; resolve focus/state through provided
+// `state_provider` callback to keep them free of view.hpp / Cocoa
+// header collisions (e.g. Carbon `Rect`).
+extern "C" void radiant_ime_mac_attach(UiContext* uicon);
+extern "C" void radiant_ime_win_attach(UiContext* uicon);
 
 char *fallback_fonts[] = {
     "Noto Color Emoji",  // Emoji — Linux / cross-platform (before text fonts
@@ -117,6 +125,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
                (int)uicon->window_width, (int)uicon->window_height);
     }
 
+    // F7: install platform IME shims (no-op on platforms without one).
+    radiant_ime_mac_attach(uicon);
+    radiant_ime_win_attach(uicon);
+
     // Create unified font context — owns font database internally
     // Created after window so pixel_ratio is known
     FontContextConfig font_cfg = {};
@@ -150,6 +162,17 @@ int ui_context_init(UiContext* uicon, bool headless) {
     scroll_config_init(uicon->pixel_ratio);
 
     return EXIT_SUCCESS;
+}
+
+// F7: opaque accessors used by IME shims (ime_mac.mm / ime_win.cpp) so
+// those translation units don't need to include view.hpp (which collides
+// with Cocoa's `Rect`).
+extern "C" GLFWwindow* radiant_ui_get_glfw_window(UiContext* uicon) {
+    return uicon ? uicon->window : nullptr;
+}
+extern "C" RadiantState* radiant_ui_get_state(UiContext* uicon) {
+    if (!uicon || !uicon->document) return nullptr;
+    return (RadiantState*)uicon->document->state;
 }
 
 // walk a view tree and destroy heap-allocated video resources
