@@ -2810,6 +2810,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_error("Failed to create CSS engine");
         return nullptr;
     }
+    // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
+    dom_doc->cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Load external CSS if provided
