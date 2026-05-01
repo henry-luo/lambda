@@ -3286,9 +3286,20 @@ static Item js_proxy_get_trap(JsProxyData* pd, const char* trap_name, int trap_l
     }
     Item handler_item = PD_HANDLER(pd);
     if (get_type_id(handler_item) != LMD_TYPE_MAP) return ItemNull;
-    bool found = false;
-    Item trap = js_map_get_fast(handler_item.map, trap_name, trap_len, &found);
-    if (!found || trap.item == ItemNull.item || get_type_id(trap) == LMD_TYPE_UNDEFINED) return ItemNull;
+    // ES §7.3.10 GetMethod: do a proper [[Get]] (must invoke accessors) and
+    // then validate callability. js_map_get_fast skips accessor getters.
+    Item trap = js_property_get_str(handler_item, trap_name, trap_len);
+    if (js_exception_pending) return ItemNull;
+    if (trap.item == ItemNull.item) return ItemNull;
+    TypeId tt = get_type_id(trap);
+    if (tt == LMD_TYPE_UNDEFINED || tt == LMD_TYPE_NULL) return ItemNull;
+    if (tt != LMD_TYPE_FUNC) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "'%.*s' returned for property '%.*s' of object '#<Object>' is not a function",
+                 trap_len, trap_name, trap_len, trap_name);
+        js_throw_type_error(msg);
+        return ItemNull;
+    }
     return trap;
 }
 
