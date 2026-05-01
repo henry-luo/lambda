@@ -6106,6 +6106,42 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Item value = js_property_get(obj, name);
         Item desc = js_new_object();
         js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+        // ES §10.4.3.4 String exotic [[GetOwnProperty]]: length and integer-index
+        // properties up to length have {writable:false, enumerable:true (indices) /
+        // false (length), configurable:false}.
+        if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
+            bool sw_is_length = (name_str->len == 6 && memcmp(name_str->chars, "length", 6) == 0);
+            bool sw_is_index = false;
+            if (!sw_is_length && name_str->len > 0) {
+                bool all_digits = true;
+                for (int i = 0; i < (int)name_str->len; i++) {
+                    if (name_str->chars[i] < '0' || name_str->chars[i] > '9') { all_digits = false; break; }
+                }
+                if (all_digits && (name_str->len == 1 || name_str->chars[0] != '0')) {
+                    bool own_pv = false;
+                    Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
+                    if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
+                        String* pv_s = it2s(pv);
+                        if (pv_s) {
+                            long idx = strtol(name_str->chars, NULL, 10);
+                            if (idx >= 0 && idx < (long)pv_s->len) sw_is_index = true;
+                        }
+                    }
+                }
+            }
+            if (sw_is_length) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+                return desc;
+            }
+            if (sw_is_index) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+                return desc;
+            }
+        }
         // Stage A3.2: shape-flag-first attribute query.
         ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
         bool is_writable = js_props_query_writable(m, _se, name_str->chars, (int)name_str->len);

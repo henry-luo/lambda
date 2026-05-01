@@ -16032,8 +16032,24 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
 
 extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc) {
     if (get_type_id(str) != LMD_TYPE_STRING || get_type_id(method_name) != LMD_TYPE_STRING) {
+        // For replaceAll, defer ALL coercion of `this` until after searchValue checks per
+        // ES §22.1.3.19 step ordering. The @@replace dispatch must receive the original
+        // this value (e.g. a String wrapper object), not a primitive-extracted version.
+        // Same applies to split (@@split dispatch per ES §22.1.3.21).
+        bool defer_replaceall = false;
+        if (get_type_id(method_name) == LMD_TYPE_STRING) {
+            String* mn = it2s(method_name);
+            if (mn && ((mn->len == 10 && strncmp(mn->chars, "replaceAll", 10) == 0)
+                       || (mn->len == 5 && strncmp(mn->chars, "split", 5) == 0))) {
+                if (str.item == ItemNull.item || get_type_id(str) == LMD_TYPE_NULL
+                    || get_type_id(str) == LMD_TYPE_UNDEFINED) {
+                    return js_throw_type_error("String.prototype method called on null or undefined");
+                }
+                defer_replaceall = true;
+            }
+        }
         // v18n: coerce this to string if not already (for .call() with non-string this)
-        if (get_type_id(str) != LMD_TYPE_STRING) {
+        if (!defer_replaceall && get_type_id(str) != LMD_TYPE_STRING) {
             // ES5: String wrapper MAP — extract __primitiveValue__ directly to avoid
             // ToPrimitive recursion (calling js_to_string on a String wrapper MAP
             // re-enters here through toString/valueOf prototype dispatch).
@@ -16306,11 +16322,29 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             && get_type_id(args[0]) != LMD_TYPE_NULL) {
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_10", 8))};
             Item sym_fn = js_property_get(args[0], sym_key);
+            if (js_exception_pending) return ItemNull;
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
+                && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                // GetMethod: non-callable @@split → TypeError
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.split is not callable");
+                }
                 Item call_args[2] = { str, argc >= 2 ? args[1] : make_js_undefined() };
                 return js_call_function(sym_fn, args[0], call_args, 2);
             }
+        }
+        // Step 3: ToString(this) — deferred from entry per spec ordering
+        if (get_type_id(str) != LMD_TYPE_STRING) {
+            if (get_type_id(str) == LMD_TYPE_MAP && js_class_id(str) == JS_CLASS_STRING) {
+                bool pv_found = false;
+                Item pv = js_map_get_fast(str.map, "__primitiveValue__", 18, &pv_found);
+                if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) str = pv;
+                else str = (Item){.item = s2it(heap_create_name("", 0))};
+            } else {
+                str = js_to_string(str);
+                if (js_exception_pending) return ItemNull;
+            }
+            if (get_type_id(str) != LMD_TYPE_STRING) return ItemNull;
         }
         // ES spec steps 6-8: compute limit, coerce separator, check limit=0
         // Step 6: ToUint32(limit) — must happen before ToString(separator)
@@ -16649,17 +16683,35 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                     return js_throw_type_error("String.prototype.replaceAll called with a non-global RegExp argument");
                 }
             }
-            // Step 2c: Check for [Symbol.replace] method
+            // Step 2c: Check for [Symbol.replace] method (GetMethod semantics)
             Item sym_key = (Item){.item = s2it(heap_create_name("__sym_8", 7))};
             Item sym_fn = js_property_get(args[0], sym_key);
             if (js_exception_pending) return make_js_undefined();
             if (sym_fn.item != ItemNull.item && get_type_id(sym_fn) != LMD_TYPE_UNDEFINED
-                && get_type_id(sym_fn) == LMD_TYPE_FUNC) {
+                && get_type_id(sym_fn) != LMD_TYPE_NULL) {
+                // Per ES §7.3.10 GetMethod: if value is not undefined/null and not callable, throw TypeError
+                if (get_type_id(sym_fn) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("Symbol.replace is not callable");
+                }
                 Item call_args[2] = { str, args[1] };
                 return js_call_function(sym_fn, args[0], call_args, 2);
             }
         }
         // Step 4+: ToString searchValue, do string-based replaceAll
+        // Coerce this to string now (deferred from entry per spec step 3).
+        if (get_type_id(str) != LMD_TYPE_STRING) {
+            // String wrapper fast-path (avoid ToPrimitive recursion through toString)
+            if (get_type_id(str) == LMD_TYPE_MAP && js_class_id(str) == JS_CLASS_STRING) {
+                bool pv_found = false;
+                Item pv = js_map_get_fast(str.map, "__primitiveValue__", 18, &pv_found);
+                if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) str = pv;
+                else str = (Item){.item = s2it(heap_create_name("", 0))};
+            } else {
+                str = js_to_string(str);
+                if (js_exception_pending) return ItemNull;
+            }
+            if (get_type_id(str) != LMD_TYPE_STRING) return ItemNull;
+        }
         // Convert searchValue to string first (even if it's a regex with @@replace=undefined)
         Item search_str = js_to_string(args[0]);
         if (js_exception_pending) return make_js_undefined();
