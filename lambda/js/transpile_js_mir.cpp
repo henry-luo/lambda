@@ -12302,7 +12302,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // eval(code) — dynamic evaluation
             if (nl == 4 && strncmp(n, "eval", 4) == 0 && !jm_find_var(mt, "_js_eval")) {
-                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // Pass scope flag: 1 = global scope (mt->in_main), 0 = function scope
                 return jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
