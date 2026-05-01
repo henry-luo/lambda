@@ -777,6 +777,16 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
     if (ev->target_selector && doc) {
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
+            if (ev->has_target_offset) {
+                float ex, ey, ew, eh;
+                get_element_rect_abs(elem, &ex, &ey, &ew, &eh);
+                *out_x = (int)(ex + (float)ev->target_offset_x);
+                *out_y = (int)(ey + (float)ev->target_offset_y);
+                log_info("event_sim: resolved selector '%s'[%d] + offset (%d,%d) to (%d, %d)",
+                         ev->target_selector, ev->target_index,
+                         ev->target_offset_x, ev->target_offset_y, *out_x, *out_y);
+                return true;
+            }
             float fx, fy;
             get_element_center_abs(elem, &fx, &fy);
             *out_x = (int)fx;
@@ -827,6 +837,14 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
         // target can also carry x,y
         if (target_map.has("x")) ev->x = target_map.get("x").asInt32();
         if (target_map.has("y")) ev->y = target_map.get("y").asInt32();
+        // optional pixel offset from element top-left, applied when a
+        // selector resolves (so tests can target a specific spot inside
+        // a wide element such as <input type="text">).
+        if (target_map.has("offset_x") || target_map.has("offset_y")) {
+            ev->target_offset_x = target_map.get("offset_x").asInt32();
+            ev->target_offset_y = target_map.get("offset_y").asInt32();
+            ev->has_target_offset = true;
+        }
     }
     // Legacy target_text at top level
     if (!ev->target_text) {

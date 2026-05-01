@@ -147,6 +147,9 @@ struct SimEvent {
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
     int target_index;            // 0-based index: which matching element (default 0 = first)
+    int target_offset_x;         // optional pixel offset from element top-left (CSS px)
+    int target_offset_y;         // optional pixel offset from element top-left (CSS px)
+    bool has_target_offset;      // true when offset_x/offset_y were specified
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
     char* input_text;            // for type action: text to type

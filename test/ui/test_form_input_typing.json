@@ -1,0 +1,30 @@
+{
+  "name": "Form input - typing inserts characters into value (F1)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_input_typing ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+
+    {"type": "type", "target": {"selector": "#name"}, "text": "hello"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hello"},
+
+    {"type": "log", "message": "Typing more appends to existing value"},
+    {"type": "type", "target": {"selector": "#name"}, "text": " world"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hello world"},
+
+    {"type": "log", "message": "Tripleclick selects all, typing replaces selection"},
+    {"type": "tripleclick", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false},
+    {"type": "type", "target": {"selector": "#name"}, "text": "X"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "X"}
+  ]
+}

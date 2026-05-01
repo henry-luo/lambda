@@ -736,6 +736,17 @@ void te_ime_commit(DomElement* elem, RadiantState* state, void* target,
     // both the preedit and the committed text.
     te_clear_preedit(f);
 
+    // Read-only / disabled fields accept the IME session (preedit was
+    // shown above and is now cleared) but reject the actual commit so
+    // the underlying value is never mutated.
+    if (f->readonly || f->disabled) {
+        log_debug("te_ime_commit: rejected on readonly/disabled control");
+        char tmp_null = '\0';
+        js_dom_queue_textcontrol_compositionend(elem,
+            committed ? committed : &tmp_null);
+        return;
+    }
+
     if (committed && len > 0 && state && target) {
         // Insert at caret (or replace selection) via the same path as
         // text input — gets undo, beforeinput/input, maxlength clamp.

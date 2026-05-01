@@ -37,6 +37,7 @@ class View;
 
 extern "C" GLFWwindow*    radiant_ui_get_glfw_window(struct UiContext*);
 extern "C" RadiantState*  radiant_ui_get_state(struct UiContext*);
+extern "C" void           radiant_state_request_repaint(struct RadiantState*);
 
 View* focus_get(RadiantState* state);
 bool  tc_is_text_control(DomElement* elem);
@@ -104,6 +105,10 @@ const char* ns_to_utf8(id obj) {
     te_ime_update(e, utf8, len, (uint32_t)selectedRange.location);
     log_debug("[IME mac] setMarkedText '%s' caret=%lu",
               utf8, (unsigned long)selectedRange.location);
+    // Wake the GLFW main loop so the preedit underline appears immediately
+    // (the IME callbacks bypass GLFW's regular event callbacks).
+    radiant_state_request_repaint(ime_state());
+    glfwPostEmptyEvent();
 }
 
 - (void)unmarkText {
@@ -132,6 +137,10 @@ const char* ns_to_utf8(id obj) {
     uint32_t len = (uint32_t)strlen(utf8);
     te_ime_commit(e, state, (void*)e, utf8, len);
     log_debug("[IME mac] insertText commit '%s'", utf8);
+    // Wake the GLFW main loop so the committed text appears without
+    // waiting for the next mouse-move / animation tick.
+    radiant_state_request_repaint(state);
+    glfwPostEmptyEvent();
 }
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range

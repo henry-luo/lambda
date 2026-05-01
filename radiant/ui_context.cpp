@@ -175,6 +175,18 @@ extern "C" RadiantState* radiant_ui_get_state(UiContext* uicon) {
     return (RadiantState*)uicon->document->state;
 }
 
+extern "C" void radiant_state_request_repaint(RadiantState* state) {
+    if (state) {
+        // Set both flags so render() actually rebuilds the display list.
+        // `needs_repaint` alone only triggers a repaint when there is a
+        // dirty region; paths that bypass the event pipeline (macOS IME,
+        // async resource loaders) have no opportunity to mark dirty
+        // regions, so flip `is_dirty` directly.
+        state->needs_repaint = true;
+        state->is_dirty = true;
+    }
+}
+
 // walk a view tree and destroy heap-allocated video resources
 // must be called before view_pool_destroy to avoid leaking RdtVideo*
 static void destroy_video_in_view(View* view) {

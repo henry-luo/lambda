@@ -317,6 +317,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     // Handle key events
     handle_event(&ui_context, ui_context.document, &event);
+    // Always repaint after a key event so caret motion, character
+    // insertion/deletion, selection changes, and context-menu open/close
+    // become visible immediately.
+    do_redraw = 1;
 }
 
 void character_callback(GLFWwindow* window, unsigned int codepoint) {
@@ -333,6 +337,9 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
     }
 
     handle_event(&ui_context, ui_context.document, &event);
+    // Repaint so the typed character appears without waiting for the
+    // next mouse move / animation tick.
+    do_redraw = 1;
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -390,7 +397,12 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         log_debug("Left mouse button released");
 
-    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+    // Forward both LEFT and RIGHT mouse buttons. RIGHT is required for
+    // the native context menu (event.cpp opens it on RDT_EVENT_MOUSE_DOWN
+    // when btn_event->button == GLFW_MOUSE_BUTTON_RIGHT). MIDDLE is
+    // unused so we skip it.
+    if (button == GLFW_MOUSE_BUTTON_LEFT ||
+        button == GLFW_MOUSE_BUTTON_RIGHT) {
         handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
         do_redraw = 1;  // trigger repaint after mouse click
     }
@@ -1023,6 +1035,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         if (state && state->has_active_video) {
             // only force full render if nothing else triggered it;
             // otherwise the video-only blit path in render() handles it
+            do_redraw = 1;
+        }
+
+        // Pick up repaint requests from paths that don't go through a GLFW
+        // event callback (e.g. macOS IME setMarkedText / insertText, async
+        // resource loaders that flip needs_repaint directly). Combined with
+        // a glfwPostEmptyEvent these unblock the wait-for-event loop.
+        if (state && (state->needs_repaint || state->needs_reflow || state->is_dirty)) {
             do_redraw = 1;
         }
 
