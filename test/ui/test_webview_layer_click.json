@@ -2,6 +2,7 @@
   "name": "Webview layer mode: click forwarding",
   "html": "test/html/webview_layer_test.html",
   "auto_close": true,
+  "skip_headless": true,
   "events": [
     {"type": "log", "message": "=== webview layer click test ==="},
     {"type": "wait", "ms": 1500},

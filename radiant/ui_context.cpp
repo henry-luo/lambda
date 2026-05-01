@@ -53,6 +53,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 
 int ui_context_init(UiContext* uicon, bool headless) {
     memset(uicon, 0, sizeof(UiContext));
+    uicon->headless = headless;
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;
 

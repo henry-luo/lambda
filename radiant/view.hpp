@@ -1424,6 +1424,9 @@ typedef struct UiContext {
     MouseState mouse_state; // current mouse state
     struct BrowsingSession* browsing_session;  // web browsing session with history
     struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
+    bool headless;          // true if running headless (no visible window). When true, clipboard
+                            // operations use the in-process ClipboardStore only and do NOT touch
+                            // the OS pasteboard via GLFW (avoids cross-process races in tests).
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
