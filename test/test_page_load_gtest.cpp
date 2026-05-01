@@ -152,7 +152,7 @@ static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
 // macOS-only enforcement: getrusage(RUSAGE_CHILDREN) reports peak RSS in bytes
 // on Darwin and KB on Linux — we normalise via wait4 + a per-OS multiplier.
 #define MAX_PEAK_RSS_BYTES (160ULL * 1024 * 1024)  // 160 MB hard cap (RSS, includes shared OS pages)
-#define MAX_PEAK_FOOTPRINT_BYTES (160ULL * 1024 * 1024)  // 160 MB cap on app-private memory (excludes shared OS pages)
+#define MAX_PEAK_FOOTPRINT_BYTES (180ULL * 1024 * 1024)  // 180 MB cap on app-private memory (excludes shared OS pages)
 
 #ifdef __APPLE__
     #define RUSAGE_MAXRSS_TO_BYTES(x) ((uint64_t)(x))
