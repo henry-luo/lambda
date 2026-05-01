@@ -2,6 +2,7 @@
 // See radiant/text_control.hpp for the public surface and design rationale.
 
 #include "text_control.hpp"
+#include "text_edit.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -174,11 +175,67 @@ void tc_ensure_init(DomElement* elem) {
     if (!f->value || f->value != f->current_value) {
         f->value = f->current_value;
     }
+    // F4: seed :placeholder-shown after initial value load.
+    {
+        bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
+        if (show) {
+            f->placeholder_shown = 1;
+            dom_element_set_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+        } else {
+            f->placeholder_shown = 0;
+            dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+        }
+    }
 }
+
+// F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
+// Set when the control is empty AND a placeholder is configured.
+static void tc_refresh_placeholder_shown(DomElement* elem, FormControlProp* f) {
+    if (!elem || !f) return;
+    bool show = (f->current_value_len == 0) && f->placeholder && f->placeholder[0];
+    if (show) {
+        f->placeholder_shown = 1;
+        dom_element_set_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+    } else {
+        f->placeholder_shown = 0;
+        dom_element_clear_pseudo_state(elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+    }
+}
+
+// F4 (Radiant_Design_Form_Input.md §3.5): suppress recursive history push
+// when undo/redo restore is itself calling tc_set_value.
+static thread_local int g_tc_history_guard = 0;
+extern "C" void tc_history_guard_enter() { g_tc_history_guard++; }
+extern "C" void tc_history_guard_exit () { if (g_tc_history_guard > 0) g_tc_history_guard--; }
 
 void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
+
+    // F4: enforce HTML `maxlength` on every value mutation. The attribute
+    // counts UTF-16 code units in the spec; we approximate with codepoints
+    // for the truncation step (matches our existing UTF-8↔UTF-16 helpers).
+    // Truncation happens at a UTF-8 character boundary so we never split a
+    // multi-byte sequence. Skipped for the initial init load (when the
+    // legacy `value` attribute may be longer than the new maxlength).
+    if (f->tc_initialized && f->maxlength >= 0 && new_val && new_len > 0) {
+        uint32_t cp_count = 0;
+        size_t   byte_at  = 0;
+        while (byte_at < new_len && cp_count < (uint32_t)f->maxlength) {
+            unsigned char b = (unsigned char)new_val[byte_at];
+            size_t step = (b < 0x80) ? 1 : (b < 0xC0) ? 1
+                          : (b < 0xE0) ? 2 : (b < 0xF0) ? 3 : 4;
+            if (byte_at + step > new_len) break;
+            byte_at += step;
+            cp_count++;
+        }
+        if (byte_at < new_len) {
+            log_debug("tc_set_value: maxlength=%d clamped %zu -> %zu bytes",
+                      f->maxlength, new_len, byte_at);
+            new_len = byte_at;
+        }
+    }
+
     uint32_t old_start = f->selection_start;
     uint32_t old_end = f->selection_end;
     uint8_t  old_dir = f->selection_direction;
@@ -204,6 +261,15 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
          f->selection_direction != old_dir)) {
         tc_notify_selection_changed(elem);
     }
+
+    // F4: snapshot the post-mutation state into the undo ring (skipped
+    // during initial init and while undo/redo is restoring).
+    if (was_initialized && g_tc_history_guard == 0) {
+        te_history_push(elem);
+    }
+
+    // F4: refresh :placeholder-shown after value changes (incl. clear).
+    tc_refresh_placeholder_shown(elem, f);
 }
 
 void tc_set_selection_range(DomElement* elem,
