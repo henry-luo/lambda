@@ -1,0 +1,34 @@
+{
+  "name": "Form input - IME preedit shown then cancelled leaves value untouched (F7)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_ime_preedit_then_cancel ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 60},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "hi"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi"},
+
+    {"type": "log", "message": "Preedit appears (transient) then is cancelled — value unchanged"},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "ん", "caret": 1},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi"},
+
+    {"type": "ime_compose", "phase": "update", "preedit": "んに", "caret": 2},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi"},
+
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi"},
+
+    {"type": "log", "message": "After cancel, plain typing still works"},
+    {"type": "type", "target": {"selector": "#name"}, "text": "!"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi!"}
+  ]
+}

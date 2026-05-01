@@ -85,8 +85,8 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
  * @param font Font properties to use
  * @param color Text color
  */
-static void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
-                                 FontProp* font, Color color) {
+void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+                          FontProp* font, Color color) {
     if (!text || !*text || !font || !rdcon->ui_context) return;
 
     // Setup font for rendering
@@ -296,6 +296,35 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     }
     float scroll_px = (form ? form->scroll_x : 0.0f) * s;
 
+    // Draw selection highlight BEFORE the text so glyphs render on top
+    // of the highlight (matches native widgets and CSS ::selection).
+    if (focused_here && !is_placeholder && form->tc_initialized
+        && form->selection_start != form->selection_end
+        && text && *text) {
+        uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
+                                                      ? form->current_value : src_text,
+                                                  form->current_value
+                                                      ? form->current_value_len
+                                                      : (uint32_t)strlen(src_text),
+                                                  form->selection_start);
+        uint32_t b8_src = tc_utf16_to_utf8_offset(form->current_value
+                                                      ? form->current_value : src_text,
+                                                  form->current_value
+                                                      ? form->current_value_len
+                                                      : (uint32_t)strlen(src_text),
+                                                  form->selection_end);
+        int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
+        int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
+        float ax = text_x + measure_input_text_width(rdcon, block->font, text, a8) * s
+                   - scroll_px;
+        float bx = text_x + measure_input_text_width(rdcon, block->font, text, b8) * s
+                   - scroll_px;
+        if (bx > ax) {
+            Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
+            fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
+        }
+    }
+
     if (text && *text && block->font) {
         // Set text color
         Color text_color;
@@ -315,36 +344,8 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
                              block->font, text_color);
     }
 
-    // Draw caret + selection if this input has focus
+    // Draw caret if this input has focus
     if (focused_here) {
-        // Selection highlight first so caret draws on top.
-        if (!is_placeholder && form->tc_initialized
-            && form->selection_start != form->selection_end
-            && text && *text) {
-            uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
-                                                          ? form->current_value : src_text,
-                                                      form->current_value
-                                                          ? form->current_value_len
-                                                          : (uint32_t)strlen(src_text),
-                                                      form->selection_start);
-            uint32_t b8_src = tc_utf16_to_utf8_offset(form->current_value
-                                                          ? form->current_value : src_text,
-                                                      form->current_value
-                                                          ? form->current_value_len
-                                                          : (uint32_t)strlen(src_text),
-                                                      form->selection_end);
-            int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
-            int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
-            float ax = text_x + measure_input_text_width(rdcon, block->font, text, a8) * s
-                       - scroll_px;
-            float bx = text_x + measure_input_text_width(rdcon, block->font, text, b8) * s
-                       - scroll_px;
-            if (bx > ax) {
-                Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
-                fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
-            }
-        }
-
         // F4: respect global caret blink visibility (state->caret->visible).
         // Headless / first-frame rendering keeps it true so screenshot tests
         // see the caret.

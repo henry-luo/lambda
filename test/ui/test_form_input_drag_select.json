@@ -1,0 +1,29 @@
+{
+  "name": "Form input - mouse drag selects text inside <input type=text>",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_input_drag_select ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "hello world"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hello world"},
+
+    {"type": "log", "message": "Drag from start of input toward right to select text"},
+    {"type": "mouse_down", "target": {"selector": "#name", "offset_x": 6, "offset_y": 12}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"selector": "#name", "offset_x": 80, "offset_y": 12}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_selection", "is_collapsed": false},
+    {"type": "mouse_up", "target": {"selector": "#name", "offset_x": 80, "offset_y": 12}, "button": 0},
+    {"type": "wait", "ms": 80},
+
+    {"type": "log", "message": "Cmd+C copies selection — verifies form->selection_* mirror"},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "contains": "hel"}
+  ]
+}

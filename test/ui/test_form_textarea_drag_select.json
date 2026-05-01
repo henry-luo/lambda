@@ -1,0 +1,29 @@
+{
+  "name": "Form input - textarea cross-line drag selection",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_textarea_drag_select ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#bio"}},
+    {"type": "wait", "ms": 60},
+    {"type": "paste_text", "target": {"selector": "#bio"}, "text": "line one\nline two\nline three"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "line one\nline two\nline three"},
+
+    {"type": "log", "message": "Drag from inside line 1 down to inside line 3 — selection should span all three"},
+    {"type": "mouse_down", "target": {"selector": "#bio", "offset_x": 8, "offset_y": 8}, "button": "left"},
+    {"type": "mouse_move", "target": {"selector": "#bio", "offset_x": 30, "offset_y": 50}},
+    {"type": "mouse_move", "target": {"selector": "#bio", "offset_x": 60, "offset_y": 70}},
+    {"type": "mouse_up", "target": {"selector": "#bio", "offset_x": 60, "offset_y": 70}, "button": "left"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "log", "message": "Cut should remove the multi-line selection"},
+    {"type": "key_combo", "key": "x", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "contains": "line"},
+    {"type": "assert_clipboard", "contains": "\n"}
+  ]
+}

@@ -262,6 +262,19 @@ typedef struct RadiantState {
     float dropdown_x, dropdown_y;  // dropdown popup position (absolute, in physical pixels)
     float dropdown_width;          // dropdown popup width
     float dropdown_height;         // dropdown popup height
+
+    // F8 (Radiant_Design_Form_Input.md §3.10): native context menu for
+    // text controls. Owned outside the focus state because right-click
+    // can target any element. When `context_menu_target` is non-null the
+    // overlay is drawn after the dropdown layer; `context_menu_x/y` is
+    // the popup origin in physical pixels; `context_menu_hover` is the
+    // 0-based index of the highlighted item or -1.
+    View* context_menu_target;     // text control the menu acts upon
+    float context_menu_x;
+    float context_menu_y;
+    float context_menu_width;
+    float context_menu_height;
+    int   context_menu_hover;      // -1 = none
     
     // Document-level states
     float scroll_x, scroll_y;      // document scroll position

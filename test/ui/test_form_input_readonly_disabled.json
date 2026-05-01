@@ -1,0 +1,23 @@
+{
+  "name": "Form input - readonly and disabled reject typing",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_input_readonly_disabled ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Readonly input keeps initial value when typed into"},
+    {"type": "click", "target": {"selector": "#readonly-fld"}},
+    {"type": "wait", "ms": 80},
+    {"type": "type", "target": {"selector": "#readonly-fld"}, "text": "edit"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#readonly-fld"}, "equals": "locked"},
+
+    {"type": "log", "message": "Disabled input also rejects typing"},
+    {"type": "click", "target": {"selector": "#disabled-fld"}},
+    {"type": "wait", "ms": 80},
+    {"type": "type", "target": {"selector": "#disabled-fld"}, "text": "edit"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#disabled-fld"}, "equals": "off"}
+  ]
+}

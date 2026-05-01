@@ -1,0 +1,17 @@
+{
+  "name": "Textarea - typing across multiple lines (F1)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_textarea_typing_keys ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#bio"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#bio"}},
+
+    {"type": "type", "target": {"selector": "#bio"}, "text": "first"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "first"}
+  ]
+}

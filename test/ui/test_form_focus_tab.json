@@ -1,0 +1,21 @@
+{
+  "name": "Form input - Tab key cycles focus (F3)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_focus_tab ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#name"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#code"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#pwd"}}
+  ]
+}

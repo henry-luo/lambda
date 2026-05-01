@@ -1,0 +1,32 @@
+{
+  "name": "Form input - paste sets value, cmd+v re-pastes (F6)",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_input_clipboard ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+
+    {"type": "log", "message": "paste_text injects directly into form value buffer"},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "pasted"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "pasted"},
+
+    {"type": "log", "message": "Triple-click selects all, Cmd+C copies to system clipboard"},
+    {"type": "tripleclick", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": false},
+    {"type": "key_combo", "key": "c", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_clipboard", "equals": "pasted"},
+
+    {"type": "log", "message": "Cmd+V appends another copy from clipboard"},
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "wait", "ms": 80},
+    {"type": "key_combo", "key": "v", "mods_str": "super"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#name"}, "contains": "pasted"}
+  ]
+}

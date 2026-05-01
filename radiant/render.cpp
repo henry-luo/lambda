@@ -12,6 +12,7 @@
 #include "dom_range_resolver.hpp"
 #include "tile_pool.h"
 #include "webview.h"
+#include "context_menu.hpp"
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -3644,6 +3645,9 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
         ViewBlock* select = (ViewBlock*)state->open_dropdown;
         render_select_dropdown(rdcon, select, state);
     }
+
+    // F8: render context menu popup above the dropdown layer.
+    context_menu_render(rdcon, state);
 
     // Render drag-and-drop overlay (drop target highlight + drag indicator)
     if (state->drag_drop && state->drag_drop->active) {
