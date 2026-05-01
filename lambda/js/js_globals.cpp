@@ -3129,6 +3129,10 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     }
     if (method->len == 11 && strncmp(method->chars, "toPrecision", 11) == 0) {
         if (argc < 1 || get_type_id(args[0]) == LMD_TYPE_UNDEFINED) return js_to_string(num);
+        // per spec ES §21.1.3.5 step 3: ToNumber(precision) must throw TypeError on Symbol
+        if (js_key_is_symbol_c(args[0])) {
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        }
         // per spec: step 3 ToInteger(precision) before step 4 NaN/Infinity check
         Item prec_item = js_to_number(args[0]);
         if (js_check_exception()) return ItemNull;
@@ -3212,6 +3216,10 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         bool has_frac = (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED);
         int frac = 0;
         if (has_frac) {
+            // per spec ES §21.1.3.2 step 2: ToNumber(fractionDigits) must throw TypeError on Symbol
+            if (js_key_is_symbol_c(args[0])) {
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            }
             Item frac_item = js_to_number(args[0]);
             if (js_check_exception()) return ItemNull;
             TypeId ft = get_type_id(frac_item);
@@ -6098,6 +6106,42 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
         Item value = js_property_get(obj, name);
         Item desc = js_new_object();
         js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+        // ES §10.4.3.4 String exotic [[GetOwnProperty]]: length and integer-index
+        // properties up to length have {writable:false, enumerable:true (indices) /
+        // false (length), configurable:false}.
+        if (js_class_id((Item){.map = m}) == JS_CLASS_STRING) {
+            bool sw_is_length = (name_str->len == 6 && memcmp(name_str->chars, "length", 6) == 0);
+            bool sw_is_index = false;
+            if (!sw_is_length && name_str->len > 0) {
+                bool all_digits = true;
+                for (int i = 0; i < (int)name_str->len; i++) {
+                    if (name_str->chars[i] < '0' || name_str->chars[i] > '9') { all_digits = false; break; }
+                }
+                if (all_digits && (name_str->len == 1 || name_str->chars[0] != '0')) {
+                    bool own_pv = false;
+                    Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &own_pv);
+                    if (own_pv && get_type_id(pv) == LMD_TYPE_STRING) {
+                        String* pv_s = it2s(pv);
+                        if (pv_s) {
+                            long idx = strtol(name_str->chars, NULL, 10);
+                            if (idx >= 0 && idx < (long)pv_s->len) sw_is_index = true;
+                        }
+                    }
+                }
+            }
+            if (sw_is_length) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+                return desc;
+            }
+            if (sw_is_index) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+                return desc;
+            }
+        }
         // Stage A3.2: shape-flag-first attribute query.
         ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
         bool is_writable = js_props_query_writable(m, _se, name_str->chars, (int)name_str->len);
@@ -8810,6 +8854,56 @@ extern "C" Item js_number_is_safe_integer(Item value) {
 // Array.from(iterable) — convert array-like to array
 // =============================================================================
 
+// J39-7 / ES §22.1.2.1: when Array.from is invoked with a mapper and the
+// source provides Symbol.iterator, fuse the iterator step + mapper call so
+// that an abrupt completion from mapfn triggers IteratorClose on the
+// in-progress iterator (per IfAbruptCloseIterator).
+extern "C" Item js_get_iterator(Item iterable);
+extern "C" Item js_iterator_step(Item iterator);
+extern "C" Item js_iterator_close(Item iterator);
+static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) {
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern void js_throw_value(Item value);
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_array_new(0);
+    Item result = js_array_new(0);
+    int64_t k = 0;
+    while (true) {
+        Item next_val = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            // step itself threw — iterator is already done, do not close.
+            return js_array_new(0);
+        }
+        if (next_val.item == JS_ITER_DONE_SENTINEL) break;
+        Item idx_item = (Item){.item = i2it((int)k)};
+        Item args[2] = {next_val, idx_item};
+        Item mapped = js_call_function(mapFn, this_arg, args, 2);
+        if (js_check_exception()) {
+            // mapfn threw — IfAbruptCloseIterator: invoke iterator.return().
+            // The original abrupt completion is preserved; any exception from
+            // .return() is discarded.
+            Item saved = js_clear_exception();
+            js_iterator_close(iterator);
+            (void)js_clear_exception();
+            js_throw_value(saved);
+            return js_array_new(0);
+        }
+        js_array_push(result, mapped);
+        k++;
+    }
+    return result;
+}
+
+// Returns true if `iterable` exposes a callable Symbol.iterator (`__sym_1`).
+static bool js_has_sym_iterator(Item iterable) {
+    TypeId tid = get_type_id(iterable);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) return false;
+    Item key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item iter_factory = js_property_get(iterable, key);
+    return get_type_id(iter_factory) == LMD_TYPE_FUNC;
+}
+
 extern "C" Item js_array_from(Item iterable) {
     extern Item js_throw_type_error(const char* msg);
     TypeId tid = get_type_id(iterable);
@@ -8921,6 +9015,13 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
     }
     // No mapper: just delegate.
     if (mft != LMD_TYPE_FUNC) return js_array_from(iterable);
+    // J39-7 spec §22.1.2.1: if the source has Symbol.iterator, fuse iteration
+    // with the mapper so that an abrupt completion from mapfn triggers
+    // IteratorClose. Array fast path below is OK because array iterator's
+    // .return() is a no-op for non-generator array iteration in tests.
+    if (js_has_sym_iterator(iterable)) {
+        return js_array_from_iter_mapped(iterable, mapFn, make_js_undefined());
+    }
     // J39-7 spec §22.1.2.1: source[k] must be read each iteration so that callbacks
     // mutating the source array are observed. For LMD_TYPE_ARRAY and array-like maps,
     // iterate the source live.
@@ -8976,6 +9077,10 @@ extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item t
     if (stid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return js_array_new(0);
+    }
+    // J39-7: iterator-protocol path with IteratorClose on mapfn-throw.
+    if (js_has_sym_iterator(iterable)) {
+        return js_array_from_iter_mapped(iterable, mapFn, this_arg);
     }
     if (stid == LMD_TYPE_ARRAY) {
         Array* src = iterable.array;
