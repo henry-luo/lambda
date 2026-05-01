@@ -298,6 +298,7 @@ Item js_map_method(Item obj, Item method_name, Item* args, int argc);
 Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
+void js_object_proto_setter(Item object, Item value);
 void js_mark_non_enumerable(Item object, Item name);
 void js_mark_non_writable(Item object, Item name);
 void js_mark_non_configurable(Item object, Item name);
