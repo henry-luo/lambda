@@ -16,6 +16,29 @@
 
     {"type": "key_press", "key": "tab"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_focus", "target": {"selector": "#pwd"}}
+    {"type": "assert_focus", "target": {"selector": "#pwd"}},
+
+    {"type": "log", "message": "Tab visits readonly input but skips disabled input"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#readonly-fld"}},
+
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#bio"}},
+
+    {"type": "log", "message": "Tab visits the submit button"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#submit-btn"}},
+
+    {"type": "log", "message": "Shift+Tab moves focus backward"},
+    {"type": "key_press", "key": "tab", "mods_str": "shift"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#bio"}},
+
+    {"type": "key_press", "key": "tab", "mods_str": "shift"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_focus", "target": {"selector": "#readonly-fld"}}
   ]
 }

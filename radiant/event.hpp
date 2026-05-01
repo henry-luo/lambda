@@ -69,6 +69,7 @@ typedef enum {
     RDT_KEY_ENTER = 257,
     RDT_KEY_TAB = 258,
     RDT_KEY_ESCAPE = 256,
+    RDT_KEY_SPACE = 32,
     // Clipboard keys (A, C, V, X, Z) and Y for redo on Win/Linux
     RDT_KEY_A = 65,
     RDT_KEY_C = 67,
