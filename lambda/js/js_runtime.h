@@ -317,7 +317,7 @@ Item js_reflect_define_property(Item obj, Item key, Item desc);
 Item js_reflect_delete_property(Item obj, Item key);
 Item js_reflect_own_keys(Item obj);
 Item js_reflect_prevent_extensions(Item obj);
-Item js_reflect_set(Item obj, Item key, Item value);
+Item js_reflect_set(Item obj, Item key, Item value, Item receiver);
 Item js_reflect_set_prototype_of(Item obj, Item proto);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);

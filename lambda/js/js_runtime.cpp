@@ -9183,6 +9183,11 @@ static Item js_array_like_to_array(Item obj) {
     Item len_val = js_property_get(obj, length_key);
     // propagate exception from length getter (e.g. Object.defineProperty getter that throws)
     if (js_check_exception()) return ItemNull;
+    // ES ToLength(Get(O, "length")) — Symbol throws TypeError per ToNumber.
+    if (js_key_is_symbol(len_val)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     int len = (int)js_get_number(len_val);
     if (js_check_exception()) return ItemNull;
     if (len < 0) len = 0;
@@ -10024,6 +10029,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
+            if (js_check_exception()) return ItemNull;
+            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
+            // return the wrapped receiver per ES spec — these methods return O.
+            // For Boolean/Number wrappers length is 0 so no writeback is needed.
+            if (is_mutating && (builtin_id == JS_BUILTIN_ARR_FILL ||
+                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
+                                builtin_id == JS_BUILTIN_ARR_SORT ||
+                                builtin_id == JS_BUILTIN_ARR_REVERSE)) {
+                return wrapped;
+            }
             return result;
         }
     }
@@ -11819,7 +11834,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_reflect_prevent_extensions(arg0);
     }
     case JS_BUILTIN_REFLECT_SET: {
-        return js_reflect_set(arg0, arg1, arg2);
+        return js_reflect_set(arg0, arg1, arg2, ItemNull);
     }
     case JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF: {
         return js_reflect_set_prototype_of(arg0, arg1);
@@ -17703,7 +17718,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 2  && strncmp(c, "at", 2) == 0) ||
             (len == 4  && strncmp(c, "sort", 4) == 0) ||
             (len == 7  && strncmp(c, "reverse", 7) == 0) ||
-            (len == 4  && strncmp(c, "fill", 4) == 0);
+            (len == 4  && strncmp(c, "fill", 4) == 0) ||
+            (len == 10 && strncmp(c, "copyWithin", 10) == 0);
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
             // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
@@ -17845,9 +17861,23 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     // indexOf
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
-        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
-        int start = (argc >= 2) ? (int)js_get_number(args[1]) : 0;
+        // ES §22.1.3.13 step 3: if len is 0, return -1 (BEFORE ToInteger(fromIndex)).
+        if (a->length == 0) return (Item){.item = i2it(-1)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
+        // J39-7: ToInteger(fromIndex) — Symbol throws TypeError, object → ToPrimitive (may throw).
+        int start = 0;
+        if (argc >= 2) {
+            if (js_key_is_symbol(args[1]))
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            double d_from = js_get_number(args[1]);
+            if (js_exception_pending) return ItemNull;
+            if (d_from != d_from) d_from = 0;
+            d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+            if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
+            if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
+            start = (int)d_from;
+        }
         // v24: ES spec - negative fromIndex means length + fromIndex
         if (start < 0) { start = a->length + start; if (start < 0) start = 0; }
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -17870,10 +17900,23 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     // includes
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
-        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
-        // v24: Support fromIndex argument (ES spec)
-        int from = (argc >= 2) ? (int)js_get_number(args[1]) : 0;
+        // ES §22.1.3.11 step 3: if len is 0, return false (BEFORE ToInteger(fromIndex)).
+        if (a->length == 0) return (Item){.item = b2it(false)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
+        // J39-7: ToInteger(fromIndex) — Symbol throws TypeError, object → ToPrimitive (may throw).
+        int from = 0;
+        if (argc >= 2) {
+            if (js_key_is_symbol(args[1]))
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            double d_from = js_get_number(args[1]);
+            if (js_exception_pending) return ItemNull;
+            if (d_from != d_from) d_from = 0; // NaN → 0
+            d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+            if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
+            if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
+            from = (int)d_from;
+        }
         if (from < 0) { from = a->length + from; if (from < 0) from = 0; }
         for (int i = from; i < a->length; i++) {
             // includes uses SameValueZero (NaN === NaN, +0 === -0)
@@ -17889,10 +17932,15 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // join - converts all elements to strings and joins them
     if (method->len == 4 && strncmp(method->chars, "join", 4) == 0) {
-        Item sep = argc > 0 ? args[0] : (Item){.item = s2it(heap_create_name(","))};
-        String* sep_str = it2s(sep);
-        const char* sep_chars = sep_str ? sep_str->chars : ",";
-        size_t sep_len = sep_str ? sep_str->len : 1;
+        // ES §23.1.3.18: separator default "," only when undefined; otherwise ToString(separator).
+        const char* sep_chars = ",";
+        size_t sep_len = 1;
+        if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED && args[0].item != ITEM_JS_UNDEFINED) {
+            Item sep_item = js_to_string(args[0]);
+            if (js_exception_pending) return ItemNull;
+            String* sep_str = it2s(sep_item);
+            if (sep_str) { sep_chars = sep_str->chars; sep_len = sep_str->len; }
+        }
 
         Array* a = arr.array;
         StrBuf* buf = strbuf_new();
@@ -18586,24 +18634,31 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // copyWithin(target, start, end?) — copy elements within the array
     if (method->len == 10 && strncmp(method->chars, "copyWithin", 10) == 0) {
-        if (arr_type != LMD_TYPE_ARRAY || argc < 2) return arr;
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* a = arr.array;
         int len = a->length;
         // ES §22.1.3.3 step 6: throw TypeError for Symbol args before any side effects.
-        if (js_key_is_symbol(args[0]))
+        if (argc > 0 && js_key_is_symbol(args[0]))
             return js_throw_type_error("Cannot convert a Symbol value to a number");
-        if (js_key_is_symbol(args[1]))
+        if (argc > 1 && js_key_is_symbol(args[1]))
             return js_throw_type_error("Cannot convert a Symbol value to a number");
         if (argc > 2 && js_key_is_symbol(args[2]))
             return js_throw_type_error("Cannot convert a Symbol value to a number");
         // Use double to handle -Infinity/Infinity/NaN safely before clamping to int.
-        // Per spec, end=undefined means len (NOT ToInteger(undefined)=0).
+        // Per spec, start=undefined treated as 0; end=undefined means len.
+        bool start_is_undef = (argc <= 1) ||
+            args[1].item == ITEM_JS_UNDEFINED ||
+            get_type_id(args[1]) == LMD_TYPE_UNDEFINED;
         bool end_is_undef = (argc <= 2) ||
             args[2].item == ITEM_JS_UNDEFINED ||
             get_type_id(args[2]) == LMD_TYPE_UNDEFINED;
-        double d_target = js_get_number(args[0]);
-        double d_start = js_get_number(args[1]);
+        // J39-7: ToInteger may invoke valueOf (object → ToPrimitive). Propagate exceptions.
+        double d_target = (argc > 0) ? js_get_number(args[0]) : 0.0;
+        if (js_exception_pending) return ItemNull;
+        double d_start = start_is_undef ? 0.0 : js_get_number(args[1]);
+        if (js_exception_pending) return ItemNull;
         double d_end = end_is_undef ? (double)len : js_get_number(args[2]);
+        if (js_exception_pending) return ItemNull;
         if (d_target != d_target) d_target = 0; // NaN → 0
         if (d_start != d_start) d_start = 0;
         if (d_end != d_end) d_end = 0;
@@ -18956,9 +19011,25 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     // lastIndexOf
     if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
-        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
         Array* a = arr.array;
-        int from = argc > 1 ? (int)js_get_number(args[1]) : a->length - 1;
+        // ES §22.1.3.16 step 3: if len is 0, return -1 (BEFORE ToInteger(fromIndex)).
+        if (a->length == 0) return (Item){.item = i2it(-1)};
+        Item search_val = (argc >= 1) ? args[0] : make_js_undefined();
+        // J39-7: ToInteger(fromIndex) — Symbol throws TypeError, object → ToPrimitive (may throw).
+        int from;
+        if (argc > 1) {
+            if (js_key_is_symbol(args[1]))
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            double d_from = js_get_number(args[1]);
+            if (js_exception_pending) return ItemNull;
+            if (d_from != d_from) d_from = 0;
+            d_from = d_from >= 0 ? floor(d_from) : ceil(d_from);
+            if (d_from < (double)INT_MIN) d_from = (double)INT_MIN;
+            if (d_from > (double)INT_MAX) d_from = (double)INT_MAX;
+            from = (int)d_from;
+        } else {
+            from = a->length - 1;
+        }
         if (from < 0) from = a->length + from;
         if (from >= a->length) from = a->length - 1;
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -19065,7 +19136,18 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         Array* a = arr.array;
-        int idx = (argc < 1) ? 0 : (int)js_get_number(args[0]);
+        int idx = 0;
+        if (argc >= 1) {
+            if (js_key_is_symbol(args[0]))
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            double d = js_get_number(args[0]);
+            if (js_exception_pending) return ItemNull;
+            if (d != d) d = 0;
+            d = d >= 0 ? floor(d) : ceil(d);
+            if (d < (double)INT_MIN) d = (double)INT_MIN;
+            if (d > (double)INT_MAX) d = (double)INT_MAX;
+            idx = (int)d;
+        }
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
         Item val = a->items[idx];
@@ -20005,6 +20087,10 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         return;
     }
     TypeId ot = get_type_id(object);
+    // Encode explicit-null prototype as ITEM_JS_UNDEFINED sentinel for storage.
+    Item proto_to_store = (prototype.item == ItemNull.item)
+        ? (Item){.item = ITEM_JS_UNDEFINED}
+        : prototype;
     // Handle functions: store __proto__ in properties_map
     if (ot == LMD_TYPE_FUNC) {
         if (get_type_id(prototype) != LMD_TYPE_MAP && get_type_id(prototype) != LMD_TYPE_FUNC &&
@@ -20015,13 +20101,13 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             heap_register_gc_root(&fn->properties_map.item);
         }
         Item key = js_get_proto_key();
-        js_property_set(fn->properties_map, key, prototype);
+        js_property_set(fn->properties_map, key, proto_to_store);
         return;
     }
     // Handle arrays: store __proto__ in companion map (arr->extra)
     if (ot == LMD_TYPE_ARRAY) {
         Item key = js_get_proto_key();
-        js_property_set(object, key, prototype);
+        js_property_set(object, key, proto_to_store);
         return;
     }
     if (ot != LMD_TYPE_MAP) return;
@@ -20043,9 +20129,9 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             depth++;
         }
     }
-    // P10d: use interned __proto__ key
+    // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
-    js_property_set(object, key, prototype);
+    js_property_set(object, key, proto_to_store);
 }
 
 // Check if a function has a custom __proto__ set via Object.setPrototypeOf

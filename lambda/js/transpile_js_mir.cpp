@@ -11025,10 +11025,9 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t key_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                // js_in takes (key, obj) not (obj, key)
-                return jm_call_2(mt, "js_in", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg));
+                return jm_call_2(mt, "js_reflect_has", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
             // Reflect.get(obj, key)
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
@@ -11037,23 +11036,26 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t key_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_property_access", MIR_T_I64,
+                return jm_call_2(mt, "js_reflect_get", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
-            // Reflect.set(obj, key, value)
+            // Reflect.set(obj, key, value [, receiver])
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
                 prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "set", 3) == 0) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
+                JsAstNode* a4 = a3 ? a3->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t key_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
                 MIR_reg_t val_arg = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_null(mt);
-                return jm_call_3(mt, "js_reflect_set", MIR_T_I64,
+                MIR_reg_t recv_arg = a4 ? jm_transpile_box_item(mt, a4) : jm_emit_null(mt);
+                return jm_call_4(mt, "js_reflect_set", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg));
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_arg));
             }
             // Reflect.defineProperty(obj, key, desc)
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
@@ -11087,7 +11089,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 MIR_reg_t name_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_object_get_own_property_descriptor", MIR_T_I64,
+                return jm_call_2(mt, "js_reflect_get_own_property_descriptor", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg));
             }
@@ -11095,7 +11097,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
                 prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "getPrototypeOf", 14) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_get_prototype_of", MIR_T_I64,
+                return jm_call_1(mt, "js_reflect_get_prototype_of", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.setPrototypeOf(obj, proto)
@@ -11113,7 +11115,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
                 prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "isExtensible", 12) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_object_is_extensible", MIR_T_I64,
+                return jm_call_1(mt, "js_reflect_is_extensible", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.preventExtensions(obj)
@@ -11142,12 +11144,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "setPrototypeOf", 14) == 0) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
-                MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
-                MIR_reg_t proto_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
-                jm_call_void_2(mt, "js_set_prototype",
+                MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
+                MIR_reg_t proto_arg = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_undefined(mt);
+                return jm_call_2(mt, "js_object_set_prototype_of", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_arg));
-                return obj_arg;
             }
             // JSON.parse(str, reviver?)
             if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
