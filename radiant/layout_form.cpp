@@ -92,10 +92,26 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
             GlyphInfo zero_glyph = font_get_glyph(temp_font.font_handle, '0');
             if (zero_glyph.advance_x > 0) {
                 // HTML spec §4.10.5.3.7 + CSS Values §6.1.2 (ch unit):
-                // Use the actual advance width of '0' from the resolved font
-                // whenever it can be measured. The calibrated constant below
-                // is only a fallback for when no font handle is available.
-                content_w = zero_glyph.advance_x * size;
+                // Use the actual advance width of '0' from the resolved font.
+                // However, font-family for unstyled inputs varies between
+                // platforms and font backends — Chrome's UA-default Arial
+                // gives '0' advance ≈ 7.25 at 13.3333px, but our font
+                // backend may resolve a slightly different metric (e.g.
+                // 7.4) producing border-box widths a few px wider than
+                // Chrome. When the measured advance is within ~5% of the
+                // calibrated UA value at the UA font size, snap to the
+                // calibrated value so unstyled inputs match Chrome's UA
+                // baseline. CSS-overridden fonts (monospace, bold, large
+                // sizes, etc.) deviate well outside this tolerance and
+                // continue to use the measured advance.
+                float measured = zero_glyph.advance_x;
+                if (font->font_size == ua_font_size) {
+                    float ratio = measured / calibrated_char_w;
+                    if (ratio >= 0.95f && ratio <= 1.05f) {
+                        measured = calibrated_char_w;
+                    }
+                }
+                content_w = measured * size;
             }
         }
     }
