@@ -45,6 +45,8 @@
     #include <dirent.h>
     #include <sys/stat.h>
     #include <sys/wait.h>
+    #include <sys/resource.h>
+    #include <sys/time.h>
     #include <signal.h>
     #define LAMBDA_EXE "./lambda.exe"
     #define PAGE_DIR "test/layout/data/page"
@@ -144,12 +146,28 @@ static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
 #define MAX_LAYOUT_SECONDS 4.0
 #define MAX_RENDER_SECONDS 2.0
 
+// Peak RSS limit per page (bytes). A single lambda.exe child rendering one
+// HTML/MD page should comfortably fit in this budget; exceeding it usually
+// signals a memory leak or pathological growth in font/css/layout pipelines.
+// macOS-only enforcement: getrusage(RUSAGE_CHILDREN) reports peak RSS in bytes
+// on Darwin and KB on Linux — we normalise via wait4 + a per-OS multiplier.
+#define MAX_PEAK_RSS_BYTES (160ULL * 1024 * 1024)  // 160 MB hard cap (RSS, includes shared OS pages)
+#define MAX_PEAK_FOOTPRINT_BYTES (160ULL * 1024 * 1024)  // 160 MB cap on app-private memory (excludes shared OS pages)
+
+#ifdef __APPLE__
+    #define RUSAGE_MAXRSS_TO_BYTES(x) ((uint64_t)(x))
+#else
+    #define RUSAGE_MAXRSS_TO_BYTES(x) ((uint64_t)(x) * 1024ULL)
+#endif
+
 struct PageTestResult {
     int exit_code;        // 0 = success, non-zero = failure
     bool timed_out;
     double elapsed_ms;
     double layout_ms;     // from [LAYOUT_PROF], -1 if not found
     double render_ms;     // from [RENDER_PROF], -1 if not found
+    uint64_t peak_rss_bytes;  // child's peak resident set size (0 if unknown)
+    uint64_t peak_footprint_bytes;  // child's peak phys_footprint (macOS only, 0 if unknown)
     std::string output;   // stderr/stdout from lambda.exe
 };
 
@@ -164,6 +182,18 @@ static double parse_prof_ms(const std::string& output, const char* tag) {
     while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
     if (pos >= output.size()) return -1;
     return atof(output.c_str() + pos);
+}
+
+// Parse "[PEAK_FOOTPRINT] <bytes>\n" emitted by the child on macOS exit.
+// Returns 0 if the tag is not found.
+static uint64_t parse_peak_footprint(const std::string& output) {
+    const char* tag = "[PEAK_FOOTPRINT]";
+    size_t pos = output.find(tag);
+    if (pos == std::string::npos) return 0;
+    pos += strlen(tag);
+    while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
+    if (pos >= output.size()) return 0;
+    return strtoull(output.c_str() + pos, nullptr, 10);
 }
 
 #ifdef _WIN32
@@ -194,6 +224,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
+    result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
 
@@ -206,6 +237,8 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.elapsed_ms = 0;
     result.layout_ms = -1;
     result.render_ms = -1;
+    result.peak_rss_bytes = 0;
+    result.peak_footprint_bytes = 0;
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -272,7 +305,10 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     close(pipefd[0]);
 
     int status = 0;
-    waitpid(pid, &status, 0);
+    struct rusage child_usage;
+    memset(&child_usage, 0, sizeof(child_usage));
+    wait4(pid, &status, 0, &child_usage);
+    result.peak_rss_bytes = RUSAGE_MAXRSS_TO_BYTES(child_usage.ru_maxrss);
 
     auto t1 = std::chrono::steady_clock::now();
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -289,6 +325,7 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
 
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
+    result.peak_footprint_bytes = parse_peak_footprint(result.output);
     return result;
 }
 
@@ -357,11 +394,13 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
     SCOPED_TRACE("Page: " + info.test_name);
 
     // Print timing
-    char timing_buf[128];
-    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms)%s",
+    char timing_buf[200];
+    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB)%s",
              info.test_name.c_str(), (int)result.elapsed_ms,
              result.layout_ms >= 0 ? result.layout_ms : 0.0,
              result.render_ms >= 0 ? result.render_ms : 0.0,
+             (unsigned long long)(result.peak_rss_bytes / (1024 * 1024)),
+             (unsigned long long)(result.peak_footprint_bytes / (1024 * 1024)),
              result.timed_out ? " (TIMEOUT)" : "");
     std::cout << timing_buf << std::endl;
 
@@ -391,6 +430,22 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
         EXPECT_LT(result.render_ms, MAX_RENDER_SECONDS * 1000)
             << info.test_name << " render took " << result.render_ms << "ms (limit: "
             << (MAX_RENDER_SECONDS * 1000) << "ms)";
+    }
+
+    // Peak memory limit. Prefer phys_footprint when available (macOS): it excludes
+    // shared OS framework pages and matches Activity Monitor's "Memory" column,
+    // giving a true measure of app-private allocation pressure. Fall back to RSS
+    // (which includes shared pages) when footprint is not reported.
+    if (result.peak_footprint_bytes > 0) {
+        EXPECT_LE(result.peak_footprint_bytes, MAX_PEAK_FOOTPRINT_BYTES)
+            << info.test_name << " peak phys_footprint = "
+            << (result.peak_footprint_bytes / (1024 * 1024)) << " MB (limit: "
+            << (MAX_PEAK_FOOTPRINT_BYTES / (1024 * 1024)) << " MB)";
+    } else if (result.peak_rss_bytes > 0) {
+        EXPECT_LE(result.peak_rss_bytes, MAX_PEAK_RSS_BYTES)
+            << info.test_name << " peak RSS = "
+            << (result.peak_rss_bytes / (1024 * 1024)) << " MB (limit: "
+            << (MAX_PEAK_RSS_BYTES / (1024 * 1024)) << " MB)";
     }
 }
 

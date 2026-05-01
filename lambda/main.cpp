@@ -2628,6 +2628,46 @@ int main(int argc, char *argv[]) {
 
         fprintf(stderr, "view command completed with result: %d\n", exit_code);
         log_debug("view command completed with result: %d", exit_code);
+
+        // Always print peak physical footprint on macOS so the parent test process
+        // can read true app memory usage (excludes shared OS framework pages).
+        // See: task_info(TASK_VM_INFO) — phys_footprint_peak is what Activity Monitor shows.
+#ifdef __APPLE__
+        {
+            task_vm_info_data_t vm_info;
+            mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+            if (task_info(mach_task_self(), TASK_VM_INFO,
+                          (task_info_t)&vm_info, &cnt) == KERN_SUCCESS) {
+                fprintf(stderr, "[PEAK_FOOTPRINT] %llu\n",
+                        (unsigned long long)vm_info.ledger_phys_footprint_peak);
+            }
+        }
+#endif
+        // optional memory dump: VIEW_MEM_STATS=1 prints memtrack categories before exit.
+        const char* mem_stats_env = getenv("VIEW_MEM_STATS");
+        if (mem_stats_env && *mem_stats_env && strcmp(mem_stats_env, "0") != 0) {
+            MemtrackStats stats;
+            memtrack_get_stats(&stats);
+            fprintf(stderr, "[MEMSTATS] total: current=%zu peak=%zu\n",
+                    stats.current_bytes, stats.peak_bytes);
+            for (int i = 0; i < MEM_CAT_COUNT; i++) {
+                MemtrackCategoryStats cs;
+                memtrack_get_category_stats((MemCategory)i, &cs);
+                if (cs.peak_bytes > 0) {
+                    fprintf(stderr, "[MEMSTATS] %-24s current=%10zu peak=%10zu allocs=%zu\n",
+                            memtrack_category_names[i], cs.current_bytes, cs.peak_bytes, cs.total_allocs);
+                }
+            }
+        }
+        // VIEW_PAUSE_BEFORE_EXIT=N -- sleep N seconds before exit so vmmap/leaks can attach.
+        const char* pause_env = getenv("VIEW_PAUSE_BEFORE_EXIT");
+        if (pause_env && *pause_env) {
+            int secs = atoi(pause_env);
+            if (secs > 0) {
+                fprintf(stderr, "[PAUSE] pid=%d sleeping %d seconds\n", (int)getpid(), secs);
+                sleep(secs);
+            }
+        }
         log_finish();
         return exit_code;
     }

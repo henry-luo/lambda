@@ -18,6 +18,26 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
 // Call image_free() to free the returned data
 unsigned char* image_load_from_memory(const unsigned char* data, size_t length, int* width, int* height, int* channels);
 
+// Load image from a file, decoding at or above the requested target dimensions.
+// Memory-efficient: for JPEG uses libjpeg-turbo's native DCT scaling; for PNG
+// uses row-by-row decode with box-average downsampling. Other formats fall
+// back to a full decode followed by post-resize.
+//
+// Inputs:
+//   filename     path to image
+//   target_w/h   desired displayed pixels (use 0 to disable scaling for that axis)
+// Outputs:
+//   *width/*height  dimensions of returned RGBA buffer (>= target_w/h when scaling)
+//   *channels       always set to 4 on success
+// Returns RGBA buffer (free via image_free) or NULL on failure.
+unsigned char* image_load_scaled(const char* filename,
+                                 int target_w, int target_h,
+                                 int* width, int* height, int* channels);
+
+unsigned char* image_load_from_memory_scaled(const unsigned char* data, size_t length,
+                                             int target_w, int target_h,
+                                             int* width, int* height, int* channels);
+
 // Free image data returned by image_load or image_load_from_memory
 void image_free(unsigned char* data);
 

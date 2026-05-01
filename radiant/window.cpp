@@ -25,6 +25,33 @@ extern "C" {
 #include "../lib/url.h"
 }
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+// Sample current and peak phys_footprint, log under tag MEMSTAGE if VIEW_MEM_STAGES=1.
+extern "C" void log_mem_stage(const char* stage) {
+    static int env_checked = 0;
+    static int enabled = 0;
+    if (!env_checked) {
+        const char* e = getenv("VIEW_MEM_STAGES");
+        enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+        env_checked = 1;
+    }
+    if (!enabled) return;
+    task_vm_info_data_t info;
+    mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &cnt) != KERN_SUCCESS) {
+        return;
+    }
+    fprintf(stderr, "[MEMSTAGE] %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB\n",
+            stage,
+            (unsigned long long)(info.phys_footprint / (1024 * 1024)),
+            (unsigned long long)(info.ledger_phys_footprint_peak / (1024 * 1024)),
+            (unsigned long long)(info.resident_size / (1024 * 1024)));
+}
+#else
+extern "C" void log_mem_stage(const char*) {}
+#endif
+
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 void render_video_frames_cached(RadiantState* rstate, ImageSurface* surface, UiContext* uicon);
@@ -810,6 +837,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
         // Load document based on file extension
         log_notice("view: loading document...");
+        log_mem_stage("before-load");
         DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
@@ -818,6 +846,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
             ui_context_cleanup(&ui_context);
             return -1;
         }
+        log_mem_stage("after-load");
         log_notice("view: document loaded, starting layout...");
 
         // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
@@ -891,14 +920,18 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         // Layout document (for HTML-based documents)
         // PDF documents have pre-built view trees and skip this
         if (doc->root) {
+            log_mem_stage("before-layout");
             layout_html_doc(&ui_context, doc, false);
+            log_mem_stage("after-layout");
         }
         log_notice("view: layout complete, rendering...");
         // PDF scaling now happens inside pdf_page_to_view_tree
 
         // Render document
         if (doc && doc->view_tree) {
+            log_mem_stage("before-render");
             render_html_doc(&ui_context, doc->view_tree, NULL);
+            log_mem_stage("after-render");
         }
         log_notice("view: render complete");
 

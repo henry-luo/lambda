@@ -30,7 +30,11 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
                                 int face_index, FontWeight weight, FontSlant slant) {
     if (!data || len == 0 || size_px <= 0) return NULL;
 
-    CFDataRef cf_data = CFDataCreate(NULL, data, (CFIndex)len);
+    // use no-copy CFData backed by the caller's buffer (the FontHandle owns
+    // the memory_buffer for its lifetime, so CoreText can safely reference
+    // the bytes in place).  CFDataCreate would copy the entire buffer, which
+    // for large fonts (Apple Color Emoji.ttc = 188 MB) blows up RSS.
+    CFDataRef cf_data = CFDataCreateWithBytesNoCopy(NULL, data, (CFIndex)len, kCFAllocatorNull);
     if (!cf_data) return NULL;
 
     CTFontRef ct_font = NULL;

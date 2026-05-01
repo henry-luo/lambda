@@ -1734,7 +1734,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
         ImageSurface* img = marker_prop->loaded_image;
         if (img && img->pixels && img->width > 0 && img->height > 0) {
-            image_surface_ensure_decoded(img);
+            // marker images are typically rendered at intrinsic size; request natural decode
+            image_surface_ensure_decoded(img, img->width, img->height);
             const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
             float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
             float img_w = (float)img->width;
@@ -2574,6 +2575,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     // Save backdrop for filter: drop-shadow() (element must render on transparent so we get true alpha)
     bool has_drop_shadow = false;
+    bool has_filter_opacity = false;
     bool has_filter_backdrop = false;
     uint32_t* ds_backdrop = nullptr;
     int dsx0 = 0, dsy0 = 0, dsw = 0, dsh = 0;
@@ -2590,13 +2592,18 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             } else if (ff->type == FILTER_BLUR) {
                 if (ff->params.blur_radius > filter_blur_max)
                     filter_blur_max = ff->params.blur_radius;
+            } else if (ff->type == FILTER_OPACITY) {
+                has_filter_opacity = true;
             }
             ff = ff->next;
         }
-        // Any filter chain creates a stacking context: render element to a
-        // transparent backdrop so filters (esp. opacity()) composite correctly
-        // onto the underlying surface instead of punching alpha holes.
-        has_filter_backdrop = true;
+        // Backdrop save (transparent rendering) is needed only for filters that
+        // produce alpha that must composite over the underlying surface:
+        //  - drop-shadow(): needs element alpha to generate the shadow
+        //  - opacity(): reduces element alpha; without backdrop save, lowering
+        //    alpha would punch holes through the underlying surface
+        // Pure color/blur filters operate on pixels in place and don't need it.
+        has_filter_backdrop = has_drop_shadow || has_filter_opacity;
     }
     if (has_filter_backdrop) {
         float ds = rdcon->scale;
@@ -2607,7 +2614,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 (ceilf(fabs(ds_offset_x > 0 ? ds_offset_x : -ds_offset_x)) +
                  ceilf(fabs(ds_offset_y > 0 ? ds_offset_y : -ds_offset_y)) +
                  ceilf(ds_blur) + 2) : 0;
-            float blur_expand = ceilf(filter_blur_max);
+            // Blur output extends 2 * blur_radius from element edge:
+            //  filter_rect padding (blur_radius) + box_blur kernel padding (blur_radius).
+            // Backdrop region must cover the full blur output so it's composited back.
+            float blur_expand = ceilf(filter_blur_max * 2.0f);
             float expand = ds_expand > blur_expand ? ds_expand : blur_expand;
             dsx0 = (int)(pa_block.x + block->x * ds - expand);
             dsy0 = (int)(pa_block.y + block->y * ds - expand);
@@ -3101,8 +3111,8 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             log_debug("failed to render svg image");
         }
     } else {
-        // ensure raster image pixels are decoded (lazy loading)
-        image_surface_ensure_decoded(img);
+        // ensure raster image pixels are decoded (lazy loading) at the displayed size
+        image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height);
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         rc_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface, &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
             rdcon->clip_shapes, rdcon->clip_shape_depth);

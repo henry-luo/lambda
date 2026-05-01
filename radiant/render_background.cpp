@@ -1642,8 +1642,8 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
     // Render tiles
     bool is_svg = (img->format == IMAGE_FORMAT_SVG);
     if (!is_svg) {
-        // ensure raster image pixels are decoded (lazy loading)
-        image_surface_ensure_decoded(img);
+        // ensure raster image pixels are decoded (lazy loading) at the tile size
+        image_surface_ensure_decoded(img, (int)tile_w, (int)tile_h);
     }
 
     // Use wrap-around bilinear for repeating raster backgrounds so that

@@ -15,6 +15,7 @@
 #include <unistd.h>  // for _exit
 #include <pthread.h> // for thread-safe initialization
 #include <sys/mman.h> // for mmap/munmap
+#include <execinfo.h> // for backtrace
 
 #ifndef MAP_ANONYMOUS
 #ifdef MAP_ANON
@@ -45,6 +46,10 @@ struct Pool {
     MmapChunk* chunks;     // linked list of mmap'd regions
     uint8_t* cursor;       // bump pointer within current chunk
     uint8_t* limit;        // end of current chunk
+    // diagnostics: rough running totals (rpmalloc mode tracks allocs only,
+    // not frees, so this is a high-water-mark approximation).
+    size_t alloc_bytes;     // total bytes ever allocated
+    size_t alloc_count;     // total alloc calls
 };
 
 #define POOL_VALID_MARKER 0xDEADBEEF
@@ -100,6 +105,27 @@ Pool* pool_create(void) {
     pool->chunks = NULL;
     pool->cursor = NULL;
     pool->limit = NULL;
+    pool->alloc_bytes = 0;
+    pool->alloc_count = 0;
+
+    // Optional one-line backtrace dump on each pool creation: POOL_TRACE=1
+    static int trace_env_checked = 0;
+    static int trace_enabled = 0;
+    if (!trace_env_checked) {
+        const char* e = getenv("POOL_TRACE");
+        trace_enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+        trace_env_checked = 1;
+    }
+    if (trace_enabled) {
+        void* bt[6];
+        int n = backtrace(bt, 6);
+        char** syms = backtrace_symbols(bt, n);
+        fprintf(stderr, "[POOLTRACE] new pool=%u\n", pool->pool_id);
+        for (int i = 1; i < n; i++) {  // skip ourselves
+            fprintf(stderr, "[POOLTRACE]   %s\n", syms[i]);
+        }
+        free(syms);
+    }
 
     return pool;
 }
@@ -162,6 +188,20 @@ void pool_destroy(Pool* pool) {
 
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
 
+    // optional diagnostic dump: POOL_STATS=1 prints lifetime alloc bytes per pool.
+    static int pool_stats_env_checked = 0;
+    static int pool_stats_enabled = 0;
+    if (!pool_stats_env_checked) {
+        const char* e = getenv("POOL_STATS");
+        pool_stats_enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
+        pool_stats_env_checked = 1;
+    }
+    if (pool_stats_enabled) {
+        fprintf(stderr, "[POOLSTATS] pool=%u alloc_bytes=%zu alloc_count=%zu mode=%s\n",
+                pool->pool_id, pool->alloc_bytes, pool->alloc_count,
+                pool->heap ? "rpmalloc" : "mmap");
+    }
+
     if (pool->heap) {
         // rpmalloc mode
         rpmalloc_heap_free_all(pool->heap);
@@ -220,6 +260,9 @@ void* pool_alloc(Pool* pool, size_t size) {
         void* result = rpmalloc_heap_alloc(pool->heap, size);
         if (!result) {
             log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
+        } else {
+            pool->alloc_bytes += size;
+            pool->alloc_count++;
         }
         return result;
     }
@@ -266,6 +309,10 @@ void* pool_calloc(Pool* pool, size_t size) {
         *header = size;
         result = pool->cursor + MMAP_SIZE_HEADER;
         pool->cursor += total;
+    }
+    if (result) {
+        pool->alloc_bytes += size;
+        pool->alloc_count++;
     }
     return result;
 }
@@ -336,4 +383,14 @@ char* pool_strdup(Pool* pool, const char* str) {
 unsigned int pool_get_id(Pool* pool) {
     if (!pool) return 0;
     return pool->pool_id;
+}
+
+void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count) {
+    if (!pool) {
+        if (alloc_bytes) *alloc_bytes = 0;
+        if (alloc_count) *alloc_count = 0;
+        return;
+    }
+    if (alloc_bytes) *alloc_bytes = pool->alloc_bytes;
+    if (alloc_count) *alloc_count = pool->alloc_count;
 }
