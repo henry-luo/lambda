@@ -10547,7 +10547,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         int idx = (int)it2i(idx_item);
         int kind = (int)it2i(kind_item); // 0=keys, 1=values, 2=entries
         if (get_type_id(arr_item) != LMD_TYPE_ARRAY || idx >= arr_item.array->length) {
-            // done — return {value: undefined, done: true}
+            // done — per ES §23.1.5.2.1 step 8.a: set [[IteratedObject]] to
+            // undefined so subsequent calls keep returning done=true even if
+            // new elements are pushed onto the original array afterwards.
+            js_property_set(this_val, (Item){.item = s2it(arr_key)}, make_js_undefined());
+            // return {value: undefined, done: true}
             Item result = js_new_object();
             js_property_set(result, (Item){.item = s2it(heap_create_name("value", 5))}, make_js_undefined());
             js_property_set(result, (Item){.item = s2it(heap_create_name("done", 4))}, (Item){.item = b2it(true)});

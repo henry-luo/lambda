@@ -3129,6 +3129,10 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
     }
     if (method->len == 11 && strncmp(method->chars, "toPrecision", 11) == 0) {
         if (argc < 1 || get_type_id(args[0]) == LMD_TYPE_UNDEFINED) return js_to_string(num);
+        // per spec ES §21.1.3.5 step 3: ToNumber(precision) must throw TypeError on Symbol
+        if (js_key_is_symbol_c(args[0])) {
+            return js_throw_type_error("Cannot convert a Symbol value to a number");
+        }
         // per spec: step 3 ToInteger(precision) before step 4 NaN/Infinity check
         Item prec_item = js_to_number(args[0]);
         if (js_check_exception()) return ItemNull;
@@ -3212,6 +3216,10 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         bool has_frac = (argc >= 1 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED);
         int frac = 0;
         if (has_frac) {
+            // per spec ES §21.1.3.2 step 2: ToNumber(fractionDigits) must throw TypeError on Symbol
+            if (js_key_is_symbol_c(args[0])) {
+                return js_throw_type_error("Cannot convert a Symbol value to a number");
+            }
             Item frac_item = js_to_number(args[0]);
             if (js_check_exception()) return ItemNull;
             TypeId ft = get_type_id(frac_item);
