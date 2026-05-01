@@ -17539,6 +17539,15 @@ static void js_create_data_property_or_throw(Item object, int index, Item value)
             }
             if (!is_writable)   js_attr_set_writable(object, buf, blen, /*writable=*/true);
             if (!is_enumerable) js_attr_set_enumerable(object, buf, blen, /*enumerable=*/true);
+        } else {
+            // J39-7: brand-new own property — per ES OrdinaryDefineOwnProperty
+            // step 2 / IsCompatiblePropertyDescriptor: if object is not
+            // extensible and property doesn't already exist, [[DefineOwnProperty]]
+            // returns false → CreateDataPropertyOrThrow throws TypeError.
+            if (!js_is_extensible(object)) {
+                js_throw_type_error("Cannot define property, object is not extensible");
+                return;
+            }
         }
         Item key = (Item){.item = s2it(heap_create_name(buf, blen))};
         js_property_set(object, key, value);
