@@ -5,6 +5,10 @@
 
 struct DomElement;
 
+// Forward decl from text_edit.hpp (avoids circular include).
+struct EditHistory;
+void te_history_free(EditHistory* h);
+
 /**
  * Form Control Support for Radiant
  *
@@ -184,6 +188,38 @@ struct FormControlProp {
     // nullptr or "" means no custom error.
     char* custom_validity_msg;
 
+    // ------------------------------------------------------------------
+    // F1 (Radiant_Design_Form_Input.md §3.1):
+    //   - value_at_focus: snapshot of current_value taken when this text
+    //     control receives focus. Used by te_blur_dispatch_change() to
+    //     decide whether to fire `change` on blur (HTML §4.10.5.5).
+    //   - history: undo/redo ring (lazy-allocated by text_edit.cpp).
+    //     Opaque here; defined in text_edit.hpp.
+    // ------------------------------------------------------------------
+    char*    value_at_focus;
+    uint32_t value_at_focus_len;
+    void*    history;   // EditHistory*; lazy
+
+    // ------------------------------------------------------------------
+    // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
+    //   - scroll_x / scroll_y: viewport offset for auto-scroll. The text
+    //     content is shifted left/up by these amounts so the caret stays
+    //     visible inside the content box. Updated by render_form before
+    //     drawing the caret.
+    //   - caret_blink_t: monotonic seconds since the last caret toggle.
+    //   - caret_on: visibility flag toggled by the blink timer (always
+    //     true in headless renders so snapshots stay deterministic).
+    //   - placeholder_shown / focus_visible: cached pseudo-state bits,
+    //     refreshed on focus/blur/value-change so CSS selector matching
+    //     can read them in O(1).
+    // ------------------------------------------------------------------
+    float    scroll_x;
+    float    scroll_y;
+    float    caret_blink_t;
+    uint8_t  caret_on : 1;
+    uint8_t  placeholder_shown : 1;
+    uint8_t  focus_visible : 1;
+
     // Constructor
     FormControlProp() : control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
@@ -198,11 +234,16 @@ struct FormControlProp {
         selection_start(0), selection_end(0), selection_direction(0),
         tc_initialized(0), tc_sc_pending(0),
         tc_sc_next_pending(nullptr),
-        custom_validity_msg(nullptr) {}
+        custom_validity_msg(nullptr),
+        value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
+        scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
+        caret_on(1), placeholder_shown(0), focus_visible(0) {}
 
     ~FormControlProp() {
         if (current_value) { free(current_value); current_value = nullptr; }
         if (custom_validity_msg) { free(custom_validity_msg); custom_validity_msg = nullptr; }
+        if (value_at_focus) { free(value_at_focus); value_at_focus = nullptr; }
+        if (history) { te_history_free((EditHistory*)history); history = nullptr; }
     }
 };
 

@@ -2,6 +2,7 @@
 #include "state_store.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
+#include "text_edit.hpp"
 #include "browsing_session.h"
 #include "rdt_video.h"
 #include "webview.h"
@@ -2205,6 +2206,16 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 
         // Sync DOM pseudo-states for previous focus
         if (prev_focus) {
+            // F1 (Radiant_Design_Form_Input.md §3.1): if the blurred element
+            // is a text control whose value differs from the focus-time
+            // snapshot, dispatch `change` before `blur` (HTML §4.10.5.5).
+            if (prev_focus->is_element()) {
+                DomElement* prev_elem = (DomElement*)prev_focus;
+                if (te_blur_should_dispatch_change(prev_elem)) {
+                    dispatch_lambda_handler   (evcon, prev_focus, "change");
+                    dispatch_html_event_handler(evcon, prev_focus, "change");
+                }
+            }
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
             // §7 unification (U-4/U-6): legacy inline + bridge listeners both run
@@ -2235,12 +2246,26 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         // Propagate :focus-within up the ancestor chain
         propagate_focus_within(new_focus, true);
 
+        // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
+        // focus time so a later blur can decide whether to fire `change`.
+        if (new_focus->is_element()) {
+            te_focus_capture_value((DomElement*)new_focus);
+        }
+
         log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)",
                   new_focus, from_keyboard, from_keyboard);
     } else {
         focus_clear(state);
 
         if (prev_focus) {
+            // F1: same `change` dispatch on focus-cleared path.
+            if (prev_focus->is_element()) {
+                DomElement* prev_elem = (DomElement*)prev_focus;
+                if (te_blur_should_dispatch_change(prev_elem)) {
+                    dispatch_lambda_handler   (evcon, prev_focus, "change");
+                    dispatch_html_event_handler(evcon, prev_focus, "change");
+                }
+            }
             // Phase 20: dispatch blur event to Lambda handler before clearing focus state
             dispatch_lambda_handler(evcon, prev_focus, "blur");
             // §7 unification (U-4/U-6): inline + bridge always both fire.
@@ -3473,6 +3498,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     log_debug("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
                         char_offset, caret_x, caret_y, caret_height);
+                    // F2 (Radiant_Design_Form_Input.md §3.4): dblclick =>
+                    // word selection, tripleclick (or higher) => select-all
+                    // for single-line <input>.
+                    if (event->mouse_button.clicks >= 3) {
+                        te_select_all(target_elem, state, evcon.target);
+                    } else if (event->mouse_button.clicks == 2) {
+                        if (!te_select_word_at(target_elem, state, evcon.target,
+                                               (uint32_t)char_offset)) {
+                            // No word at click — fall through to caret set above.
+                        }
+                    }
                     evcon.need_repaint = true;
 
                 } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
@@ -3568,6 +3604,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
 
                     log_debug("TEXTAREA CARET: offset=%d line=%d", char_offset, click_line);
+                    // F2: dblclick selects the word, tripleclick selects the
+                    // logical line in <textarea>.
+                    if (event->mouse_button.clicks >= 3) {
+                        te_select_line_at(target_elem, state, evcon.target,
+                                          (uint32_t)char_offset);
+                    } else if (event->mouse_button.clicks == 2) {
+                        te_select_word_at(target_elem, state, evcon.target,
+                                          (uint32_t)char_offset);
+                    }
                     evcon.need_repaint = true;
 
                 } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
@@ -4137,6 +4182,105 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 const char* value = focus_elem->form->value;
                 int value_len = value ? (int)strlen(value) : 0;
                 int cur = state->caret->char_offset;
+                bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
+                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+
+                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo. Bypass
+                // the rest of the input-branch dispatch on consume.
+                if (cmd && key_event->key == RDT_KEY_Z) {
+                    bool did = (key_event->mods & RDT_MOD_SHIFT)
+                        ? te_history_redo(focus_elem)
+                        : te_history_undo(focus_elem);
+                    if (did) {
+                        // Restore caret to the snapshot's selection end.
+                        int vlen = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        if (state->caret->char_offset > vlen) {
+                            state->caret->char_offset = vlen;
+                        }
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_Y) {
+                    if (te_history_redo(focus_elem)) {
+                        int vlen = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        if (state->caret->char_offset > vlen) {
+                            state->caret->char_offset = vlen;
+                        }
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+
+                // F3: Alt+Left/Right → word jump (using te_prev/next_word_byte
+                // on the live UTF-8 buffer). Caret-only; no selection extend
+                // here to keep behavior change minimal.
+                if (alt && key_event->key == RDT_KEY_LEFT) {
+                    state->caret->char_offset = (int)te_prev_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    evcon.need_repaint = true;
+                    break;
+                }
+                if (alt && key_event->key == RDT_KEY_RIGHT) {
+                    state->caret->char_offset = (int)te_next_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    evcon.need_repaint = true;
+                    break;
+                }
+                // F3: Cmd+Left == Home, Cmd+Right == End on macOS for
+                // single-line inputs.
+                if (cmd && key_event->key == RDT_KEY_LEFT) {
+                    state->caret->char_offset = 0;
+                    evcon.need_repaint = true;
+                    break;
+                }
+                if (cmd && key_event->key == RDT_KEY_RIGHT) {
+                    state->caret->char_offset = value_len;
+                    evcon.need_repaint = true;
+                    break;
+                }
+                // F3: Up/Down in single-line <input> mirrors Chrome —
+                // move caret to start/end of value (no vertical motion).
+                if (key_event->key == RDT_KEY_UP) {
+                    state->caret->char_offset = 0;
+                    evcon.need_repaint = true;
+                    break;
+                }
+                if (key_event->key == RDT_KEY_DOWN) {
+                    state->caret->char_offset = value_len;
+                    evcon.need_repaint = true;
+                    break;
+                }
+                // F3: Alt+Backspace → delete previous word.
+                //     Cmd+Backspace → delete to start of value.
+                if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
+                    uint32_t new_off = cmd
+                        ? 0
+                        : te_prev_word_byte(value, (uint32_t)value_len,
+                                            (uint32_t)cur);
+                    if (new_off < (uint32_t)cur) {
+                        te_replace_byte_range(focus_elem, state, focused,
+                                              new_off, (uint32_t)cur,
+                                              nullptr, 0);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
+                // F3: Alt+Delete → delete next word.
+                if (alt && key_event->key == RDT_KEY_DELETE) {
+                    uint32_t new_end = te_next_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    if (new_end > (uint32_t)cur) {
+                        te_replace_byte_range(focus_elem, state, focused,
+                                              (uint32_t)cur, new_end,
+                                              nullptr, 0);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
 
                 if (key_event->key == RDT_KEY_LEFT) {
                     // move caret left by one UTF-8 character
@@ -4347,6 +4491,109 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->selection->is_selecting = false;
                     selection_extend(state, value_len);
                     state->caret->char_offset = value_len;
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo.
+                if (cmd && key_event->key == RDT_KEY_Z) {
+                    bool did = (key_event->mods & RDT_MOD_SHIFT)
+                        ? te_history_redo(focus_elem)
+                        : te_history_undo(focus_elem);
+                    if (did) {
+                        int vlen = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        if (state->caret->char_offset > vlen) {
+                            state->caret->char_offset = vlen;
+                        }
+                        if (state->selection) selection_clear(state);
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_Y) {
+                    if (te_history_redo(focus_elem)) {
+                        int vlen = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        if (state->caret->char_offset > vlen) {
+                            state->caret->char_offset = vlen;
+                        }
+                        if (state->selection) selection_clear(state);
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+
+                bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
+
+                // F3: Alt+Left/Right → word jump (with Shift = extend).
+                if (alt && key_event->key == RDT_KEY_LEFT) {
+                    int new_off = (int)te_prev_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    if (shift) sel_begin_or_extend(new_off);
+                    else { selection_clear(state); state->caret->char_offset = new_off; }
+                    evcon.need_repaint = true;
+                    break;
+                }
+                if (alt && key_event->key == RDT_KEY_RIGHT) {
+                    int new_off = (int)te_next_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    if (shift) sel_begin_or_extend(new_off);
+                    else { selection_clear(state); state->caret->char_offset = new_off; }
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // F3: Alt+Backspace → delete previous word.
+                //     Cmd+Backspace → delete to start of current line.
+                if ((alt || cmd) && key_event->key == RDT_KEY_BACKSPACE) {
+                    uint32_t new_off;
+                    if (cmd) {
+                        // Line start = first byte after previous '\n', or 0.
+                        new_off = te_line_start(value, (uint32_t)value_len,
+                                                (uint32_t)cur);
+                    } else {
+                        new_off = te_prev_word_byte(value, (uint32_t)value_len,
+                                                    (uint32_t)cur);
+                    }
+                    if (new_off < (uint32_t)cur) {
+                        te_replace_byte_range(focus_elem, state, focused,
+                                              new_off, (uint32_t)cur,
+                                              nullptr, 0);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // F3: Alt+Delete → delete next word.
+                if (alt && key_event->key == RDT_KEY_DELETE) {
+                    uint32_t new_end = te_next_word_byte(
+                        value, (uint32_t)value_len, (uint32_t)cur);
+                    if (new_end > (uint32_t)cur) {
+                        te_replace_byte_range(focus_elem, state, focused,
+                                              (uint32_t)cur, new_end,
+                                              nullptr, 0);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // F3: PgUp / PgDn → move caret by ~10 logical lines (no
+                // viewport-aware metrics yet; matches the heuristic in the
+                // proposal §3.5).
+                if (key_event->key == RDT_KEY_PAGE_UP ||
+                    key_event->key == RDT_KEY_PAGE_DOWN) {
+                    int delta = (key_event->key == RDT_KEY_PAGE_UP) ? -10 : 10;
+                    int target_line = cur_line + delta;
+                    if (target_line < 0) target_line = 0;
+                    if (target_line > total_lines - 1) target_line = total_lines - 1;
+                    int loff = line_start_off(target_line);
+                    int llen = line_len_from(loff);
+                    int target_col = cur_col < llen ? cur_col : llen;
+                    int new_off = loff + target_col;
+                    if (shift) sel_begin_or_extend(new_off);
+                    else { selection_clear(state); state->caret->char_offset = new_off; }
                     evcon.need_repaint = true;
                     break;
                 }

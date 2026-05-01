@@ -991,6 +991,16 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->button = reader.get("button").asInt32();
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "tripleclick") == 0) {
+        // F2 (Radiant_Design_Form_Input.md §4.1): three rapid clicks at the
+        // same location. Reuses SIM_EVENT_DBLCLICK plumbing with click_count=3.
+        ev->type = SIM_EVENT_DBLCLICK;
+        ev->x = reader.get("x").asInt32();
+        ev->y = reader.get("y").asInt32();
+        ev->button = reader.get("button").asInt32();
+        ev->click_count = 3;
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "type") == 0) {
         ev->type = SIM_EVENT_TYPE;
         const char* text = reader.get("text").cstring();
@@ -1949,11 +1959,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_DBLCLICK: {
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
-            log_info("event_sim: dblclick at (%d, %d)", x, y);
-            // First click
-            sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
-            sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
-            // Second click with clicks=2
+            // F2: click_count default = 2 (dblclick). 3 = tripleclick.
+            int total_clicks = ev->click_count > 0 ? ev->click_count : 2;
+            if (total_clicks < 2) total_clicks = 2;
+            log_info("event_sim: %sclick at (%d, %d) total_clicks=%d",
+                     total_clicks >= 3 ? "triple" : "dbl", x, y, total_clicks);
+            // First (total_clicks - 1) plain clicks via sim_mouse_button.
+            for (int c = 1; c < total_clicks; c++) {
+                sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
+                sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
+            }
+            // Final click carries clicks=total_clicks so handle_event can
+            // dispatch dblclick/tripleclick semantics.
             sim_mouse_move(uicon, x, y);
             {
                 RdtEvent event;
@@ -1962,7 +1979,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 event.mouse_button.x = x;
                 event.mouse_button.y = y;
                 event.mouse_button.button = ev->button;
-                event.mouse_button.clicks = 2;
+                event.mouse_button.clicks = (uint8_t)total_clicks;
                 event.mouse_button.mods = ev->mods;
                 handle_event(uicon, uicon->document, &event);
                 event.mouse_button.type = RDT_EVENT_MOUSE_UP;

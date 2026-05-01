@@ -204,6 +204,11 @@ struct SimEvent {
     bool negate_scroll;          // invert assertion (pass when NOT at expected position)
     // Webview fields
     char* js_code;               // for webview_eval_js: JavaScript code to execute
+    // F2 (Radiant_Design_Form_Input.md §4.1): click count for the
+    // tripleclick / dblclick path. 0 = default (dblclick uses 2,
+    // tripleclick sets 3). Used as MouseButtonEvent::clicks on the
+    // last synthesized down/up pair.
+    int click_count;
 };
 
 // Event simulation context

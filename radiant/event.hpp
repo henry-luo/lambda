@@ -69,11 +69,12 @@ typedef enum {
     RDT_KEY_ENTER = 257,
     RDT_KEY_TAB = 258,
     RDT_KEY_ESCAPE = 256,
-    // Clipboard keys (A, C, V, X, Z)
+    // Clipboard keys (A, C, V, X, Z) and Y for redo on Win/Linux
     RDT_KEY_A = 65,
     RDT_KEY_C = 67,
     RDT_KEY_V = 86,
     RDT_KEY_X = 88,
+    RDT_KEY_Y = 89,
     RDT_KEY_Z = 90,
 } RdtKeyCode;
 
