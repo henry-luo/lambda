@@ -8818,18 +8818,43 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
         js_throw_type_error("Array.from: mapFn is not a function");
         return js_array_new(0);
     }
-    Item arr = js_array_from(iterable);
-    if (js_check_exception()) return js_array_new(0);
-    // Apply mapper if provided and is a function
-    if (get_type_id(mapFn) == LMD_TYPE_FUNC) {
-        int64_t len = js_array_length(arr);
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = js_array_get(arr, (Item){.item = i2it(i)});
-            Item idx_item = (Item){.item = i2it(i)};
+    // No mapper: just delegate.
+    if (mft != LMD_TYPE_FUNC) return js_array_from(iterable);
+    // J39-7 spec §22.1.2.1: source[k] must be read each iteration so that callbacks
+    // mutating the source array are observed. For LMD_TYPE_ARRAY and array-like maps,
+    // iterate the source live.
+    TypeId stid = get_type_id(iterable);
+    if (stid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return js_array_new(0);
+    }
+    if (stid == LMD_TYPE_ARRAY) {
+        Array* src = iterable.array;
+        Item result = js_array_new(0);
+        // Per Array iterator protocol: re-check length each iteration so that
+        // iteration stops if source is shrunk by callback.
+        for (int64_t i = 0; i < (int64_t)src->length; i++) {
+            // re-fetch each iteration — observes mutations
+            Item elem = js_array_get(iterable, (Item){.item = i2it((int)i)});
+            Item idx_item = (Item){.item = i2it((int)i)};
             Item args[2] = {elem, idx_item};
             Item mapped = js_call_function(mapFn, make_js_undefined(), args, 2);
-            js_array_set(arr, (Item){.item = i2it(i)}, mapped);
+            if (js_check_exception()) return js_array_new(0);
+            js_array_push(result, mapped);
         }
+        return result;
+    }
+    // Fallback: pre-materialize and map.
+    Item arr = js_array_from(iterable);
+    if (js_check_exception()) return js_array_new(0);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = (Item){.item = i2it(i)};
+        Item args[2] = {elem, idx_item};
+        Item mapped = js_call_function(mapFn, make_js_undefined(), args, 2);
+        if (js_check_exception()) return js_array_new(0);
+        js_array_set(arr, (Item){.item = i2it(i)}, mapped);
     }
     return arr;
 }
@@ -8844,6 +8869,25 @@ extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item t
     if (!is_undef && mft != LMD_TYPE_FUNC) {
         js_throw_type_error("Array.from: mapFn is not a function");
         return js_array_new(0);
+    }
+    if (mft != LMD_TYPE_FUNC) return js_array_from(iterable);
+    TypeId stid = get_type_id(iterable);
+    if (stid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Cannot convert undefined or null to object");
+        return js_array_new(0);
+    }
+    if (stid == LMD_TYPE_ARRAY) {
+        Array* src = iterable.array;
+        Item result = js_array_new(0);
+        for (int64_t i = 0; i < (int64_t)src->length; i++) {
+            Item elem = js_array_get(iterable, (Item){.item = i2it((int)i)});
+            Item idx_item = (Item){.item = i2it((int)i)};
+            Item args[2] = {elem, idx_item};
+            Item mapped = js_call_function(mapFn, this_arg, args, 2);
+            if (js_check_exception()) return js_array_new(0);
+            js_array_push(result, mapped);
+        }
+        return result;
     }
     Item arr = js_array_from(iterable);
     if (js_check_exception()) return js_array_new(0);
