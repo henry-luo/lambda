@@ -1,0 +1,39 @@
+{
+  "name": "Form - Select keyboard interaction (Tab focus, Space/Enter open)",
+  "html": "test/ui/test_form_controls.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== form_select_keyboard ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "--- A. Focus, then close dropdown to start clean ---"},
+    {"type": "focus", "target": {"selector": "select#color"}},
+    {"type": "wait", "ms": 60},
+    {"type": "key_press", "key": "escape"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "select#color"}},
+
+    {"type": "log", "message": "--- B. Space opens the dropdown of the focused select ---"},
+    {"type": "key_press", "key": "space"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "select#color"}},
+
+    {"type": "log", "message": "--- C. Escape closes the dropdown ---"},
+    {"type": "key_press", "key": "escape"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "select#color"}},
+
+    {"type": "log", "message": "--- D. Enter also opens the dropdown ---"},
+    {"type": "key_press", "key": "enter"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "select#color"}},
+    {"type": "key_press", "key": "escape"},
+    {"type": "wait", "ms": 60},
+
+    {"type": "log", "message": "--- E. Disabled select ignores Space activation ---"},
+    {"type": "focus", "target": {"selector": "select#country"}},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "select#country"}}
+  ]
+}
+

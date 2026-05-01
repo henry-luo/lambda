@@ -1,0 +1,20 @@
+{
+  "name": "Form - Tab visits button",
+  "html": "test/ui/test_form_assertions.html",
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "wait", "ms": 200},
+    {"type": "click", "target": {"selector": "#email"}},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#email"}},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "key_press", "key": "tab"},
+    {"type": "wait", "ms": 60},
+    {"type": "assert_focus", "target": {"selector": "#btn-submit"}}
+  ]
+}

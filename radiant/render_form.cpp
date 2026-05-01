@@ -401,6 +401,26 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         rdt_path_free(p);
     }
 
+    // Focus ring — a 2px outset blue rectangle (matches our text-input
+    // focus indicator and gives Tab navigation a visible target).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        float rx = x - ring, ry = y - ring;
+        float rw = size + 2 * ring, rh = size + 2 * ring;
+        RdtPath* p = rdt_path_new();
+        rdt_path_move_to(p, rx, ry);
+        rdt_path_line_to(p, rx + rw, ry);
+        rdt_path_line_to(p, rx + rw, ry + rh);
+        rdt_path_line_to(p, rx, ry + rh);
+        rdt_path_close(p);
+        rc_stroke_path(rdcon, p, ring_color, ring,
+                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rdt_path_free(p);
+    }
+
     log_debug("[FORM] render_checkbox at (%.1f, %.1f) checked=%d", x, y, form->checked);
 }
 
@@ -432,6 +452,15 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
         Color dot_color = make_color(0, 0, 0);
         float dot_radius = radius * 0.4f;  // inner dot is ~40% of radio size
         fill_circle(rdcon, cx, cy, dot_radius, dot_color);
+    }
+
+    // Focus ring (see render_checkbox).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
     }
 
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, form->checked);
@@ -501,6 +530,25 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         float text_x = x + (w - text_width) / 2;
         float text_y = y + (h - font_size_scaled) / 2;
         render_simple_string(rdcon, form->value, text_x, text_y, block->font, text_color);
+    }
+
+    // Focus ring (Tab navigation indicator).
+    RadiantState* state = rdcon->ui_context && rdcon->ui_context->document
+        ? (RadiantState*)rdcon->ui_context->document->state : nullptr;
+    if (state && focus_get(state) == (View*)block) {
+        float ring = 2.0f * s;
+        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
+        float rx = x - ring, ry = y - ring;
+        float rw = w + 2 * ring, rh = h + 2 * ring;
+        RdtPath* p = rdt_path_new();
+        rdt_path_move_to(p, rx, ry);
+        rdt_path_line_to(p, rx + rw, ry);
+        rdt_path_line_to(p, rx + rw, ry + rh);
+        rdt_path_line_to(p, rx, ry + rh);
+        rdt_path_close(p);
+        rc_stroke_path(rdcon, p, ring_color, ring,
+                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+        rdt_path_free(p);
     }
 
     log_debug("[FORM] render_button at (%.1f, %.1f) size %.1fx%.1f, has_css_bg=%d",
@@ -841,10 +889,13 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // Border (inset style)
     draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
 
-    // Determine text content or placeholder
+    // Determine text content or placeholder. Only enter placeholder mode
+    // when an actual placeholder string is present — otherwise an empty
+    // textarea would be flagged as a placeholder and the caret-render
+    // path (guarded by !is_placeholder) would skip drawing the caret.
     const char* text = form->value;
     bool is_placeholder = false;
-    if (!text || !*text) {
+    if ((!text || !*text) && form->placeholder && *form->placeholder) {
         text = form->placeholder;
         is_placeholder = true;
     }
@@ -994,10 +1045,13 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
     }
 
-    // Draw caret if this textarea has focus
+    // Draw caret if this textarea has focus. Note: do NOT gate on
+    // !is_placeholder — when the value is empty and a placeholder is
+    // shown, the caret still belongs at offset 0 (matches native
+    // browser behavior).
     if (state) {
         View* focused = focus_get(state);
-        if (focused == (View*)block && state->caret && !is_placeholder
+        if (focused == (View*)block && state->caret
             && state->caret->visible) {
             const char* value = form->value;
             int caret_off = state->caret->char_offset;

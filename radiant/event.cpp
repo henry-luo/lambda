@@ -1551,11 +1551,13 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Rad
             }
         }
 
-        // Traverse to next node (depth-first)
-        if (current->is_block()) {
-            ViewBlock* block = (ViewBlock*)current;
-            if (block->first_child) {
-                current = block->first_child;
+        // Traverse DOM-element tree (descend into ALL element children,
+        // not just block children — radio inputs are commonly nested in
+        // inline <label> wrappers which would otherwise be skipped).
+        if (current->is_element()) {
+            ViewElement* ce = (ViewElement*)current;
+            if (ce->first_child) {
+                current = (View*)ce->first_child;
                 continue;
             }
         }
@@ -4291,6 +4293,52 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             evcon.need_repaint = true;
             break;
+        }
+
+        // Space toggles a focused checkbox / radio (matches native browser
+        // and ARIA keyboard behavior). Space and Enter both "activate" a
+        // focused <button> (browsers fire click on key-up for Space and
+        // key-down for Enter; we fire on key-down for both for simplicity
+        // so HTML form submission works without a mouse).
+        if (focused && focused->is_element()
+            && (key_event->key == RDT_KEY_SPACE || key_event->key == RDT_KEY_ENTER)
+            && !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
+            ViewElement* fe = (ViewElement*)focused;
+            uint32_t tag = fe->tag();
+            bool handled = false;
+            if (tag == HTM_TAG_INPUT && key_event->key == RDT_KEY_SPACE) {
+                if (is_checkbox(focused) || is_radio(focused)) {
+                    handle_checkbox_radio_click(&evcon, focused);
+                    dispatch_html_event_handler(&evcon, focused, "click");
+                    radiant_dispatch_mouse_event(&evcon, focused, "click",
+                        0, 0, 0, 0, false, false, false, false, 1);
+                    handled = true;
+                }
+            } else if (tag == HTM_TAG_BUTTON) {
+                // Disabled buttons are inert.
+                DomElement* delem = (DomElement*)focused;
+                bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
+                    && delem->form && delem->form->disabled;
+                if (!disabled) {
+                    dispatch_html_event_handler(&evcon, focused, "click");
+                    radiant_dispatch_mouse_event(&evcon, focused, "click",
+                        0, 0, 0, 0, false, false, false, false, 1);
+                    handled = true;
+                }
+            } else if (tag == HTM_TAG_SELECT) {
+                // Space / Enter on a focused <select> opens (or toggles)
+                // the dropdown popup, matching native browser behavior.
+                DomElement* delem = (DomElement*)focused;
+                bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
+                    && delem->form && delem->form->disabled;
+                if (!disabled) {
+                    handled = handle_select_click(&evcon, focused);
+                }
+            }
+            if (handled) {
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // capture selection state before dispatch (needed for caret adjustment after)
