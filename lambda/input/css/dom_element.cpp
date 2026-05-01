@@ -2909,6 +2909,40 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         if (elem->has_attr("disabled")) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
         }
+        // :placeholder-shown — initial seed before any user/JS interaction
+        // applies when the value is empty AND a non-empty placeholder is set
+        // (only meaningful for text-like inputs; we don't gate by type here
+        // because the placeholder attribute itself only renders for text-like
+        // controls, matching browser behavior closely enough for static layout).
+        const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
+        if (ph_value && ph_value[0]) {
+            const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
+            if (!val_attr || !val_attr[0]) {
+                dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+            }
+        }
+    }
+    // :disabled also applies to <select>, <textarea>, <button>, <optgroup>, <option>,
+    // <fieldset> per HTML spec: https://html.spec.whatwg.org/#selector-disabled
+    else if (str_ieq_const(tag_name, strlen(tag_name), "select") ||
+             str_ieq_const(tag_name, strlen(tag_name), "textarea") ||
+             str_ieq_const(tag_name, strlen(tag_name), "button") ||
+             str_ieq_const(tag_name, strlen(tag_name), "optgroup") ||
+             str_ieq_const(tag_name, strlen(tag_name), "option") ||
+             str_ieq_const(tag_name, strlen(tag_name), "fieldset")) {
+        if (elem->has_attr("disabled")) {
+            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
+        }
+        // <textarea>: :placeholder-shown when no child text content and
+        // placeholder attr present. The textarea's initial value is its
+        // child text; here we approximate by checking whether the element
+        // has any children. text_control.cpp later refines on first JS access.
+        if (str_ieq_const(tag_name, strlen(tag_name), "textarea")) {
+            const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
+            if (ph_value && ph_value[0] && elem->length == 0) {
+                dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+            }
+        }
     }
 
     // set parent relationship if provided

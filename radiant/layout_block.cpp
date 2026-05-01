@@ -3013,7 +3013,6 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
 }
 
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
-
     // Reset abs-child linked list so multiple layout passes (e.g., flex measurement
     // + flex final) don't accumulate duplicates and create a cycle in
     // re_resolve_abs_children_vertical. Absolute children re-register themselves
@@ -6471,12 +6470,29 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     log_debug("%s inline-block with content baseline: ascender=%.1f, descender=%.1f, block_h=%.1f", elmt->source_loc(),
                         effective_baseline, descender_part, block->height);
                 } else {
-                    // Replaced element or no in-flow content: baseline at bottom margin edge
-                    // CSS 2.1 §10.8.1: The entire margin-box sits above the baseline.
+                    // Replaced element or no in-flow content.
+                    // CSS 2.1 §10.8.1 says the baseline is the bottom MARGIN edge,
+                    // but for true replaced elements (img, input checkbox/radio/etc),
+                    // browsers (Chrome/Firefox) place the baseline at the bottom
+                    // BORDER edge, so margin-bottom contributes to the descender.
+                    // Match browser behavior for replaced inline-blocks.
+                    bool is_replaced_inline = (block->display.inner == RDT_DISPLAY_REPLACED);
                     if (block->bound) {
-                        // margin-box above baseline = height + margin-top + margin-bottom
-                        lycon->line.max_ascender = max(lycon->line.max_ascender,
-                            block->height + block->bound->margin.top + block->bound->margin.bottom);
+                        if (is_replaced_inline) {
+                            // baseline = bottom border edge:
+                            //   ascender above baseline = margin.top + height
+                            //   descender below baseline = margin.bottom
+                            lycon->line.max_ascender = max(lycon->line.max_ascender,
+                                block->height + block->bound->margin.top);
+                            if (block->bound->margin.bottom > 0) {
+                                lycon->line.max_descender = max(lycon->line.max_descender,
+                                    block->bound->margin.bottom);
+                            }
+                        } else {
+                            // Non-replaced empty inline-block: baseline at bottom margin edge
+                            lycon->line.max_ascender = max(lycon->line.max_ascender,
+                                block->height + block->bound->margin.top + block->bound->margin.bottom);
+                        }
                     }
                     else {
                         lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);

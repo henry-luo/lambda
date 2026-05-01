@@ -1455,8 +1455,62 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 log_debug("  -> replaced INPUT (tag fallback, type=%s) intrinsic width: %.1f",
                     input_type ? input_type : "text", replaced_width);
             } else if (replaced_tag == HTM_TAG_SELECT) {
-                replaced_width = FormDefaults::SELECT_WIDTH;
-                log_debug("  -> replaced SELECT (tag fallback) intrinsic width: %.1f", replaced_width);
+                // SELECT (combo box): measure max option text + arrow overhead.
+                // calc_select_size in layout_form.cpp may never run when SELECT is a
+                // flex/grid item (laid out via measurement path rather than layout_form_control).
+                bool is_listbox = view_block_replaced->form &&
+                    (view_block_replaced->form->multiple || view_block_replaced->form->select_size > 1);
+                if (is_listbox) {
+                    replaced_width = FormDefaults::SELECT_WIDTH;
+                } else {
+                    float max_text_width = 0;
+                    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                        if (!child->is_element()) continue;
+                        DomElement* ce = child->as_element();
+                        uintptr_t ctag = ce->tag();
+                        if (ctag == HTM_TAG_OPTION) {
+                            for (DomNode* tc = ce->first_child; tc; tc = tc->next_sibling) {
+                                DomText* dt = tc->as_text();
+                                if (dt && dt->text && dt->length > 0) {
+                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
+                                    if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                                }
+                            }
+                        } else if (ctag == HTM_TAG_OPTGROUP) {
+                            const char* lbl = ce->get_attribute("label");
+                            if (lbl) {
+                                size_t ll = strlen(lbl);
+                                if (ll > 0) {
+                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
+                                    if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                                }
+                            }
+                            for (DomNode* gc = ce->first_child; gc; gc = gc->next_sibling) {
+                                if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
+                                    float opt_text_width = 0;
+                                    for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
+                                        DomText* dt = tc->as_text();
+                                        if (dt && dt->text && dt->length > 0) {
+                                            TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
+                                            if (tw.max_content > opt_text_width) opt_text_width = tw.max_content;
+                                        }
+                                    }
+                                    float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
+                                    if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
+                                        effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                                    if (effective > max_text_width) max_text_width = effective;
+                                }
+                            }
+                        }
+                    }
+                    float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f;
+                    float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
+                    float calculated = max_text_width + overhead;
+                    replaced_width = calculated > min_select_width ? calculated : min_select_width;
+                    if (view_block_replaced->form)
+                        view_block_replaced->form->intrinsic_width = replaced_width;
+                }
+                log_debug("  -> replaced SELECT (measured) intrinsic width: %.1f", replaced_width);
             } else if (replaced_tag == HTM_TAG_TEXTAREA) {
                 // Textarea default: 20 cols * ~8px average char width + padding
                 replaced_width = FormDefaults::TEXTAREA_COLS * 8.0f + FormDefaults::TEXTAREA_PADDING * 2;
@@ -3811,8 +3865,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         return svg_height;
     }
 
-    // Form controls (input, select, textarea) — replaced elements with intrinsic height
-    // Return only the CONTENT height; the shared padding/border code at the bottom adds the rest
+    // Form controls (input, select, textarea) — replaced elements with intrinsic height.
+    // Per HTML/CSS, these are replaced elements: their layout children (e.g. <option>)
+    // do NOT contribute to the visible box height. Return only the CONTENT height here;
+    // the shared padding/border code at the bottom adds the rest. Skip child traversal.
+    bool is_form_control_replaced = false;
     {
         uintptr_t etag = element->tag();
         if (etag == HTM_TAG_INPUT || etag == HTM_TAG_SELECT || etag == HTM_TAG_TEXTAREA) {
@@ -3836,7 +3893,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
             log_debug("calculate_max_content_height: form control %s content_height=%.1f",
                       element->node_name(), height);
-            // Fall through to add padding + border at bottom of function
+            is_form_control_replaced = true;
+            // Skip children traversal below; pad/border still added at end.
         }
     }
 
@@ -4070,6 +4128,13 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
                     continue;
                 }
+                // Resolve display.outer if not yet resolved (may happen during early
+                // measurement before resolve_htm_style runs).
+                CssEnum child_outer = child_ve->display.outer;
+                if (child_outer == 0) {
+                    DisplayValue dv = resolve_display_value((void*)c);
+                    child_outer = dv.outer;
+                }
                 // Check if child is an inline element
                 const char* child_tag = child_elem->node_name();
                 if (child_tag && (
@@ -4087,9 +4152,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     strcmp(child_tag, "sup") == 0)) {
                     continue;  // Known inline elements
                 }
-                // Check display.outer for inline
-                if (child_elem->display.outer == CSS_VALUE_INLINE) {
-                    continue;  // CSS says it's inline
+                // Check display.outer for inline OR inline-block (both flow inline)
+                if (child_outer == CSS_VALUE_INLINE ||
+                    child_outer == CSS_VALUE_INLINE_BLOCK) {
+                    continue;  // CSS says it's inline-level
                 }
                 // Found a block element
                 has_only_inline_content = false;
@@ -4107,7 +4173,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
 
     // For multi-column grids, calculate height based on rows
-    if (is_grid_container && grid_column_count > 1) {
+    if (is_form_control_replaced) {
+        // Replaced form control: skip children entirely; padding/border added below.
+    } else if (is_grid_container && grid_column_count > 1) {
         // Collect child heights
         int child_count = 0;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
