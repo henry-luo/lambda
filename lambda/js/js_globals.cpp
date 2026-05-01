@@ -8854,6 +8854,56 @@ extern "C" Item js_number_is_safe_integer(Item value) {
 // Array.from(iterable) — convert array-like to array
 // =============================================================================
 
+// J39-7 / ES §22.1.2.1: when Array.from is invoked with a mapper and the
+// source provides Symbol.iterator, fuse the iterator step + mapper call so
+// that an abrupt completion from mapfn triggers IteratorClose on the
+// in-progress iterator (per IfAbruptCloseIterator).
+extern "C" Item js_get_iterator(Item iterable);
+extern "C" Item js_iterator_step(Item iterator);
+extern "C" Item js_iterator_close(Item iterator);
+static Item js_array_from_iter_mapped(Item iterable, Item mapFn, Item this_arg) {
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern void js_throw_value(Item value);
+    Item iterator = js_get_iterator(iterable);
+    if (js_check_exception()) return js_array_new(0);
+    Item result = js_array_new(0);
+    int64_t k = 0;
+    while (true) {
+        Item next_val = js_iterator_step(iterator);
+        if (js_check_exception()) {
+            // step itself threw — iterator is already done, do not close.
+            return js_array_new(0);
+        }
+        if (next_val.item == JS_ITER_DONE_SENTINEL) break;
+        Item idx_item = (Item){.item = i2it((int)k)};
+        Item args[2] = {next_val, idx_item};
+        Item mapped = js_call_function(mapFn, this_arg, args, 2);
+        if (js_check_exception()) {
+            // mapfn threw — IfAbruptCloseIterator: invoke iterator.return().
+            // The original abrupt completion is preserved; any exception from
+            // .return() is discarded.
+            Item saved = js_clear_exception();
+            js_iterator_close(iterator);
+            (void)js_clear_exception();
+            js_throw_value(saved);
+            return js_array_new(0);
+        }
+        js_array_push(result, mapped);
+        k++;
+    }
+    return result;
+}
+
+// Returns true if `iterable` exposes a callable Symbol.iterator (`__sym_1`).
+static bool js_has_sym_iterator(Item iterable) {
+    TypeId tid = get_type_id(iterable);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) return false;
+    Item key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+    Item iter_factory = js_property_get(iterable, key);
+    return get_type_id(iter_factory) == LMD_TYPE_FUNC;
+}
+
 extern "C" Item js_array_from(Item iterable) {
     extern Item js_throw_type_error(const char* msg);
     TypeId tid = get_type_id(iterable);
@@ -8965,6 +9015,13 @@ extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
     }
     // No mapper: just delegate.
     if (mft != LMD_TYPE_FUNC) return js_array_from(iterable);
+    // J39-7 spec §22.1.2.1: if the source has Symbol.iterator, fuse iteration
+    // with the mapper so that an abrupt completion from mapfn triggers
+    // IteratorClose. Array fast path below is OK because array iterator's
+    // .return() is a no-op for non-generator array iteration in tests.
+    if (js_has_sym_iterator(iterable)) {
+        return js_array_from_iter_mapped(iterable, mapFn, make_js_undefined());
+    }
     // J39-7 spec §22.1.2.1: source[k] must be read each iteration so that callbacks
     // mutating the source array are observed. For LMD_TYPE_ARRAY and array-like maps,
     // iterate the source live.
@@ -9020,6 +9077,10 @@ extern "C" Item js_array_from_with_mapper_this(Item iterable, Item mapFn, Item t
     if (stid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
         js_throw_type_error("Cannot convert undefined or null to object");
         return js_array_new(0);
+    }
+    // J39-7: iterator-protocol path with IteratorClose on mapfn-throw.
+    if (js_has_sym_iterator(iterable)) {
+        return js_array_from_iter_mapped(iterable, mapFn, this_arg);
     }
     if (stid == LMD_TYPE_ARRAY) {
         Array* src = iterable.array;

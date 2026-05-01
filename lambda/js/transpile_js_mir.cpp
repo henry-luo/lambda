@@ -14331,6 +14331,12 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                     char buf[256];
                     snprintf(buf, sizeof(buf), "set %s", raw + 6);
                     jm_emit_set_function_name(mt, val, buf);
+                } else if (key_id->name && key_id->name->len == 9 &&
+                           memcmp(raw, "__proto__", 9) == 0) {
+                    // J39-7: ES B.3.7 — when isProtoSetter is true the
+                    // NamedEvaluation step is skipped, so an anonymous
+                    // function value must NOT inherit "__proto__" as its
+                    // name. Leave default name (empty string).
                 } else {
                     JsFunctionNode* fn_node = (JsFunctionNode*)p->value;
                     if (!fn_node->name) {
