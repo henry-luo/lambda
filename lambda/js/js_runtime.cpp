@@ -9183,6 +9183,11 @@ static Item js_array_like_to_array(Item obj) {
     Item len_val = js_property_get(obj, length_key);
     // propagate exception from length getter (e.g. Object.defineProperty getter that throws)
     if (js_check_exception()) return ItemNull;
+    // ES ToLength(Get(O, "length")) — Symbol throws TypeError per ToNumber.
+    if (js_key_is_symbol(len_val)) {
+        js_throw_type_error("Cannot convert a Symbol value to a number");
+        return ItemNull;
+    }
     int len = (int)js_get_number(len_val);
     if (js_check_exception()) return ItemNull;
     if (len < 0) len = 0;
@@ -10024,6 +10029,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             if (js_check_exception()) { js_array_method_real_this = (Item){0}; return ItemNull; }
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
+            if (js_check_exception()) return ItemNull;
+            // J39-7: in-place mutating methods (fill/copyWithin/sort/reverse) must
+            // return the wrapped receiver per ES spec — these methods return O.
+            // For Boolean/Number wrappers length is 0 so no writeback is needed.
+            if (is_mutating && (builtin_id == JS_BUILTIN_ARR_FILL ||
+                                builtin_id == JS_BUILTIN_ARR_COPY_WITHIN ||
+                                builtin_id == JS_BUILTIN_ARR_SORT ||
+                                builtin_id == JS_BUILTIN_ARR_REVERSE)) {
+                return wrapped;
+            }
             return result;
         }
     }
@@ -11819,7 +11834,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_reflect_prevent_extensions(arg0);
     }
     case JS_BUILTIN_REFLECT_SET: {
-        return js_reflect_set(arg0, arg1, arg2);
+        return js_reflect_set(arg0, arg1, arg2, ItemNull);
     }
     case JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF: {
         return js_reflect_set_prototype_of(arg0, arg1);
@@ -17703,7 +17718,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             (len == 2  && strncmp(c, "at", 2) == 0) ||
             (len == 4  && strncmp(c, "sort", 4) == 0) ||
             (len == 7  && strncmp(c, "reverse", 7) == 0) ||
-            (len == 4  && strncmp(c, "fill", 4) == 0);
+            (len == 4  && strncmp(c, "fill", 4) == 0) ||
+            (len == 10 && strncmp(c, "copyWithin", 10) == 0);
         if (is_generic) {
             // Note: slice/map/filter length validation per ArraySpeciesCreate is done
             // up-front in js_dispatch_builtin (LMD_TYPE_MAP branch) before reaching here.
@@ -20005,6 +20021,10 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         return;
     }
     TypeId ot = get_type_id(object);
+    // Encode explicit-null prototype as ITEM_JS_UNDEFINED sentinel for storage.
+    Item proto_to_store = (prototype.item == ItemNull.item)
+        ? (Item){.item = ITEM_JS_UNDEFINED}
+        : prototype;
     // Handle functions: store __proto__ in properties_map
     if (ot == LMD_TYPE_FUNC) {
         if (get_type_id(prototype) != LMD_TYPE_MAP && get_type_id(prototype) != LMD_TYPE_FUNC &&
@@ -20015,13 +20035,13 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             heap_register_gc_root(&fn->properties_map.item);
         }
         Item key = js_get_proto_key();
-        js_property_set(fn->properties_map, key, prototype);
+        js_property_set(fn->properties_map, key, proto_to_store);
         return;
     }
     // Handle arrays: store __proto__ in companion map (arr->extra)
     if (ot == LMD_TYPE_ARRAY) {
         Item key = js_get_proto_key();
-        js_property_set(object, key, prototype);
+        js_property_set(object, key, proto_to_store);
         return;
     }
     if (ot != LMD_TYPE_MAP) return;
@@ -20043,9 +20063,9 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
             depth++;
         }
     }
-    // P10d: use interned __proto__ key
+    // P10d: use interned __proto__ key.
     Item key = js_get_proto_key();
-    js_property_set(object, key, prototype);
+    js_property_set(object, key, proto_to_store);
 }
 
 // Check if a function has a custom __proto__ set via Object.setPrototypeOf

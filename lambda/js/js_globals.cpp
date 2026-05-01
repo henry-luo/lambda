@@ -5254,8 +5254,22 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
     return new_obj;
 }
 
+// Forward declaration; defined later in this file.
+static int64_t js_parse_array_index(const char* s, int len);
+
+// Comparator used by qsort in js_reflect_own_keys to order integer indices ASC.
+static int js_idx_pair_cmp(const void* a, const void* b) {
+    int64_t ia = ((const int64_t*)a)[0];
+    int64_t ib = ((const int64_t*)b)[0];
+    if (ia < ib) return -1;
+    if (ia > ib) return 1;
+    return 0;
+}
+
 // Reflect.ownKeys(obj) — returns array of all own property keys (strings + symbols)
 extern "C" Item js_reflect_own_keys(Item obj) {
+    // ES §28.1.13 Reflect.ownKeys: target must be an Object.
+    if (!js_require_object_type(obj, "ownKeys")) return ItemNull;
     // Proxy [[OwnKeys]] trap
     if (js_is_proxy(obj)) {
         return js_proxy_trap_own_keys(obj);
@@ -5264,30 +5278,195 @@ extern "C" Item js_reflect_own_keys(Item obj) {
     Item names = js_object_get_own_property_names(obj);
     // get symbol keys via getOwnPropertySymbols
     Item symbols = js_object_get_own_property_symbols(obj);
-    // concatenate: names + symbols
+    // Reorder per ES §10.1.11.1 OrdinaryOwnPropertyKeys:
+    //   1) integer indices in ascending numeric order
+    //   2) other string keys in insertion order
+    //   3) symbols in insertion order
+    Item result = js_array_new(0);
+    if (get_type_id(names) == LMD_TYPE_ARRAY) {
+        int n = (int)js_array_length(names);
+        int64_t* idx_pairs = n > 0 ? (int64_t*)malloc(sizeof(int64_t) * 2 * n) : NULL;
+        int idx_count = 0;
+        for (int i = 0; i < n; i++) {
+            Item k = js_array_get(names, (Item){.item = i2it(i)});
+            if (get_type_id(k) == LMD_TYPE_STRING) {
+                String* ks = it2s(k);
+                int64_t parsed = js_parse_array_index(ks->chars, (int)ks->len);
+                if (parsed >= 0) {
+                    idx_pairs[idx_count * 2 + 0] = parsed;
+                    idx_pairs[idx_count * 2 + 1] = (int64_t)k.item;
+                    idx_count++;
+                }
+            }
+        }
+        if (idx_count > 1) qsort(idx_pairs, idx_count, sizeof(int64_t) * 2, js_idx_pair_cmp);
+        for (int i = 0; i < idx_count; i++) {
+            Item k = (Item){.item = (uint64_t)idx_pairs[i * 2 + 1]};
+            js_array_push(result, k);
+        }
+        // Then string keys (skipping integer indices) in insertion order.
+        for (int i = 0; i < n; i++) {
+            Item k = js_array_get(names, (Item){.item = i2it(i)});
+            if (get_type_id(k) == LMD_TYPE_STRING) {
+                String* ks = it2s(k);
+                if (js_parse_array_index(ks->chars, (int)ks->len) >= 0) continue;
+            }
+            js_array_push(result, k);
+        }
+        if (idx_pairs) free(idx_pairs);
+    }
+    // Symbols last, in insertion order.
     if (get_type_id(symbols) == LMD_TYPE_ARRAY) {
         int sym_len = (int)js_array_length(symbols);
         for (int i = 0; i < sym_len; i++) {
-            Item idx = {.item = i2it(i)};
-            Item sym = js_array_get(symbols, idx);
-            js_array_push(names, sym);
+            Item sym = js_array_get(symbols, (Item){.item = i2it(i)});
+            js_array_push(result, sym);
         }
     }
-    return names;
+    return result;
 }
 
-// Reflect.set(obj, key, value) — returns boolean
-extern "C" Item js_reflect_set(Item obj, Item key, Item value) {
-    Item result = js_property_set(obj, key, value);
-    // For proxy objects, [[Set]] returns a boolean (false means trap returned falsish)
-    if (js_is_proxy(obj) && result.item == (uint64_t)b2it(false)) {
-        return (Item){.item = b2it(false)};
+// Reflect.set(target, key, value [, receiver]) — returns boolean.
+// ES §28.1.14 → §10.1.9.1 OrdinarySet → §10.1.9.2 OrdinarySetWithOwnDescriptor.
+extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver) {
+    if (!js_require_object_type(target, "set")) return ItemNull;
+    // 3-arg call sites (old transpiler path) pass ItemNull; treat as receiver = target.
+    if (receiver.item == ItemNull.item) receiver = target;
+
+    // Proxy/TypedArray fast paths BEFORE ToPropertyKey: integer index dispatch
+    // in js_property_set requires the original int key, not stringified.
+    if (js_is_proxy(target)) {
+        Item r = js_property_set(target, key, value);
+        if (r.item == (uint64_t)b2it(false)) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(true)};
     }
-    return (Item){.item = b2it(true)};
+    if (get_type_id(target) == LMD_TYPE_MAP &&
+        target.map && target.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        js_property_set(target, key, value);
+        return (Item){.item = b2it(true)};
+    }
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    // If receiver != target, fall back to OrdinarySetWithOwnDescriptor below.
+    // If receiver == target and target is plain Array/Map without indexed
+    // accessor traps, the legacy fast path is correct and preserves prior
+    // behavior (avoids subtle regressions in shape-keyed array writes).
+    if (receiver.item == target.item) {
+        js_property_set(target, key, value);
+        return (Item){.item = b2it(true)};
+    }
+
+    // Walk prototype chain to find the descriptor that governs this Set.
+    Item ownDesc = ItemNull;
+    Item cur = target;
+    int depth = 0;
+    while (cur.item != ItemNull.item && depth < 100) {
+        ownDesc = js_object_get_own_property_descriptor(cur, key);
+        if (get_type_id(ownDesc) == LMD_TYPE_MAP) break;
+        cur = js_get_prototype_of(cur);
+        depth++;
+    }
+
+    bool desc_present = (get_type_id(ownDesc) == LMD_TYPE_MAP);
+    Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
+    Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
+    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+
+    if (desc_present) {
+        // Accessor descriptor? has `set` or `get` field on the descriptor object.
+        bool has_set = false, has_get = false;
+        Item set_fn = ItemNull, get_fn = ItemNull;
+        // Use shape lookup directly — js_property_get may walk prototype.
+        if (get_type_id(ownDesc) == LMD_TYPE_MAP) {
+            String* sks = it2s(set_key);
+            Item sv = js_map_get_fast_ext(ownDesc.map, sks->chars, (int)sks->len, &has_set);
+            if (has_set) set_fn = sv;
+            String* gks = it2s(get_key);
+            Item gv = js_map_get_fast_ext(ownDesc.map, gks->chars, (int)gks->len, &has_get);
+            if (has_get) get_fn = gv;
+        }
+        if (has_set || has_get) {
+            // Accessor descriptor.
+            if (!has_set || get_type_id(set_fn) != LMD_TYPE_FUNC) {
+                return (Item){.item = b2it(false)};
+            }
+            Item args[1] = { value };
+            js_call_function(set_fn, receiver, args, 1);
+            if (js_check_exception()) return ItemNull;
+            return (Item){.item = b2it(true)};
+        }
+        // Data descriptor: check writable.
+        bool has_w = false;
+        Item wv = js_map_get_fast_ext(ownDesc.map,
+            it2s(writable_key)->chars, (int)it2s(writable_key)->len, &has_w);
+        bool writable = has_w ? it2b(js_to_boolean(wv)) : true;
+        if (!writable) return (Item){.item = b2it(false)};
+        // Receiver must be an Object.
+        TypeId rt = get_type_id(receiver);
+        bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY ||
+                            rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
+        if (!recv_is_obj) return (Item){.item = b2it(false)};
+        // If receiver != target, write to receiver per OrdinarySetWithOwnDescriptor.
+        if (receiver.item != target.item) {
+            // Existing own descriptor on receiver?
+            Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+            if (get_type_id(recv_own) == LMD_TYPE_MAP) {
+                bool r_has_set = false, r_has_get = false;
+                js_map_get_fast_ext(recv_own.map,
+                    it2s(set_key)->chars, (int)it2s(set_key)->len, &r_has_set);
+                js_map_get_fast_ext(recv_own.map,
+                    it2s(get_key)->chars, (int)it2s(get_key)->len, &r_has_get);
+                if (r_has_set || r_has_get) {
+                    // Accessor on receiver: cannot replace via Set.
+                    return (Item){.item = b2it(false)};
+                }
+                bool rh_w = false;
+                Item rw = js_map_get_fast_ext(recv_own.map,
+                    it2s(writable_key)->chars, (int)it2s(writable_key)->len, &rh_w);
+                bool r_writable = rh_w ? it2b(js_to_boolean(rw)) : true;
+                if (!r_writable) return (Item){.item = b2it(false)};
+            }
+            // CreateDataProperty(receiver, key, value).
+            js_property_set(receiver, key, value);
+            return (Item){.item = b2it(true)};
+        }
+        // receiver == target: ordinary write.
+        js_property_set(target, key, value);
+        return (Item){.item = b2it(true)};
+    }
+    // No descriptor anywhere on chain → CreateDataProperty(receiver, key, value).
+    {
+        TypeId rt = get_type_id(receiver);
+        bool recv_is_obj = (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY ||
+                            rt == LMD_TYPE_FUNC || rt == LMD_TYPE_ELEMENT);
+        if (!recv_is_obj) return (Item){.item = b2it(false)};
+        Item recv_own = js_object_get_own_property_descriptor(receiver, key);
+        if (get_type_id(recv_own) == LMD_TYPE_MAP) {
+            bool r_has_set = false, r_has_get = false;
+            js_map_get_fast_ext(recv_own.map,
+                it2s(set_key)->chars, (int)it2s(set_key)->len, &r_has_set);
+            js_map_get_fast_ext(recv_own.map,
+                it2s(get_key)->chars, (int)it2s(get_key)->len, &r_has_get);
+            if (r_has_set || r_has_get) return (Item){.item = b2it(false)};
+            bool rh_w = false;
+            Item rw = js_map_get_fast_ext(recv_own.map,
+                it2s(writable_key)->chars, (int)it2s(writable_key)->len, &rh_w);
+            bool r_writable = rh_w ? it2b(js_to_boolean(rw)) : true;
+            if (!r_writable) return (Item){.item = b2it(false)};
+        }
+        js_property_set(receiver, key, value);
+        return (Item){.item = b2it(true)};
+    }
 }
 
 // Reflect.defineProperty(obj, key, desc) — returns boolean (no throw)
 extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
+    // ES §28.1.3 Reflect.defineProperty: target must be an Object.
+    if (!js_require_object_type(obj, "defineProperty")) return ItemNull;
+    // step 2: Let key be ? ToPropertyKey(propertyKey).
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
     if (js_is_proxy(obj)) {
         extern Item js_proxy_trap_define_property(Item proxy, Item key, Item desc);
         Item result = js_proxy_trap_define_property(obj, key, desc);
@@ -5300,21 +5479,93 @@ extern "C" Item js_reflect_define_property(Item obj, Item key, Item desc) {
 
 // Reflect.deleteProperty(obj, key) — returns boolean
 extern "C" Item js_reflect_delete_property(Item obj, Item key) {
+    // ES §28.1.4 Reflect.deleteProperty: target must be an Object.
+    if (!js_require_object_type(obj, "deleteProperty")) return ItemNull;
+    // step 2: Let key be ? ToPropertyKey(propertyKey).
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
     return js_delete_property(obj, key);
 }
 
 // Reflect.setPrototypeOf(obj, proto) — returns boolean
 extern "C" Item js_reflect_set_prototype_of(Item obj, Item proto) {
+    // ES §28.1.15 Reflect.setPrototypeOf: target must be an Object.
+    if (!js_require_object_type(obj, "setPrototypeOf")) return ItemNull;
+    // proto must be Object or null; otherwise TypeError (covers Symbol too).
+    TypeId pt = get_type_id(proto);
+    bool proto_is_null = (proto.item == ItemNull.item);
+    bool proto_is_obj = (pt == LMD_TYPE_MAP || pt == LMD_TYPE_FUNC ||
+                        pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT);
+    if (!proto_is_null && !proto_is_obj) {
+        js_throw_type_error("Object prototype may only be an Object or null");
+        return ItemNull;
+    }
     if (js_is_proxy(obj)) {
         extern Item js_proxy_trap_set_prototype_of(Item proxy, Item proto);
         return js_proxy_trap_set_prototype_of(obj, proto);
+    }
+    // OrdinarySetPrototypeOf (ES §10.1.2.1):
+    // 4. If SameValue(proto, current) is true, return true.
+    Item current = js_get_prototype_of(obj);
+    if (current.item == proto.item) return (Item){.item = b2it(true)};
+    // 5. If [[Extensible]] is false, return false.
+    bool extensible = it2b(js_to_boolean(js_object_is_extensible(obj)));
+    if (!extensible) return (Item){.item = b2it(false)};
+    // 8. Cycle check: walk proto chain; if it contains target, return false.
+    if (proto_is_obj) {
+        Item p = proto;
+        int depth = 0;
+        while (p.item != ItemNull.item && depth < 100) {
+            if (p.item == obj.item) return (Item){.item = b2it(false)};
+            if (js_is_proxy(p)) break;  // would need trap; skip
+            p = js_get_prototype_of(p);
+            depth++;
+        }
     }
     js_set_prototype(obj, proto);
     return (Item){.item = b2it(true)};
 }
 
+// Object.setPrototypeOf(obj, proto) — ES §20.1.2.21
+// Differences from Reflect.setPrototypeOf:
+// - target null/undefined → TypeError (RequireObjectCoercible)
+// - proto not Object/null → TypeError (already true above)
+// - SetPrototypeOf returning false (cycle/non-extensible) → TypeError
+// - Returns the (possibly-coerced) object on success.
+extern "C" Item js_object_set_prototype_of(Item obj, Item proto) {
+    // 1. RequireObjectCoercible
+    if (obj.item == ItemNull.item || obj.item == ITEM_JS_UNDEFINED) {
+        js_throw_type_error("Object.setPrototypeOf called on null or undefined");
+        return ItemNull;
+    }
+    // 2. proto must be Object or null (undefined throws TypeError).
+    TypeId pt = get_type_id(proto);
+    bool proto_is_null = (proto.item == ItemNull.item);
+    bool proto_is_obj = (pt == LMD_TYPE_MAP || pt == LMD_TYPE_FUNC ||
+                        pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT);
+    if (!proto_is_null && !proto_is_obj) {
+        js_throw_type_error("Object prototype may only be an Object or null");
+        return ItemNull;
+    }
+    // 3. If O is not Object, return O (primitives pass through).
+    TypeId ot = get_type_id(obj);
+    if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_ELEMENT) {
+        return obj;
+    }
+    // 4. Delegate to Reflect.setPrototypeOf semantics; throw on false.
+    Item r = js_reflect_set_prototype_of(obj, proto);
+    if (js_check_exception()) return ItemNull;
+    if (r.item == (uint64_t)b2it(false)) {
+        js_throw_type_error("Object.setPrototypeOf: cyclic __proto__ value or non-extensible target");
+        return ItemNull;
+    }
+    return obj;
+}
+
 // Reflect.preventExtensions(obj) — returns boolean
 extern "C" Item js_reflect_prevent_extensions(Item obj) {
+    // ES §28.1.12 Reflect.preventExtensions: target must be an Object.
+    if (!js_require_object_type(obj, "preventExtensions")) return ItemNull;
     if (js_is_proxy(obj)) {
         extern Item js_proxy_trap_prevent_extensions(Item proxy);
         Item result = js_proxy_trap_prevent_extensions(obj);
@@ -5323,6 +5574,42 @@ extern "C" Item js_reflect_prevent_extensions(Item obj) {
     }
     js_object_prevent_extensions(obj);
     return (Item){.item = b2it(true)};
+}
+
+// Reflect.get(target, key [, receiver]) — ES §28.1.6
+extern "C" Item js_reflect_get(Item target, Item key) {
+    if (!js_require_object_type(target, "get")) return ItemNull;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    return js_property_access(target, key);
+}
+
+// Reflect.has(target, key) — ES §28.1.9
+extern "C" Item js_reflect_has(Item target, Item key) {
+    if (!js_require_object_type(target, "has")) return ItemNull;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    return js_in(key, target);
+}
+
+// Reflect.getPrototypeOf(target) — ES §28.1.8
+extern "C" Item js_reflect_get_prototype_of(Item target) {
+    if (!js_require_object_type(target, "getPrototypeOf")) return ItemNull;
+    return js_get_prototype_of(target);
+}
+
+// Reflect.isExtensible(target) — ES §28.1.10
+extern "C" Item js_reflect_is_extensible(Item target) {
+    if (!js_require_object_type(target, "isExtensible")) return ItemNull;
+    return js_object_is_extensible(target);
+}
+
+// Reflect.getOwnPropertyDescriptor(target, key) — ES §28.1.7
+extern "C" Item js_reflect_get_own_property_descriptor(Item target, Item key) {
+    if (!js_require_object_type(target, "getOwnPropertyDescriptor")) return ItemNull;
+    key = js_to_property_key(key);
+    if (js_check_exception()) return ItemNull;
+    return js_object_get_own_property_descriptor(target, key);
 }
 
 // Reflect.apply(target, thisArg, argsList) — call target with thisArg and args
