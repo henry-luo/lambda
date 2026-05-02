@@ -3249,6 +3249,47 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
                 ViewBlock* root_block = (ViewBlock*)root_view;
 
+                // Per CSS 2.1 §14.2: the iframe's viewport is its own canvas.
+                // Propagate the body background (or html background) to fill the
+                // iframe content box, otherwise the body only paints its own
+                // intrinsic-sized box (often smaller than the iframe viewport,
+                // leaving white gaps below the body content).
+                if (root_block->tag_id != HTM_TAG_SVG &&
+                    !(root_block->embed && root_block->embed->img)) {
+                    Color canvas_bg;
+                    canvas_bg.c = 0;
+                    bool html_has_bg = root_block->bound && root_block->bound->background &&
+                                       root_block->bound->background->color.a > 0;
+                    if (html_has_bg) {
+                        canvas_bg = root_block->bound->background->color;
+                    } else {
+                        // walk html children for body bg
+                        View* c = root_block->first_child;
+                        while (c) {
+                            if (c->view_type == RDT_VIEW_BLOCK) {
+                                ViewBlock* cb = (ViewBlock*)c;
+                                const char* nm = cb->node_name();
+                                if (nm && str_ieq_const(nm, strlen(nm), "body")) {
+                                    if (cb->bound && cb->bound->background &&
+                                        cb->bound->background->color.a > 0) {
+                                        canvas_bg = cb->bound->background->color;
+                                    }
+                                    break;
+                                }
+                            }
+                            c = (View*)c->next_sibling;
+                        }
+                    }
+                    if (canvas_bg.a > 0) {
+                        // Fill iframe content box (already computed above as content_left/top/right/bottom).
+                        rc_fill_rect(rdcon,
+                                     content_left, content_top,
+                                     content_right - content_left,
+                                     content_bottom - content_top,
+                                     canvas_bg);
+                    }
+                }
+
                 // Check if root element is SVG - if so, render directly without background
                 if (root_block->tag_id == HTM_TAG_SVG) {
                     log_debug("render embedded SVG document (no background)");
