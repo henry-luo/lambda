@@ -144,10 +144,10 @@ fn _apply_color(st, opr, ops) {
 // ============================================================
 
 fn _is_tf_name(op_record) {
-    (op_record.op == "Tf")
+    ((op_record.op == "Tf")
         and (len(op_record.operands) >= 1)
         and (op_record.operands[0] is map)
-        and (op_record.operands[0].kind == "name")
+        and (op_record.operands[0].kind == "name"))
 }
 
 fn _list_contains(list, name) {
