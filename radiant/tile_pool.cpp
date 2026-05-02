@@ -484,6 +484,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                 case DL_SHADOW_CLIP_RESTORE:
                     shadow_clip_saved = nullptr;
                     break;
+                case DL_OUTER_SHADOW:
+                    // self-contained, nothing to track on skip
+                    break;
                 default:
                     break;
             }
@@ -898,6 +901,46 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                 }
             }
             shadow_clip_saved = nullptr;
+            break;
+        }
+
+        case DL_OUTER_SHADOW: {
+            DlOuterShadow* o = &item->outer_shadow;
+            // adjust shadow rect to tile-local coords
+            float sx = o->shadow_x - tile_x;
+            float sy = o->shadow_y - tile_y;
+            // adjust exclude shape (rounded rect or inset use x/y at indices 0/1)
+            int ex_type = o->exclude_type;
+            float ex_params[8];
+            memcpy(ex_params, o->exclude_params, 8 * sizeof(float));
+            switch ((ClipShapeType)ex_type) {
+                case CLIP_SHAPE_CIRCLE:
+                case CLIP_SHAPE_ELLIPSE:
+                case CLIP_SHAPE_INSET:
+                case CLIP_SHAPE_ROUNDED_RECT:
+                    ex_params[0] -= tile_x; ex_params[1] -= tile_y;
+                    break;
+                default: break;
+            }
+            int cl_type = o->clip_type;
+            float cl_params[8];
+            memcpy(cl_params, o->clip_params, 8 * sizeof(float));
+            switch ((ClipShapeType)cl_type) {
+                case CLIP_SHAPE_CIRCLE:
+                case CLIP_SHAPE_ELLIPSE:
+                case CLIP_SHAPE_INSET:
+                case CLIP_SHAPE_ROUNDED_RECT:
+                    cl_params[0] -= tile_x; cl_params[1] -= tile_y;
+                    break;
+                default: break;
+            }
+            render_outer_shadow_blur_composite(
+                scratch, tile_surface,
+                sx, sy, o->shadow_w, o->shadow_h,
+                o->sr_tl, o->sr_tr, o->sr_br, o->sr_bl,
+                o->color, o->blur_radius,
+                ex_type, ex_params,
+                cl_type, cl_params);
             break;
         }
 
