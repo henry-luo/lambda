@@ -1614,6 +1614,17 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->option_count = option_count;
             block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
         }
+        // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
+        // `appearance: none` removes the native dropdown arrow so author CSS can supply its own.
+        {
+            CssDeclaration* ap_decl = dom_element_get_specified_value(block, CSS_PROPERTY_APPEARANCE);
+            if (ap_decl && ap_decl->value && ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                ap_decl->value->data.keyword == CSS_VALUE_NONE) {
+                block->form->appearance_none = 1;
+            } else {
+                block->form->appearance_none = 0;
+            }
+        }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }

@@ -1432,11 +1432,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // Form controls (INPUT, SELECT, TEXTAREA) have intrinsic sizes.
         // When FormControlProp is allocated (styles resolved), use its intrinsic_width.
         // Otherwise, fall back to tag+type-based defaults for early intrinsic sizing.
-        // Return content-area width; border+padding added by common code at bottom.
+        // Note: form->intrinsic_width set by calc_select_size already includes the
+        // element's CSS padding+border (i.e. it is border-box). The common code at
+        // the bottom of this function adds horizontal padding+border again — for
+        // form controls sourced from form->intrinsic_width we therefore mark the
+        // value as "already includes pad+border" and skip the bottom addition.
         if (replaced_width < 0 && view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM
             && view_block_replaced->form && view_block_replaced->form->intrinsic_width > 0) {
             replaced_width = view_block_replaced->form->intrinsic_width;
-            log_debug("  -> replaced FORM CONTROL intrinsic width: %.1f", replaced_width);
+            sizes.replaced_includes_pad_border = true;
+            log_debug("  -> replaced FORM CONTROL intrinsic width: %.1f (border-box, skip bottom pad/border)", replaced_width);
         }
         // Tag-based fallback: form prop not yet allocated during early intrinsic sizing
         if (replaced_width < 0) {
@@ -1463,7 +1468,25 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (is_listbox) {
                     replaced_width = FormDefaults::SELECT_WIDTH;
                 } else {
-                    float max_text_width = 0;
+                    // For appearance:none, the heavy author CSS padding typically reserves
+                    // room for an author-supplied chevron icon (e.g. via ::after) — it is
+                    // not part of the replaced content. To match Chrome:
+                    //   • min_content = option text min (no CSS padding) — the floor parent
+                    //     shrink-to-fit can collapse to.
+                    //   • max_content = option text max + CSS padding + border (full
+                    //     border-box) — added by the common pad/border code below.
+                    // The asymmetry lets parent fit-content clamp to available width
+                    // (text floor) when text+padding overflows the container.
+                    bool appearance_none = false;
+                    {
+                        CssDeclaration* ap_decl = dom_element_get_specified_value(element, CSS_PROPERTY_APPEARANCE);
+                        if (ap_decl && ap_decl->value && ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                            ap_decl->value->data.keyword == CSS_VALUE_NONE) {
+                            appearance_none = true;
+                        }
+                    }
+                    float max_text_min = 0;  // longest unbreakable word across options
+                    float max_text_max = 0;  // longest no-wrap option text
                     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                         if (!child->is_element()) continue;
                         DomElement* ce = child->as_element();
@@ -1473,7 +1496,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 DomText* dt = tc->as_text();
                                 if (dt && dt->text && dt->length > 0) {
                                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                    if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                                    if (tw.min_content > max_text_min) max_text_min = tw.min_content;
+                                    if (tw.max_content > max_text_max) max_text_max = tw.max_content;
                                 }
                             }
                         } else if (ctag == HTM_TAG_OPTGROUP) {
@@ -1482,33 +1506,52 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 size_t ll = strlen(lbl);
                                 if (ll > 0) {
                                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, lbl, ll);
-                                    if (tw.max_content > max_text_width) max_text_width = tw.max_content;
+                                    if (tw.min_content > max_text_min) max_text_min = tw.min_content;
+                                    if (tw.max_content > max_text_max) max_text_max = tw.max_content;
                                 }
                             }
                             for (DomNode* gc = ce->first_child; gc; gc = gc->next_sibling) {
                                 if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
-                                    float opt_text_width = 0;
+                                    float opt_min = 0, opt_max = 0;
                                     for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
                                         DomText* dt = tc->as_text();
                                         if (dt && dt->text && dt->length > 0) {
                                             TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                                            if (tw.max_content > opt_text_width) opt_text_width = tw.max_content;
+                                            if (tw.min_content > opt_min) opt_min = tw.min_content;
+                                            if (tw.max_content > opt_max) opt_max = tw.max_content;
                                         }
                                     }
-                                    float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
-                                    if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
-                                        effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
-                                    if (effective > max_text_width) max_text_width = effective;
+                                    float eff_min = opt_min + FormDefaults::OPTGROUP_OPTION_INDENT;
+                                    float eff_max = opt_max + FormDefaults::OPTGROUP_OPTION_INDENT;
+                                    if (eff_min < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
+                                        eff_min = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                                    if (eff_max < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
+                                        eff_max = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                                    if (eff_min > max_text_min) max_text_min = eff_min;
+                                    if (eff_max > max_text_max) max_text_max = eff_max;
                                 }
                             }
                         }
                     }
-                    float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f;
+                    // CSS `appearance: none` removes the UA dropdown arrow; skip its width overhead.
+                    float overhead = appearance_none ? 0.0f : (FormDefaults::SELECT_ARROW_WIDTH + 1.0f);
                     float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
-                    float calculated = max_text_width + overhead;
-                    replaced_width = calculated > min_select_width ? calculated : min_select_width;
+                    float calc_max = max_text_max + overhead;
+                    if (calc_max < min_select_width) calc_max = min_select_width;
+                    replaced_width = calc_max;
                     if (view_block_replaced->form)
                         view_block_replaced->form->intrinsic_width = replaced_width;
+                    if (appearance_none) {
+                        // Establish asymmetric min/max so parent shrink-to-fit can clamp
+                        // to available width when the SELECT's full border-box overflows.
+                        sizes.min_content = max_text_min;  // pad/border NOT added below
+                        sizes.max_content = max_text_max;  // pad/border ADDED below
+                        sizes.replaced_min_excludes_pad_border = true;
+                        replaced_intrinsic_set = true;
+                        // Guard: skip the unconditional `if (replaced_width >= 0)` block
+                        // that would overwrite the asymmetric values we just set.
+                        replaced_width = -1;
+                    }
                 }
                 log_debug("  -> replaced SELECT (measured) intrinsic width: %.1f", replaced_width);
             } else if (replaced_tag == HTM_TAG_TEXTAREA) {
@@ -3346,8 +3389,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     float horiz_padding = pad_left + pad_right;
     float horiz_border = border_left + border_right;
-    sizes.min_content += horiz_padding + horiz_border;
-    sizes.max_content += horiz_padding + horiz_border;
+    if (sizes.replaced_includes_pad_border) {
+        log_debug("  -> skipping pad/border add: replaced form control already border-box");
+    } else {
+        sizes.max_content += horiz_padding + horiz_border;
+        if (!sizes.replaced_min_excludes_pad_border) {
+            sizes.min_content += horiz_padding + horiz_border;
+        } else {
+            log_debug("  -> asymmetric pad/border: max+=%.1f, min unchanged",
+                      horiz_padding + horiz_border);
+        }
+    }
 
     // CSS 2.1 §8.3: For inline elements with forced breaks, the left padding/border
     // applies to the first line and the right padding/border to the last line.

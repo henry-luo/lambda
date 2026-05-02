@@ -499,6 +499,16 @@ typedef struct {
     float first_line_max = -1;  // width before first forced break (-1 = no forced break)
     float last_line_max = -1;   // width after last forced break (-1 = no forced break)
     bool has_forced_break = false;
+    // Replaced form controls populate min_content/max_content from
+    // FormControlProp::intrinsic_width which is already a border-box value.
+    // When this flag is set, the common pad/border addition pass at the bottom
+    // of measure_element_intrinsic_widths() must be skipped to avoid double counting.
+    bool replaced_includes_pad_border = false;
+    // Asymmetric variant: replaced element's min-content represents the natural
+    // (text-only) width — heavy author CSS padding should NOT be added to it for
+    // shrink-to-fit purposes (matches Chrome behavior for appearance:none <select>).
+    // max-content still gets pad+border added so it represents the full border-box.
+    bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)

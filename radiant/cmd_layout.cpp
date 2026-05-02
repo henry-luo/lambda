@@ -1630,19 +1630,28 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     // so subsequent serial loaders find them already cached on disk.
     prefetch_document_subresources(html_root, base_path);
 
-    // Step 1: Collect and parse <link rel="stylesheet"> references
-    log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
-
-    int linked_count = *stylesheet_count;
-    if (linked_count_out) *linked_count_out = linked_count;
-
-    // Step 2: Collect and parse <style> inline CSS
-    log_debug("[CSS] Step 2: Collecting inline <style> elements...");
+    // Step 1: Collect and parse <style> inline CSS first.
+    // Per CSS cascade spec, document source order determines tie-breaking among
+    // declarations of equal specificity & origin. Inline <style> blocks typically
+    // appear in <head> *before* <link rel="stylesheet">, so the linked rules
+    // should be considered LATER in source order and thus win ties. Since the
+    // per-element style tree assigns source_order in the order rules are
+    // applied (later = higher = wins), we must apply <style> first, then linked.
+    log_debug("[CSS] Step 1: Collecting inline <style> elements...");
     collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count, 0);
 
+    int inline_count = *stylesheet_count;
+
+    // Step 2: Collect and parse <link rel="stylesheet"> references — applied last
+    // so their declarations get higher source_order and win against earlier <style>.
+    log_debug("[CSS] Step 2: Collecting linked stylesheets...");
+    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count, 0);
+
+    int linked_count = *stylesheet_count - inline_count;
+    if (linked_count_out) *linked_count_out = linked_count;
+
     log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
-              *stylesheet_count, linked_count, *stylesheet_count - linked_count);
+              *stylesheet_count, linked_count, inline_count);
     return stylesheets;
 }
 

@@ -6045,6 +6045,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_replaced) {
             content_has_line_boxes = false;
         }
+        // Combo-box <select> baseline: Chrome (and other browsers) place the
+        // baseline at the internal text baseline rather than the bottom margin
+        // edge — this lets a SELECT visually sit on the same baseline as
+        // surrounding text and prevents the parent line box from accruing extra
+        // descent below the control. Only applies to single-line combo boxes
+        // (not multi/listbox, where row layout dominates).
+        if (block->tag() == HTM_TAG_SELECT && block->font && block->blk &&
+            !(block->form && (block->form->multiple || block->form->select_size > 1))) {
+            float pad_top = block->bound ? block->bound->padding.top : 0;
+            float bord_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
+            float ascender = block->font->ascender > 0 ? block->font->ascender
+                                                       : block->font->font_size * 0.8f;
+            float synth_baseline = pad_top + bord_top + ascender;
+            if (synth_baseline > 0 && synth_baseline < block->height) {
+                content_last_line_ascender = synth_baseline;
+                content_has_line_boxes = true;
+            }
+        }
 
         log_debug("%s inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d, is_replaced=%d, block_height=%.1f", elmt->source_loc(),
             content_last_line_ascender, content_has_line_boxes, is_replaced, block->height);

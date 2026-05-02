@@ -266,6 +266,11 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float max_text_width = 0;
+    // CSS `appearance: none` removes the UA chrome; treat option text as min-content
+    // (longest unbreakable word) so the SELECT collapses toward author intent — matches
+    // Chrome where appearance-less <select> with `width: 100%` shrinks rather than
+    // expanding to the longest option's max-content width.
+    bool use_min_content = form && form->appearance_none;
 
     // Iterate through children to find longest option text
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
@@ -279,8 +284,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 DomText* dt = tc->as_text();
                 if (dt && dt->text && dt->length > 0) {
                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                    if (tw.max_content > max_text_width)
-                        max_text_width = tw.max_content;
+                    float w = use_min_content ? tw.min_content : tw.max_content;
+                    if (w > max_text_width) max_text_width = w;
                 }
             }
         } else if (ctag == HTM_TAG_OPTGROUP) {
@@ -290,8 +295,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 size_t label_len = strlen(label_attr);
                 if (label_len > 0) {
                     TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, label_attr, label_len);
-                    if (tw.max_content > max_text_width)
-                        max_text_width = tw.max_content;
+                    float w = use_min_content ? tw.min_content : tw.max_content;
+                    if (w > max_text_width) max_text_width = w;
                 }
             }
             // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
@@ -302,8 +307,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                         DomText* dt = tc->as_text();
                         if (dt && dt->text && dt->length > 0) {
                             TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                            if (tw.max_content > opt_text_width)
-                                opt_text_width = tw.max_content;
+                            float w = use_min_content ? tw.min_content : tw.max_content;
+                            if (w > opt_text_width) opt_text_width = w;
                         }
                     }
                     // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
@@ -348,7 +353,12 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         form->intrinsic_height = visible_rows * row_height + 2.0f;
     } else {
         // Combo box mode
-        float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f; // arrow + small margin
+        // CSS `appearance: none` removes the native dropdown arrow; the page
+        // typically supplies its own decoration via padding-right + ::after.
+        // In that case we must NOT add UA arrow overhead, otherwise the
+        // border-box ends up wider than what the author intended.
+        bool has_ua_arrow = !form->appearance_none;
+        float overhead = has_ua_arrow ? (FormDefaults::SELECT_ARROW_WIDTH + 1.0f) : 0.0f;
         float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f; // ~22px minimum (matches Chrome empty)
         float calculated = max_text_width + overhead;
         form->intrinsic_width = calculated > min_select_width ? calculated : min_select_width;

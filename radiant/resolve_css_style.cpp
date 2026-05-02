@@ -11190,6 +11190,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 log_debug("[Lambda CSS Background] Processing conic gradient layer %d: %s", i, func_name);
                                 resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
                             }
+                        } else if (str_ieq_const(func_name, strlen(func_name), "url")) {
+                            // url() image layer — route to background-image handler.
+                            // Currently we only retain the topmost url() (single image slot).
+                            if (!bg->image) {
+                                CssDeclaration img_decl = *decl;
+                                img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
+                                img_decl.value = layer;
+                                log_debug("[Lambda CSS Background] Processing url image layer %d", i);
+                                resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
+                            }
                         }
                     }
                 }
